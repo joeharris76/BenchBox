@@ -625,8 +625,6 @@ class TestDatabaseValidator:
 
 
 @pytest.mark.unit
-
-
 @pytest.mark.unit
 @pytest.mark.fast
 class TestValidationCoverageGaps:
@@ -663,6 +661,6 @@ class TestValidationCoverageGaps:
 
         # Should initialize correctly
         assert validator is not None
-        assert hasattr(validator, 'validate')
-        assert hasattr(validator, 'connection_validator')
-        assert hasattr(validator, 'schema_validator')
+        assert hasattr(validator, "validate")
+        assert hasattr(validator, "connection_validator")
+        assert hasattr(validator, "schema_validator")

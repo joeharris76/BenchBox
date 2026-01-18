@@ -267,9 +267,7 @@ class SQLiteAdapter(PlatformAdapter):
         """Apply unified tuning configuration (limited support in SQLite)."""
         # SQLite doesn't support tuning features
 
-    def apply_platform_optimizations(
-        self, platform_config: PlatformOptimizationConfiguration, connection: Any
-    ) -> None:
+    def apply_platform_optimizations(self, platform_config: PlatformOptimizationConfiguration, connection: Any) -> None:
         """Apply SQLite-specific optimizations."""
         # Basic optimizations are applied in create_connection
 

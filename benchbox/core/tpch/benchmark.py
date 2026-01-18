@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
@@ -107,7 +107,7 @@ class TPCHBenchmark(BaseBenchmark):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         verbose: int | bool = 0,
         parallel: int = 1,
         force_regenerate: bool = False,
@@ -164,7 +164,7 @@ class TPCHBenchmark(BaseBenchmark):
         # Initialize maintenance test manager
         self.maintenance_test: TPCHMaintenanceTest | None = None
 
-    def generate_data(self) -> list[Union[str, Path]]:
+    def generate_data(self) -> list[str | Path]:
         """Generate TPC-H benchmark data.
 
         Returns:

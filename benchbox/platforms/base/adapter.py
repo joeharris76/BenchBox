@@ -1648,9 +1648,8 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 return None, 0.0
 
         # Apply sampling rate if specified
-        if self.plan_sampling_rate is not None:
-            if random.random() > self.plan_sampling_rate:
-                return None, 0.0
+        if self.plan_sampling_rate is not None and random.random() > self.plan_sampling_rate:
+            return None, 0.0
 
         start_time = time.perf_counter()
 
@@ -2333,7 +2332,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             and hasattr(benchmark.tables, "keys")
         ):
             try:
-                return [t.lower() for t in benchmark.tables.keys()]
+                return [t.lower() for t in benchmark.tables]
             except (TypeError, AttributeError):
                 pass
         return None
@@ -3089,7 +3088,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                         break
 
                 if invalid_queries:
-                    available_queries = sorted(str(k) for k in queries.keys())
+                    available_queries = sorted(str(k) for k in queries)
                     # Limit displayed available queries for readability
                     if len(available_queries) > 20:
                         available_display = ", ".join(available_queries[:20]) + ", ..."

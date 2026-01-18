@@ -447,13 +447,20 @@ class TestFabricSparkAdapterCLI:
             FabricSparkAdapter.add_cli_arguments(parser)
 
             # Parse with test arguments
-            args = parser.parse_args([
-                "--workspace-id", "test-workspace",
-                "--lakehouse-id", "test-lakehouse",
-                "--tenant-id", "test-tenant",
-                "--spark-pool", "test-pool",
-                "--timeout", "120",
-            ])
+            args = parser.parse_args(
+                [
+                    "--workspace-id",
+                    "test-workspace",
+                    "--lakehouse-id",
+                    "test-lakehouse",
+                    "--tenant-id",
+                    "test-tenant",
+                    "--spark-pool",
+                    "test-pool",
+                    "--timeout",
+                    "120",
+                ]
+            )
 
             assert args.workspace_id == "test-workspace"
             assert args.lakehouse_id == "test-lakehouse"

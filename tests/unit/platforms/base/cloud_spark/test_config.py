@@ -110,18 +110,14 @@ class TestSparkConfig:
 
     def test_to_dict_dynamic_allocation(self):
         """Test dynamic allocation enabled when num_executors is None."""
-        config = SparkConfig(
-            resources=SparkResourceConfig(num_executors=None)
-        )
+        config = SparkConfig(resources=SparkResourceConfig(num_executors=None))
         result = config.to_dict()
 
         assert result["spark.dynamicAllocation.enabled"] == "true"
 
     def test_to_dict_fixed_executors(self):
         """Test dynamic allocation disabled when num_executors is set."""
-        config = SparkConfig(
-            resources=SparkResourceConfig(num_executors=10)
-        )
+        config = SparkConfig(resources=SparkResourceConfig(num_executors=10))
         result = config.to_dict()
 
         assert result["spark.dynamicAllocation.enabled"] == "false"

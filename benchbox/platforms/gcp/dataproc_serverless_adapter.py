@@ -151,9 +151,7 @@ class DataprocServerlessAdapter(CloudSparkConfigMixin, SparkTuningMixin, Platfor
         if not GOOGLE_CLOUD_AVAILABLE:
             deps_satisfied, missing = check_platform_dependencies("dataproc-serverless")
             if not deps_satisfied:
-                raise ConfigurationError(
-                    get_dependency_error_message("dataproc-serverless", missing)
-                )
+                raise ConfigurationError(get_dependency_error_message("dataproc-serverless", missing))
 
         if not project_id:
             raise ConfigurationError("project_id is required for Dataproc Serverless adapter")
@@ -345,9 +343,7 @@ spark.stop()
             if self.network_uri:
                 batch["environment_config"]["execution_config"]["network_uri"] = self.network_uri
             if self.subnetwork_uri:
-                batch["environment_config"]["execution_config"]["subnetwork_uri"] = (
-                    self.subnetwork_uri
-                )
+                batch["environment_config"]["execution_config"]["subnetwork_uri"] = self.subnetwork_uri
 
         parent = f"projects/{self.project_id}/locations/{self.region}"
 
@@ -596,9 +592,7 @@ spark.stop()
             results["foreign_keys"] = self.apply_foreign_keys(config.foreign_keys)
 
         if config.platform:
-            results["platform_optimizations"] = self.apply_platform_optimizations(
-                config.platform
-            )
+            results["platform_optimizations"] = self.apply_platform_optimizations(config.platform)
 
         return results
 

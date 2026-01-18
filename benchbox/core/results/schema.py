@@ -47,9 +47,21 @@ def _normalize_query_result(qr: Any) -> dict[str, Any]:
         return qr.dict()
     # Fallback: try to extract common attributes
     result: dict[str, Any] = {}
-    for attr in ("query_id", "id", "status", "execution_time_ms", "execution_time",
-                 "rows_returned", "iteration", "stream_id", "error_message", "error",
-                 "error_type", "query_plan", "plan_fingerprint"):
+    for attr in (
+        "query_id",
+        "id",
+        "status",
+        "execution_time_ms",
+        "execution_time",
+        "rows_returned",
+        "iteration",
+        "stream_id",
+        "error_message",
+        "error",
+        "error_type",
+        "query_plan",
+        "plan_fingerprint",
+    ):
         if hasattr(qr, attr):
             val = getattr(qr, attr)
             if val is not None:
@@ -59,7 +71,6 @@ def _normalize_query_result(qr: Any) -> dict[str, Any]:
 
 class SchemaV2ValidationError(ValueError):
     """Raised when schema v2.0 validation fails."""
-
 
 
 class SchemaV2Validator:
@@ -214,7 +225,11 @@ def build_result_payload(result: BenchmarkResults) -> dict[str, Any]:
                 "phase": "query",
                 "query_id": str(query_id),
             }
-            error_type = qr.get("error_type") or qr.get("error_message", "").split(":")[0] if qr.get("error_message") else "UnknownError"
+            error_type = (
+                qr.get("error_type") or qr.get("error_message", "").split(":")[0]
+                if qr.get("error_message")
+                else "UnknownError"
+            )
             error_entry["type"] = error_type or "UnknownError"
             error_entry["message"] = qr.get("error_message") or qr.get("error") or "Query failed"
             errors_list.append(error_entry)
@@ -384,10 +399,12 @@ def build_plans_payload(result: BenchmarkResults) -> dict[str, Any] | None:
 
     # Add plan capture errors
     for error in result.plan_capture_errors or []:
-        errors_list.append({
-            "query_id": error.get("query_id", "unknown"),
-            "error": error.get("error", "Unknown error"),
-        })
+        errors_list.append(
+            {
+                "query_id": error.get("query_id", "unknown"),
+                "error": error.get("error", "Unknown error"),
+            }
+        )
 
     if not plans_by_query and not errors_list:
         return None
@@ -654,12 +671,14 @@ def _extract_table_errors(execution_phases: Any) -> list[dict[str, Any]]:
             error_type = stats.get("error_type")
             error_msg = stats.get("error_message")
             if error_type or error_msg:
-                errors.append({
-                    "phase": "data_loading",
-                    "table": table_name,
-                    "type": error_type or "LoadError",
-                    "message": error_msg or "Table loading failed",
-                })
+                errors.append(
+                    {
+                        "phase": "data_loading",
+                        "table": table_name,
+                        "type": error_type or "LoadError",
+                        "message": error_msg or "Table loading failed",
+                    }
+                )
 
     return errors
 

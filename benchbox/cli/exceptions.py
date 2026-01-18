@@ -217,11 +217,10 @@ class ErrorHandler:
         """Handle BenchBox CLI specific errors."""
 
         # Transfer source location from error to context if not already set
-        if context and hasattr(error, "source_file"):
-            if not context.source_file and error.source_file:
-                context.source_file = error.source_file
-                context.source_line = error.source_line
-                context.source_function = error.source_function
+        if context and hasattr(error, "source_file") and not context.source_file and error.source_file:
+            context.source_file = error.source_file
+            context.source_line = error.source_line
+            context.source_function = error.source_function
 
         # Error type specific handling
         if isinstance(error, ConfigurationError):

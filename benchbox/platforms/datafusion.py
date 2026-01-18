@@ -896,10 +896,7 @@ class DataFusionAdapter(PlatformAdapter):
             return False
 
         # Check if working directory has parquet files
-        if any(working_dir.glob("*.parquet")):
-            return True
-
-        return False
+        return bool(any(working_dir.glob("*.parquet")))
 
     def drop_database(self, **connection_config) -> None:
         """Drop DataFusion working directory and all data."""

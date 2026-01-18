@@ -60,7 +60,7 @@ def _get_schemas_from_manifest(manifest: ManifestV2, benchmark_name: str | None)
         # Get schemas from benchmark
         schemas = {}
         if hasattr(benchmark_instance, "get_schema"):
-            for table_name in manifest.tables.keys():
+            for table_name in manifest.tables:
                 try:
                     schema = benchmark_instance.get_schema(table_name)
                     if schema:

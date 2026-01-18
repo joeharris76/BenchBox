@@ -455,9 +455,7 @@ class ClusteringConfig:
 
     def __post_init__(self) -> None:
         """Validate the clustering configuration."""
-        if self.bucket_count is not None and (
-            not isinstance(self.bucket_count, int) or self.bucket_count <= 0
-        ):
+        if self.bucket_count is not None and (not isinstance(self.bucket_count, int) or self.bucket_count <= 0):
             raise ValueError("bucket_count must be a positive integer")
 
     def to_dict(self) -> dict[str, Any]:

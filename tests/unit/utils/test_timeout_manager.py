@@ -110,10 +110,13 @@ class TestTimeoutManager:
         """Test context manager when operation times out (raises)."""
         manager = TimeoutManager(default_timeout_seconds=300.0)
 
-        with pytest.raises(TimeoutError) as exc_info, manager.timeout_context(
-            timeout_seconds=0.1,
-            operation_name="slow_op",
-            raise_on_timeout=True,
+        with (
+            pytest.raises(TimeoutError) as exc_info,
+            manager.timeout_context(
+                timeout_seconds=0.1,
+                operation_name="slow_op",
+                raise_on_timeout=True,
+            ),
         ):
             time.sleep(0.3)
 

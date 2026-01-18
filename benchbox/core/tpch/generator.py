@@ -280,9 +280,7 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
 
         return self._stdout_support_cached
 
-    def _generate_table_streaming(
-        self, table_name: str, output_path: Path, work_dir: Path
-    ) -> Path:
+    def _generate_table_streaming(self, table_name: str, output_path: Path, work_dir: Path) -> Path:
         """Generate a single table using streaming stdout mode.
 
         Pipes dbgen -z output directly to compression, avoiding intermediate files.
@@ -305,8 +303,10 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
             "-z",  # Output to stdout
             "-q",  # Quiet mode (suppress progress to stderr)
             "-f",  # Force (overwrite if needed)
-            "-s", str(self.scale_factor),
-            "-T", table_code,  # Generate single table
+            "-s",
+            str(self.scale_factor),
+            "-T",
+            table_code,  # Generate single table
         ]
 
         # Set up environment
@@ -343,9 +343,7 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
                 proc.wait()
                 if proc.returncode != 0:
                     stderr = proc.stderr.read().decode(errors="ignore") if proc.stderr else ""
-                    raise RuntimeError(
-                        f"dbgen failed for table {table_name}: {stderr}"
-                    )
+                    raise RuntimeError(f"dbgen failed for table {table_name}: {stderr}")
 
             return output_path
 
@@ -390,35 +388,24 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
         def generate_table(table_name: str) -> tuple[str, Path]:
             base_filename = f"{table_name}.tbl"
             output_path = work_dir_path / f"{base_filename}{ext}"
-            result_path = self._generate_table_streaming(
-                table_name, output_path, work_dir_path
-            )
+            result_path = self._generate_table_streaming(table_name, output_path, work_dir_path)
             return table_name, result_path
 
         if self.parallel > 1:
             # Generate tables in parallel
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(self.parallel, len(tables))
-            ) as executor:
-                futures = {
-                    executor.submit(generate_table, table): table
-                    for table in tables
-                }
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.parallel, len(tables))) as executor:
+                futures = {executor.submit(generate_table, table): table for table in tables}
 
                 for future in concurrent.futures.as_completed(futures):
                     table_name, file_path = future.result()
                     results[table_name] = file_path
-                    self.log_verbose(
-                        f"Generated {table_name} via streaming: {file_path.name}"
-                    )
+                    self.log_verbose(f"Generated {table_name} via streaming: {file_path.name}")
         else:
             # Generate tables sequentially
             for table in tables:
                 table_name, file_path = generate_table(table)
                 results[table_name] = file_path
-                self.log_verbose(
-                    f"Generated {table_name} via streaming: {file_path.name}"
-                )
+                self.log_verbose(f"Generated {table_name} via streaming: {file_path.name}")
 
         return results
 
@@ -601,9 +588,7 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
 
         # Fall back to traditional file-based generation
         if self.should_use_compression() and not self._check_stdout_support():
-            self.logger.warning(
-                "dbgen binary does not support -z flag; falling back to file-then-compress mode"
-            )
+            self.logger.warning("dbgen binary does not support -z flag; falling back to file-then-compress mode")
 
         # Proactively remove any existing TPC-H .tbl outputs to avoid permission/overwrite issues
         try:
@@ -967,9 +952,7 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
                 sorted_chunks = sorted(chunk_files, key=lambda f: f.name)
                 # Return ALL shards, not just the first one
                 table_paths[table_name] = sorted_chunks
-                self.log_verbose(
-                    f"Generated {len(chunk_files)} chunk files for {table_name}"
-                )
+                self.log_verbose(f"Generated {len(chunk_files)} chunk files for {table_name}")
                 continue
 
             source_file = self.dbgen_path / filename
@@ -1037,10 +1020,7 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
             if self.verbose_enabled and compressed_paths:
                 # For compression report, flatten any lists to their first element for display
                 # (the report is just for verbose output, not critical)
-                flat_paths = {
-                    k: (v[0] if isinstance(v, list) else v)
-                    for k, v in compressed_paths.items()
-                }
+                flat_paths = {k: (v[0] if isinstance(v, list) else v) for k, v in compressed_paths.items()}
                 self.print_compression_report(flat_paths)
 
             self._validate_file_format_consistency(target_dir)

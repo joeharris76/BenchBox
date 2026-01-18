@@ -306,15 +306,13 @@ class TestPandasFamilyAdapter:
         # Must have exactly one valid timing key
         timing_keys_present = valid_timing_keys & set(result.keys())
         assert len(timing_keys_present) >= 1, (
-            f"Result must contain a valid timing key from {valid_timing_keys}, "
-            f"got keys: {set(result.keys())}"
+            f"Result must contain a valid timing key from {valid_timing_keys}, got keys: {set(result.keys())}"
         )
 
         # Must NOT have invalid timing keys (they would be silently ignored)
         invalid_keys_present = invalid_timing_keys & set(result.keys())
         assert len(invalid_keys_present) == 0, (
-            f"Result contains invalid timing keys {invalid_keys_present} "
-            f"that would be silently ignored by the schema"
+            f"Result contains invalid timing keys {invalid_keys_present} that would be silently ignored by the schema"
         )
 
         # Timing value must be positive

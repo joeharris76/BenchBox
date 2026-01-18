@@ -768,7 +768,7 @@ def _populate_tables_from_manifest(benchmark: Any, manifest: dict | None = None)
             return None
         tbl_map: dict[str, Any] = {}
         total_files = 0
-        for table in (manifest_data.get("tables") or {}).keys():
+        for table in manifest_data.get("tables") or {}:
             entries = get_table_files(manifest_data, table)
             if not entries:
                 continue
@@ -842,7 +842,7 @@ def _validate_manifest_if_present(benchmark: Any, config: BenchmarkConfig) -> tu
         from benchbox.utils.datagen_manifest import get_table_files
 
         tables = manifest.get("tables", {}) or {}
-        for table_name in tables.keys():
+        for table_name in tables:
             entries = get_table_files(manifest, table_name)
             for entry in entries:
                 rel = entry.get("path")

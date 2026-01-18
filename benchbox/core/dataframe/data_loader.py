@@ -380,9 +380,7 @@ class FormatConverter:
             for sort_col in write_config.sort_by:
                 # Validate column exists
                 if sort_col.name not in table.column_names:
-                    logger.warning(
-                        f"Sort column '{sort_col.name}' not found in table, skipping"
-                    )
+                    logger.warning(f"Sort column '{sort_col.name}' not found in table, skipping")
                     continue
                 # PyArrow sort_indices uses "ascending" or "descending"
                 order = "ascending" if sort_col.order == "asc" else "descending"
@@ -764,10 +762,9 @@ class DataFrameDataLoader:
         if effective_write_config and not effective_write_config.is_default():
             # Add write config hash to source hash to differentiate cached outputs
             import json
+
             config_str = json.dumps(effective_write_config.to_dict(), sort_keys=True)
-            source_hash = hashlib.md5(
-                f"{source_hash}:{config_str}".encode()
-            ).hexdigest()[:12]
+            source_hash = hashlib.md5(f"{source_hash}:{config_str}".encode()).hexdigest()[:12]
 
         if not self.force_regenerate and self.cache.has_cached_data(
             benchmark_name, scale_factor, target_format, source_hash
@@ -933,9 +930,7 @@ class DataFrameDataLoader:
             delimiter = "|" if source_path.suffix.lower() == ".tbl" else ","
 
             # Get table-specific write config (filter sort columns that exist in this table)
-            table_write_config = self._get_table_write_config(
-                write_config, table_name, column_names
-            )
+            table_write_config = self._get_table_write_config(write_config, table_name, column_names)
 
             # Convert
             status, row_count = FormatConverter.convert_csv_to_parquet(
@@ -998,26 +993,14 @@ class DataFrameDataLoader:
 
         # Filter sort_by columns to only include those that exist in this table
         valid_columns = set(column_names)
-        filtered_sort_by = [
-            s for s in write_config.sort_by
-            if s.name in valid_columns
-        ]
+        filtered_sort_by = [s for s in write_config.sort_by if s.name in valid_columns]
 
         # Filter partition_by columns similarly
-        filtered_partition_by = [
-            p for p in write_config.partition_by
-            if p.name in valid_columns
-        ]
+        filtered_partition_by = [p for p in write_config.partition_by if p.name in valid_columns]
 
         # Filter dictionary columns
-        filtered_dict_cols = [
-            c for c in write_config.dictionary_columns
-            if c in valid_columns
-        ]
-        filtered_skip_dict_cols = [
-            c for c in write_config.skip_dictionary_columns
-            if c in valid_columns
-        ]
+        filtered_dict_cols = [c for c in write_config.dictionary_columns if c in valid_columns]
+        filtered_skip_dict_cols = [c for c in write_config.skip_dictionary_columns if c in valid_columns]
 
         # Return a new config with filtered columns
         return DataFrameWriteConfiguration(

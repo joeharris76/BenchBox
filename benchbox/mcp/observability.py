@@ -110,9 +110,7 @@ def setup_structured_logging(
     if use_json:
         handler.setFormatter(JSONFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 
     logger.addHandler(handler)
 
@@ -196,9 +194,7 @@ class MetricsCollector:
                 return self._get_tool_stats(tool_name)
             else:
                 return {
-                    "tools": {
-                        name: self._get_tool_stats(name) for name in self._call_counts
-                    },
+                    "tools": {name: self._get_tool_stats(name) for name in self._call_counts},
                     "summary": {
                         "total_calls": sum(self._call_counts.values()),
                         "total_success": sum(self._success_counts.values()),

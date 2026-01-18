@@ -21,7 +21,6 @@ import csv
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 
@@ -55,7 +54,7 @@ class TSBSDevOpsDataGenerator(VerbosityMixin):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         num_hosts: int | None = None,
         duration_days: int | None = None,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
@@ -164,10 +163,7 @@ class TSBSDevOpsDataGenerator(VerbosityMixin):
 
     def _check_existing_data(self) -> bool:
         """Check if valid data files exist."""
-        for table in TABLE_ORDER:
-            if not (self.output_dir / f"{table}.csv").exists():
-                return False
-        return True
+        return all((self.output_dir / f"{table}.csv").exists() for table in TABLE_ORDER)
 
     def _collect_table_files(self) -> dict[str, Path]:
         """Collect existing table file paths."""

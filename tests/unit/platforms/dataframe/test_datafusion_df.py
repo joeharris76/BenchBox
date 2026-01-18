@@ -683,10 +683,7 @@ class TestDataFusionASTRegexPatterns:
 
         # Sample AST string matching actual DataFusion error message format
         # Format: Column { relation: None, name: \"col_name\" } and Alias { ... name: \"alias_name\" }
-        ast_str = (
-            'Alias(Alias { expr: ..., relation: None, '
-            'name: \\"avg_result\\", metadata: None })'
-        )
+        ast_str = 'Alias(Alias { expr: ..., relation: None, name: \\"avg_result\\", metadata: None })'
         result = _extract_datafusion_alias_name(ast_str)
         assert result == "avg_result"
 
@@ -696,7 +693,7 @@ class TestDataFusionASTRegexPatterns:
 
         # Matches actual format: Column { name: \"col\" } ... name: \"alias\"
         ast_str = (
-            'Alias(Alias { expr: AggregateFunction(...Column { relation: None, '
+            "Alias(Alias { expr: AggregateFunction(...Column { relation: None, "
             'name: \\"test_col\\" }...), relation: None, name: \\"avg_result\\", metadata: None })'
         )
         result = _extract_datafusion_alias_name(ast_str)

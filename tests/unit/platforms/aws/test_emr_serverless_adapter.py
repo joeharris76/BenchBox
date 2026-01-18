@@ -357,13 +357,9 @@ class TestEMRServerlessAdapterTuning:
         with (
             patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
             # SparkConfigOptimizer is now used from the mixin module
-            patch(
-                "benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer"
-            ) as mock_optimizer,
+            patch("benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer") as mock_optimizer,
         ):
             mock_staging.from_uri.return_value = MagicMock()
             mock_config = MagicMock()

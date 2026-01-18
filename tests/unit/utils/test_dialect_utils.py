@@ -299,9 +299,7 @@ class TestPostgresIdentifierQuoting:
         """Test real scenario: TPC-DS uppercase columns with lowercase schema."""
         # This simulates what happens with TPC-DS templates
         query = "SELECT SR_RETURN_AMT, SR_NET_LOSS FROM store_returns WHERE SR_RETURN_AMT > 100"
-        result = translate_sql_query(
-            query, target_dialect="postgres", source_dialect="netezza", identify=True
-        )
+        result = translate_sql_query(query, target_dialect="postgres", source_dialect="netezza", identify=True)
         # Result should have unquoted identifiers that will be folded to lowercase
         assert '"SR_RETURN_AMT"' not in result
         assert '"SR_NET_LOSS"' not in result

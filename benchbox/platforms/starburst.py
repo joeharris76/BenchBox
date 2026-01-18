@@ -93,10 +93,7 @@ class StarburstAdapter(TrinoAdapter):
 
         # Username with email/role format
         if "username" not in config or not config["username"]:
-            config["username"] = (
-                os.environ.get("STARBURST_USER")
-                or os.environ.get("STARBURST_USERNAME")
-            )
+            config["username"] = os.environ.get("STARBURST_USER") or os.environ.get("STARBURST_USERNAME")
 
         # Append role to username if provided separately and not already in username
         role = config.get("role") or os.environ.get("STARBURST_ROLE")
@@ -206,48 +203,24 @@ class StarburstAdapter(TrinoAdapter):
         """Add Starburst-specific CLI arguments."""
         starburst_group = parser.add_argument_group("Starburst Arguments")
         starburst_group.add_argument(
-            "--host",
-            type=str,
-            help="Starburst Galaxy hostname (e.g., my-cluster.trino.galaxy.starburst.io)"
+            "--host", type=str, help="Starburst Galaxy hostname (e.g., my-cluster.trino.galaxy.starburst.io)"
         )
+        starburst_group.add_argument("--port", type=int, default=443, help="Starburst Galaxy port (default: 443)")
+        starburst_group.add_argument("--catalog", type=str, help="Default catalog for queries")
+        starburst_group.add_argument("--schema", type=str, default="default", help="Default schema within the catalog")
         starburst_group.add_argument(
-            "--port",
-            type=int,
-            default=443,
-            help="Starburst Galaxy port (default: 443)"
+            "--username", type=str, help="Username in email/role format (e.g., joe@example.com/accountadmin)"
         )
+        starburst_group.add_argument("--password", type=str, help="Password for Starburst Galaxy authentication")
         starburst_group.add_argument(
-            "--catalog",
-            type=str,
-            help="Default catalog for queries"
-        )
-        starburst_group.add_argument(
-            "--schema",
-            type=str,
-            default="default",
-            help="Default schema within the catalog"
-        )
-        starburst_group.add_argument(
-            "--username",
-            type=str,
-            help="Username in email/role format (e.g., joe@example.com/accountadmin)"
-        )
-        starburst_group.add_argument(
-            "--password",
-            type=str,
-            help="Password for Starburst Galaxy authentication"
-        )
-        starburst_group.add_argument(
-            "--role",
-            type=str,
-            help="Role name (appended to username if not already included)"
+            "--role", type=str, help="Role name (appended to username if not already included)"
         )
         starburst_group.add_argument(
             "--table-format",
             type=str,
             choices=["memory", "hive", "iceberg", "delta"],
             default="iceberg",
-            help="Table format for creating benchmark tables (default: iceberg)"
+            help="Table format for creating benchmark tables (default: iceberg)",
         )
 
     @classmethod

@@ -864,7 +864,7 @@ class TestWritePrimitivesBulkLoad:
         bulk_load_ops = write_bench.get_operations_by_category("bulk_load")
 
         # Check for CSV operations with different sizes and compressions
-        csv_ops = [op_id for op_id in bulk_load_ops.keys() if "csv" in op_id]
+        csv_ops = [op_id for op_id in bulk_load_ops if "csv" in op_id]
 
         # Should have CSV operations for small/medium/large with various compressions
         assert len(csv_ops) >= 12, f"Should have at least 12 CSV operations, got {len(csv_ops)}"
@@ -879,7 +879,7 @@ class TestWritePrimitivesBulkLoad:
         bulk_load_ops = write_bench.get_operations_by_category("bulk_load")
 
         # Check for Parquet operations
-        parquet_ops = [op_id for op_id in bulk_load_ops.keys() if "parquet" in op_id]
+        parquet_ops = [op_id for op_id in bulk_load_ops if "parquet" in op_id]
 
         # Should have Parquet operations for small/medium/large with various compressions
         assert len(parquet_ops) >= 12, f"Should have at least 12 Parquet operations, got {len(parquet_ops)}"
@@ -945,7 +945,7 @@ class TestWritePrimitivesBulkLoad:
         compression_formats = ["gzip", "zstd", "bzip2", "snappy"]
         found_compressions = set()
 
-        for op_id in bulk_load_ops.keys():
+        for op_id in bulk_load_ops:
             for compression in compression_formats:
                 if compression in op_id:
                     found_compressions.add(compression)

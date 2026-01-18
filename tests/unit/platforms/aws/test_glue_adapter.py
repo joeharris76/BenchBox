@@ -207,14 +207,10 @@ class TestAWSGlueAdapterSchema:
                     super().__init__(f"{operation_name}: {error_response}")
 
             # Patch ClientError with the mock class
-            with patch(
-                "benchbox.platforms.aws.glue_adapter.ClientError", MockClientError
-            ):
+            with patch("benchbox.platforms.aws.glue_adapter.ClientError", MockClientError):
                 # Simulate database not found
                 error_response = {"Error": {"Code": "EntityNotFoundException"}}
-                mock_glue_client.get_database.side_effect = MockClientError(
-                    error_response, "GetDatabase"
-                )
+                mock_glue_client.get_database.side_effect = MockClientError(error_response, "GetDatabase")
                 mock_session.client.return_value = mock_glue_client
                 mock_boto3.Session.return_value = mock_session
 

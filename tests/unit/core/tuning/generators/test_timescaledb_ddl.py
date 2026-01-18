@@ -175,9 +175,7 @@ class TestPartitionChildren:
         columns = [ColumnDefinition("time", "TIMESTAMPTZ")]
         tuning = generator.generate_tuning_clauses(table_tuning)
 
-        children = generator.generate_partition_children(
-            "metrics", columns, tuning, table_tuning
-        )
+        children = generator.generate_partition_children("metrics", columns, tuning, table_tuning)
 
         assert len(children) == 0
 

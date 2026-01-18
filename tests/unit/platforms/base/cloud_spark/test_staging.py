@@ -327,9 +327,7 @@ class TestS3Staging:
         staging._client = mock_client
 
         assert staging.file_exists("table/file.parquet")
-        mock_client.head_object.assert_called_with(
-            Bucket="my-bucket", Key="data/table/file.parquet"
-        )
+        mock_client.head_object.assert_called_with(Bucket="my-bucket", Key="data/table/file.parquet")
 
     def test_s3_list_files(self):
         """Test S3 file listing."""
@@ -366,9 +364,7 @@ class TestS3Staging:
 
         mock_client = MagicMock()
         mock_paginator = MagicMock()
-        mock_paginator.paginate.return_value = [
-            {"Contents": [{"Key": "data/table/file1.parquet"}]}
-        ]
+        mock_paginator.paginate.return_value = [{"Contents": [{"Key": "data/table/file1.parquet"}]}]
         mock_client.get_paginator.return_value = mock_paginator
         staging._client = mock_client
 

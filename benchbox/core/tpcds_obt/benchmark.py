@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 from benchbox.core.base_benchmark import BaseBenchmark
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
@@ -30,8 +30,8 @@ class TPCDSOBTBenchmark(BaseBenchmark):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
-        tpcds_source_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
+        tpcds_source_dir: str | Path | None = None,
         parallel: int = 1,
         force_regenerate: bool = False,
         dimension_mode: str = "full",
@@ -196,7 +196,7 @@ class TPCDSOBTBenchmark(BaseBenchmark):
 
     def get_query(
         self,
-        query_id: Union[int, str],
+        query_id: int | str,
         *,
         params: dict[str, Any] | None = None,
         seed: int | None = None,
@@ -239,7 +239,7 @@ class TPCDSOBTBenchmark(BaseBenchmark):
 
     def execute_query(
         self,
-        query_id: Union[int, str],
+        query_id: int | str,
         connection: Any,
         params: Mapping[str, Any] | None = None,
     ) -> list[tuple[Any, ...]]:

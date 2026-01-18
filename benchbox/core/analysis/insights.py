@@ -419,11 +419,10 @@ class InsightGenerator:
         recommendations.append(f"For maximum performance: Choose {winner.platform}")
 
         # Cost-focused recommendation
-        if report.cost_analysis:
-            if report.cost_analysis.best_value != winner.platform:
-                recommendations.append(
-                    f"For best value: Consider {report.cost_analysis.best_value} (better price/performance)"
-                )
+        if report.cost_analysis and report.cost_analysis.best_value != winner.platform:
+            recommendations.append(
+                f"For best value: Consider {report.cost_analysis.best_value} (better price/performance)"
+            )
 
         # Consistency recommendation
         most_consistent = None

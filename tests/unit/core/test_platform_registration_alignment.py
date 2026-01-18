@@ -168,7 +168,7 @@ class TestPlatformRegistrationAlignment:
     def test_all_canonical_platforms_in_adapter_mapping(self):
         """All canonical SQL platforms must be in get_platform_adapter() mapping."""
         mapping = self._get_platform_adapter_mapping()
-        mapping_platforms = {k for k in mapping.keys() if k not in PLATFORM_ALIASES}
+        mapping_platforms = {k for k in mapping if k not in PLATFORM_ALIASES}
 
         missing = CANONICAL_SQL_PLATFORMS - mapping_platforms
         assert not missing, (
@@ -182,7 +182,7 @@ class TestPlatformRegistrationAlignment:
 
         # Get canonical names from mapping (resolve aliases)
         mapping_canonical = set()
-        for name in mapping.keys():
+        for name in mapping:
             if name in PLATFORM_ALIASES:
                 mapping_canonical.add(PLATFORM_ALIASES[name])
             else:
@@ -204,7 +204,7 @@ class TestPlatformRegistrationAlignment:
         sql_registered = registered - excluded
 
         mapping_canonical = set()
-        for name in mapping.keys():
+        for name in mapping:
             if name in PLATFORM_ALIASES:
                 mapping_canonical.add(PLATFORM_ALIASES[name])
             else:
@@ -305,9 +305,7 @@ class TestPlatformCapabilitiesAlignment:
                     f"Hybrid platform '{platform}' should have supports_sql=False "
                     "(adapter exists for data loading only)"
                 )
-                assert caps.supports_dataframe, (
-                    f"Hybrid platform '{platform}' should have supports_dataframe=True"
-                )
+                assert caps.supports_dataframe, f"Hybrid platform '{platform}' should have supports_dataframe=True"
 
     def test_dual_mode_platforms_support_both(self):
         """Platforms that support both modes must have both flags True."""

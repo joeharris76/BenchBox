@@ -19,27 +19,27 @@ from .base import BenchmarkResults, ConnectionConfig, PlatformAdapter
 try:
     from .duckdb import DuckDBAdapter
 except ImportError:
-    DuckDBAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    DuckDBAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .motherduck import MotherDuckAdapter
 except ImportError:
-    MotherDuckAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    MotherDuckAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .sqlite import SQLiteAdapter
 except ImportError:
-    SQLiteAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    SQLiteAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .datafusion import DataFusionAdapter
 except ImportError:
-    DataFusionAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    DataFusionAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .polars_platform import PolarsAdapter
 except ImportError:
-    PolarsAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    PolarsAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 # Import cloud platform adapters with graceful fallback
 # ClickHouse is optional and may not be included in pip-installed packages
@@ -52,83 +52,83 @@ try:
 except ImportError:
     _clickhouse_module = None  # type: ignore[assignment]
     clickhouse = None  # type: ignore[assignment]
-    ClickHouseAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    ClickHouseAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .databricks import DatabricksAdapter
 except ImportError:
-    DatabricksAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    DatabricksAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .bigquery import BigQueryAdapter
 except ImportError:
-    BigQueryAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    BigQueryAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .redshift import RedshiftAdapter
 except ImportError:
-    RedshiftAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    RedshiftAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .snowflake import SnowflakeAdapter
 except ImportError:
-    SnowflakeAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    SnowflakeAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .trino import TrinoAdapter
 except ImportError:
-    TrinoAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    TrinoAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .athena import AthenaAdapter
 except ImportError:
-    AthenaAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    AthenaAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .spark import SparkAdapter
 except ImportError:
-    SparkAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    SparkAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .pyspark import PySparkSQLAdapter
 except ImportError:
-    PySparkSQLAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    PySparkSQLAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .firebolt import FireboltAdapter
 except ImportError:
-    FireboltAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    FireboltAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .influxdb import InfluxDBAdapter
 except ImportError:
-    InfluxDBAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    InfluxDBAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .presto import PrestoAdapter
 except ImportError:
-    PrestoAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    PrestoAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .postgresql import PostgreSQLAdapter
 except ImportError:
-    PostgreSQLAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    PostgreSQLAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .timescaledb import TimescaleDBAdapter
 except ImportError:
-    TimescaleDBAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    TimescaleDBAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .azure_synapse import AzureSynapseAdapter
 except ImportError:
-    AzureSynapseAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    AzureSynapseAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 try:
     from .fabric_warehouse import FabricWarehouseAdapter, MicrosoftFabricAdapter
 except ImportError:
-    FabricWarehouseAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
-    MicrosoftFabricAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    FabricWarehouseAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+    MicrosoftFabricAdapter: Optional[type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
 # DataFrame platform adapters - these use a different interface (DataFrame API instead of SQL)
 # Import availability flags and adapters with graceful fallback

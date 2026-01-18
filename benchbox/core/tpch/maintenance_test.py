@@ -786,9 +786,8 @@ class TPCHMaintenanceTest:
                 orderless_count = result[0] if result else 0
 
                 # This is a warning, not a critical violation (some orders may legitimately have no items yet)
-                if orderless_count > 0:
-                    if self.verbose:
-                        self.logger.info(f"Note: {orderless_count} ORDERS without LINEITEM records (may be expected)")
+                if orderless_count > 0 and self.verbose:
+                    self.logger.info(f"Note: {orderless_count} ORDERS without LINEITEM records (may be expected)")
             except Exception as e:
                 if self.verbose:
                     self.logger.warning(f"Could not check orders without lineitems: {e}")

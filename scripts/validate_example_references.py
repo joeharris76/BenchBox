@@ -18,15 +18,14 @@ Licensed under the MIT License.
 import re
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 
-def find_markdown_files(docs_dir: Path) -> List[Path]:
+def find_markdown_files(docs_dir: Path) -> list[Path]:
     """Find all markdown files in documentation directory."""
     return list(docs_dir.rglob("*.md"))
 
 
-def extract_file_references(content: str, file_path: Path) -> List[Tuple[int, str, str]]:
+def extract_file_references(content: str, file_path: Path) -> list[tuple[int, str, str]]:
     """Extract file references from markdown content.
 
     Returns:
@@ -48,7 +47,7 @@ def extract_file_references(content: str, file_path: Path) -> List[Tuple[int, st
     return references
 
 
-def validate_reference(ref_path: str, doc_file: Path, repo_root: Path) -> Tuple[bool, str]:
+def validate_reference(ref_path: str, doc_file: Path, repo_root: Path) -> tuple[bool, str]:
     """Validate a single reference path.
 
     Args:

@@ -186,9 +186,7 @@ class TestDataFrameWriteConfigurationSerialization:
 
     def test_to_dict_with_sort(self) -> None:
         """Test serialization with sort columns."""
-        config = DataFrameWriteConfiguration(
-            sort_by=[SortColumn(name="l_shipdate", order="asc")]
-        )
+        config = DataFrameWriteConfiguration(sort_by=[SortColumn(name="l_shipdate", order="asc")])
         result = config.to_dict()
         assert result == {"sort_by": [{"name": "l_shipdate", "order": "asc"}]}
 
@@ -276,17 +274,13 @@ class TestGetEnabledTypes:
 
     def test_with_sort(self) -> None:
         """Test SORT_BY type is enabled."""
-        config = DataFrameWriteConfiguration(
-            sort_by=[SortColumn(name="col")]
-        )
+        config = DataFrameWriteConfiguration(sort_by=[SortColumn(name="col")])
         types = config.get_enabled_types()
         assert DataFrameWriteTuningType.SORT_BY in types
 
     def test_with_partition(self) -> None:
         """Test PARTITION_BY type is enabled."""
-        config = DataFrameWriteConfiguration(
-            partition_by=[PartitionColumn(name="col")]
-        )
+        config = DataFrameWriteConfiguration(partition_by=[PartitionColumn(name="col")])
         types = config.get_enabled_types()
         assert DataFrameWriteTuningType.PARTITION_BY in types
 
@@ -349,9 +343,7 @@ class TestValidateWriteConfigForPlatform:
 
     def test_partition_warning_for_polars(self) -> None:
         """Test partition warning for Polars."""
-        config = DataFrameWriteConfiguration(
-            partition_by=[PartitionColumn(name="o_orderdate")]
-        )
+        config = DataFrameWriteConfiguration(partition_by=[PartitionColumn(name="o_orderdate")])
         warnings = validate_write_config_for_platform(config, "polars")
         assert len(warnings) == 1
         assert "does not support partitioned writes" in warnings[0]
@@ -365,9 +357,7 @@ class TestValidateWriteConfigForPlatform:
 
     def test_sort_warning_for_dask(self) -> None:
         """Test sort warning for Dask."""
-        config = DataFrameWriteConfiguration(
-            sort_by=[SortColumn(name="l_shipdate")]
-        )
+        config = DataFrameWriteConfiguration(sort_by=[SortColumn(name="l_shipdate")])
         warnings = validate_write_config_for_platform(config, "dask")
         assert len(warnings) == 1
         assert "limited sort support" in warnings[0]

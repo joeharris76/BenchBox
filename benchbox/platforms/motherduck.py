@@ -24,7 +24,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from benchbox.core.config_inheritance import (
     resolve_dialect_for_query_translation,
@@ -140,7 +140,7 @@ class MotherDuckAdapter(PlatformAdapter):
         """
         return resolve_dialect_for_query_translation("motherduck")
 
-    def create_connection(self, connection_config: Optional[dict[str, Any]] = None):
+    def create_connection(self, connection_config: dict[str, Any] | None = None):
         """Create connection to MotherDuck.
 
         Uses DuckDB's native MotherDuck integration with connection string:
@@ -174,8 +174,7 @@ class MotherDuckAdapter(PlatformAdapter):
         except Exception as e:
             logger.error(f"Failed to connect to MotherDuck: {e}")
             raise ConnectionError(
-                f"Failed to connect to MotherDuck: {e}\n"
-                "Check your MOTHERDUCK_TOKEN and network connection."
+                f"Failed to connect to MotherDuck: {e}\nCheck your MOTHERDUCK_TOKEN and network connection."
             )
 
     def close_connection(self, connection=None):

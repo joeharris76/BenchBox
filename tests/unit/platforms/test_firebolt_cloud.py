@@ -20,19 +20,27 @@ class TestFireboltCloudMode:
         """Cloud mode raises error without credentials."""
         with patch.dict(os.environ, {}, clear=True):
             # Clear any existing env vars
-            for key in ["FIREBOLT_CLIENT_ID", "FIREBOLT_CLIENT_SECRET",
-                       "FIREBOLT_ACCOUNT_NAME", "FIREBOLT_ENGINE_NAME",
-                       "SERVICE_ACCOUNT_ID", "SERVICE_ACCOUNT_SECRET"]:
+            for key in [
+                "FIREBOLT_CLIENT_ID",
+                "FIREBOLT_CLIENT_SECRET",
+                "FIREBOLT_ACCOUNT_NAME",
+                "FIREBOLT_ENGINE_NAME",
+                "SERVICE_ACCOUNT_ID",
+                "SERVICE_ACCOUNT_SECRET",
+            ]:
                 os.environ.pop(key, None)
 
             # Mock the firebolt SDK imports
-            with patch.dict("sys.modules", {
-                "firebolt": MagicMock(),
-                "firebolt.client": MagicMock(),
-                "firebolt.client.auth": MagicMock(),
-                "firebolt.client.auth.firebolt_core": MagicMock(),
-                "firebolt.db": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "firebolt": MagicMock(),
+                    "firebolt.client": MagicMock(),
+                    "firebolt.client.auth": MagicMock(),
+                    "firebolt.client.auth.firebolt_core": MagicMock(),
+                    "firebolt.db": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.firebolt import FireboltAdapter
 
                 with pytest.raises(Exception) as exc_info:
@@ -43,21 +51,27 @@ class TestFireboltCloudMode:
 
     def test_cloud_mode_accepts_env_vars(self):
         """Cloud mode reads credentials from environment variables."""
-        with patch.dict(os.environ, {
-            "FIREBOLT_CLIENT_ID": "env-client-id",
-            "FIREBOLT_CLIENT_SECRET": "env-client-secret",
-            "FIREBOLT_ACCOUNT_NAME": "env-account",
-            "FIREBOLT_ENGINE_NAME": "env-engine",
-            "FIREBOLT_DATABASE": "env-database",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "FIREBOLT_CLIENT_ID": "env-client-id",
+                "FIREBOLT_CLIENT_SECRET": "env-client-secret",
+                "FIREBOLT_ACCOUNT_NAME": "env-account",
+                "FIREBOLT_ENGINE_NAME": "env-engine",
+                "FIREBOLT_DATABASE": "env-database",
+            },
+        ):
             # Mock the firebolt SDK imports
-            with patch.dict("sys.modules", {
-                "firebolt": MagicMock(),
-                "firebolt.client": MagicMock(),
-                "firebolt.client.auth": MagicMock(),
-                "firebolt.client.auth.firebolt_core": MagicMock(),
-                "firebolt.db": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "firebolt": MagicMock(),
+                    "firebolt.client": MagicMock(),
+                    "firebolt.client.auth": MagicMock(),
+                    "firebolt.client.auth.firebolt_core": MagicMock(),
+                    "firebolt.db": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.firebolt import FireboltAdapter
 
                 adapter = FireboltAdapter(deployment_mode="cloud")
@@ -70,20 +84,26 @@ class TestFireboltCloudMode:
 
     def test_cloud_mode_supports_service_account_vars(self):
         """Cloud mode reads SERVICE_ACCOUNT_* environment variables."""
-        with patch.dict(os.environ, {
-            "SERVICE_ACCOUNT_ID": "sa-client-id",
-            "SERVICE_ACCOUNT_SECRET": "sa-client-secret",
-            "FIREBOLT_ACCOUNT_NAME": "sa-account",
-            "FIREBOLT_ENGINE_NAME": "sa-engine",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "SERVICE_ACCOUNT_ID": "sa-client-id",
+                "SERVICE_ACCOUNT_SECRET": "sa-client-secret",
+                "FIREBOLT_ACCOUNT_NAME": "sa-account",
+                "FIREBOLT_ENGINE_NAME": "sa-engine",
+            },
+        ):
             # Mock the firebolt SDK imports
-            with patch.dict("sys.modules", {
-                "firebolt": MagicMock(),
-                "firebolt.client": MagicMock(),
-                "firebolt.client.auth": MagicMock(),
-                "firebolt.client.auth.firebolt_core": MagicMock(),
-                "firebolt.db": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "firebolt": MagicMock(),
+                    "firebolt.client": MagicMock(),
+                    "firebolt.client.auth": MagicMock(),
+                    "firebolt.client.auth.firebolt_core": MagicMock(),
+                    "firebolt.db": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.firebolt import FireboltAdapter
 
                 adapter = FireboltAdapter(deployment_mode="cloud")
@@ -93,20 +113,26 @@ class TestFireboltCloudMode:
 
     def test_cloud_mode_config_overrides_env(self):
         """Config parameters override environment variables."""
-        with patch.dict(os.environ, {
-            "FIREBOLT_CLIENT_ID": "env-client-id",
-            "FIREBOLT_CLIENT_SECRET": "env-client-secret",
-            "FIREBOLT_ACCOUNT_NAME": "env-account",
-            "FIREBOLT_ENGINE_NAME": "env-engine",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "FIREBOLT_CLIENT_ID": "env-client-id",
+                "FIREBOLT_CLIENT_SECRET": "env-client-secret",
+                "FIREBOLT_ACCOUNT_NAME": "env-account",
+                "FIREBOLT_ENGINE_NAME": "env-engine",
+            },
+        ):
             # Mock the firebolt SDK imports
-            with patch.dict("sys.modules", {
-                "firebolt": MagicMock(),
-                "firebolt.client": MagicMock(),
-                "firebolt.client.auth": MagicMock(),
-                "firebolt.client.auth.firebolt_core": MagicMock(),
-                "firebolt.db": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "firebolt": MagicMock(),
+                    "firebolt.client": MagicMock(),
+                    "firebolt.client.auth": MagicMock(),
+                    "firebolt.client.auth.firebolt_core": MagicMock(),
+                    "firebolt.db": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.firebolt import FireboltAdapter
 
                 adapter = FireboltAdapter(
@@ -125,13 +151,16 @@ class TestFireboltCloudMode:
     def test_core_mode_with_url(self):
         """Core mode accepts URL configuration."""
         # Mock the firebolt SDK imports
-        with patch.dict("sys.modules", {
-            "firebolt": MagicMock(),
-            "firebolt.client": MagicMock(),
-            "firebolt.client.auth": MagicMock(),
-            "firebolt.client.auth.firebolt_core": MagicMock(),
-            "firebolt.db": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "firebolt": MagicMock(),
+                "firebolt.client": MagicMock(),
+                "firebolt.client.auth": MagicMock(),
+                "firebolt.client.auth.firebolt_core": MagicMock(),
+                "firebolt.db": MagicMock(),
+            },
+        ):
             from benchbox.platforms.firebolt import FireboltAdapter
 
             adapter = FireboltAdapter(
@@ -145,13 +174,16 @@ class TestFireboltCloudMode:
     def test_core_mode_inferred_default_url(self):
         """Core mode is inferred with default URL when only URL provided."""
         # Mock the firebolt SDK imports
-        with patch.dict("sys.modules", {
-            "firebolt": MagicMock(),
-            "firebolt.client": MagicMock(),
-            "firebolt.client.auth": MagicMock(),
-            "firebolt.client.auth.firebolt_core": MagicMock(),
-            "firebolt.db": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "firebolt": MagicMock(),
+                "firebolt.client": MagicMock(),
+                "firebolt.client.auth": MagicMock(),
+                "firebolt.client.auth.firebolt_core": MagicMock(),
+                "firebolt.db": MagicMock(),
+            },
+        ):
             from benchbox.platforms.firebolt import FireboltAdapter
 
             # When URL is provided, core mode is inferred
@@ -163,13 +195,16 @@ class TestFireboltCloudMode:
     def test_invalid_deployment_mode(self):
         """Invalid deployment mode raises error."""
         # Mock the firebolt SDK imports
-        with patch.dict("sys.modules", {
-            "firebolt": MagicMock(),
-            "firebolt.client": MagicMock(),
-            "firebolt.client.auth": MagicMock(),
-            "firebolt.client.auth.firebolt_core": MagicMock(),
-            "firebolt.db": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "firebolt": MagicMock(),
+                "firebolt.client": MagicMock(),
+                "firebolt.client.auth": MagicMock(),
+                "firebolt.client.auth.firebolt_core": MagicMock(),
+                "firebolt.db": MagicMock(),
+            },
+        ):
             from benchbox.platforms.firebolt import FireboltAdapter
 
             with pytest.raises(ValueError) as exc_info:
@@ -181,20 +216,26 @@ class TestFireboltCloudMode:
 
     def test_default_api_endpoint(self):
         """Default API endpoint is api.app.firebolt.io."""
-        with patch.dict(os.environ, {
-            "FIREBOLT_CLIENT_ID": "test-id",
-            "FIREBOLT_CLIENT_SECRET": "test-secret",
-            "FIREBOLT_ACCOUNT_NAME": "test-account",
-            "FIREBOLT_ENGINE_NAME": "test-engine",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "FIREBOLT_CLIENT_ID": "test-id",
+                "FIREBOLT_CLIENT_SECRET": "test-secret",
+                "FIREBOLT_ACCOUNT_NAME": "test-account",
+                "FIREBOLT_ENGINE_NAME": "test-engine",
+            },
+        ):
             # Mock the firebolt SDK imports
-            with patch.dict("sys.modules", {
-                "firebolt": MagicMock(),
-                "firebolt.client": MagicMock(),
-                "firebolt.client.auth": MagicMock(),
-                "firebolt.client.auth.firebolt_core": MagicMock(),
-                "firebolt.db": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "firebolt": MagicMock(),
+                    "firebolt.client": MagicMock(),
+                    "firebolt.client.auth": MagicMock(),
+                    "firebolt.client.auth.firebolt_core": MagicMock(),
+                    "firebolt.db": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.firebolt import FireboltAdapter
 
                 adapter = FireboltAdapter(deployment_mode="cloud")
@@ -203,21 +244,27 @@ class TestFireboltCloudMode:
 
     def test_custom_api_endpoint(self):
         """Custom API endpoint can be configured."""
-        with patch.dict(os.environ, {
-            "FIREBOLT_CLIENT_ID": "test-id",
-            "FIREBOLT_CLIENT_SECRET": "test-secret",
-            "FIREBOLT_ACCOUNT_NAME": "test-account",
-            "FIREBOLT_ENGINE_NAME": "test-engine",
-            "FIREBOLT_API_ENDPOINT": "custom.api.firebolt.io",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "FIREBOLT_CLIENT_ID": "test-id",
+                "FIREBOLT_CLIENT_SECRET": "test-secret",
+                "FIREBOLT_ACCOUNT_NAME": "test-account",
+                "FIREBOLT_ENGINE_NAME": "test-engine",
+                "FIREBOLT_API_ENDPOINT": "custom.api.firebolt.io",
+            },
+        ):
             # Mock the firebolt SDK imports
-            with patch.dict("sys.modules", {
-                "firebolt": MagicMock(),
-                "firebolt.client": MagicMock(),
-                "firebolt.client.auth": MagicMock(),
-                "firebolt.client.auth.firebolt_core": MagicMock(),
-                "firebolt.db": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "firebolt": MagicMock(),
+                    "firebolt.client": MagicMock(),
+                    "firebolt.client.auth": MagicMock(),
+                    "firebolt.client.auth.firebolt_core": MagicMock(),
+                    "firebolt.db": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.firebolt import FireboltAdapter
 
                 adapter = FireboltAdapter(deployment_mode="cloud")

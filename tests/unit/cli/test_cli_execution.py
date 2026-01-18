@@ -616,12 +616,12 @@ class TestBenchmarkExecutorResultCreation:
         mock_benchmark.create_minimal_benchmark_result.return_value = mock_result
 
         # Mock the engine's get_benchmark_instance to return our mock
-        with patch.object(executor.engine, 'get_benchmark_instance', return_value=mock_benchmark):
+        with patch.object(executor.engine, "get_benchmark_instance", return_value=mock_benchmark):
             result = executor._build_minimal_result(
                 benchmark_config=Mock(name="tpch", display_name="TPC-H", scale_factor=0.01),
                 database_config=Mock(type="duckdb"),
                 system_profile=Mock(),
-                validation_status="INTERRUPTED"
+                validation_status="INTERRUPTED",
             )
 
         assert result.validation_status == "INTERRUPTED"
@@ -636,24 +636,21 @@ class TestBenchmarkExecutorResultCreation:
 
         # Use a real benchmark config object
         from benchbox.core.config import BenchmarkConfig
-        config = BenchmarkConfig(
-            name="tpch",
-            display_name="TPC-H",
-            scale_factor=0.01
-        )
+
+        config = BenchmarkConfig(name="tpch", display_name="TPC-H", scale_factor=0.01)
 
         result = executor._build_minimal_result(
             benchmark_config=config,
             database_config=Mock(type="duckdb"),
             system_profile=Mock(),
             validation_status="FAILED",
-            validation_details={"error": "Test error"}
+            validation_details={"error": "Test error"},
         )
 
         assert result.benchmark_name == "TPC-H"
         assert result.validation_status == "FAILED"
         assert result.scale_factor == 0.01
-        assert hasattr(result, '_benchmark_id_override')
+        assert hasattr(result, "_benchmark_id_override")
         assert result._benchmark_id_override == "tpch"
 
     def test_execution_caches_benchmark_instance(self):
@@ -661,13 +658,13 @@ class TestBenchmarkExecutorResultCreation:
         executor = BenchmarkExecutor()
         result = make_benchmark_results(validation_status="PASSED")
 
-        with patch.object(executor.engine, 'execute_benchmark', return_value=result):
-            with patch.object(executor.engine, 'get_benchmark_instance', return_value=Mock()):
+        with patch.object(executor.engine, "execute_benchmark", return_value=result):
+            with patch.object(executor.engine, "get_benchmark_instance", return_value=Mock()):
                 with patch("benchbox.cli.execution.quiet_console.print"):
                     executor.execute_benchmark(
                         benchmark_config=Mock(name="tpch", display_name="TPC-H", scale_factor=0.01),
                         database_config=Mock(name="test_db", type="duckdb"),
-                        system_profile=Mock()
+                        system_profile=Mock(),
                     )
 
         assert executor._benchmark_instance is not None
@@ -675,12 +672,7 @@ class TestBenchmarkExecutorResultCreation:
     def test_display_execution_info_with_queries_subset(self):
         """Test display when queries attribute exists."""
         executor = BenchmarkExecutor()
-        config = BenchmarkConfig(
-            name="tpch",
-            display_name="TPC-H",
-            queries=["Q1", "Q6", "Q17"],
-            scale_factor=0.01
-        )
+        config = BenchmarkConfig(name="tpch", display_name="TPC-H", queries=["Q1", "Q6", "Q17"], scale_factor=0.01)
         db_config = Mock(name="test_db")
 
         with patch("benchbox.cli.execution.console.print"):
@@ -692,12 +684,7 @@ class TestBenchmarkExecutorResultCreation:
     def test_display_execution_info_with_high_concurrency(self):
         """Test display with concurrency > 1."""
         executor = BenchmarkExecutor()
-        config = BenchmarkConfig(
-            name="tpch",
-            display_name="TPC-H",
-            concurrency=4,
-            scale_factor=0.01
-        )
+        config = BenchmarkConfig(name="tpch", display_name="TPC-H", concurrency=4, scale_factor=0.01)
         db_config = Mock(name="test_db")
 
         with patch("benchbox.cli.execution.console.print"):

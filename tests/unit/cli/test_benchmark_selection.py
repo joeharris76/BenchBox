@@ -410,7 +410,12 @@ class TestTwoPhaseSelectionFlow:
         manager = BenchmarkManager()
 
         primitives_order = manager.BENCHMARK_ORDER["Primitives"]
-        assert primitives_order == ["read_primitives", "write_primitives", "transaction_primitives", "metadata_primitives"]
+        assert primitives_order == [
+            "read_primitives",
+            "write_primitives",
+            "transaction_primitives",
+            "metadata_primitives",
+        ]
 
     def test_prompt_category_selection_returns_category(self):
         """Test that _prompt_category_selection returns selected category."""
@@ -467,9 +472,7 @@ class TestTwoPhaseSelectionFlow:
         # Get sorted benchmarks for a category
         category = "Industry"
         category_benchmarks = {
-            bench_id: info
-            for bench_id, info in manager.benchmarks.items()
-            if info["category"] == category
+            bench_id: info for bench_id, info in manager.benchmarks.items() if info["category"] == category
         }
 
         popularity_order = manager.BENCHMARK_ORDER.get(category, [])

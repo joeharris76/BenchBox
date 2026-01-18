@@ -45,7 +45,7 @@ class WritePrimitivesDataGenerator(CompressionMixin, CloudStorageGeneratorMixin,
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         verbose: int | bool = 0,
         quiet: bool = False,
         parallel: int = 1,

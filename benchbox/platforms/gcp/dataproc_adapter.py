@@ -287,8 +287,7 @@ class DataprocAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdapter):
                         "message": "Cluster will be created on first job submission",
                     }
                 raise ConfigurationError(
-                    f"Cluster {self.cluster_name} not found. "
-                    f"Create it first or set create_ephemeral_cluster=True"
+                    f"Cluster {self.cluster_name} not found. Create it first or set create_ephemeral_cluster=True"
                 ) from None
             raise ConfigurationError(f"Failed to connect to Dataproc: {e}") from e
 
@@ -721,9 +720,7 @@ spark.stop()
             results["foreign_keys"] = self.apply_foreign_keys(config.foreign_keys)
 
         if config.platform:
-            results["platform_optimizations"] = self.apply_platform_optimizations(
-                config.platform
-            )
+            results["platform_optimizations"] = self.apply_platform_optimizations(config.platform)
 
         return results
 

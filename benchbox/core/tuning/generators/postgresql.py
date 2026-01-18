@@ -239,17 +239,13 @@ class PostgreSQLDDLGenerator(BaseDDLGenerator):
         statements = []
 
         if strategy == PartitionStrategy.HASH:
-            statements = self._generate_hash_partitions(
-                parent_table, qualified_parent, platform_opts
-            )
+            statements = self._generate_hash_partitions(parent_table, qualified_parent, platform_opts)
         elif strategy == PartitionStrategy.RANGE:
             statements = self._generate_range_partitions(
                 parent_table, qualified_parent, partition_columns, platform_opts
             )
         elif strategy == PartitionStrategy.LIST:
-            statements = self._generate_list_partitions(
-                parent_table, qualified_parent, platform_opts
-            )
+            statements = self._generate_list_partitions(parent_table, qualified_parent, platform_opts)
 
         return statements
 
@@ -351,8 +347,7 @@ class PostgreSQLDDLGenerator(BaseDDLGenerator):
         list_values = getattr(platform_opts, "list_values", None)
         if not list_values:
             logger.warning(
-                f"No list_values provided for LIST partition {parent_table}. "
-                f"No partition children generated."
+                f"No list_values provided for LIST partition {parent_table}. No partition children generated."
             )
             return []
 

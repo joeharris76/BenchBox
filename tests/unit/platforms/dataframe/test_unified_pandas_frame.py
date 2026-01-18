@@ -540,26 +540,24 @@ class TestUnifiedPandasFrameIntegration:
         """Test chained operations maintain wrapper type."""
         import pandas as pd
 
-        df = pd.DataFrame({
-            "group": ["A", "A", "B", "B"],
-            "value": [1, 2, 3, 4],
-        })
+        df = pd.DataFrame(
+            {
+                "group": ["A", "A", "B", "B"],
+                "value": [1, 2, 3, 4],
+            }
+        )
         adapter = Mock()
         # Configure mock to call real pandas groupby_agg
         adapter.groupby_agg = lambda df, by, agg, as_index: (
-            df.groupby(by, as_index=as_index).agg(**agg).reset_index() if not as_index
+            df.groupby(by, as_index=as_index).agg(**agg).reset_index()
+            if not as_index
             else df.groupby(by, as_index=as_index).agg(**agg)
         )
 
         wrapper = UnifiedPandasFrame(df, adapter)
 
         # Chain operations
-        result = (
-            wrapper[wrapper["value"] > 1]
-            .copy()
-            .sort_values("value", ascending=False)
-            .head(2)
-        )
+        result = wrapper[wrapper["value"] > 1].copy().sort_values("value", ascending=False).head(2)
 
         assert isinstance(result, UnifiedPandasFrame)
         assert len(result) == 2
@@ -568,16 +566,16 @@ class TestUnifiedPandasFrameIntegration:
         """Test groupby with a pandas-like adapter."""
         import pandas as pd
 
-        df = pd.DataFrame({
-            "group": ["A", "A", "B"],
-            "value": [10, 20, 30],
-        })
+        df = pd.DataFrame(
+            {
+                "group": ["A", "A", "B"],
+                "value": [10, 20, 30],
+            }
+        )
 
         # Create adapter mock that implements groupby_agg properly
         adapter = Mock()
-        adapter.groupby_agg = lambda df, by, agg, as_index: (
-            df.groupby(by, as_index=False).agg(**agg)
-        )
+        adapter.groupby_agg = lambda df, by, agg, as_index: (df.groupby(by, as_index=False).agg(**agg))
 
         wrapper = UnifiedPandasFrame(df, adapter)
         result = wrapper.groupby("group", as_index=False).agg(total=("value", "sum"))

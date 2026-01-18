@@ -236,11 +236,9 @@ class TestPlatformRegistry:
             assert len(install_cmd) > 0, f"{platform_name} should have installation command"
 
             # Most should be uv add commands or built-in, but pip is allowed for special cases (e.g., cudf)
-            assert (
-                install_cmd.startswith("uv add")
-                or install_cmd.startswith("pip install")
-                or install_cmd == "Built-in Python library"
-            ), f"Unexpected install command for {platform_name}: {install_cmd}"
+            assert install_cmd.startswith(("uv add", "pip install")) or install_cmd == "Built-in Python library", (
+                f"Unexpected install command for {platform_name}: {install_cmd}"
+            )
 
     def test_pyspark_dual_mode_metadata(self):
         """Ensure PySpark advertises dual SQL/DataFrame capabilities."""

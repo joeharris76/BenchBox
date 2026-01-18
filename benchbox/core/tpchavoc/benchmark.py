@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpchavoc.queries import TPCHavocQueryManager
@@ -80,7 +80,7 @@ class TPCHavocBenchmark(TPCHBenchmark):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         verbose: int | bool = 0,
         parallel: int = 1,
         validation_tolerance: float = 1e-10,
@@ -271,9 +271,7 @@ class TPCHavocBenchmark(TPCHBenchmark):
             ),
         }
 
-    def export_variant_queries(
-        self, output_dir: Union[str, Path] | None = None, format: str = "sql"
-    ) -> dict[str, Path]:
+    def export_variant_queries(self, output_dir: str | Path | None = None, format: str = "sql") -> dict[str, Path]:
         """Export all variant queries to files.
 
         Args:

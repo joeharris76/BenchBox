@@ -1826,7 +1826,9 @@ def _extract_multi_agg_arithmetic(ast_str: str, alias_name: str) -> tuple[list[A
         # Each aggregate has its own NVL-wrapped column
         # Pattern: Sum { ... NVLFunc ... Column(name: col1) ... } ... Sum { ... NVLFunc ... Column(name: col2) ... }
         # Find aggregate blocks and extract column from each
-        agg_pattern = r"AggregateFunction\s*\{[^}]*inner:\s*(\w+)[^}]*args:\s*\[ScalarFunction[^]]+name:\s*\\?\"([^\"\\]+)\\?\""
+        agg_pattern = (
+            r"AggregateFunction\s*\{[^}]*inner:\s*(\w+)[^}]*args:\s*\[ScalarFunction[^]]+name:\s*\\?\"([^\"\\]+)\\?\""
+        )
         agg_with_nvl_matches = re.findall(agg_pattern, ast_str, re.DOTALL)
 
         if agg_with_nvl_matches:

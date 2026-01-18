@@ -187,7 +187,7 @@ class TestCoffeeShopGenerator:
             # Handle V2 manifest format: dict[table, dict[format, list[entries]]]
             from benchbox.utils.datagen_manifest import get_table_files
 
-            for table_name in manifest["tables"].keys():
+            for table_name in manifest["tables"]:
                 entries = get_table_files(manifest, table_name)
                 for entry in entries:
                     assert not os.path.isabs(entry["path"])

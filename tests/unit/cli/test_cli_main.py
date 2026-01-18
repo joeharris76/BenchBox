@@ -30,18 +30,15 @@ class TestConfigManagerFactory:
         manager = get_config_manager()
 
         assert isinstance(manager, ConfigManager)
-        assert hasattr(manager, 'get')
-        assert hasattr(manager, 'set')
-        assert hasattr(manager, 'config')
+        assert hasattr(manager, "get")
+        assert hasattr(manager, "set")
+        assert hasattr(manager, "config")
 
     def test_main_block_execution(self):
         """Test __main__ block execution via subprocess."""
         # Use subprocess to test the __main__ block
         result = subprocess.run(
-            [sys.executable, "-m", "benchbox.cli.main", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=10
+            [sys.executable, "-m", "benchbox.cli.main", "--help"], capture_output=True, text=True, timeout=10
         )
         assert result.returncode == 0
         assert "Usage:" in result.stdout or "BenchBox" in result.stdout

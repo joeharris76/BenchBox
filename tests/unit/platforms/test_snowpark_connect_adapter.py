@@ -201,9 +201,10 @@ class TestSnowparkConnectAdapterConnection:
         mock_session = MagicMock()
         mock_session.sql.return_value.collect.return_value = [("8.0.0",)]
 
-        with patch.object(adapter, "_session", None), patch(
-            "benchbox.platforms.snowpark_connect.Session"
-        ) as mock_session_class:
+        with (
+            patch.object(adapter, "_session", None),
+            patch("benchbox.platforms.snowpark_connect.Session") as mock_session_class,
+        ):
             mock_builder = MagicMock()
             mock_builder.configs.return_value = mock_builder
             mock_builder.create.return_value = mock_session
@@ -492,9 +493,7 @@ class TestSnowparkConnectAdapterTuning:
 
         assert adapter._benchmark_type == "tpch"
         # Should disable result cache
-        mock_session.sql.assert_called_with(
-            "ALTER SESSION SET USE_CACHED_RESULT = FALSE"
-        )
+        mock_session.sql.assert_called_with("ALTER SESSION SET USE_CACHED_RESULT = FALSE")
 
 
 class TestSnowparkConnectAdapterConnectionParams:

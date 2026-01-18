@@ -262,7 +262,7 @@ class TemplateLoader:
                 return int(numbers[0]), "numeric"
             return 0, "numeric"
 
-        if expr_lower.startswith("dist") or expr_lower.startswith("sub"):
+        if expr_lower.startswith(("dist", "sub")):
             return 0, "numeric"
 
         # Fallback to literal expression
@@ -792,7 +792,7 @@ class QueryConverter:
                 f"{channel}_returns", name
             )
 
-        if name.endswith("ticket_number") or name.endswith("order_number"):
+        if name.endswith(("ticket_number", "order_number")):
             return "sale_id"
 
         if name.endswith("item_sk"):

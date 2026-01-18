@@ -62,9 +62,7 @@ class TestAthenaSparkAdapterInitialization:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -88,9 +86,7 @@ class TestAthenaSparkAdapterInitialization:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -114,9 +110,7 @@ class TestAthenaSparkAdapterInitialization:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -143,9 +137,7 @@ class TestAthenaSparkAdapterPlatformInfo:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -174,9 +166,7 @@ class TestAthenaSparkAdapterPlatformInfo:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -198,9 +188,7 @@ class TestAthenaSparkAdapterConnection:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3") as mock_boto3,
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -210,9 +198,7 @@ class TestAthenaSparkAdapterConnection:
                 "SessionId": "session-123",
                 "State": "CREATING",
             }
-            mock_athena_client.get_session_status.return_value = {
-                "Status": {"State": "IDLE"}
-            }
+            mock_athena_client.get_session_status.return_value = {"Status": {"State": "IDLE"}}
             mock_boto3.client.return_value = mock_athena_client
 
             from benchbox.platforms.aws import AthenaSparkAdapter
@@ -234,9 +220,7 @@ class TestAthenaSparkAdapterConnection:
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3") as mock_boto3,
             patch("benchbox.platforms.aws.athena_spark_adapter.ClientError", Exception),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -344,9 +328,7 @@ class TestAthenaSparkAdapterTuning:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -365,9 +347,7 @@ class TestAthenaSparkAdapterTuning:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -388,13 +368,9 @@ class TestAthenaSparkAdapterTuning:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
             # SparkConfigOptimizer is now used from the mixin module
-            patch(
-                "benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer"
-            ) as mock_optimizer,
+            patch("benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer") as mock_optimizer,
         ):
             mock_staging.from_uri.return_value = MagicMock()
             mock_config = MagicMock()
@@ -437,9 +413,7 @@ class TestAthenaSparkAdapterFromConfig:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3", MagicMock()),
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 
@@ -469,9 +443,7 @@ class TestAthenaSparkAdapterClose:
         with (
             patch("benchbox.platforms.aws.athena_spark_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.athena_spark_adapter.boto3") as mock_boto3,
-            patch(
-                "benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging"
-            ) as mock_staging,
+            patch("benchbox.platforms.aws.athena_spark_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
 

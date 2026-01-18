@@ -147,10 +147,7 @@ class CloudSparkStaging(ABC):
         }
 
         if scheme not in provider_map:
-            raise ValueError(
-                f"Unsupported URI scheme: {scheme}. "
-                f"Supported: {', '.join(provider_map.keys())}"
-            )
+            raise ValueError(f"Unsupported URI scheme: {scheme}. Supported: {', '.join(provider_map.keys())}")
 
         provider = provider_map[scheme]
 
@@ -373,9 +370,7 @@ class S3Staging(CloudSparkStaging):
             try:
                 import boto3
             except ImportError as e:
-                raise ImportError(
-                    "boto3 required for S3 staging. Install with: uv add boto3"
-                ) from e
+                raise ImportError("boto3 required for S3 staging. Install with: uv add boto3") from e
 
             session_kwargs = {}
             if self.config.credentials:
@@ -467,8 +462,7 @@ class GCSStaging(CloudSparkStaging):
                 from google.cloud import storage
             except ImportError as e:
                 raise ImportError(
-                    "google-cloud-storage required for GCS staging. "
-                    "Install with: uv add google-cloud-storage"
+                    "google-cloud-storage required for GCS staging. Install with: uv add google-cloud-storage"
                 ) from e
 
             self._client = storage.Client()
@@ -713,8 +707,7 @@ class DBFSStaging(CloudSparkStaging):
                 from databricks.sdk import WorkspaceClient
             except ImportError as e:
                 raise ImportError(
-                    "databricks-sdk required for DBFS staging. "
-                    "Install with: uv add databricks-sdk"
+                    "databricks-sdk required for DBFS staging. Install with: uv add databricks-sdk"
                 ) from e
 
             self._client = WorkspaceClient()

@@ -156,31 +156,23 @@ class SparkConfig:
 
         # AQE configs
         config["spark.sql.adaptive.enabled"] = str(self.aqe.enabled).lower()
-        config["spark.sql.adaptive.coalescePartitions.enabled"] = str(
-            self.aqe.coalesce_partitions_enabled
-        ).lower()
+        config["spark.sql.adaptive.coalescePartitions.enabled"] = str(self.aqe.coalesce_partitions_enabled).lower()
         config["spark.sql.adaptive.coalescePartitions.minPartitionNum"] = str(
             self.aqe.coalesce_partitions_min_partition_num
         )
         config["spark.sql.adaptive.skewJoin.enabled"] = str(self.aqe.skew_join_enabled).lower()
-        config["spark.sql.adaptive.skewJoin.skewedPartitionFactor"] = str(
-            self.aqe.skew_join_skewed_partition_factor
-        )
+        config["spark.sql.adaptive.skewJoin.skewedPartitionFactor"] = str(self.aqe.skew_join_skewed_partition_factor)
         config["spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes"] = (
             self.aqe.skew_join_skewed_partition_threshold
         )
-        config["spark.sql.adaptive.localShuffleReader.enabled"] = str(
-            self.aqe.local_shuffle_reader_enabled
-        ).lower()
+        config["spark.sql.adaptive.localShuffleReader.enabled"] = str(self.aqe.local_shuffle_reader_enabled).lower()
 
         # I/O configs
         config["spark.io.compression.codec"] = self.io.compression_codec
         config["spark.serializer"] = self.io.serializer
         config["spark.sql.parquet.compression.codec"] = self.io.parquet_compression
         config["spark.sql.parquet.filterPushdown"] = str(self.io.parquet_filter_pushdown).lower()
-        config["spark.sql.parquet.columnIndex.enabled"] = str(
-            self.io.parquet_column_index_filter
-        ).lower()
+        config["spark.sql.parquet.columnIndex.enabled"] = str(self.io.parquet_column_index_filter).lower()
         config["spark.sql.broadcastTimeout"] = str(self.io.broadcast_timeout)
         config["spark.network.timeout"] = str(self.io.network_timeout)
 
@@ -355,9 +347,7 @@ class SparkConfigOptimizer:
         config = cls.for_tpch(scale_factor * 0.5, platform, **kwargs)
 
         # SSB queries are simpler, reduce partitions
-        config.parallelism.shuffle_partitions = max(
-            50, config.parallelism.shuffle_partitions // 2
-        )
+        config.parallelism.shuffle_partitions = max(50, config.parallelism.shuffle_partitions // 2)
 
         return config
 

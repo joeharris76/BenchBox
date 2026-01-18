@@ -150,9 +150,7 @@ class TestPartitionChildGeneration:
         columns = [ColumnDefinition("l_orderkey", "BIGINT")]
         tuning = generator.generate_tuning_clauses(table_tuning)
 
-        children = generator.generate_partition_children(
-            "lineitem", columns, tuning, table_tuning
-        )
+        children = generator.generate_partition_children("lineitem", columns, tuning, table_tuning)
 
         assert len(children) == 4
         assert "lineitem_p0 PARTITION OF lineitem" in children[0]
@@ -170,9 +168,7 @@ class TestPartitionChildGeneration:
         columns = [ColumnDefinition("o_orderdate", "DATE")]
         tuning = generator.generate_tuning_clauses(table_tuning)
 
-        children = generator.generate_partition_children(
-            "orders", columns, tuning, table_tuning
-        )
+        children = generator.generate_partition_children("orders", columns, tuning, table_tuning)
 
         # Default is 2020-2026 = 6 years
         assert len(children) == 6
@@ -190,9 +186,7 @@ class TestPartitionChildGeneration:
         columns = [ColumnDefinition("o_orderkey", "BIGINT")]
         tuning = generator.generate_tuning_clauses(table_tuning)
 
-        children = generator.generate_partition_children(
-            "orders", columns, tuning, table_tuning
-        )
+        children = generator.generate_partition_children("orders", columns, tuning, table_tuning)
 
         assert len(children) == 0
 

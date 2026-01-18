@@ -19,7 +19,6 @@ import tempfile
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 
@@ -315,7 +314,7 @@ class NYCTaxiDataDownloader(VerbosityMixin):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         year: int = 2019,
         months: list[int] | None = None,
         seed: int | None = None,

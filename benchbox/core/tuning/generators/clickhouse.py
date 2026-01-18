@@ -278,6 +278,7 @@ class ClickHouseDDLGenerator(BaseDDLGenerator):
             data_type = self._map_to_clickhouse_type(column.data_type)
             # Check using the nullable property from ColumnDefinition
             from benchbox.core.tuning.ddl_generator import ColumnNullability
+
             if column.nullable == ColumnNullability.NULLABLE or column.nullable == ColumnNullability.DEFAULT:
                 data_type = f"Nullable({data_type})"
 

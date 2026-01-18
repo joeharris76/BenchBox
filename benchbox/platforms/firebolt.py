@@ -117,9 +117,7 @@ class FireboltAdapter(PlatformAdapter):
         # Credential loading with env var fallbacks (config takes priority)
         self.url = config.get("url") or config.get("engine_url")
         self.client_id = (
-            config.get("client_id")
-            or os.environ.get("FIREBOLT_CLIENT_ID")
-            or os.environ.get("SERVICE_ACCOUNT_ID")
+            config.get("client_id") or os.environ.get("FIREBOLT_CLIENT_ID") or os.environ.get("SERVICE_ACCOUNT_ID")
         )
         self.client_secret = (
             config.get("client_secret")
@@ -132,10 +130,7 @@ class FireboltAdapter(PlatformAdapter):
 
         if deployment_mode:
             if deployment_mode not in {"core", "cloud"}:
-                raise ValueError(
-                    f"Invalid Firebolt deployment mode '{deployment_mode}'. "
-                    f"Valid modes: core, cloud"
-                )
+                raise ValueError(f"Invalid Firebolt deployment mode '{deployment_mode}'. Valid modes: core, cloud")
             self.deployment_mode = deployment_mode
         elif legacy_mode:
             if legacy_mode not in {"core", "cloud"}:
@@ -143,6 +138,7 @@ class FireboltAdapter(PlatformAdapter):
             self.deployment_mode = legacy_mode
             # Log deprecation warning for legacy config key
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(
                 "Config key 'firebolt_mode' is deprecated. Use deployment mode syntax "
@@ -171,25 +167,13 @@ class FireboltAdapter(PlatformAdapter):
         self.mode = self.deployment_mode
 
         # Common configuration with env var fallback
-        self.database = (
-            config.get("database")
-            or os.environ.get("FIREBOLT_DATABASE")
-            or "benchbox"
-        )
+        self.database = config.get("database") or os.environ.get("FIREBOLT_DATABASE") or "benchbox"
 
         # Cloud-specific configuration with env var fallbacks
-        self.account_name = (
-            config.get("account_name")
-            or os.environ.get("FIREBOLT_ACCOUNT_NAME")
-        )
-        self.engine_name = (
-            config.get("engine_name")
-            or os.environ.get("FIREBOLT_ENGINE_NAME")
-        )
+        self.account_name = config.get("account_name") or os.environ.get("FIREBOLT_ACCOUNT_NAME")
+        self.engine_name = config.get("engine_name") or os.environ.get("FIREBOLT_ENGINE_NAME")
         self.api_endpoint = (
-            config.get("api_endpoint")
-            or os.environ.get("FIREBOLT_API_ENDPOINT")
-            or "api.app.firebolt.io"
+            config.get("api_endpoint") or os.environ.get("FIREBOLT_API_ENDPOINT") or "api.app.firebolt.io"
         )
 
         # Validate required fields per mode

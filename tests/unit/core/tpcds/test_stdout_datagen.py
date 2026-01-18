@@ -389,10 +389,7 @@ class TestStreamingCompression:
             assert len(lines) == 20, f"Expected 20 rows in gzip, got {len(lines)}"
 
     @pytest.mark.skipif(
-        not any(
-            (Path(p) / "zstd").exists()
-            for p in os.environ.get("PATH", "").split(os.pathsep)
-        ),
+        not any((Path(p) / "zstd").exists() for p in os.environ.get("PATH", "").split(os.pathsep)),
         reason="zstd not available",
     )
     def test_stdout_pipes_to_zstd(self, dsdgen_path: Path, tools_dir: Path) -> None:

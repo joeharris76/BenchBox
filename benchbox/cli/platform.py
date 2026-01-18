@@ -859,7 +859,9 @@ def setup_platforms(interactive: bool):
     available_count = sum(1 for info in platforms_info.values() if info.available)
     missing_count = sum(1 for info in platforms_info.values() if not info.available)
 
-    console.print(f"[bold]Current Status:[/bold] {enabled_count} enabled, {available_count} available, {missing_count} missing dependencies\n")
+    console.print(
+        f"[bold]Current Status:[/bold] {enabled_count} enabled, {available_count} available, {missing_count} missing dependencies\n"
+    )
 
     # Define action options for numbered menu
     action_options = [

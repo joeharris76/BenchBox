@@ -20,15 +20,24 @@ class TestStarburstAdapter:
         """Starburst adapter raises error without host."""
         with patch.dict(os.environ, {}, clear=True):
             # Clear any existing env vars
-            for key in ["STARBURST_HOST", "STARBURST_USER", "STARBURST_USERNAME",
-                       "STARBURST_PASSWORD", "STARBURST_ROLE", "STARBURST_CATALOG"]:
+            for key in [
+                "STARBURST_HOST",
+                "STARBURST_USER",
+                "STARBURST_USERNAME",
+                "STARBURST_PASSWORD",
+                "STARBURST_ROLE",
+                "STARBURST_CATALOG",
+            ]:
                 os.environ.pop(key, None)
 
             # Mock the trino imports
-            with patch.dict("sys.modules", {
-                "trino": MagicMock(),
-                "trino.auth": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.starburst import StarburstAdapter
 
                 with pytest.raises(ValueError) as exc_info:
@@ -46,10 +55,13 @@ class TestStarburstAdapter:
             for key in ["STARBURST_USER", "STARBURST_USERNAME"]:
                 os.environ.pop(key, None)
 
-            with patch.dict("sys.modules", {
-                "trino": MagicMock(),
-                "trino.auth": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.starburst import StarburstAdapter
 
                 with pytest.raises(ValueError) as exc_info:
@@ -66,10 +78,13 @@ class TestStarburstAdapter:
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("STARBURST_PASSWORD", None)
 
-            with patch.dict("sys.modules", {
-                "trino": MagicMock(),
-                "trino.auth": MagicMock(),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ):
                 from benchbox.platforms.starburst import StarburstAdapter
 
                 with pytest.raises(ValueError) as exc_info:
@@ -83,10 +98,13 @@ class TestStarburstAdapter:
 
     def test_starburst_defaults_to_https_port_443(self):
         """Starburst adapter defaults to HTTPS on port 443."""
-        with patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "trino": MagicMock(),
+                "trino.auth": MagicMock(),
+            },
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter(
@@ -101,15 +119,24 @@ class TestStarburstAdapter:
 
     def test_starburst_accepts_env_vars(self):
         """Starburst adapter reads credentials from environment variables."""
-        with patch.dict(os.environ, {
-            "STARBURST_HOST": "env-cluster.trino.galaxy.starburst.io",
-            "STARBURST_USER": "env-user@example.com/accountadmin",
-            "STARBURST_PASSWORD": "env-password",
-            "STARBURST_CATALOG": "env-catalog",
-        }), patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "STARBURST_HOST": "env-cluster.trino.galaxy.starburst.io",
+                    "STARBURST_USER": "env-user@example.com/accountadmin",
+                    "STARBURST_PASSWORD": "env-password",
+                    "STARBURST_CATALOG": "env-catalog",
+                },
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ),
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter()
@@ -121,14 +148,23 @@ class TestStarburstAdapter:
 
     def test_starburst_accepts_starburst_username_env_var(self):
         """Starburst adapter reads STARBURST_USERNAME as fallback."""
-        with patch.dict(os.environ, {
-            "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
-            "STARBURST_USERNAME": "username-user@example.com/admin",
-            "STARBURST_PASSWORD": "test-password",
-        }), patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
+                    "STARBURST_USERNAME": "username-user@example.com/admin",
+                    "STARBURST_PASSWORD": "test-password",
+                },
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ),
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter()
@@ -137,14 +173,23 @@ class TestStarburstAdapter:
 
     def test_starburst_config_overrides_env(self):
         """Config parameters override environment variables."""
-        with patch.dict(os.environ, {
-            "STARBURST_HOST": "env-cluster.trino.galaxy.starburst.io",
-            "STARBURST_USER": "env-user@example.com/accountadmin",
-            "STARBURST_PASSWORD": "env-password",
-        }), patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "STARBURST_HOST": "env-cluster.trino.galaxy.starburst.io",
+                    "STARBURST_USER": "env-user@example.com/accountadmin",
+                    "STARBURST_PASSWORD": "env-password",
+                },
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ),
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter(
@@ -159,15 +204,24 @@ class TestStarburstAdapter:
 
     def test_starburst_appends_role_to_username(self):
         """Starburst adapter appends role to username if not already included."""
-        with patch.dict(os.environ, {
-            "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
-            "STARBURST_USER": "test@example.com",
-            "STARBURST_PASSWORD": "test-password",
-            "STARBURST_ROLE": "accountadmin",
-        }), patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
+                    "STARBURST_USER": "test@example.com",
+                    "STARBURST_PASSWORD": "test-password",
+                    "STARBURST_ROLE": "accountadmin",
+                },
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ),
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter()
@@ -176,15 +230,24 @@ class TestStarburstAdapter:
 
     def test_starburst_does_not_duplicate_role(self):
         """Starburst adapter doesn't append role if already in username."""
-        with patch.dict(os.environ, {
-            "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
-            "STARBURST_USER": "test@example.com/admin",
-            "STARBURST_PASSWORD": "test-password",
-            "STARBURST_ROLE": "accountadmin",
-        }), patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
+                    "STARBURST_USER": "test@example.com/admin",
+                    "STARBURST_PASSWORD": "test-password",
+                    "STARBURST_ROLE": "accountadmin",
+                },
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ),
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter()
@@ -194,15 +257,24 @@ class TestStarburstAdapter:
 
     def test_starburst_custom_port(self):
         """Starburst adapter accepts custom port."""
-        with patch.dict(os.environ, {
-            "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
-            "STARBURST_USER": "test@example.com/admin",
-            "STARBURST_PASSWORD": "test-password",
-            "STARBURST_PORT": "8443",
-        }), patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "STARBURST_HOST": "test-cluster.trino.galaxy.starburst.io",
+                    "STARBURST_USER": "test@example.com/admin",
+                    "STARBURST_PASSWORD": "test-password",
+                    "STARBURST_PORT": "8443",
+                },
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "trino": MagicMock(),
+                    "trino.auth": MagicMock(),
+                },
+            ),
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter()
@@ -211,10 +283,13 @@ class TestStarburstAdapter:
 
     def test_starburst_platform_name(self):
         """Starburst adapter returns correct platform name."""
-        with patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "trino": MagicMock(),
+                "trino.auth": MagicMock(),
+            },
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter(
@@ -227,10 +302,13 @@ class TestStarburstAdapter:
 
     def test_starburst_dialect_is_trino(self):
         """Starburst adapter uses Trino SQL dialect."""
-        with patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "trino": MagicMock(),
+                "trino.auth": MagicMock(),
+            },
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter(
@@ -292,10 +370,13 @@ class TestStarburstErrorMessages:
 
     def test_friendly_auth_error(self):
         """Starburst provides friendly auth error message."""
-        with patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "trino": MagicMock(),
+                "trino.auth": MagicMock(),
+            },
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter(
@@ -314,10 +395,13 @@ class TestStarburstErrorMessages:
 
     def test_friendly_connection_error(self):
         """Starburst provides friendly connection error message."""
-        with patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "trino": MagicMock(),
+                "trino.auth": MagicMock(),
+            },
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter(
@@ -335,10 +419,13 @@ class TestStarburstErrorMessages:
 
     def test_friendly_ssl_error(self):
         """Starburst provides friendly SSL error message."""
-        with patch.dict("sys.modules", {
-            "trino": MagicMock(),
-            "trino.auth": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "trino": MagicMock(),
+                "trino.auth": MagicMock(),
+            },
+        ):
             from benchbox.platforms.starburst import StarburstAdapter
 
             adapter = StarburstAdapter(

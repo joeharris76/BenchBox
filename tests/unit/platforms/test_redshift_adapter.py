@@ -445,9 +445,12 @@ class TestRedshiftAdapter:
             import benchbox.platforms.redshift as redshift_module
 
             if redshift_module.redshift_connector:
-                with patch.object(
-                    redshift_module.redshift_connector, "connect", side_effect=Exception("Connection failed")
-                ), pytest.raises(Exception, match="Connection failed"):
+                with (
+                    patch.object(
+                        redshift_module.redshift_connector, "connect", side_effect=Exception("Connection failed")
+                    ),
+                    pytest.raises(Exception, match="Connection failed"),
+                ):
                     adapter.create_connection()
             elif redshift_module.psycopg2:
                 with patch.object(redshift_module.psycopg2, "connect", side_effect=Exception("Connection failed")):

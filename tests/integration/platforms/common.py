@@ -1743,9 +1743,7 @@ def install_dataproc_stub(
 ) -> CloudSparkStubState:
     """Install stubs for Dataproc adapter (google.cloud.dataproc_v1 + storage)."""
 
-    state = CloudSparkStubState(
-        project_id=project_id, region=region, bucket=gcs_bucket, cluster_name=cluster_name
-    )
+    state = CloudSparkStubState(project_id=project_id, region=region, bucket=gcs_bucket, cluster_name=cluster_name)
 
     # Create dataproc_v1 module stubs
     dataproc_v1_module = types.ModuleType("google.cloud.dataproc_v1")

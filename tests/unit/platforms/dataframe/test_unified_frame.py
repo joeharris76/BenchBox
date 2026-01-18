@@ -193,15 +193,19 @@ class TestUnifiedLazyFrameJoins:
         unified_lazy_frame_cls = _get_unified_lazy_frame()
         mock_adapter = _create_mock_adapter()
 
-        left = polars.DataFrame({
-            "id": [1, 2, 3],
-            "name": ["Alice", "Bob", "Carol"],
-        }).lazy()
+        left = polars.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "name": ["Alice", "Bob", "Carol"],
+            }
+        ).lazy()
 
-        right = polars.DataFrame({
-            "id": [2, 3, 4],
-            "value": [100, 200, 300],
-        }).lazy()
+        right = polars.DataFrame(
+            {
+                "id": [2, 3, 4],
+                "value": [100, 200, 300],
+            }
+        ).lazy()
 
         return {
             "polars": polars,
@@ -230,10 +234,12 @@ class TestUnifiedLazyFrameJoins:
         unified_lazy_frame_cls = _get_unified_lazy_frame()
 
         # Create right df with overlapping column name
-        right = pl.DataFrame({
-            "id": [2, 3],
-            "name": ["Bob2", "Carol2"],  # Duplicate column name
-        }).lazy()
+        right = pl.DataFrame(
+            {
+                "id": [2, 3],
+                "name": ["Bob2", "Carol2"],  # Duplicate column name
+            }
+        ).lazy()
 
         right_ulf = unified_lazy_frame_cls(right, mock_adapter)
 

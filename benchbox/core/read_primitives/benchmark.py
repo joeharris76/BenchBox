@@ -180,7 +180,7 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
         if dialect:
             # Get queries with dialect-specific variants (if available) and translate
             translated_queries = {}
-            for query_id in base_queries.keys():
+            for query_id in base_queries:
                 try:
                     # Try to get dialect-specific variant first
                     query_sql = self.query_manager.get_query(query_id, dialect=dialect)

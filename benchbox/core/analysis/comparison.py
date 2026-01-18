@@ -848,10 +848,7 @@ def _dict_to_benchmark_results(data: dict[str, Any]) -> BenchmarkResults:
     # Validate schema version
     version = data.get("version")
     if version != "2.0":
-        raise ValueError(
-            f"Unsupported schema version: {version}. "
-            f"Only schema v2.0 is supported for comparison."
-        )
+        raise ValueError(f"Unsupported schema version: {version}. Only schema v2.0 is supported for comparison.")
 
     return reconstruct_benchmark_results(data)
 

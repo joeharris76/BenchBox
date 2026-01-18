@@ -206,5 +206,5 @@ class TestCatalogValidation:
 
         for query in catalog.queries.values():
             if query.variants:
-                for dialect in query.variants.keys():
+                for dialect in query.variants:
                     assert dialect == dialect.lower()

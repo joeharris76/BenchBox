@@ -16,7 +16,7 @@ import csv
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 from benchbox.core.tsbs_devops.generator import TSBSDevOpsDataGenerator
 from benchbox.core.tsbs_devops.queries import TSBSDevOpsQueryManager
@@ -74,7 +74,7 @@ class TSBSDevOpsBenchmark(VerbosityMixin):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         num_hosts: int | None = None,
         duration_days: int | None = None,
         interval_seconds: int = 10,
@@ -152,7 +152,7 @@ class TSBSDevOpsBenchmark(VerbosityMixin):
         # Track generated table files
         self.tables: dict[str, Path] = {}
 
-    def generate_data(self) -> list[Union[str, Path]]:
+    def generate_data(self) -> list[str | Path]:
         """Generate TSBS DevOps benchmark data.
 
         Returns:
@@ -181,7 +181,7 @@ class TSBSDevOpsBenchmark(VerbosityMixin):
 
     def get_query(
         self,
-        query_id: Union[int, str],
+        query_id: int | str,
         *,
         params: dict[str, Any] | None = None,
         **kwargs,

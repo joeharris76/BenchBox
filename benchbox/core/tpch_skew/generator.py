@@ -272,10 +272,7 @@ class TPCHSkewDataGenerator(VerbosityMixin):
             "region.tbl",
             "supplier.tbl",
         ]
-        for filename in expected_files:
-            if not (self.output_dir / filename).exists():
-                return False
-        return True
+        return all((self.output_dir / filename).exists() for filename in expected_files)
 
     def _collect_table_files(self) -> dict[str, Path]:
         """Collect existing table file paths."""

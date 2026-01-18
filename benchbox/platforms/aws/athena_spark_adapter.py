@@ -177,10 +177,7 @@ class AthenaSparkAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdapte
                 raise ConfigurationError(get_dependency_error_message("athena-spark", missing))
 
         if not workgroup:
-            raise ConfigurationError(
-                "workgroup is required for Athena Spark. "
-                "Must be a Spark-enabled workgroup."
-            )
+            raise ConfigurationError("workgroup is required for Athena Spark. Must be a Spark-enabled workgroup.")
 
         if not s3_staging_dir:
             raise ConfigurationError("s3_staging_dir is required (e.g., s3://bucket/path)")
@@ -467,9 +464,7 @@ result.show(100, truncate=False)
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            response = client.get_calculation_execution_status(
-                CalculationExecutionId=calculation_id
-            )
+            response = client.get_calculation_execution_status(CalculationExecutionId=calculation_id)
             state = response["Status"]["State"]
 
             if state in AthenaSparkCalculationState.TERMINAL_STATES:
@@ -491,9 +486,7 @@ result.show(100, truncate=False)
         client = self._get_athena_client()
 
         try:
-            response = client.get_calculation_execution(
-                CalculationExecutionId=calculation_id
-            )
+            response = client.get_calculation_execution(CalculationExecutionId=calculation_id)
 
             # Results are in the Result field
             result = response.get("Result", {})
@@ -617,9 +610,7 @@ result.show(100, truncate=False)
         """
         start_time = time.time()
 
-        calculation_id, state = self._submit_calculation(
-            query, code_type="SQL", wait_for_completion=True
-        )
+        calculation_id, state = self._submit_calculation(query, code_type="SQL", wait_for_completion=True)
 
         elapsed = time.time() - start_time
         self._query_count += 1
@@ -744,9 +735,7 @@ result.show(100, truncate=False)
             results["foreign_keys"] = self.apply_foreign_keys(config.foreign_keys)
 
         if config.platform:
-            results["platform_optimizations"] = self.apply_platform_optimizations(
-                config.platform
-            )
+            results["platform_optimizations"] = self.apply_platform_optimizations(config.platform)
 
         return results
 

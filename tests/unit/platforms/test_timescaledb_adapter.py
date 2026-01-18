@@ -339,7 +339,7 @@ class TestTimescaleDBIntervalValidation:
             "1 day'; DROP TABLE users; --",
             "1 day' OR '1'='1",
             "1 day; SELECT * FROM pg_shadow",
-            "1 day\"; DELETE FROM hypertables; --",
+            '1 day"; DELETE FROM hypertables; --',
         ]
 
         for payload in injection_payloads:

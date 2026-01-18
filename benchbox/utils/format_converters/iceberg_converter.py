@@ -170,7 +170,8 @@ class IcebergConverter(BaseFormatConverter):
 
             catalog = SqlCatalog(
                 "benchbox_catalog",
-                uri=f"sqlite:///{catalog_db}", warehouse=warehouse_path,
+                uri=f"sqlite:///{catalog_db}",
+                warehouse=warehouse_path,
             )
 
             # Create namespace if it doesn't exist

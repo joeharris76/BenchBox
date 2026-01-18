@@ -127,8 +127,7 @@ class DatabricksDataFrameAdapter(DatabricksAdapter):
                 else "Databricks Connect not installed"
             )
             logger.warning(
-                "%s. DataFrame mode requires: uv add databricks-connect. "
-                "Falling back to SQL mode.",
+                "%s. DataFrame mode requires: uv add databricks-connect. Falling back to SQL mode.",
                 reason,
             )
             self.execution_mode = "sql"
@@ -174,10 +173,7 @@ class DatabricksDataFrameAdapter(DatabricksAdapter):
             return self._spark
 
         if not DATABRICKS_CONNECT_AVAILABLE:
-            raise ImportError(
-                "Databricks Connect required for DataFrame mode. "
-                "Install with: uv add databricks-connect"
-            )
+            raise ImportError("Databricks Connect required for DataFrame mode. Install with: uv add databricks-connect")
 
         try:
             # Build Databricks Connect session

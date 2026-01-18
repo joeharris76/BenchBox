@@ -254,7 +254,8 @@ class ExecutionTracker:
         """Remove old completed executions to bound memory."""
         # Count completed executions
         completed_count = sum(
-            1 for s in self._executions.values()
+            1
+            for s in self._executions.values()
             if s.status in (ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED)
         )
 

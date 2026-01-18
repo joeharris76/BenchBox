@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, ClassVar, Union
+from typing import Any, ClassVar
 
 from benchbox.utils.verbosity import VerbosityMixin, compute_verbosity
 
@@ -84,7 +84,7 @@ class TPCHStreams(VerbosityMixin):
         self,
         num_streams: int = 1,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         rng_seed: int | None = None,
         verbose: int | bool = 0,
     ) -> None:

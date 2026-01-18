@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, List, Protocol, Union, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 try:
@@ -41,7 +41,7 @@ class DatabricksPath:
     to the underlying Path object.
     """
 
-    def __init__(self, local_path: Union[str, Path], dbfs_target: str):
+    def __init__(self, local_path: str | Path, dbfs_target: str):
         """Create a new DatabricksPath instance.
 
         Args:
@@ -63,7 +63,7 @@ class DatabricksPath:
         """Repr shows both local and target paths."""
         return f"DatabricksPath({self._path!r}, dbfs_target={self._dbfs_target!r})"
 
-    def __truediv__(self, other: Union[str, Path]) -> Path:
+    def __truediv__(self, other: str | Path) -> Path:
         """Path joining operator - returns regular Path."""
         return self._path / other
 
@@ -149,7 +149,7 @@ class CloudStagingPath:
     between runs, significantly improving performance.
     """
 
-    def __init__(self, local_path: Union[str, Path], cloud_target: str):
+    def __init__(self, local_path: str | Path, cloud_target: str):
         """Create a new CloudStagingPath instance.
 
         Args:
@@ -171,7 +171,7 @@ class CloudStagingPath:
         """Repr shows both local and cloud paths."""
         return f"CloudStagingPath({self._path!r}, cloud_target={self._cloud_target!r})"
 
-    def __truediv__(self, other: Union[str, Path]) -> Path:
+    def __truediv__(self, other: str | Path) -> Path:
         """Path joining operator - returns regular Path."""
         return self._path / other
 
@@ -316,7 +316,7 @@ class DatabricksVolumeAdapter:
         path = self._to_ws_path(remote_path)
         try:
             items = self._ws.files.list(path)  # type: ignore[attr-defined]
-            names: List[str] = []
+            names: list[str] = []
             for it in items or []:
                 # Item may be dict or object; extract path/name best-effort
                 p = getattr(it, "path", None) or getattr(it, "file_path", None) or str(it)
@@ -329,7 +329,7 @@ class DatabricksVolumeAdapter:
             return []
 
 
-def is_cloud_path(path: Union[str, Path]) -> bool:
+def is_cloud_path(path: str | Path) -> bool:
     """Check if a path is a cloud storage path.
 
     Includes dbfs:// paths (Databricks File System / Unity Catalog Volumes)
@@ -349,7 +349,7 @@ def is_cloud_path(path: Union[str, Path]) -> bool:
     return parsed.scheme in ["s3", "gs", "gcs", "az", "abfss", "azure", "dbfs"]
 
 
-def is_databricks_path(path: Union[str, Path]) -> bool:
+def is_databricks_path(path: str | Path) -> bool:
     """Check if a path is a Databricks DBFS or UC Volume path.
 
     Databricks paths use the dbfs:// scheme but are NOT supported by
@@ -380,7 +380,7 @@ def validate_cloud_path_support() -> bool:
     return CloudPath is not None
 
 
-def create_path_handler(path: Union[str, Path]) -> Union[Path, CloudPath, DatabricksPath]:
+def create_path_handler(path: str | Path) -> Path | CloudPath | DatabricksPath:
     """Create appropriate path handler for local or cloud paths.
 
     Note: dbfs:// paths (Databricks UC Volumes) cannot be handled directly by
@@ -473,7 +473,7 @@ def get_remote_fs_adapter(remote_path: str) -> RemoteFileSystemAdapter:
     raise ValueError(f"No RemoteFileSystemAdapter available for path: {remote_path}")
 
 
-def validate_cloud_credentials(path: Union[str, Path]) -> dict[str, Any]:
+def validate_cloud_credentials(path: str | Path) -> dict[str, Any]:
     """Validate cloud credentials for the given path.
 
     Args:
@@ -587,8 +587,8 @@ def validate_cloud_credentials(path: Union[str, Path]) -> dict[str, Any]:
 
 
 def ensure_cloud_directory(
-    path: Union[str, Path, CloudPath],
-) -> Union[Path, CloudPath, DatabricksPath]:
+    path: str | Path | CloudPath,
+) -> Path | CloudPath | DatabricksPath:
     """Ensure cloud or local directory exists.
 
     Args:
@@ -619,7 +619,7 @@ def ensure_cloud_directory(
     return path_handler
 
 
-def get_cloud_path_info(path: Union[str, Path]) -> dict[str, Any]:
+def get_cloud_path_info(path: str | Path) -> dict[str, Any]:
     """Get information about a cloud path.
 
     Args:
@@ -687,7 +687,7 @@ def get_cloud_path_info(path: Union[str, Path]) -> dict[str, Any]:
 class CloudPathAdapter:
     """Adapter to provide unified interface for local and cloud paths."""
 
-    def __init__(self, path: Union[str, Path]):
+    def __init__(self, path: str | Path):
         """Initialize path adapter.
 
         Args:

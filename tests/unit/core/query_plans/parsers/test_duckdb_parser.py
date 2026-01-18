@@ -4,7 +4,6 @@ Tests for DuckDB query plan parser.
 Uses real DuckDB EXPLAIN output examples to verify parsing correctness.
 """
 
-
 import pytest
 
 from benchbox.core.query_plans.parsers.duckdb import DuckDBQueryPlanParser

@@ -81,25 +81,20 @@ class ValidationError(Exception):
     """Raised when input validation fails."""
 
 
-
 class SQLInjectionError(ValidationError):
     """Raised when potential SQL injection is detected."""
-
 
 
 class QueryComplexityError(ValidationError):
     """Raised when query complexity exceeds limits."""
 
 
-
 class InputLengthError(ValidationError):
     """Raised when input exceeds maximum length."""
 
 
-
 class InvalidIdentifierError(ValidationError):
     """Raised when an identifier is invalid."""
-
 
 
 @dataclass

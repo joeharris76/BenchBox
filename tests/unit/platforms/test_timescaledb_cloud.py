@@ -93,13 +93,16 @@ class TestTimescaleDBCloudMode:
         """Cloud mode reads credentials from environment variables."""
         from benchbox.platforms.timescaledb import TimescaleDBAdapter
 
-        with patch.dict(os.environ, {
-            "TIMESCALE_HOST": "env-host.tsdb.cloud.timescale.com",
-            "TIMESCALE_PASSWORD": "env-password",
-            "TIMESCALE_USER": "env-user",
-            "TIMESCALE_PORT": "54321",
-            "TIMESCALE_DATABASE": "env-db",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "TIMESCALE_HOST": "env-host.tsdb.cloud.timescale.com",
+                "TIMESCALE_PASSWORD": "env-password",
+                "TIMESCALE_USER": "env-user",
+                "TIMESCALE_PORT": "54321",
+                "TIMESCALE_DATABASE": "env-db",
+            },
+        ):
             adapter = TimescaleDBAdapter(deployment_mode="cloud")
 
             assert adapter.host == "env-host.tsdb.cloud.timescale.com"
@@ -112,10 +115,13 @@ class TestTimescaleDBCloudMode:
         """Config parameters override environment variables."""
         from benchbox.platforms.timescaledb import TimescaleDBAdapter
 
-        with patch.dict(os.environ, {
-            "TIMESCALE_HOST": "env-host.tsdb.cloud.timescale.com",
-            "TIMESCALE_PASSWORD": "env-password",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "TIMESCALE_HOST": "env-host.tsdb.cloud.timescale.com",
+                "TIMESCALE_PASSWORD": "env-password",
+            },
+        ):
             adapter = TimescaleDBAdapter(
                 deployment_mode="cloud",
                 host="config-host.tsdb.cloud.timescale.com",
@@ -180,9 +186,12 @@ class TestTimescaleDBCloudMode:
         """Service URL can be provided via environment variable."""
         from benchbox.platforms.timescaledb import TimescaleDBAdapter
 
-        with patch.dict(os.environ, {
-            "TIMESCALE_SERVICE_URL": "postgres://envuser:envpass@envhost.com:9999/envdb?sslmode=require",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "TIMESCALE_SERVICE_URL": "postgres://envuser:envpass@envhost.com:9999/envdb?sslmode=require",
+            },
+        ):
             adapter = TimescaleDBAdapter(deployment_mode="cloud")
 
             assert adapter.host == "envhost.com"

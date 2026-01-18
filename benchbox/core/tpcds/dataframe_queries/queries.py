@@ -5054,7 +5054,11 @@ def q2_expression_impl(ctx: DataFrameContext) -> Any:
             ctx.when(col("d_day_name") == "Sunday").then(col("sales_price")).otherwise(None).sum().alias("sun_sales"),
             ctx.when(col("d_day_name") == "Monday").then(col("sales_price")).otherwise(None).sum().alias("mon_sales"),
             ctx.when(col("d_day_name") == "Tuesday").then(col("sales_price")).otherwise(None).sum().alias("tue_sales"),
-            ctx.when(col("d_day_name") == "Wednesday").then(col("sales_price")).otherwise(None).sum().alias("wed_sales"),
+            ctx.when(col("d_day_name") == "Wednesday")
+            .then(col("sales_price"))
+            .otherwise(None)
+            .sum()
+            .alias("wed_sales"),
             ctx.when(col("d_day_name") == "Thursday").then(col("sales_price")).otherwise(None).sum().alias("thu_sales"),
             ctx.when(col("d_day_name") == "Friday").then(col("sales_price")).otherwise(None).sum().alias("fri_sales"),
             ctx.when(col("d_day_name") == "Saturday").then(col("sales_price")).otherwise(None).sum().alias("sat_sales"),
@@ -9054,7 +9058,6 @@ def q40_expression_impl(ctx: DataFrameContext) -> Any:
     """
     from datetime import datetime, timedelta
 
-
     params = get_parameters(40)
     year = params.get("year", 2000)
     # Midpoint date for before/after split
@@ -9220,7 +9223,6 @@ def q16_expression_impl(ctx: DataFrameContext) -> Any:
     Tables: catalog_sales, catalog_returns, date_dim, customer_address, call_center
     """
     from datetime import datetime, timedelta
-
 
     params = get_parameters(16)
     year = params.get("year", 2002)
@@ -10091,7 +10093,6 @@ def q94_expression_impl(ctx: DataFrameContext) -> Any:
     Tables: web_sales, web_returns, date_dim, customer_address, web_site
     """
     from datetime import datetime, timedelta
-
 
     params = get_parameters(94)
     year = params.get("year", 1999)
@@ -11746,7 +11747,6 @@ def q95_expression_impl(ctx: DataFrameContext) -> Any:
     """
     from datetime import datetime, timedelta
 
-
     params = get_parameters(95)
     year = params.get("year", 1999)
     month = params.get("month", 2)
@@ -13211,7 +13211,6 @@ def q21_expression_impl(ctx: DataFrameContext) -> Any:
     """Q21: Inventory analysis comparing quantities before/after a date (Polars)."""
     from datetime import date, timedelta
 
-
     params = get_parameters(21)
     year = params.get("year", 2000)
     month = params.get("month", 1)
@@ -13284,7 +13283,6 @@ def q21_expression_impl(ctx: DataFrameContext) -> Any:
 def q21_pandas_impl(ctx: DataFrameContext) -> Any:
     """Q21: Inventory analysis comparing quantities before/after a date (Pandas)."""
     from datetime import date, timedelta
-
 
     params = get_parameters(21)
     year = params.get("year", 2000)
@@ -13587,7 +13585,9 @@ def q64_expression_impl(ctx: DataFrameContext) -> Any:
         .agg(
             [
                 ctx.sum("cs_ext_list_price").alias("sale"),
-                (ctx.sum("cr_refunded_cash") + ctx.sum("cr_reversed_charge") + ctx.sum("cr_store_credit")).alias("refund"),
+                (ctx.sum("cr_refunded_cash") + ctx.sum("cr_reversed_charge") + ctx.sum("cr_store_credit")).alias(
+                    "refund"
+                ),
             ]
         )
         .filter(col("sale") > lit(2) * col("refund"))

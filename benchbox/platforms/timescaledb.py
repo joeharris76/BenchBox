@@ -209,13 +209,9 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
         super().__init__(**config)
 
         # TimescaleDB-specific configuration with validation
-        self.chunk_interval = self._validate_interval(
-            config.get("chunk_interval", "1 day"), "chunk_interval"
-        )
+        self.chunk_interval = self._validate_interval(config.get("chunk_interval", "1 day"), "chunk_interval")
         self.compression_enabled = config.get("compression_enabled", False)
-        self.compression_after = self._validate_interval(
-            config.get("compression_after", "7 days"), "compression_after"
-        )
+        self.compression_after = self._validate_interval(config.get("compression_after", "7 days"), "compression_after")
 
         # Track which tables are hypertables
         self._hypertables: set[str] = set()
@@ -242,10 +238,16 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
 
         # Otherwise use individual parameters
         config["host"] = config.get("host") or os.environ.get("TIMESCALE_HOST")
-        config["password"] = config.get("password") or os.environ.get("TIMESCALE_PASSWORD") or os.environ.get("PGPASSWORD")
-        config["username"] = config.get("username") or os.environ.get("TIMESCALE_USER") or os.environ.get("PGUSER", "tsdbadmin")
+        config["password"] = (
+            config.get("password") or os.environ.get("TIMESCALE_PASSWORD") or os.environ.get("PGPASSWORD")
+        )
+        config["username"] = (
+            config.get("username") or os.environ.get("TIMESCALE_USER") or os.environ.get("PGUSER", "tsdbadmin")
+        )
         config["port"] = config.get("port") or int(os.environ.get("TIMESCALE_PORT") or os.environ.get("PGPORT", "5432"))
-        config["database"] = config.get("database") or os.environ.get("TIMESCALE_DATABASE") or os.environ.get("PGDATABASE", "tsdb")
+        config["database"] = (
+            config.get("database") or os.environ.get("TIMESCALE_DATABASE") or os.environ.get("PGDATABASE", "tsdb")
+        )
 
         # Validate required credentials
         if not config.get("host"):
@@ -293,7 +295,9 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
             else:
                 config["sslmode"] = "require"  # Default for cloud
 
-            logger.debug(f"Parsed service URL: host={config['host']}, port={config['port']}, database={config['database']}")
+            logger.debug(
+                f"Parsed service URL: host={config['host']}, port={config['port']}, database={config['database']}"
+            )
 
         except Exception as e:
             raise ValueError(f"Invalid TIMESCALE_SERVICE_URL format: {e}")

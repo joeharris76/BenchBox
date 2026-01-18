@@ -192,7 +192,7 @@ class RemoteManifestValidator:
         warnings: list[str] = []
 
         tables = manifest.get("tables") or {}
-        for table_name in tables.keys():
+        for table_name in tables:
             entries = get_table_files(manifest, table_name)
             if not entries:
                 warnings.append(f"No files listed for table {table_name}")

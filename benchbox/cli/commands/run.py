@@ -1619,7 +1619,9 @@ def run(
                     resolved_mode = "sql"  # Default fallback
             db_manager = DatabaseManager()
             db_manager.set_verbosity(verbosity_settings)
-            database_config = db_manager.create_config(platform=platform, runtime_overrides={"execution_mode": resolved_mode})
+            database_config = db_manager.create_config(
+                platform=platform, runtime_overrides={"execution_mode": resolved_mode}
+            )
 
             # Benchmark config - reconstruct from saved data and benchmark metadata
             bench_manager = BenchmarkManager()

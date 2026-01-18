@@ -123,7 +123,7 @@ class DuckDBQueryPlanParser(QueryPlanParser):
         """Detect if EXPLAIN output is JSON format."""
         stripped = explain_output.strip()
         # JSON format starts with { or [
-        return stripped.startswith("{") or stripped.startswith("[")
+        return stripped.startswith(("{", "["))
 
     def _parse_json_format(self, query_id: str, explain_output: str) -> QueryPlanDAG:
         """

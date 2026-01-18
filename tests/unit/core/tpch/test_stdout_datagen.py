@@ -41,9 +41,7 @@ class TestDbgenStdoutSupport:
             timeout=5,
         )
         # -z help text should be in stderr (where dbgen prints help)
-        assert "-z" in result.stderr or "-z" in result.stdout, (
-            "dbgen binary does not support -z flag for stdout output"
-        )
+        assert "-z" in result.stderr or "-z" in result.stdout, "dbgen binary does not support -z flag for stdout output"
 
     def test_dbgen_z_flag_produces_output(self, dbgen_exe: Path):
         """Verify -z flag produces data to stdout."""
@@ -53,6 +51,7 @@ class TestDbgenStdoutSupport:
             dists_file = generator.dbgen_path / "dists.dss"
             if dists_file.exists():
                 import shutil
+
                 shutil.copy2(dists_file, Path(tmpdir) / "dists.dss")
 
             # Generate region table (smallest, only 5 rows)
@@ -83,6 +82,7 @@ class TestDbgenStdoutSupport:
             dists_file = generator.dbgen_path / "dists.dss"
             if dists_file.exists():
                 import shutil
+
                 shutil.copy2(dists_file, Path(tmpdir) / "dists.dss")
 
             result = subprocess.run(
@@ -118,6 +118,7 @@ class TestStdoutMatchesFileOutput:
             dists_file = generator.dbgen_path / "dists.dss"
             if dists_file.exists():
                 import shutil
+
                 shutil.copy2(dists_file, tmpdir_path / "dists.dss")
 
             # Generate via stdout
@@ -139,9 +140,7 @@ class TestStdoutMatchesFileOutput:
 
             file_output = (tmpdir_path / "region.tbl").read_bytes()
 
-            assert stdout_result.stdout == file_output, (
-                "stdout output does not match file output for region table"
-            )
+            assert stdout_result.stdout == file_output, "stdout output does not match file output for region table"
 
     def test_stdout_matches_file_output_customer(self, dbgen_exe: Path):
         """Verify -z output matches file output for customer table."""
@@ -153,6 +152,7 @@ class TestStdoutMatchesFileOutput:
             dists_file = generator.dbgen_path / "dists.dss"
             if dists_file.exists():
                 import shutil
+
                 shutil.copy2(dists_file, tmpdir_path / "dists.dss")
 
             # Generate via stdout
@@ -174,9 +174,7 @@ class TestStdoutMatchesFileOutput:
 
             file_output = (tmpdir_path / "customer.tbl").read_bytes()
 
-            assert stdout_result.stdout == file_output, (
-                "stdout output does not match file output for customer table"
-            )
+            assert stdout_result.stdout == file_output, "stdout output does not match file output for customer table"
 
 
 class TestGeneratorStdoutDetection:
@@ -209,9 +207,7 @@ class TestGeneratorStdoutDetection:
         """Verify the updated dbgen binary supports -z flag."""
         try:
             generator = TPCHDataGenerator(scale_factor=0.01)
-            assert generator._check_stdout_support(), (
-                "dbgen binary should support -z flag after patches are applied"
-            )
+            assert generator._check_stdout_support(), "dbgen binary should support -z flag after patches are applied"
         except (RuntimeError, FileNotFoundError):
             pytest.skip("dbgen binary not available")
 
@@ -234,6 +230,7 @@ class TestBackwardCompatibility:
             dists_file = generator.dbgen_path / "dists.dss"
             if dists_file.exists():
                 import shutil
+
                 shutil.copy2(dists_file, tmpdir_path / "dists.dss")
 
             # Generate region table using file mode (no -z)
@@ -263,6 +260,7 @@ class TestBackwardCompatibility:
             dists_file = generator.dbgen_path / "dists.dss"
             if dists_file.exists():
                 import shutil
+
                 shutil.copy2(dists_file, tmpdir_path / "dists.dss")
 
             # Generate region table
@@ -303,6 +301,7 @@ class TestMoneyFormatFix:
             dists_file = generator.dbgen_path / "dists.dss"
             if dists_file.exists():
                 import shutil
+
                 shutil.copy2(dists_file, tmpdir_path / "dists.dss")
 
             # Generate customer table (has money field: acctbal)

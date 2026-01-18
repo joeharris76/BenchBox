@@ -228,9 +228,7 @@ class TestDatabricksDataFrameAdapterExpressionHelpers:
             True,
         ):
             mock_col = MagicMock()
-            with patch(
-                "benchbox.platforms.databricks.dataframe_adapter.F"
-            ) as mock_f:
+            with patch("benchbox.platforms.databricks.dataframe_adapter.F") as mock_f:
                 mock_f.col = mock_col
                 adapter.col("test_column")
                 mock_col.assert_called_once_with("test_column")
@@ -248,9 +246,7 @@ class TestDatabricksDataFrameAdapterExpressionHelpers:
             True,
         ):
             mock_lit = MagicMock()
-            with patch(
-                "benchbox.platforms.databricks.dataframe_adapter.F"
-            ) as mock_f:
+            with patch("benchbox.platforms.databricks.dataframe_adapter.F") as mock_f:
                 mock_f.lit = mock_lit
                 adapter.lit(42)
                 mock_lit.assert_called_once_with(42)
@@ -274,9 +270,7 @@ class TestDatabricksDataFrameAdapterExpressionHelpers:
             mock_max = MagicMock()
             mock_col = MagicMock(return_value="col_expr")
 
-            with patch(
-                "benchbox.platforms.databricks.dataframe_adapter.F"
-            ) as mock_f:
+            with patch("benchbox.platforms.databricks.dataframe_adapter.F") as mock_f:
                 mock_f.col = mock_col
                 mock_f.sum = mock_sum
                 mock_f.avg = mock_avg
@@ -326,9 +320,7 @@ class TestDatabricksDataFrameAdapterQueryExecution:
         assert result["query_id"] == "TEST1"
         mock_cursor.execute.assert_called_once()
 
-    def test_execute_query_with_callable_uses_dataframe_mode(
-        self, mock_databricks_sql
-    ):
+    def test_execute_query_with_callable_uses_dataframe_mode(self, mock_databricks_sql):
         """Test execute_query() with callable dispatches to DataFrame mode."""
         adapter = DatabricksDataFrameAdapter(
             server_hostname="test.cloud.databricks.com",
@@ -337,9 +329,7 @@ class TestDatabricksDataFrameAdapterQueryExecution:
         )
 
         # Mock the execute_dataframe_query method
-        with patch.object(
-            adapter, "execute_dataframe_query", return_value={"query_id": "Q1"}
-        ) as mock_df_exec:
+        with patch.object(adapter, "execute_dataframe_query", return_value={"query_id": "Q1"}) as mock_df_exec:
             # Create a callable query builder
             def query_builder(spark, tables):
                 return spark.table("test")

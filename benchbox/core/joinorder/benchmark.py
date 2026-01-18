@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 from benchbox.base import BaseBenchmark
 
@@ -35,7 +35,7 @@ class JoinOrderBenchmark(BaseBenchmark):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         queries_dir: str | None = None,
         verbose: int | bool = 0,
         *,

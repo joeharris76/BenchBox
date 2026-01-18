@@ -19,7 +19,6 @@ class BenchBoxError(Exception):
     """
 
 
-
 class ConfigurationError(BenchBoxError):
     """Configuration validation error.
 

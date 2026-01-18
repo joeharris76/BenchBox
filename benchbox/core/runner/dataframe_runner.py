@@ -369,8 +369,9 @@ def _execute_dataframe_queries(
 
     # Execute measurement iterations
     # Each measurement iteration uses a different stream_id (continues from warmup)
-    console.print(f"\n[cyan]Running {measurement_iterations} measurement iteration(s) "
-                  f"with {total_queries} queries each...[/cyan]")
+    console.print(
+        f"\n[cyan]Running {measurement_iterations} measurement iteration(s) with {total_queries} queries each...[/cyan]"
+    )
 
     # Collect results across all measurement iterations
     all_iteration_results: dict[str, list[dict[str, Any]]] = {}
@@ -387,8 +388,9 @@ def _execute_dataframe_queries(
         if query_filter:
             measurement_queries = [q for q in measurement_queries if q.query_id in query_filter]
 
-        console.print(f"\n[green]Iteration {iteration + 1}/{measurement_iterations} "
-                      f"(stream {measurement_stream_id})[/green]")
+        console.print(
+            f"\n[green]Iteration {iteration + 1}/{measurement_iterations} (stream {measurement_stream_id})[/green]"
+        )
 
         for i, query in enumerate(measurement_queries, 1):
             console.print(f"[blue]Executing query {i}/{total_queries}: {query.query_id}[/blue]")

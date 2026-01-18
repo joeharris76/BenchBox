@@ -332,9 +332,7 @@ class LivySessionManager(CloudSparkSessionManager):
             try:
                 import requests
             except ImportError as e:
-                raise ImportError(
-                    "requests required for Livy API. Install with: uv add requests"
-                ) from e
+                raise ImportError("requests required for Livy API. Install with: uv add requests") from e
             self._http_client = requests.Session()
         return self._http_client
 
@@ -497,9 +495,7 @@ class DatabricksConnectSessionManager(CloudSparkSessionManager):
         try:
             from databricks.connect import DatabricksSession
         except ImportError as e:
-            raise ImportError(
-                "databricks-connect required. Install with: uv add databricks-connect"
-            ) from e
+            raise ImportError("databricks-connect required. Install with: uv add databricks-connect") from e
 
         self._state = SessionState.STARTING
         self._logger.info("Creating Databricks Connect session...")
@@ -563,16 +559,27 @@ class DatabricksConnectSessionManager(CloudSparkSessionManager):
 
         # Only allow SQL execution for security - no arbitrary code execution
         sql_prefixes = (
-            "SELECT", "CREATE", "INSERT", "DROP", "ALTER",
-            "USE", "SHOW", "DESCRIBE", "EXPLAIN", "SET",
-            "WITH", "MERGE", "UPDATE", "DELETE", "TRUNCATE",
+            "SELECT",
+            "CREATE",
+            "INSERT",
+            "DROP",
+            "ALTER",
+            "USE",
+            "SHOW",
+            "DESCRIBE",
+            "EXPLAIN",
+            "SET",
+            "WITH",
+            "MERGE",
+            "UPDATE",
+            "DELETE",
+            "TRUNCATE",
         )
         code_upper = code.strip().upper()
         if not any(code_upper.startswith(prefix) for prefix in sql_prefixes):
             self._state = SessionState.IDLE
             raise RuntimeError(
-                f"Only SQL statements are supported. "
-                f"Code must start with one of: {', '.join(sql_prefixes)}"
+                f"Only SQL statements are supported. Code must start with one of: {', '.join(sql_prefixes)}"
             )
 
         result = self._spark.sql(code).collect()

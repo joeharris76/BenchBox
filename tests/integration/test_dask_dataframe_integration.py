@@ -70,56 +70,77 @@ class TestDaskDataFrameIntegration:
         data_dir.mkdir()
 
         # Create lineitem table (simplified TPC-H schema)
-        lineitem_df = pd.DataFrame({
-            "l_orderkey": [1, 1, 2, 2, 3],
-            "l_partkey": [100, 101, 100, 102, 101],
-            "l_suppkey": [10, 11, 10, 12, 11],
-            "l_linenumber": [1, 2, 1, 2, 1],
-            "l_quantity": [5.0, 10.0, 3.0, 8.0, 6.0],
-            "l_extendedprice": [100.0, 200.0, 60.0, 160.0, 120.0],
-            "l_discount": [0.05, 0.10, 0.0, 0.05, 0.08],
-            "l_tax": [0.02, 0.02, 0.02, 0.02, 0.02],
-            "l_returnflag": ["N", "R", "N", "N", "R"],
-            "l_linestatus": ["O", "F", "O", "O", "F"],
-            "l_shipdate": [date(1998, 1, 1), date(1998, 2, 1), date(1998, 1, 15),
-                          date(1998, 2, 15), date(1998, 3, 1)],
-            "l_commitdate": [date(1998, 1, 10), date(1998, 2, 10), date(1998, 1, 20),
-                            date(1998, 2, 20), date(1998, 3, 10)],
-            "l_receiptdate": [date(1998, 1, 15), date(1998, 2, 15), date(1998, 1, 25),
-                             date(1998, 2, 25), date(1998, 3, 15)],
-            "l_shipinstruct": ["DELIVER IN PERSON"] * 5,
-            "l_shipmode": ["AIR", "SHIP", "AIR", "RAIL", "TRUCK"],
-            "l_comment": ["comment"] * 5,
-        })
+        lineitem_df = pd.DataFrame(
+            {
+                "l_orderkey": [1, 1, 2, 2, 3],
+                "l_partkey": [100, 101, 100, 102, 101],
+                "l_suppkey": [10, 11, 10, 12, 11],
+                "l_linenumber": [1, 2, 1, 2, 1],
+                "l_quantity": [5.0, 10.0, 3.0, 8.0, 6.0],
+                "l_extendedprice": [100.0, 200.0, 60.0, 160.0, 120.0],
+                "l_discount": [0.05, 0.10, 0.0, 0.05, 0.08],
+                "l_tax": [0.02, 0.02, 0.02, 0.02, 0.02],
+                "l_returnflag": ["N", "R", "N", "N", "R"],
+                "l_linestatus": ["O", "F", "O", "O", "F"],
+                "l_shipdate": [
+                    date(1998, 1, 1),
+                    date(1998, 2, 1),
+                    date(1998, 1, 15),
+                    date(1998, 2, 15),
+                    date(1998, 3, 1),
+                ],
+                "l_commitdate": [
+                    date(1998, 1, 10),
+                    date(1998, 2, 10),
+                    date(1998, 1, 20),
+                    date(1998, 2, 20),
+                    date(1998, 3, 10),
+                ],
+                "l_receiptdate": [
+                    date(1998, 1, 15),
+                    date(1998, 2, 15),
+                    date(1998, 1, 25),
+                    date(1998, 2, 25),
+                    date(1998, 3, 15),
+                ],
+                "l_shipinstruct": ["DELIVER IN PERSON"] * 5,
+                "l_shipmode": ["AIR", "SHIP", "AIR", "RAIL", "TRUCK"],
+                "l_comment": ["comment"] * 5,
+            }
+        )
         lineitem_path = data_dir / "lineitem.parquet"
         lineitem_df.to_parquet(lineitem_path)
 
         # Create orders table
-        orders_df = pd.DataFrame({
-            "o_orderkey": [1, 2, 3],
-            "o_custkey": [100, 101, 100],
-            "o_orderstatus": ["O", "O", "F"],
-            "o_totalprice": [300.0, 220.0, 120.0],
-            "o_orderdate": [date(1997, 12, 1), date(1997, 12, 15), date(1998, 1, 1)],
-            "o_orderpriority": ["1-URGENT", "2-HIGH", "3-MEDIUM"],
-            "o_clerk": ["Clerk#1", "Clerk#2", "Clerk#1"],
-            "o_shippriority": [0, 0, 0],
-            "o_comment": ["order comment"] * 3,
-        })
+        orders_df = pd.DataFrame(
+            {
+                "o_orderkey": [1, 2, 3],
+                "o_custkey": [100, 101, 100],
+                "o_orderstatus": ["O", "O", "F"],
+                "o_totalprice": [300.0, 220.0, 120.0],
+                "o_orderdate": [date(1997, 12, 1), date(1997, 12, 15), date(1998, 1, 1)],
+                "o_orderpriority": ["1-URGENT", "2-HIGH", "3-MEDIUM"],
+                "o_clerk": ["Clerk#1", "Clerk#2", "Clerk#1"],
+                "o_shippriority": [0, 0, 0],
+                "o_comment": ["order comment"] * 3,
+            }
+        )
         orders_path = data_dir / "orders.parquet"
         orders_df.to_parquet(orders_path)
 
         # Create customer table
-        customer_df = pd.DataFrame({
-            "c_custkey": [100, 101],
-            "c_name": ["Customer#100", "Customer#101"],
-            "c_address": ["123 Main St", "456 Oak Ave"],
-            "c_nationkey": [1, 2],
-            "c_phone": ["13-555-1234", "31-555-5678"],
-            "c_acctbal": [1000.0, 2000.0],
-            "c_mktsegment": ["BUILDING", "AUTOMOBILE"],
-            "c_comment": ["customer comment"] * 2,
-        })
+        customer_df = pd.DataFrame(
+            {
+                "c_custkey": [100, 101],
+                "c_name": ["Customer#100", "Customer#101"],
+                "c_address": ["123 Main St", "456 Oak Ave"],
+                "c_nationkey": [1, 2],
+                "c_phone": ["13-555-1234", "31-555-5678"],
+                "c_acctbal": [1000.0, 2000.0],
+                "c_mktsegment": ["BUILDING", "AUTOMOBILE"],
+                "c_comment": ["customer comment"] * 2,
+            }
+        )
         customer_path = data_dir / "customer.parquet"
         customer_df.to_parquet(customer_path)
 
@@ -299,27 +320,27 @@ class TestDaskTPCHQueryExecution:
         data_dir.mkdir()
 
         # Lineitem with Q1-compatible data
-        lineitem = pd.DataFrame({
-            "l_orderkey": range(1, 11),
-            "l_partkey": [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
-            "l_suppkey": [10, 11, 10, 11, 12, 13, 10, 11, 12, 13],
-            "l_linenumber": [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
-            "l_quantity": [10.0, 20.0, 15.0, 25.0, 30.0, 35.0, 12.0, 18.0, 22.0, 28.0],
-            "l_extendedprice": [100.0, 200.0, 150.0, 250.0, 300.0, 350.0, 120.0, 180.0, 220.0, 280.0],
-            "l_discount": [0.05, 0.06, 0.04, 0.07, 0.05, 0.06, 0.04, 0.05, 0.06, 0.07],
-            "l_tax": [0.02] * 10,
-            "l_returnflag": ["A", "N", "R", "A", "N", "R", "A", "N", "R", "A"],
-            "l_linestatus": ["F", "O", "F", "O", "F", "O", "F", "O", "F", "O"],
-            "l_shipdate": [date(1998, 8, 1)] * 10,  # Before Q1 cutoff
-            "l_commitdate": [date(1998, 8, 10)] * 10,
-            "l_receiptdate": [date(1998, 8, 15)] * 10,
-            "l_shipinstruct": ["NONE"] * 10,
-            "l_shipmode": ["AIR"] * 10,
-            "l_comment": [""] * 10,
-        })
-        (data_dir / "lineitem.parquet").write_bytes(
-            lineitem.to_parquet()
+        lineitem = pd.DataFrame(
+            {
+                "l_orderkey": range(1, 11),
+                "l_partkey": [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+                "l_suppkey": [10, 11, 10, 11, 12, 13, 10, 11, 12, 13],
+                "l_linenumber": [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
+                "l_quantity": [10.0, 20.0, 15.0, 25.0, 30.0, 35.0, 12.0, 18.0, 22.0, 28.0],
+                "l_extendedprice": [100.0, 200.0, 150.0, 250.0, 300.0, 350.0, 120.0, 180.0, 220.0, 280.0],
+                "l_discount": [0.05, 0.06, 0.04, 0.07, 0.05, 0.06, 0.04, 0.05, 0.06, 0.07],
+                "l_tax": [0.02] * 10,
+                "l_returnflag": ["A", "N", "R", "A", "N", "R", "A", "N", "R", "A"],
+                "l_linestatus": ["F", "O", "F", "O", "F", "O", "F", "O", "F", "O"],
+                "l_shipdate": [date(1998, 8, 1)] * 10,  # Before Q1 cutoff
+                "l_commitdate": [date(1998, 8, 10)] * 10,
+                "l_receiptdate": [date(1998, 8, 15)] * 10,
+                "l_shipinstruct": ["NONE"] * 10,
+                "l_shipmode": ["AIR"] * 10,
+                "l_comment": [""] * 10,
+            }
         )
+        (data_dir / "lineitem.parquet").write_bytes(lineitem.to_parquet())
 
         return data_dir
 

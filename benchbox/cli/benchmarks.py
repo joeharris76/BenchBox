@@ -590,9 +590,7 @@ class BenchmarkManager:
         benchmark_id, benchmark_info = self._prompt_benchmark_in_category(selected_category)
 
         # Show confirmation
-        console.print(
-            f"\n[green]✓ Selected: {benchmark_info['display_name']} ({benchmark_info['category']})[/green]"
-        )
+        console.print(f"\n[green]✓ Selected: {benchmark_info['display_name']} ({benchmark_info['category']})[/green]")
 
         # Configuration
         return self._configure_benchmark(benchmark_id, benchmark_info)
@@ -667,9 +665,7 @@ class BenchmarkManager:
         """
         # Filter benchmarks by category
         category_benchmarks = {
-            bench_id: info
-            for bench_id, info in self.benchmarks.items()
-            if info["category"] == category
+            bench_id: info for bench_id, info in self.benchmarks.items() if info["category"] == category
         }
 
         # Sort by popularity order (if defined), then alphabetically

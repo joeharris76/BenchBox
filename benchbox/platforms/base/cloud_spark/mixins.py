@@ -358,9 +358,7 @@ class SparkDDLGeneratorMixin:
             # Fall back to Z-ORDER for older Delta versions
             sorted_cols = sorted(all_cluster_cols, key=lambda c: c.order)
             col_names = [c.name for c in sorted_cols]
-            clauses.post_create_statements.append(
-                f"OPTIMIZE {{table_name}} ZORDER BY ({', '.join(col_names)})"
-            )
+            clauses.post_create_statements.append(f"OPTIMIZE {{table_name}} ZORDER BY ({', '.join(col_names)})")
 
         # Handle distribution via Z-ORDER
         distribution_columns = table_tuning.get_columns_by_type(TuningType.DISTRIBUTION)
@@ -368,9 +366,7 @@ class SparkDDLGeneratorMixin:
             # Z-ORDER on distribution columns if not already clustering
             sorted_cols = sorted(distribution_columns, key=lambda c: c.order)
             col_names = [c.name for c in sorted_cols]
-            clauses.post_create_statements.append(
-                f"OPTIMIZE {{table_name}} ZORDER BY ({', '.join(col_names)})"
-            )
+            clauses.post_create_statements.append(f"OPTIMIZE {{table_name}} ZORDER BY ({', '.join(col_names)})")
 
         # Add Delta Lake optimization properties
         enable_auto_optimize = True

@@ -14,7 +14,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 from benchbox.base import BaseBenchmark
 from benchbox.core.ai_primitives.cost import (
@@ -128,7 +128,7 @@ class AIPrimitivesBenchmark(BaseBenchmark):
     def __init__(
         self,
         scale_factor: float = 0.01,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         max_cost_usd: float = 0.0,
         dry_run: bool = False,
         **config: Any,
@@ -169,7 +169,7 @@ class AIPrimitivesBenchmark(BaseBenchmark):
         """AI Primitives benchmark shares TPC-H data."""
         return "tpch"
 
-    def generate_data(self) -> list[Union[str, Path]]:
+    def generate_data(self) -> list[str | Path]:
         """Generate benchmark data.
 
         AI Primitives reuses TPC-H data, so this delegates to the TPC-H benchmark
@@ -213,7 +213,7 @@ class AIPrimitivesBenchmark(BaseBenchmark):
             return {}
         return self.query_manager.get_supported_queries(platform)
 
-    def get_query(self, query_id: Union[int, str], *, params: dict[str, Any] | None = None) -> str:
+    def get_query(self, query_id: int | str, *, params: dict[str, Any] | None = None) -> str:
         """Get SQL text for a specific AI query.
 
         Args:
@@ -326,7 +326,7 @@ class AIPrimitivesBenchmark(BaseBenchmark):
 
     def execute_query(
         self,
-        query_id: Union[int, str],
+        query_id: int | str,
         connection: Any,
         platform: str,
         params: dict[str, Any] | None = None,

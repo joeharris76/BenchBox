@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Dict
 
 from benchbox.core.expected_results.models import BenchmarkExpectedResults, ExpectedQueryResult
 
@@ -33,10 +32,10 @@ class ExpectedResultsRegistry:
 
     def __init__(self):
         """Initialize the registry with empty cache and thread safety."""
-        self._cache: Dict[str, Dict[float, BenchmarkExpectedResults]] = {}
-        self._providers: Dict[str, callable] = {}
+        self._cache: dict[str, dict[float, BenchmarkExpectedResults]] = {}
+        self._providers: dict[str, callable] = {}
         self._lock = threading.Lock()  # Protects cache and provider registry
-        self._loading: Dict[str, Dict[float, threading.Event]] = {}  # Tracks in-progress loads
+        self._loading: dict[str, dict[float, threading.Event]] = {}  # Tracks in-progress loads
         self._logged_stream_skips: set = set()  # Track (benchmark, stream) combos we've logged about
 
     def register_provider(self, benchmark_name: str, provider: callable) -> None:
@@ -85,17 +84,16 @@ class ExpectedResultsRegistry:
 
         # Stream-aware validation: TPC benchmarks only have answer files for stream 0
         # Return None for non-stream-0 queries to trigger automatic SKIP with informative warning
-        if stream_id is not None and stream_id > 0:
-            if benchmark_key in ("tpch", "tpcds"):
-                # Only log once per (benchmark, stream) to reduce noise
-                skip_key = (benchmark_key, stream_id)
-                if skip_key not in self._logged_stream_skips:
-                    self._logged_stream_skips.add(skip_key)
-                    logger.debug(
-                        f"Stream {stream_id} requested for {benchmark_name}. "
-                        f"Answer files only available for stream 0. Validation will be skipped for this stream."
-                    )
-                return None
+        if stream_id is not None and stream_id > 0 and benchmark_key in ("tpch", "tpcds"):
+            # Only log once per (benchmark, stream) to reduce noise
+            skip_key = (benchmark_key, stream_id)
+            if skip_key not in self._logged_stream_skips:
+                self._logged_stream_skips.add(skip_key)
+                logger.debug(
+                    f"Stream {stream_id} requested for {benchmark_name}. "
+                    f"Answer files only available for stream 0. Validation will be skipped for this stream."
+                )
+            return None
 
         # Try to load benchmark results for the requested scale factor
         benchmark_results = self._get_benchmark_results(benchmark_key, sf)

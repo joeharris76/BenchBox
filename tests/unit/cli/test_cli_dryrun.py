@@ -810,7 +810,7 @@ class TestDryRunExecutorCoverageGaps:
             # Should handle execution without error
             result = executor.execute_dry_run(config, system_profile, None)
             # Result can be None on error or a DryRunResult object
-            assert result is None or hasattr(result, 'query_preview')
+            assert result is None or hasattr(result, "query_preview")
 
     def test_dryrun_exception_in_query_list(self):
         """Test exception handling when getting query list."""

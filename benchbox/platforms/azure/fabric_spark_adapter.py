@@ -166,19 +166,13 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         if not AZURE_IDENTITY_AVAILABLE:
             deps_satisfied, missing = check_platform_dependencies("fabric-spark")
             if not deps_satisfied:
-                raise ConfigurationError(
-                    get_dependency_error_message("fabric-spark", missing)
-                )
+                raise ConfigurationError(get_dependency_error_message("fabric-spark", missing))
 
         if not workspace_id:
-            raise ConfigurationError(
-                "workspace_id is required (Fabric workspace GUID)"
-            )
+            raise ConfigurationError("workspace_id is required (Fabric workspace GUID)")
 
         if not lakehouse_id:
-            raise ConfigurationError(
-                "lakehouse_id is required (Fabric Lakehouse GUID)"
-            )
+            raise ConfigurationError("lakehouse_id is required (Fabric Lakehouse GUID)")
 
         self.workspace_id = workspace_id
         self.lakehouse_id = lakehouse_id
@@ -197,7 +191,9 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         self._staging: CloudSparkStaging | None = None
         try:
             # OneLake supports abfss:// protocol
-            staging_uri = f"abfss://{self.workspace_id}@onelake.dfs.fabric.microsoft.com/{self.lakehouse_id}/Files/benchbox"
+            staging_uri = (
+                f"abfss://{self.workspace_id}@onelake.dfs.fabric.microsoft.com/{self.lakehouse_id}/Files/benchbox"
+            )
             self._staging = CloudSparkStaging.from_uri(staging_uri)
         except Exception as e:
             logger.warning(f"Failed to initialize OneLake staging: {e}")
@@ -324,9 +320,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         )
 
         if response.status_code not in (200, 201):
-            raise ConfigurationError(
-                f"Failed to create Livy session: {response.status_code} - {response.text}"
-            )
+            raise ConfigurationError(f"Failed to create Livy session: {response.status_code} - {response.text}")
 
         session = response.json()
         session_id = session["id"]
@@ -365,9 +359,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
             )
 
             if response.status_code != 200:
-                raise ConfigurationError(
-                    f"Failed to get session status: {response.status_code}"
-                )
+                raise ConfigurationError(f"Failed to get session status: {response.status_code}")
 
             session = response.json()
             state = session["state"]
@@ -444,9 +436,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         )
 
         if response.status_code not in (200, 201):
-            raise ConfigurationError(
-                f"Failed to submit statement: {response.status_code} - {response.text}"
-            )
+            raise ConfigurationError(f"Failed to submit statement: {response.status_code} - {response.text}")
 
         statement = response.json()
         statement_id = statement["id"]
@@ -486,9 +476,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
             )
 
             if response.status_code != 200:
-                raise ConfigurationError(
-                    f"Failed to get statement status: {response.status_code}"
-                )
+                raise ConfigurationError(f"Failed to get statement status: {response.status_code}")
 
             statement = response.json()
             state = statement["state"]
@@ -504,9 +492,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
 
             time.sleep(2)
 
-        raise ConfigurationError(
-            f"Timeout waiting for statement {statement_id} after {timeout_seconds}s"
-        )
+        raise ConfigurationError(f"Timeout waiting for statement {statement_id} after {timeout_seconds}s")
 
     def create_connection(self, **kwargs: Any) -> Any:
         """Verify Azure connectivity and workspace access.
@@ -545,18 +531,14 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
                 )
             elif response.status_code == 403:
                 raise ConfigurationError(
-                    f"Access denied to workspace {self.workspace_id}. "
-                    "Check workspace permissions."
+                    f"Access denied to workspace {self.workspace_id}. Check workspace permissions."
                 )
             elif response.status_code == 404:
                 raise ConfigurationError(
-                    f"Workspace {self.workspace_id} not found. "
-                    "Verify the workspace ID is correct."
+                    f"Workspace {self.workspace_id} not found. Verify the workspace ID is correct."
                 )
             else:
-                raise ConfigurationError(
-                    f"Failed to access workspace: {response.status_code} - {response.text}"
-                )
+                raise ConfigurationError(f"Failed to access workspace: {response.status_code} - {response.text}")
         except requests.exceptions.RequestException as e:
             raise ConfigurationError(f"Failed to connect to Fabric: {e}") from e
 

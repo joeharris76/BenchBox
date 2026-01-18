@@ -542,9 +542,7 @@ def supports_views(dialect: str) -> bool:
         True if views are queryable via INFORMATION_SCHEMA
     """
     # ClickHouse has limited view support in metadata
-    if dialect.lower() == "clickhouse":
-        return False
-    return True
+    return dialect.lower() != "clickhouse"
 
 
 def supports_foreign_keys(dialect: str) -> bool:
@@ -557,9 +555,7 @@ def supports_foreign_keys(dialect: str) -> bool:
         True if FK constraints are supported
     """
     # BigQuery and ClickHouse don't support traditional FKs
-    if dialect.lower() in ("bigquery", "clickhouse"):
-        return False
-    return True
+    return dialect.lower() not in ("bigquery", "clickhouse")
 
 
 # =============================================================================

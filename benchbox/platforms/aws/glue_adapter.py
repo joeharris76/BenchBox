@@ -154,8 +154,7 @@ class AWSGlueAdapter(SparkTuningMixin, PlatformAdapter):
             self.s3_prefix = parts[1].rstrip("/") if len(parts) > 1 else "benchbox-data"
         else:
             raise ConfigurationError(
-                f"Invalid S3 staging path: {self.s3_staging_dir}\n"
-                "Must start with s3:// (e.g., s3://my-bucket/path)"
+                f"Invalid S3 staging path: {self.s3_staging_dir}\nMust start with s3:// (e.g., s3://my-bucket/path)"
             )
 
         # IAM role for Glue jobs (required)
@@ -262,8 +261,7 @@ class AWSGlueAdapter(SparkTuningMixin, PlatformAdapter):
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             if error_code == "AccessDeniedException":
                 raise ConfigurationError(
-                    f"Access denied to AWS Glue in {self.region}.\n"
-                    "Check IAM permissions for Glue service access."
+                    f"Access denied to AWS Glue in {self.region}.\nCheck IAM permissions for Glue service access."
                 ) from e
             raise ConfigurationError(f"Failed to connect to AWS Glue: {e}") from e
 
@@ -492,7 +490,7 @@ class AWSGlueAdapter(SparkTuningMixin, PlatformAdapter):
         Returns:
             S3 path to script.
         """
-        script_content = '''
+        script_content = """
 import sys
 from awsglue.transforms import *
 from awsglue.utils import getResolvedOptions
@@ -528,7 +526,7 @@ row_count = result_df.count()
 print(f"Query returned {row_count} rows")
 
 job.commit()
-'''
+"""
 
         script_key = f"{self.s3_prefix}/scripts/benchbox_query_runner.py"
         s3_client = self._get_s3_client()
@@ -647,9 +645,7 @@ job.commit()
     def add_cli_arguments(parser) -> None:
         """Add AWS Glue-specific CLI arguments."""
         glue_group = parser.add_argument_group("AWS Glue Arguments")
-        glue_group.add_argument(
-            "--region", type=str, default="us-east-1", help="AWS region for Glue"
-        )
+        glue_group.add_argument("--region", type=str, default="us-east-1", help="AWS region for Glue")
         glue_group.add_argument(
             "--s3-staging-dir",
             type=str,
@@ -660,9 +656,7 @@ job.commit()
             type=str,
             help="IAM role ARN for Glue job execution",
         )
-        glue_group.add_argument(
-            "--database", type=str, default="benchbox", help="Glue Data Catalog database"
-        )
+        glue_group.add_argument("--database", type=str, default="benchbox", help="Glue Data Catalog database")
         glue_group.add_argument(
             "--worker-type",
             type=str,
@@ -683,9 +677,7 @@ job.commit()
             choices=["3.0", "4.0"],
             help="Glue version",
         )
-        glue_group.add_argument(
-            "--aws-profile", type=str, help="AWS profile name for credentials"
-        )
+        glue_group.add_argument("--aws-profile", type=str, help="AWS profile name for credentials")
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> AWSGlueAdapter:
@@ -791,9 +783,7 @@ job.commit()
         }
 
         if config.platform:
-            results["platform_optimizations"] = self.apply_platform_optimizations(
-                config.platform
-            )
+            results["platform_optimizations"] = self.apply_platform_optimizations(config.platform)
 
         return results
 

@@ -162,7 +162,7 @@ class TestParameterSubstitution:
 
             placeholders = re.findall(r":\w+", sql)
             # Filter out valid SQL constructs like :TIMESTAMP
-            invalid = [p for p in placeholders if not p.upper() == p]
+            invalid = [p for p in placeholders if p.upper() != p]
             assert not invalid, f"Query {qid} has unsubstituted placeholders: {invalid}"
 
     def test_different_stream_ids_produce_different_params(self, query_manager):

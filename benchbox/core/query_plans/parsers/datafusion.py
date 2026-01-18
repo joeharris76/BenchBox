@@ -496,9 +496,8 @@ class DataFusionQueryPlanParser(QueryPlanParser):
             if node.get("filter_expression"):
                 kwargs["filter_expressions"] = [node["filter_expression"]]
 
-        elif logical_type == LogicalOperatorType.PROJECT:
-            if node.get("projection_exprs"):
-                kwargs["projection_expressions"] = [node["projection_exprs"]]
+        elif logical_type == LogicalOperatorType.PROJECT and node.get("projection_exprs"):
+            kwargs["projection_expressions"] = [node["projection_exprs"]]
 
         # Build properties from metrics
         properties: dict[str, Any] = {}

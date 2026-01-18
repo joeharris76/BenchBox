@@ -158,29 +158,19 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
         if not AZURE_IDENTITY_AVAILABLE:
             deps_satisfied, missing = check_platform_dependencies("synapse-spark")
             if not deps_satisfied:
-                raise ConfigurationError(
-                    get_dependency_error_message("synapse-spark", missing)
-                )
+                raise ConfigurationError(get_dependency_error_message("synapse-spark", missing))
 
         if not workspace_name:
-            raise ConfigurationError(
-                "workspace_name is required (Synapse workspace name)"
-            )
+            raise ConfigurationError("workspace_name is required (Synapse workspace name)")
 
         if not spark_pool_name:
-            raise ConfigurationError(
-                "spark_pool_name is required (Synapse Spark pool name)"
-            )
+            raise ConfigurationError("spark_pool_name is required (Synapse Spark pool name)")
 
         if not storage_account:
-            raise ConfigurationError(
-                "storage_account is required (ADLS Gen2 storage account name)"
-            )
+            raise ConfigurationError("storage_account is required (ADLS Gen2 storage account name)")
 
         if not storage_container:
-            raise ConfigurationError(
-                "storage_container is required (ADLS Gen2 container name)"
-            )
+            raise ConfigurationError("storage_container is required (ADLS Gen2 container name)")
 
         self.workspace_name = workspace_name
         self.spark_pool_name = spark_pool_name
@@ -195,7 +185,9 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
         self.livy_endpoint = livy_endpoint or self._derive_livy_endpoint()
 
         # Build ADLS Gen2 URI for staging
-        self.adls_uri = f"abfss://{self.storage_container}@{self.storage_account}.dfs.core.windows.net/{self.storage_path}"
+        self.adls_uri = (
+            f"abfss://{self.storage_container}@{self.storage_account}.dfs.core.windows.net/{self.storage_path}"
+        )
 
         # Initialize staging using cloud-spark shared infrastructure
         self._staging: CloudSparkStaging | None = None
@@ -319,9 +311,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
         )
 
         if response.status_code not in (200, 201):
-            raise ConfigurationError(
-                f"Failed to create Livy session: {response.status_code} - {response.text}"
-            )
+            raise ConfigurationError(f"Failed to create Livy session: {response.status_code} - {response.text}")
 
         session = response.json()
         session_id = session["id"]
@@ -360,9 +350,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
             )
 
             if response.status_code != 200:
-                raise ConfigurationError(
-                    f"Failed to get session status: {response.status_code}"
-                )
+                raise ConfigurationError(f"Failed to get session status: {response.status_code}")
 
             session = response.json()
             state = session["state"]
@@ -439,9 +427,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
         )
 
         if response.status_code not in (200, 201):
-            raise ConfigurationError(
-                f"Failed to submit statement: {response.status_code} - {response.text}"
-            )
+            raise ConfigurationError(f"Failed to submit statement: {response.status_code} - {response.text}")
 
         statement = response.json()
         statement_id = statement["id"]
@@ -481,9 +467,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
             )
 
             if response.status_code != 200:
-                raise ConfigurationError(
-                    f"Failed to get statement status: {response.status_code}"
-                )
+                raise ConfigurationError(f"Failed to get statement status: {response.status_code}")
 
             statement = response.json()
             state = statement["state"]
@@ -499,9 +483,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
 
             time.sleep(2)
 
-        raise ConfigurationError(
-            f"Timeout waiting for statement {statement_id} after {timeout_seconds}s"
-        )
+        raise ConfigurationError(f"Timeout waiting for statement {statement_id} after {timeout_seconds}s")
 
     def create_connection(self, **kwargs: Any) -> Any:
         """Verify Azure connectivity and workspace access.
@@ -542,8 +524,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
                 )
             elif response.status_code == 403:
                 raise ConfigurationError(
-                    f"Access denied to Synapse workspace {self.workspace_name}. "
-                    "Check workspace permissions."
+                    f"Access denied to Synapse workspace {self.workspace_name}. Check workspace permissions."
                 )
             elif response.status_code == 404:
                 raise ConfigurationError(
@@ -551,9 +532,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
                     "Verify the pool name is correct."
                 )
             else:
-                raise ConfigurationError(
-                    f"Failed to access Synapse: {response.status_code} - {response.text}"
-                )
+                raise ConfigurationError(f"Failed to access Synapse: {response.status_code} - {response.text}")
         except requests.exceptions.RequestException as e:
             raise ConfigurationError(f"Failed to connect to Synapse: {e}") from e
 

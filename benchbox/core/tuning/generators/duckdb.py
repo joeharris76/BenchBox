@@ -332,8 +332,7 @@ class DuckDBDDLGenerator(BaseDDLGenerator):
         """
         partition_clause = ", ".join(partition_columns)
         return (
-            f"COPY ({source_query}) TO '{destination_path}' "
-            f"(FORMAT {file_format}, PARTITION_BY ({partition_clause}))"
+            f"COPY ({source_query}) TO '{destination_path}' (FORMAT {file_format}, PARTITION_BY ({partition_clause}))"
         )
 
 

@@ -116,11 +116,11 @@ class QueryPlanParser(ABC):
             return "empty"
 
         # JSON format detection
-        if stripped.startswith("{") or stripped.startswith("["):
+        if stripped.startswith(("{", "[")):
             return "json"
 
         # XML format detection
-        if stripped.startswith("<?xml") or stripped.startswith("<"):
+        if stripped.startswith(("<?xml", "<")):
             return "xml"
 
         # Box-drawing characters indicate text format

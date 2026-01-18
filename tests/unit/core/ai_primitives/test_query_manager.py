@@ -79,7 +79,7 @@ class TestAIQueryManager:
 
         assert isinstance(generative, dict)
         assert len(generative) > 0
-        for query_id in generative.keys():
+        for query_id in generative:
             assert "generative" in query_id
 
     def test_get_queries_by_category_empty(self, manager):

@@ -18,17 +18,16 @@ Licensed under the MIT License.
 import py_compile
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 
-def find_example_files(examples_dir: Path) -> List[Path]:
+def find_example_files(examples_dir: Path) -> list[Path]:
     """Find all Python files in examples directory."""
     python_files = list(examples_dir.rglob("*.py"))
     # Exclude __pycache__ and other artifacts
     return [f for f in python_files if "__pycache__" not in str(f)]
 
 
-def check_syntax(file_path: Path) -> Tuple[bool, str]:
+def check_syntax(file_path: Path) -> tuple[bool, str]:
     """Check if a Python file has valid syntax.
 
     Args:
@@ -48,7 +47,7 @@ def check_syntax(file_path: Path) -> Tuple[bool, str]:
         return False, f"Error: {e}"
 
 
-def check_basic_imports(file_path: Path) -> Tuple[bool, str]:
+def check_basic_imports(file_path: Path) -> tuple[bool, str]:
     """Check if file imports can be resolved (basic check).
 
     This is a lightweight check that ensures the file can be read

@@ -496,7 +496,7 @@ def structural_similarity(sql1: str, sql2: str) -> dict[str, float]:
 
     similarities: dict[str, float] = {}
 
-    for component in comp1.keys():
+    for component in comp1:
         set1 = comp1[component]
         set2 = comp2[component]
 

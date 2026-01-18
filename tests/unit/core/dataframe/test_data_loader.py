@@ -559,10 +559,13 @@ class TestDataFrameDataLoader:
             (tmpdir / "customer.tbl").touch()
 
             # Mock has_cached_data to return True
-            with patch.object(loader.cache, "has_cached_data", return_value=True), patch.object(
-                loader.cache,
-                "get_cached_files",
-                return_value={"customer": cache_path / "customer.parquet"},
+            with (
+                patch.object(loader.cache, "has_cached_data", return_value=True),
+                patch.object(
+                    loader.cache,
+                    "get_cached_files",
+                    return_value={"customer": cache_path / "customer.parquet"},
+                ),
             ):
                 paths = loader.prepare_benchmark_data(benchmark, scale_factor=1.0)
 
@@ -716,9 +719,7 @@ class TestFormatConverterWithWriteConfig:
             parquet_path = tmpdir / "test.parquet"
 
             # Create write config with sorting
-            write_config = DataFrameWriteConfiguration(
-                sort_by=[SortColumn(name="id", order="asc")]
-            )
+            write_config = DataFrameWriteConfiguration(sort_by=[SortColumn(name="id", order="asc")])
 
             status, row_count = FormatConverter.convert_csv_to_parquet(
                 source_path=csv_path,
@@ -733,6 +734,7 @@ class TestFormatConverterWithWriteConfig:
 
             # Verify data is sorted
             import pyarrow.parquet as pq
+
             table = pq.read_table(parquet_path)
             ids = table.column("id").to_pylist()
             assert ids == [1, 2, 3], f"Expected [1, 2, 3], got {ids}"
@@ -747,9 +749,7 @@ class TestFormatConverterWithWriteConfig:
 
             parquet_path = tmpdir / "test.parquet"
 
-            write_config = DataFrameWriteConfiguration(
-                sort_by=[SortColumn(name="id", order="desc")]
-            )
+            write_config = DataFrameWriteConfiguration(sort_by=[SortColumn(name="id", order="desc")])
 
             status, row_count = FormatConverter.convert_csv_to_parquet(
                 source_path=csv_path,
@@ -761,6 +761,7 @@ class TestFormatConverterWithWriteConfig:
             assert status == ConversionStatus.SUCCESS
 
             import pyarrow.parquet as pq
+
             table = pq.read_table(parquet_path)
             ids = table.column("id").to_pylist()
             assert ids == [3, 2, 1], f"Expected [3, 2, 1], got {ids}"
@@ -791,6 +792,7 @@ class TestFormatConverterWithWriteConfig:
 
             # Verify row groups
             import pyarrow.parquet as pq
+
             meta = pq.read_metadata(parquet_path)
             # Should have 3 row groups (5 rows / 2 per group = 3 groups)
             assert meta.num_row_groups >= 2
@@ -805,9 +807,7 @@ class TestFormatConverterWithWriteConfig:
 
             parquet_path = tmpdir / "test.parquet"
 
-            write_config = DataFrameWriteConfiguration(
-                compression="gzip"
-            )
+            write_config = DataFrameWriteConfiguration(compression="gzip")
 
             status, row_count = FormatConverter.convert_csv_to_parquet(
                 source_path=csv_path,
@@ -900,9 +900,7 @@ class TestDataFrameDataLoaderWithWriteConfig:
 
     def test_init_with_write_config(self):
         """Test initialization with write config."""
-        write_config = DataFrameWriteConfiguration(
-            sort_by=[SortColumn(name="id", order="asc")]
-        )
+        write_config = DataFrameWriteConfiguration(sort_by=[SortColumn(name="id", order="asc")])
         loader = DataFrameDataLoader(write_config=write_config)
 
         assert loader.write_config is not None
@@ -956,9 +954,7 @@ class TestDataFrameDataLoaderWithWriteConfig:
         """Test that config without column info returns original."""
         loader = DataFrameDataLoader()
 
-        config = DataFrameWriteConfiguration(
-            sort_by=[SortColumn(name="id", order="asc")]
-        )
+        config = DataFrameWriteConfiguration(sort_by=[SortColumn(name="id", order="asc")])
 
         result = loader._get_table_write_config(config, "table", None)
         assert result is config

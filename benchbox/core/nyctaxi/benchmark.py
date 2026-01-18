@@ -18,7 +18,7 @@ import csv
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 from benchbox.core.nyctaxi.downloader import NYCTaxiDataDownloader
 from benchbox.core.nyctaxi.queries import NYCTaxiQueryManager
@@ -79,7 +79,7 @@ class NYCTaxiBenchmark(VerbosityMixin):
     def __init__(
         self,
         scale_factor: float = 1.0,
-        output_dir: Union[str, Path] | None = None,
+        output_dir: str | Path | None = None,
         year: int = 2019,
         months: list[int] | None = None,
         seed: int | None = None,
@@ -166,7 +166,7 @@ class NYCTaxiBenchmark(VerbosityMixin):
         # Track generated table files
         self.tables: dict[str, Path] = {}
 
-    def generate_data(self) -> list[Union[str, Path]]:
+    def generate_data(self) -> list[str | Path]:
         """Download/generate NYC Taxi benchmark data.
 
         Returns:
@@ -195,7 +195,7 @@ class NYCTaxiBenchmark(VerbosityMixin):
 
     def get_query(
         self,
-        query_id: Union[int, str],
+        query_id: int | str,
         *,
         params: dict[str, Any] | None = None,
         **kwargs,

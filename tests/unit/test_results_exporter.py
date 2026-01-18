@@ -101,7 +101,4 @@ def test_exporter_rejects_unsupported_type(tmp_path, caplog) -> None:
     assert result == {}
 
     # Error should be logged - check for any error message indicating failure
-    assert any(
-        "Failed to export" in record.message or "Error" in record.levelname
-        for record in caplog.records
-    )
+    assert any("Failed to export" in record.message or "Error" in record.levelname for record in caplog.records)

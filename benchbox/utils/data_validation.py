@@ -496,7 +496,7 @@ class BenchmarkDataValidator:
         else:
             # Unknown benchmarks: ensure manifest files exist and are non-empty
             any_files = False
-            for table_name in manifest.get("tables", {}).keys():
+            for table_name in manifest.get("tables", {}):
                 entries = get_table_files(manifest, table_name)
                 table_ok = True
                 for e in entries:

@@ -37,7 +37,6 @@ class MCPValidationError(ValueError):
     """
 
 
-
 def validate_query_id(query_id: str) -> str:
     """Validate a single query ID.
 
@@ -209,15 +208,9 @@ class RunBenchmarkInput(BaseModel):
 
     platform: Annotated[str, Field(min_length=1, max_length=50, description="Target database platform")]
     benchmark: Annotated[str, Field(min_length=1, max_length=50, description="Benchmark name")]
-    scale_factor: Annotated[
-        float, Field(gt=0, le=MAX_SCALE_FACTOR, default=0.01, description="Data scale factor")
-    ]
-    queries: Annotated[
-        str | None, Field(default=None, max_length=2000, description="Comma-separated query IDs")
-    ]
-    phases: Annotated[
-        str | None, Field(default=None, max_length=200, description="Comma-separated phase names")
-    ]
+    scale_factor: Annotated[float, Field(gt=0, le=MAX_SCALE_FACTOR, default=0.01, description="Data scale factor")]
+    queries: Annotated[str | None, Field(default=None, max_length=2000, description="Comma-separated query IDs")]
+    phases: Annotated[str | None, Field(default=None, max_length=200, description="Comma-separated phase names")]
 
     @field_validator("platform")
     @classmethod
@@ -250,12 +243,8 @@ class DryRunInput(BaseModel):
 
     platform: Annotated[str, Field(min_length=1, max_length=50, description="Target database platform")]
     benchmark: Annotated[str, Field(min_length=1, max_length=50, description="Benchmark name")]
-    scale_factor: Annotated[
-        float, Field(gt=0, le=MAX_SCALE_FACTOR, default=0.01, description="Data scale factor")
-    ]
-    queries: Annotated[
-        str | None, Field(default=None, max_length=2000, description="Comma-separated query IDs")
-    ]
+    scale_factor: Annotated[float, Field(gt=0, le=MAX_SCALE_FACTOR, default=0.01, description="Data scale factor")]
+    queries: Annotated[str | None, Field(default=None, max_length=2000, description="Comma-separated query IDs")]
 
     @field_validator("platform")
     @classmethod
@@ -287,9 +276,7 @@ class ValidateConfigInput(BaseModel):
 
     platform: Annotated[str, Field(min_length=1, max_length=50, description="Target database platform")]
     benchmark: Annotated[str, Field(min_length=1, max_length=50, description="Benchmark name")]
-    scale_factor: Annotated[
-        float, Field(gt=0, le=MAX_SCALE_FACTOR, default=1.0, description="Data scale factor")
-    ]
+    scale_factor: Annotated[float, Field(gt=0, le=MAX_SCALE_FACTOR, default=1.0, description="Data scale factor")]
 
     @field_validator("platform")
     @classmethod
@@ -365,9 +352,7 @@ class CompareResultsInput(BaseModel):
 
     file1: Annotated[str, Field(min_length=1, max_length=255, description="Baseline result file")]
     file2: Annotated[str, Field(min_length=1, max_length=255, description="Comparison result file")]
-    threshold_percent: Annotated[
-        float, Field(ge=0, le=100, default=10.0, description="Change threshold percentage")
-    ]
+    threshold_percent: Annotated[float, Field(ge=0, le=100, default=10.0, description="Change threshold percentage")]
 
     @field_validator("file1", "file2")
     @classmethod

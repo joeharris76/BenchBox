@@ -364,11 +364,10 @@ def _run_simple_wizard(
             config.enable_platform_optimization(TuningType.CLUSTERING)
             console.print("[green]✓ Partitioning and clustering enabled[/green]")
 
-    elif platform == "redshift":
-        if Confirm.ask("Enable distribution and sort keys?", default=True):
-            config.enable_platform_optimization(TuningType.DISTRIBUTION)
-            config.enable_platform_optimization(TuningType.SORTING)
-            console.print("[green]✓ Distribution and sort keys enabled[/green]")
+    elif platform == "redshift" and Confirm.ask("Enable distribution and sort keys?", default=True):
+        config.enable_platform_optimization(TuningType.DISTRIBUTION)
+        config.enable_platform_optimization(TuningType.SORTING)
+        console.print("[green]✓ Distribution and sort keys enabled[/green]")
 
     # Show summary
     _show_simple_summary(config, defaults, platform)

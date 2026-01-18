@@ -569,7 +569,14 @@ class TestDataFusionColumnTypeMapping:
                         adapter._load_table_parquet(mock_conn, "test_table", [csv_file], Path(tmpdir))
 
             # All string-type columns should map to pa.string()
-            for col_name in ["col_char", "col_char_no_len", "col_varchar", "col_varchar_no_len", "col_text", "col_string"]:
+            for col_name in [
+                "col_char",
+                "col_char_no_len",
+                "col_varchar",
+                "col_varchar_no_len",
+                "col_text",
+                "col_string",
+            ]:
                 assert col_name in captured_types, f"{col_name} should be in column_types"
                 assert captured_types[col_name] == pa.string(), f"{col_name} should be pa.string()"
 

@@ -107,9 +107,7 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
             manager = BenchmarkManager()
             benchmark_lower = benchmark.lower()
             if benchmark_lower not in manager.benchmarks:
-                error_response = make_not_found_error(
-                    "benchmark", benchmark, available=list(manager.benchmarks.keys())
-                )
+                error_response = make_not_found_error("benchmark", benchmark, available=list(manager.benchmarks.keys()))
                 error_response["execution_id"] = execution_id
                 error_response["status"] = "failed"
                 return error_response
@@ -253,9 +251,7 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
 
             # Validate benchmark exists
             if benchmark_lower not in manager.benchmarks:
-                error_response = make_not_found_error(
-                    "benchmark", benchmark, available=list(manager.benchmarks.keys())
-                )
+                error_response = make_not_found_error("benchmark", benchmark, available=list(manager.benchmarks.keys()))
                 error_response["status"] = "error"
                 return error_response
 
@@ -429,9 +425,7 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
 
         # Validate benchmark exists
         if benchmark_lower not in manager.benchmarks:
-            error_response = make_not_found_error(
-                "benchmark", benchmark, available=list(manager.benchmarks.keys())
-            )
+            error_response = make_not_found_error("benchmark", benchmark, available=list(manager.benchmarks.keys()))
             return error_response
 
         try:
@@ -462,7 +456,12 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
                 elif hasattr(qm, "get_all_queries"):
                     all_queries = qm.get_all_queries()
                     # Try various key formats
-                    for key in [normalized_id, query_id, f"Q{normalized_id}", int(normalized_id) if normalized_id.isdigit() else None]:
+                    for key in [
+                        normalized_id,
+                        query_id,
+                        f"Q{normalized_id}",
+                        int(normalized_id) if normalized_id.isdigit() else None,
+                    ]:
                         if key in all_queries:
                             q = all_queries[key]
                             query_sql = getattr(q, "sql", None) or getattr(q, "template", None)
@@ -531,26 +530,86 @@ def _get_query_complexity_hints(benchmark: str, query_id: str) -> dict[str, Any]
     # TPC-H query complexity hints (well-known queries)
     tpch_hints: dict[str, dict[str, Any]] = {
         "1": {"type": "aggregation", "tables": ["lineitem"], "complexity": "simple", "joins": 0},
-        "2": {"type": "correlated_subquery", "tables": ["part", "supplier", "partsupp", "nation", "region"], "complexity": "complex", "joins": 5},
-        "3": {"type": "join_aggregate", "tables": ["customer", "orders", "lineitem"], "complexity": "medium", "joins": 2},
+        "2": {
+            "type": "correlated_subquery",
+            "tables": ["part", "supplier", "partsupp", "nation", "region"],
+            "complexity": "complex",
+            "joins": 5,
+        },
+        "3": {
+            "type": "join_aggregate",
+            "tables": ["customer", "orders", "lineitem"],
+            "complexity": "medium",
+            "joins": 2,
+        },
         "4": {"type": "exists_subquery", "tables": ["orders", "lineitem"], "complexity": "medium", "joins": 1},
-        "5": {"type": "multi_join", "tables": ["customer", "orders", "lineitem", "supplier", "nation", "region"], "complexity": "complex", "joins": 5},
+        "5": {
+            "type": "multi_join",
+            "tables": ["customer", "orders", "lineitem", "supplier", "nation", "region"],
+            "complexity": "complex",
+            "joins": 5,
+        },
         "6": {"type": "scan_filter", "tables": ["lineitem"], "complexity": "simple", "joins": 0},
-        "7": {"type": "multi_join", "tables": ["supplier", "lineitem", "orders", "customer", "nation"], "complexity": "complex", "joins": 6},
-        "8": {"type": "multi_join", "tables": ["part", "supplier", "lineitem", "orders", "customer", "nation", "region"], "complexity": "complex", "joins": 7},
-        "9": {"type": "multi_join", "tables": ["part", "supplier", "lineitem", "partsupp", "orders", "nation"], "complexity": "complex", "joins": 5},
-        "10": {"type": "join_aggregate", "tables": ["customer", "orders", "lineitem", "nation"], "complexity": "medium", "joins": 3},
-        "11": {"type": "having_subquery", "tables": ["partsupp", "supplier", "nation"], "complexity": "medium", "joins": 2},
+        "7": {
+            "type": "multi_join",
+            "tables": ["supplier", "lineitem", "orders", "customer", "nation"],
+            "complexity": "complex",
+            "joins": 6,
+        },
+        "8": {
+            "type": "multi_join",
+            "tables": ["part", "supplier", "lineitem", "orders", "customer", "nation", "region"],
+            "complexity": "complex",
+            "joins": 7,
+        },
+        "9": {
+            "type": "multi_join",
+            "tables": ["part", "supplier", "lineitem", "partsupp", "orders", "nation"],
+            "complexity": "complex",
+            "joins": 5,
+        },
+        "10": {
+            "type": "join_aggregate",
+            "tables": ["customer", "orders", "lineitem", "nation"],
+            "complexity": "medium",
+            "joins": 3,
+        },
+        "11": {
+            "type": "having_subquery",
+            "tables": ["partsupp", "supplier", "nation"],
+            "complexity": "medium",
+            "joins": 2,
+        },
         "12": {"type": "case_aggregate", "tables": ["orders", "lineitem"], "complexity": "medium", "joins": 1},
         "13": {"type": "outer_join", "tables": ["customer", "orders"], "complexity": "medium", "joins": 1},
         "14": {"type": "case_aggregate", "tables": ["lineitem", "part"], "complexity": "simple", "joins": 1},
         "15": {"type": "view_with_max", "tables": ["lineitem", "supplier"], "complexity": "medium", "joins": 1},
-        "16": {"type": "distinct_aggregate", "tables": ["partsupp", "part", "supplier"], "complexity": "medium", "joins": 2},
+        "16": {
+            "type": "distinct_aggregate",
+            "tables": ["partsupp", "part", "supplier"],
+            "complexity": "medium",
+            "joins": 2,
+        },
         "17": {"type": "correlated_subquery", "tables": ["lineitem", "part"], "complexity": "complex", "joins": 1},
-        "18": {"type": "having_subquery", "tables": ["customer", "orders", "lineitem"], "complexity": "complex", "joins": 3},
+        "18": {
+            "type": "having_subquery",
+            "tables": ["customer", "orders", "lineitem"],
+            "complexity": "complex",
+            "joins": 3,
+        },
         "19": {"type": "or_predicates", "tables": ["lineitem", "part"], "complexity": "medium", "joins": 1},
-        "20": {"type": "exists_subquery", "tables": ["supplier", "nation", "partsupp", "part", "lineitem"], "complexity": "complex", "joins": 4},
-        "21": {"type": "not_exists", "tables": ["supplier", "lineitem", "orders", "nation"], "complexity": "complex", "joins": 4},
+        "20": {
+            "type": "exists_subquery",
+            "tables": ["supplier", "nation", "partsupp", "part", "lineitem"],
+            "complexity": "complex",
+            "joins": 4,
+        },
+        "21": {
+            "type": "not_exists",
+            "tables": ["supplier", "lineitem", "orders", "nation"],
+            "complexity": "complex",
+            "joins": 4,
+        },
         "22": {"type": "not_exists", "tables": ["customer", "orders"], "complexity": "complex", "joins": 1},
     }
 

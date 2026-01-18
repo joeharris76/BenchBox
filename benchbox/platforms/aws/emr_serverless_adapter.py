@@ -156,9 +156,7 @@ class EMRServerlessAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdap
             raise ConfigurationError("execution_role_arn is required for EMR Serverless")
 
         if not application_id and not create_application:
-            raise ConfigurationError(
-                "Either application_id must be provided or create_application=True"
-            )
+            raise ConfigurationError("Either application_id must be provided or create_application=True")
 
         # Parse S3 path
         s3_parts = s3_staging_dir[5:].split("/", 1)
@@ -517,11 +515,7 @@ spark.stop()
                 }
             },
             "configurationOverrides": {
-                "monitoringConfiguration": {
-                    "s3MonitoringConfiguration": {
-                        "logUri": f"{self.s3_staging_dir}/logs/"
-                    }
-                }
+                "monitoringConfiguration": {"s3MonitoringConfiguration": {"logUri": f"{self.s3_staging_dir}/logs/"}}
             },
         }
 
@@ -620,8 +614,7 @@ spark.stop()
         self._total_memory_gb_hours += memory_gb_hours
 
         logger.debug(
-            f"Job completed in {elapsed:.1f}s, "
-            f"vCPU-hours: {vcpu_hours:.4f}, memory-GB-hours: {memory_gb_hours:.4f}"
+            f"Job completed in {elapsed:.1f}s, vCPU-hours: {vcpu_hours:.4f}, memory-GB-hours: {memory_gb_hours:.4f}"
         )
 
         # Retrieve results from S3
@@ -641,9 +634,7 @@ spark.stop()
 
         logger.info(f"EMR Serverless session closed. Executed {self._query_count} queries.")
         if self._total_vcpu_hours > 0 or self._total_memory_gb_hours > 0:
-            estimated_cost = (self._total_vcpu_hours * 0.052624) + (
-                self._total_memory_gb_hours * 0.0057785
-            )
+            estimated_cost = (self._total_vcpu_hours * 0.052624) + (self._total_memory_gb_hours * 0.0057785)
             logger.info(
                 f"Total resources: {self._total_vcpu_hours:.4f} vCPU-hours, "
                 f"{self._total_memory_gb_hours:.4f} memory-GB-hours "
@@ -739,9 +730,7 @@ spark.stop()
             results["foreign_keys"] = self.apply_foreign_keys(config.foreign_keys)
 
         if config.platform:
-            results["platform_optimizations"] = self.apply_platform_optimizations(
-                config.platform
-            )
+            results["platform_optimizations"] = self.apply_platform_optimizations(config.platform)
 
         return results
 

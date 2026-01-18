@@ -208,7 +208,7 @@ class FireboltDDLGenerator(BaseDDLGenerator):
             "INTEGER": "INT",
             "BIGINT": "LONG",
             "SMALLINT": "INT",  # Firebolt doesn't have SMALLINT
-            "TINYINT": "INT",   # Firebolt doesn't have TINYINT
+            "TINYINT": "INT",  # Firebolt doesn't have TINYINT
             # Floating point
             "FLOAT": "FLOAT",
             "DOUBLE": "DOUBLE",

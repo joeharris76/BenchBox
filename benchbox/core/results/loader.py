@@ -24,10 +24,8 @@ class ResultLoadError(Exception):
     """Raised when a result file cannot be loaded or parsed."""
 
 
-
 class UnsupportedSchemaError(ResultLoadError):
     """Raised when the result file has an unsupported schema version."""
-
 
 
 def find_latest_result(
@@ -56,7 +54,8 @@ def find_latest_result(
 
     # Find all JSON files, excluding companion files
     result_files = [
-        f for f in directory_path.glob("*.json")
+        f
+        for f in directory_path.glob("*.json")
         if not f.name.endswith(".plans.json") and not f.name.endswith(".tuning.json")
     ]
 
@@ -388,12 +387,14 @@ def _reconstruct_query_results(
     # Add failed queries from errors
     for error in errors_list:
         if error.get("phase") == "query":
-            results.append({
-                "query_id": error.get("query_id"),
-                "status": "FAILED",
-                "error_type": error.get("type"),
-                "error_message": error.get("message"),
-            })
+            results.append(
+                {
+                    "query_id": error.get("query_id"),
+                    "status": "FAILED",
+                    "error_type": error.get("type"),
+                    "error_message": error.get("message"),
+                }
+            )
 
     return results
 

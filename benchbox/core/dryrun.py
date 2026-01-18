@@ -118,9 +118,7 @@ class DryRunExecutor:
             # Extract DDL with tuning clauses for dry-run preview
             if execution_mode == "sql" and database_config:
                 try:
-                    ddl_preview, post_load = self._extract_ddl_preview(
-                        benchmark, benchmark_config, database_config
-                    )
+                    ddl_preview, post_load = self._extract_ddl_preview(benchmark, benchmark_config, database_config)
                     result.ddl_preview = ddl_preview
                     result.post_load_statements = post_load
                 except Exception as e:
@@ -730,9 +728,7 @@ class DryRunExecutor:
                     write_dict: dict[str, Any] = {}
 
                     if write_config.sort_by:
-                        write_dict["sort_by"] = [
-                            {"name": col.name, "order": col.order} for col in write_config.sort_by
-                        ]
+                        write_dict["sort_by"] = [{"name": col.name, "order": col.order} for col in write_config.sort_by]
 
                     if write_config.partition_by:
                         write_dict["partition_by"] = [

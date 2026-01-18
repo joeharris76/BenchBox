@@ -256,9 +256,7 @@ class DatabaseManager:
                 more_count = len(additional_platforms) - 5 if len(additional_platforms) > 5 else 0
                 more_text = f" (+{more_count} more)" if more_count > 0 else ""
 
-                console.print(
-                    f"\n[dim]💡 Additional platforms matching your filter: {platform_names}{more_text}[/dim]"
-                )
+                console.print(f"\n[dim]💡 Additional platforms matching your filter: {platform_names}{more_text}[/dim]")
                 console.print("[dim]   Run [cyan]benchbox platforms enable <name>[/cyan] to add them.[/dim]")
 
         # Create choice map for selection

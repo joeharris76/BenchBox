@@ -150,9 +150,7 @@ class SnowparkConnectAdapter(SparkTuningMixin, PlatformAdapter):
 
         # Password or key-based auth required
         if not password and not private_key_path:
-            raise ConfigurationError(
-                "Either password or private_key_path is required for authentication."
-            )
+            raise ConfigurationError("Either password or private_key_path is required for authentication.")
 
         self.account = account
         self.user = user
@@ -211,11 +209,7 @@ class SnowparkConnectAdapter(SparkTuningMixin, PlatformAdapter):
             with open(self.private_key_path, "rb") as key_file:
                 private_key = serialization.load_pem_private_key(
                     key_file.read(),
-                    password=(
-                        self.private_key_passphrase.encode()
-                        if self.private_key_passphrase
-                        else None
-                    ),
+                    password=(self.private_key_passphrase.encode() if self.private_key_passphrase else None),
                     backend=default_backend(),
                 )
             params["private_key"] = private_key
@@ -342,9 +336,7 @@ class SnowparkConnectAdapter(SparkTuningMixin, PlatformAdapter):
 
         for table in tables:
             # Find data files for this table
-            table_files = list(source_path.glob(f"{table}.*")) + list(
-                source_path.glob(f"{table}/*.parquet")
-            )
+            table_files = list(source_path.glob(f"{table}.*")) + list(source_path.glob(f"{table}/*.parquet"))
 
             if not table_files:
                 logger.warning(f"No data files found for table {table}")
@@ -606,9 +598,7 @@ class SnowparkConnectAdapter(SparkTuningMixin, PlatformAdapter):
             results["foreign_keys"] = self.apply_foreign_keys(config.foreign_keys)
 
         if config.platform:
-            results["platform_optimizations"] = self.apply_platform_optimizations(
-                config.platform
-            )
+            results["platform_optimizations"] = self.apply_platform_optimizations(config.platform)
 
         return results
 

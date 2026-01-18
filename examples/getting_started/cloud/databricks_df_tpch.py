@@ -90,8 +90,7 @@ def _require_env(var_name: str) -> str:
     value = os.getenv(var_name)
     if not value:
         raise RuntimeError(
-            f"Missing environment variable {var_name}. "
-            f"Set Databricks Connect credentials before running this example."
+            f"Missing environment variable {var_name}. Set Databricks Connect credentials before running this example."
         )
     return value
 
@@ -250,9 +249,7 @@ def run_example(scale_factor: float = 0.01, dry_run: bool = False) -> None:
 
 def main():
     """Main entry point with argument parsing."""
-    parser = argparse.ArgumentParser(
-        description="Run TPC-H benchmark on Databricks using DataFrame API"
-    )
+    parser = argparse.ArgumentParser(description="Run TPC-H benchmark on Databricks using DataFrame API")
     parser.add_argument(
         "--scale-factor",
         type=float,

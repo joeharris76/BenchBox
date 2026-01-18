@@ -442,15 +442,24 @@ class TestSynapseSparkAdapterCLI:
             parser = ArgumentParser()
             SynapseSparkAdapter.add_cli_arguments(parser)
 
-            args = parser.parse_args([
-                "--workspace-name", "test-workspace",
-                "--spark-pool", "test-pool",
-                "--storage-account", "teststorage",
-                "--storage-container", "testcontainer",
-                "--storage-path", "data/benchbox",
-                "--tenant-id", "test-tenant",
-                "--timeout", "120",
-            ])
+            args = parser.parse_args(
+                [
+                    "--workspace-name",
+                    "test-workspace",
+                    "--spark-pool",
+                    "test-pool",
+                    "--storage-account",
+                    "teststorage",
+                    "--storage-container",
+                    "testcontainer",
+                    "--storage-path",
+                    "data/benchbox",
+                    "--tenant-id",
+                    "test-tenant",
+                    "--timeout",
+                    "120",
+                ]
+            )
 
             assert args.workspace_name == "test-workspace"
             assert args.spark_pool_name == "test-pool"

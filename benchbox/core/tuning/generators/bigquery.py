@@ -213,7 +213,9 @@ class BigQueryDDLGenerator(BaseDDLGenerator):
                 range_end = getattr(platform_opts, "range_end", range_end)
                 range_interval = getattr(platform_opts, "range_interval", range_interval)
 
-            return f"PARTITION BY RANGE_BUCKET({col_name}, GENERATE_ARRAY({range_start}, {range_end}, {range_interval}))"
+            return (
+                f"PARTITION BY RANGE_BUCKET({col_name}, GENERATE_ARRAY({range_start}, {range_end}, {range_interval}))"
+            )
 
         elif "TIMESTAMP" in col_type or "DATETIME" in col_type:
             # DATETIME/TIMESTAMP needs DATETIME_TRUNC or TIMESTAMP_TRUNC
@@ -230,8 +232,7 @@ class BigQueryDDLGenerator(BaseDDLGenerator):
         else:
             # Unknown type - try direct partitioning
             logger.info(
-                f"Unknown partition column type '{col_type}' for column '{col_name}'. "
-                f"Using direct PARTITION BY."
+                f"Unknown partition column type '{col_type}' for column '{col_name}'. Using direct PARTITION BY."
             )
             return f"PARTITION BY {col_name}"
 

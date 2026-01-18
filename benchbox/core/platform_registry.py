@@ -1042,11 +1042,7 @@ class PlatformRegistry:
             lib_info = cls._detect_library(lib_spec)
             libraries.append(lib_info)
 
-            if (
-                lib_spec.get("required", True)
-                and not lib_info.installed
-                and not lib_spec.get("alternative", False)
-            ):
+            if lib_spec.get("required", True) and not lib_info.installed and not lib_spec.get("alternative", False):
                 available = False
 
         # Check if driver_package is explicitly set in metadata
@@ -1318,9 +1314,7 @@ class PlatformRegistry:
         return dual_mode
 
     @classmethod
-    def get_deployment_capability(
-        cls, platform_name: str, deployment_mode: str
-    ) -> Optional[DeploymentCapability]:
+    def get_deployment_capability(cls, platform_name: str, deployment_mode: str) -> Optional[DeploymentCapability]:
         """Get deployment capability information for a specific deployment mode.
 
         Args:
@@ -1392,9 +1386,7 @@ class PlatformRegistry:
         return caps.inherits_from
 
     @classmethod
-    def requires_cloud_storage_for_deployment(
-        cls, platform_name: str, deployment_mode: Optional[str] = None
-    ) -> bool:
+    def requires_cloud_storage_for_deployment(cls, platform_name: str, deployment_mode: Optional[str] = None) -> bool:
         """Check if a specific deployment mode requires cloud storage.
 
         Args:

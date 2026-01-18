@@ -411,11 +411,14 @@ class TestClickHouseCloudAdapter:
 
         from benchbox.platforms.clickhouse.adapter import ClickHouseAdapter
 
-        with patch.dict(os.environ, {
-            "CLICKHOUSE_CLOUD_HOST": "env-host.clickhouse.cloud",
-            "CLICKHOUSE_CLOUD_PASSWORD": "env-password",
-            "CLICKHOUSE_CLOUD_USER": "env-user",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "CLICKHOUSE_CLOUD_HOST": "env-host.clickhouse.cloud",
+                "CLICKHOUSE_CLOUD_PASSWORD": "env-password",
+                "CLICKHOUSE_CLOUD_USER": "env-user",
+            },
+        ):
             adapter = ClickHouseAdapter(deployment_mode="cloud")
 
             assert adapter.host == "env-host.clickhouse.cloud"
@@ -430,10 +433,13 @@ class TestClickHouseCloudAdapter:
 
         from benchbox.platforms.clickhouse.adapter import ClickHouseAdapter
 
-        with patch.dict(os.environ, {
-            "CLICKHOUSE_CLOUD_HOST": "env-host.clickhouse.cloud",
-            "CLICKHOUSE_CLOUD_PASSWORD": "env-password",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "CLICKHOUSE_CLOUD_HOST": "env-host.clickhouse.cloud",
+                "CLICKHOUSE_CLOUD_PASSWORD": "env-password",
+            },
+        ):
             adapter = ClickHouseAdapter(
                 deployment_mode="cloud",
                 host="config-host.clickhouse.cloud",

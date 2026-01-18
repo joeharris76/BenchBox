@@ -203,7 +203,7 @@ class ManifestFileSource:
                     mapping = {}
                     platform_name = getattr(self, "_platform_name", None) or self._infer_platform_name(benchmark)
 
-                    for table_name in manifest.tables.keys():
+                    for table_name in manifest.tables:
                         # Get preferred format for this platform
                         preferred_format = get_preferred_format(manifest, table_name, platform_name)
 
@@ -967,7 +967,8 @@ class IcebergFileHandler(FileFormatHandler):
 
             catalog = SqlCatalog(
                 "benchbox_catalog",
-                uri=f"sqlite:///{catalog_db}", warehouse=warehouse_path,
+                uri=f"sqlite:///{catalog_db}",
+                warehouse=warehouse_path,
             )
 
             # Load the Iceberg table

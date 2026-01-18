@@ -125,8 +125,7 @@ class TimescaleDBDDLGenerator(PostgreSQLDDLGenerator):
 
         # Generate create_hypertable statement
         hypertable_call = (
-            f"SELECT create_hypertable('{{table_name}}', '{time_column}', "
-            f"chunk_time_interval => {chunk_interval}"
+            f"SELECT create_hypertable('{{table_name}}', '{time_column}', chunk_time_interval => {chunk_interval}"
         )
 
         # Check for space partitioning (distribution columns)
@@ -137,10 +136,7 @@ class TimescaleDBDDLGenerator(PostgreSQLDDLGenerator):
             if platform_opts:
                 num_partitions = getattr(platform_opts, "space_partitions", num_partitions)
 
-            hypertable_call += (
-                f", partitioning_column => '{space_col.name}', "
-                f"number_partitions => {num_partitions}"
-            )
+            hypertable_call += f", partitioning_column => '{space_col.name}', number_partitions => {num_partitions}"
 
         hypertable_call += ")"
 
@@ -152,9 +148,7 @@ class TimescaleDBDDLGenerator(PostgreSQLDDLGenerator):
             enable_compression = getattr(platform_opts, "enable_compression", enable_compression)
 
         if enable_compression:
-            compression_statements = self._generate_compression_statements(
-                table_tuning, platform_opts
-            )
+            compression_statements = self._generate_compression_statements(table_tuning, platform_opts)
             clauses.post_create_statements.extend(compression_statements)
 
         return clauses

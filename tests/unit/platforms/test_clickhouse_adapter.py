@@ -53,10 +53,13 @@ class TestClickHouseAdapter:
 
     def test_initialization_missing_driver(self):
         """Test initialization when ClickHouse driver dependencies are missing (server mode)."""
-        with patch(
-            "benchbox.platforms.clickhouse.adapter.check_platform_dependencies",
-            return_value=(False, ["clickhouse-driver"]),
-        ), pytest.raises(ImportError) as excinfo:
+        with (
+            patch(
+                "benchbox.platforms.clickhouse.adapter.check_platform_dependencies",
+                return_value=(False, ["clickhouse-driver"]),
+            ),
+            pytest.raises(ImportError) as excinfo,
+        ):
             ClickHouseAdapter(deployment_mode="server")  # Server mode requires driver
 
         assert "Missing dependencies for clickhouse platform" in str(excinfo.value)
@@ -265,6 +268,7 @@ class TestClickHouseAdapter:
         # Create adapter in local mode (embedded is now an alias for local)
         # Use a unique database path to avoid conflicts with other tests
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = ClickHouseAdapter(
                 deployment_mode="local",

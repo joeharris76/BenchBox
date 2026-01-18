@@ -451,7 +451,10 @@ class TestSchemaV2Validation:
             "run": {"id": "test", "timestamp": "2025-01-01T00:00:00", "total_duration_ms": 1000, "query_time_ms": 500},
             "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
             "platform": {"name": "Test"},
-            "summary": {"queries": {"total": 0, "passed": 0, "failed": 0}, "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0}},
+            "summary": {
+                "queries": {"total": 0, "passed": 0, "failed": 0},
+                "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0},
+            },
             "queries": [],
         }
 
@@ -469,7 +472,10 @@ class TestSchemaV2Validation:
             "run": {"id": "test", "timestamp": "2025-01-01T00:00:00", "total_duration_ms": 1000, "query_time_ms": 500},
             "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
             "platform": {"name": "Test"},
-            "summary": {"queries": {"total": 0, "passed": 0, "failed": 0}, "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0}},
+            "summary": {
+                "queries": {"total": 0, "passed": 0, "failed": 0},
+                "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0},
+            },
             "queries": [],
         }
 
@@ -487,7 +493,10 @@ class TestSchemaV2Validation:
             "run": {"id": "test"},  # Missing required fields
             "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
             "platform": {"name": "Test"},
-            "summary": {"queries": {"total": 0, "passed": 0, "failed": 0}, "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0}},
+            "summary": {
+                "queries": {"total": 0, "passed": 0, "failed": 0},
+                "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0},
+            },
             "queries": [],
         }
 
@@ -505,7 +514,10 @@ class TestSchemaV2Validation:
             "run": {"id": "test", "timestamp": "2025-01-01T00:00:00", "total_duration_ms": 1000, "query_time_ms": 500},
             "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
             "platform": {"name": "Test"},
-            "summary": {"queries": {"total": 0, "passed": 0, "failed": 0}, "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0}},
+            "summary": {
+                "queries": {"total": 0, "passed": 0, "failed": 0},
+                "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0},
+            },
             "queries": [],
             "unexpected_key": {},  # Unexpected
         }
@@ -524,7 +536,10 @@ class TestSchemaV2Validation:
             "run": {"id": "test", "timestamp": "2025-01-01T00:00:00", "total_duration_ms": 1000, "query_time_ms": 500},
             "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
             "platform": {"name": "Test"},
-            "summary": {"queries": {"total": 1, "passed": 1, "failed": 0}, "timing": {"total_ms": 500, "avg_ms": 500, "min_ms": 500, "max_ms": 500}},
+            "summary": {
+                "queries": {"total": 1, "passed": 1, "failed": 0},
+                "timing": {"total_ms": 500, "avg_ms": 500, "min_ms": 500, "max_ms": 500},
+            },
             "queries": [{"id": "1", "ms": 500.0, "rows": 10}],
         }
 

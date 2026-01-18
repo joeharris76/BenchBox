@@ -331,9 +331,7 @@ class TestDataprocAdapterTuning:
             patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
             # SparkConfigOptimizer is now used from the mixin module
-            patch(
-                "benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer"
-            ) as mock_optimizer,
+            patch("benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer") as mock_optimizer,
         ):
             mock_staging.from_uri.return_value = MagicMock()
             mock_config = MagicMock()

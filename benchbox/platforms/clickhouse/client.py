@@ -39,11 +39,7 @@ class ClickHouseLocalClient:
 
             # Use different API for persistent session vs connection
             # Session API: query(sql, format) vs Connection API: query(sql, format=format)
-            result = (
-                self._conn.query(query, "CSV")
-                if self._is_persistent
-                else self._conn.query(query, format="CSV")
-            )
+            result = self._conn.query(query, "CSV") if self._is_persistent else self._conn.query(query, format="CSV")
 
             # Parse result into list of tuples (similar to clickhouse-driver format)
             if result:

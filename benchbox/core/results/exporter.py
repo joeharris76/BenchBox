@@ -96,8 +96,7 @@ class ResultExporter:
         self.console = console or Console()
         self.anonymize = anonymize
         self.anonymization_manager = (
-            AnonymizationManager(anonymization_config or AnonymizationConfig())
-            if anonymize else None
+            AnonymizationManager(anonymization_config or AnonymizationConfig()) if anonymize else None
         )
         self._validator = SchemaV2Validator()
 
@@ -137,6 +136,7 @@ class ResultExporter:
         if isinstance(result, BenchmarkResults):
             try:
                 from benchbox.core.cost.integration import add_cost_estimation_to_results
+
                 result = add_cost_estimation_to_results(result)
             except Exception as e:
                 logger.debug(f"Cost estimation skipped: {e}")
@@ -153,11 +153,7 @@ class ResultExporter:
         )
 
         explicit_name = getattr(result, "output_filename", None)
-        filename_base = (
-            Path(explicit_name).stem
-            if explicit_name
-            else self._generate_filename_base(result, timestamp)
-        )
+        filename_base = Path(explicit_name).stem if explicit_name else self._generate_filename_base(result, timestamp)
 
         for format_name in formats:
             try:
@@ -187,6 +183,7 @@ class ResultExporter:
 
         try:
             from benchbox.utils.scale_factor import format_scale_factor
+
             scale_factor = format_scale_factor(getattr(result, "scale_factor", 1.0))
         except Exception:
             scale_factor = f"sf{getattr(result, 'scale_factor', 1.0)}"
@@ -311,15 +308,17 @@ class ResultExporter:
             writer.writerow(headers)
 
             for query in self._iter_query_results(result):
-                writer.writerow([
-                    query.get("query_id", ""),
-                    query.get("execution_time_ms", 0),
-                    query.get("rows_returned", 0),
-                    query.get("status", "UNKNOWN"),
-                    query.get("error_message", ""),
-                    query.get("iteration", ""),
-                    query.get("stream_id", ""),
-                ])
+                writer.writerow(
+                    [
+                        query.get("query_id", ""),
+                        query.get("execution_time_ms", 0),
+                        query.get("rows_returned", 0),
+                        query.get("status", "UNKNOWN"),
+                        query.get("error_message", ""),
+                        query.get("iteration", ""),
+                        query.get("stream_id", ""),
+                    ]
+                )
 
             self._write_file(filepath, buffer.getvalue())
             buffer.close()
@@ -335,15 +334,17 @@ class ResultExporter:
                 if exec_time_ms is None and exec_time is not None:
                     exec_time_ms = exec_time * 1000
 
-                writer.writerow([
-                    query.get("query_id", ""),
-                    exec_time_ms or 0,
-                    query.get("rows_returned", 0),
-                    query.get("status", "UNKNOWN"),
-                    query.get("error") or query.get("error_message", ""),
-                    query.get("iteration", ""),
-                    query.get("stream_id", ""),
-                ])
+                writer.writerow(
+                    [
+                        query.get("query_id", ""),
+                        exec_time_ms or 0,
+                        query.get("rows_returned", 0),
+                        query.get("status", "UNKNOWN"),
+                        query.get("error") or query.get("error_message", ""),
+                        query.get("iteration", ""),
+                        query.get("stream_id", ""),
+                    ]
+                )
 
         return filepath
 
@@ -401,7 +402,7 @@ class ResultExporter:
             <strong>Platform:</strong> {platform} |
             <strong>Scale:</strong> {scale_factor} |
             <strong>Run:</strong> {execution_id} |
-            <strong>Time:</strong> {timestamp.isoformat() if timestamp else 'N/A'}
+            <strong>Time:</strong> {timestamp.isoformat() if timestamp else "N/A"}
         </div>
         <div class="stats">
             <div class="stat">
@@ -507,31 +508,35 @@ class ResultExporter:
 
                 if version == "2.0":
                     # Schema v2.0 format
-                    results.append({
-                        "file": json_file,
-                        "version": "2.0",
-                        "benchmark": data.get("benchmark", {}).get("name", "Unknown"),
-                        "platform": data.get("platform", {}).get("name", "Unknown"),
-                        "scale_factor": data.get("benchmark", {}).get("scale_factor", 1.0),
-                        "execution_id": data.get("run", {}).get("id", ""),
-                        "timestamp": data.get("run", {}).get("timestamp", ""),
-                        "duration": data.get("run", {}).get("total_duration_ms", 0) / 1000,
-                        "queries": data.get("summary", {}).get("queries", {}).get("total", 0),
-                        "status": data.get("summary", {}).get("validation", "unknown"),
-                    })
+                    results.append(
+                        {
+                            "file": json_file,
+                            "version": "2.0",
+                            "benchmark": data.get("benchmark", {}).get("name", "Unknown"),
+                            "platform": data.get("platform", {}).get("name", "Unknown"),
+                            "scale_factor": data.get("benchmark", {}).get("scale_factor", 1.0),
+                            "execution_id": data.get("run", {}).get("id", ""),
+                            "timestamp": data.get("run", {}).get("timestamp", ""),
+                            "duration": data.get("run", {}).get("total_duration_ms", 0) / 1000,
+                            "queries": data.get("summary", {}).get("queries", {}).get("total", 0),
+                            "status": data.get("summary", {}).get("validation", "unknown"),
+                        }
+                    )
                 else:
                     # Legacy v1.x format - still supported for reading
-                    results.append({
-                        "file": json_file,
-                        "version": version,
-                        "benchmark": data.get("benchmark", {}).get("name", "Unknown"),
-                        "platform": data.get("execution", {}).get("platform", "Unknown"),
-                        "execution_id": data.get("execution", {}).get("id", ""),
-                        "timestamp": data.get("execution", {}).get("timestamp", ""),
-                        "duration": data.get("execution", {}).get("duration_ms", 0) / 1000,
-                        "queries": data.get("results", {}).get("queries", {}).get("total", 0),
-                        "status": data.get("validation", {}).get("status", "UNKNOWN"),
-                    })
+                    results.append(
+                        {
+                            "file": json_file,
+                            "version": version,
+                            "benchmark": data.get("benchmark", {}).get("name", "Unknown"),
+                            "platform": data.get("execution", {}).get("platform", "Unknown"),
+                            "execution_id": data.get("execution", {}).get("id", ""),
+                            "timestamp": data.get("execution", {}).get("timestamp", ""),
+                            "duration": data.get("execution", {}).get("duration_ms", 0) / 1000,
+                            "queries": data.get("results", {}).get("queries", {}).get("total", 0),
+                            "status": data.get("validation", {}).get("status", "UNKNOWN"),
+                        }
+                    )
 
             except Exception as exc:
                 logger.debug("Could not read %s: %s", json_file, exc)
@@ -659,21 +664,22 @@ class ResultExporter:
             current_time = current_query.get("execution_time_ms") or 0
             change = ((current_time - baseline_time) / baseline_time * 100) if baseline_time else 0
 
-            comparison["query_comparisons"].append({
-                "query_id": query_id,
-                "baseline_time_ms": baseline_time,
-                "current_time_ms": current_time,
-                "change_percent": round(change, 2),
-                "improved": current_time < baseline_time,
-            })
+            comparison["query_comparisons"].append(
+                {
+                    "query_id": query_id,
+                    "baseline_time_ms": baseline_time,
+                    "current_time_ms": current_time,
+                    "change_percent": round(change, 2),
+                    "improved": current_time < baseline_time,
+                }
+            )
 
         # Generate summary
         if comparison["query_comparisons"]:
             improved = len([q for q in comparison["query_comparisons"] if q["improved"]])
-            regressed = len([
-                q for q in comparison["query_comparisons"]
-                if not q["improved"] and q["change_percent"] > 0
-            ])
+            regressed = len(
+                [q for q in comparison["query_comparisons"] if not q["improved"] and q["change_percent"] > 0]
+            )
             comparison["summary"] = {
                 "total_queries_compared": len(comparison["query_comparisons"]),
                 "improved_queries": improved,
@@ -718,8 +724,12 @@ class ResultExporter:
                 "total_queries": queries_block.get("total", 0) if isinstance(queries_block, Mapping) else 0,
                 "successful_queries": queries_block.get("successful", 0) if isinstance(queries_block, Mapping) else 0,
                 "failed_queries": queries_block.get("failed", 0) if isinstance(queries_block, Mapping) else 0,
-                "total_execution_time": (timing_block.get("total_ms", 0) / 1000) if isinstance(timing_block, Mapping) else 0.0,
-                "average_query_time": (timing_block.get("avg_ms", 0) / 1000) if isinstance(timing_block, Mapping) else 0.0,
+                "total_execution_time": (timing_block.get("total_ms", 0) / 1000)
+                if isinstance(timing_block, Mapping)
+                else 0.0,
+                "average_query_time": (timing_block.get("avg_ms", 0) / 1000)
+                if isinstance(timing_block, Mapping)
+                else 0.0,
             }
 
     def _extract_query_map(self, data: dict[str, Any], version: str) -> dict[str, dict[str, Any]]:
@@ -766,11 +776,7 @@ class ResultExporter:
             return "no_data"
 
         time_metrics = ["total_execution_time", "average_query_time"]
-        time_changes = [
-            performance_changes[m]["change_percent"]
-            for m in time_metrics
-            if m in performance_changes
-        ]
+        time_changes = [performance_changes[m]["change_percent"] for m in time_metrics if m in performance_changes]
 
         if not time_changes:
             return "unknown"
@@ -855,21 +861,25 @@ class ResultExporter:
         </div>
         <h2>Performance Changes</h2>
         <ul>
-            {"".join(
+            {
+            "".join(
                 f"<li>{metric.replace('_', ' ').title()}: {vals['change_percent']:+.1f}% "
                 f"({'Improved' if vals['improved'] else 'Regressed'})</li>"
                 for metric, vals in performance_changes.items()
-            )}
+            )
+        }
         </ul>
         <h2>Query Details</h2>
         <table>
             <tr><th>Query</th><th>Baseline (ms)</th><th>Current (ms)</th><th>Change</th><th>Status</th></tr>
-            {"".join(
+            {
+            "".join(
                 f"<tr><td>{q['query_id']}</td><td>{q['baseline_time_ms']:.1f}</td>"
                 f"<td>{q['current_time_ms']:.1f}</td><td>{q['change_percent']:+.1f}%</td>"
                 f"<td>{'Improved' if q['improved'] else 'Regressed'}</td></tr>"
                 for q in query_comparisons
-            )}
+            )
+        }
         </table>
     </div>
 </body>
