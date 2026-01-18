@@ -1,0 +1,666 @@
+<!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
+
+# Write Primitives Benchmark
+
+```{tags} intermediate, concept, write-primitives, custom-benchmark, performance
+```
+
+## Overview
+
+The Write Primitives benchmark provides comprehensive testing of fundamental database write operations using TPC-H schema as foundation. It tests INSERT, UPDATE, DELETE, BULK_LOAD, MERGE, and DDL operations across a wide range of platforms.
+
+**Note**: Transaction operations (COMMIT, ROLLBACK, SAVEPOINT, isolation levels) are provided separately in the [Transaction Primitives](transaction-primitives.md) benchmark for better platform compatibility and focused testing.
+
+## Key Features
+
+- **109 comprehensive write operations** across 6 categories
+- **Broad platform compatibility** including ClickHouse, BigQuery, Snowflake, PostgreSQL, DuckDB
+- **Non-transactional cleanup** using explicit DELETE/DROP statements
+- **Category-based isolation** with 16 dedicated staging tables
+- **Dynamic data partitioning** that works with any dataset size
+- **TPC-H schema integration** for realistic data patterns
+- **Automatic validation** of write correctness
+
+## Quick Start
+
+```python
+from benchbox import WritePrimitives
+import duckdb
+
+# Initialize benchmark
+bench = WritePrimitives(scale_factor=0.01)
+
+# Setup requires TPC-H data first
+from benchbox import TPCH
+tpch = TPCH(scale_factor=0.01)
+tpch.generate_data()
+
+conn = duckdb.connect(":memory:")
+tpch.load_data_to_database(conn)
+
+# Setup staging tables
+bench.setup(conn)
+
+# Execute a write operation
+result = bench.execute_operation("insert_single_row", conn)
+print(f"Success: {result.success}")
+print(f"Rows affected: {result.rows_affected}")
+print(f"Duration: {result.write_duration_ms:.2f}ms")
+```
+
+## Operations Catalog
+
+The benchmark includes **109 write operations** across 6 categories:
+
+### INSERT (12 operations)
+
+- Single row INSERT
+- Batch INSERT (10, 100, 1000 rows)
+- INSERT...SELECT (simple, with JOIN, aggregated, from multiple tables)
+- INSERT...UNION
+- INSERT with default values
+- INSERT...ON CONFLICT (UPSERT)
+- INSERT...RETURNING
+
+**Purpose**: Test basic row insertion, bulk insertion patterns, and INSERT variants including UPSERT.
+
+### UPDATE (15 operations)
+
+- Single row by primary key
+- Selective (10%, 50%, 100% of rows)
+- With subquery, JOIN, aggregate
+- Multi-column updates (5+ columns)
+- With CASE expression, computed columns
+- String manipulation, date arithmetic
+- Conditional updates
+- UPDATE...RETURNING
+
+**Purpose**: Test row modification patterns from simple primary key updates to complex multi-table updates.
+
+### DELETE (14 operations)
+
+- Single row by primary key
+- Selective (10%, 25%, 50%, 75% of rows)
+- With subquery, JOIN, aggregation
+- With NOT EXISTS (anti-join)
+- DELETE...RETURNING
+- Cascade simulation
+- DELETE vs TRUNCATE comparison
+- GDPR-compliant deletion patterns (1%, 5% of suppliers)
+
+**Purpose**: Test row deletion patterns including cascade effects and data retention compliance scenarios.
+
+### BULK_LOAD (36 operations)
+
+- CSV loads (3 sizes: 1K, 100K, 1M rows)
+  - 4 compression variants each: uncompressed, gzip, zstd, bzip2
+- Parquet loads (3 sizes: 1K, 100K, 1M rows)
+  - 4 compression variants each: uncompressed, snappy, gzip, zstd
+- Special operations:
+  - Column subset loading
+  - Inline transformations (CAST, UPPER, CONCAT)
+  - Error handling (skip malformed rows)
+  - Parallel multi-file loading
+  - UPSERT mode (MERGE during load)
+  - Append vs replace modes
+  - Custom delimiters, quoted fields
+  - NULL handling, UTF-8 encoding
+  - Custom date formats
+
+**Purpose**: Test bulk data loading from files with various formats, compressions, and transformation requirements.
+
+### MERGE (20 operations)
+
+- Simple UPSERT
+- UPSERT with DELETE clause (tri-directional)
+- Varying overlap scenarios (10%, 50%, 90%, none, all)
+- Multi-column join conditions
+- Aggregated source queries
+- Conditional UPDATE and INSERT
+- Multi-column updates
+- Computed values, string operations, date arithmetic
+- CTE sources
+- MERGE...RETURNING
+- Error handling (duplicate sources)
+- ETL aggregation with running totals
+- Window function deduplication (ROW_NUMBER pattern)
+
+**Purpose**: Test UPSERT/MERGE operations for CDC, ETL, and incremental data loading scenarios.
+
+### DDL (12 operations)
+
+- CREATE TABLE (simple, with constraints, with indexes)
+- CREATE TABLE AS SELECT (simple, aggregated)
+- ALTER TABLE (ADD COLUMN, DROP COLUMN, RENAME COLUMN)
+- CREATE INDEX (on empty table, on existing data)
+- DROP INDEX
+- CREATE VIEW
+- DROP TABLE
+- TRUNCATE TABLE (small, large datasets)
+
+**Purpose**: Test schema modification operations including table and index creation/modification.
+
+## Design Philosophy
+
+The Write Primitives benchmark is designed for **broad platform compatibility** by focusing on individual write operations rather than multi-statement transactions.
+
+**Architecture Decisions**:
+- **Platform Compatibility**: Works across analytical databases (ClickHouse, BigQuery, Snowflake, Databricks, Redshift) and embedded databases (DuckDB, SQLite)
+- **Focused Testing**: Tests write operation performance and correctness independently from transaction semantics
+- **Clear Separation**: Transaction testing is handled by the separate [Transaction Primitives](transaction-primitives.md) benchmark
+
+**Key Features**:
+- **Category-based isolation**: 16 dedicated staging tables (one per operation category)
+- **Non-transactional cleanup**: Explicit DELETE/DROP statements work across all platforms
+- **Dynamic data partitioning**: Works with any dataset size (3 rows to 10M rows)
+- **Optional dependencies**: Graceful handling of missing tables (e.g., supplier)
+
+**Operation Count**:
+- **Write Primitives**: 109 operations (INSERT, UPDATE, DELETE, MERGE, BULK_LOAD, DDL)
+- **Transaction Primitives**: 8 operations (COMMIT, ROLLBACK, SAVEPOINT, isolation levels)
+
+## Design
+
+### Data Sharing
+
+- **Reuses TPC-H data** via `get_data_source_benchmark() -> "tpch"`
+- No duplicate data generation
+- Staging tables created from base TPC-H tables
+
+### Category-Based Isolation
+
+Each operation category has dedicated staging tables:
+
+**INSERT category**:
+- `insert_ops_lineitem` - Target for lineitem inserts
+- `insert_ops_orders` - Target for order inserts
+- `insert_ops_orders_summary` - Target for aggregated inserts
+- `insert_ops_lineitem_enriched` - Target for joined inserts
+
+**UPDATE category**:
+- `update_ops_orders` - Copy of orders for update testing
+
+**DELETE category**:
+- `delete_ops_orders` - Copy of orders for delete testing
+- `delete_ops_lineitem` - Copy of lineitem for delete testing
+- `delete_ops_supplier` - Copy of supplier for GDPR deletion testing (optional)
+
+**MERGE category**:
+- `merge_ops_target` - First 50% of orders (merge target)
+- `merge_ops_source` - Second 50% of orders (merge source)
+- `merge_ops_lineitem_target` - First 50% of lineitems
+- `merge_ops_summary_target` - Target for aggregated merges
+
+**BULK_LOAD category**:
+- `bulk_load_ops_target` - Target for bulk load testing
+
+**DDL category**:
+- `ddl_truncate_target` - Target for TRUNCATE testing
+
+**Metadata**:
+- `write_ops_log` - Audit log for operations
+- `batch_metadata` - Tracks batch operations
+
+### Non-Transactional Cleanup
+
+The benchmark uses explicit cleanup operations instead of transaction rollback for maximum platform compatibility:
+
+```python
+# Execute write operation
+INSERT INTO insert_ops_orders ...;
+
+# Explicit cleanup
+DELETE FROM insert_ops_orders WHERE o_orderkey = ...;
+```
+
+**Benefits**:
+- Works on databases without transaction support (ClickHouse, BigQuery)
+- Clear, predictable cleanup behavior
+- Easier debugging and validation
+- Consistent behavior across all platforms
+
+### Dynamic Data Partitioning
+
+The benchmark uses percentage-based queries instead of hard-coded key ranges for maximum flexibility:
+
+```python
+# Dynamic approach (works with any data size)
+INSERT INTO merge_ops_target
+SELECT * FROM orders
+WHERE o_orderkey <= (SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM orders);
+```
+
+**Benefits**:
+- Works with test data (3 rows) and production data (10M rows)
+- Consistent 50/50 splits for MERGE testing
+- No hard-coded assumptions about key ranges
+- Adapts automatically to actual data distribution
+
+### Validation
+
+- Every write operation has corresponding read queries
+- Validates correctness and consistency
+- Measures end-to-end write-read cycle
+
+## Schema
+
+### Staging Tables (16 total)
+
+**INSERT category** (4 tables):
+- `insert_ops_lineitem`
+- `insert_ops_orders`
+- `insert_ops_orders_summary`
+- `insert_ops_lineitem_enriched`
+
+**UPDATE category** (1 table):
+- `update_ops_orders`
+
+**DELETE category** (3 tables):
+- `delete_ops_orders`
+- `delete_ops_lineitem`
+- `delete_ops_supplier` (optional)
+
+**MERGE category** (4 tables):
+- `merge_ops_target`
+- `merge_ops_source`
+- `merge_ops_lineitem_target`
+- `merge_ops_summary_target`
+
+**BULK_LOAD category** (1 table):
+- `bulk_load_ops_target`
+
+**DDL category** (1 table):
+- `ddl_truncate_target`
+
+**Metadata** (2 tables):
+- `write_ops_log`
+- `batch_metadata`
+
+## CLI Integration
+
+```bash
+# List available benchmarks
+benchbox list
+
+# Run Write Primitives benchmark
+benchbox run write_primitives --platform duckdb --scale-factor 0.01
+
+# Run specific categories
+benchbox run write_primitives --platform duckdb --categories insert,update
+
+# Run specific operations
+benchbox run write_primitives --platform duckdb --operations insert_single_row,update_single_row_pk
+```
+
+**Important Notes**:
+- Requires TPC-H data to be loaded first
+- Staging tables automatically created during setup
+- Each operation includes automatic validation and cleanup
+
+## API Reference
+
+### WritePrimitives Class
+
+#### Constructor
+
+```python
+WritePrimitives(
+    scale_factor: float = 1.0,
+    output_dir: str = "_project/data",
+    quiet: bool = False
+)
+```
+
+**Parameters**:
+- `scale_factor`: TPC-H scale factor (must match TPC-H data)
+- `output_dir`: Directory for data files
+- `quiet`: Suppress verbose logging
+
+#### Lifecycle Methods
+
+**`setup(connection, force=False) -> Dict[str, Any]`**
+
+Creates staging tables and populates them from TPC-H base tables.
+
+- **Parameters**:
+  - `connection`: Database connection
+  - `force`: If True, drop existing staging tables first
+- **Returns**: Dict with keys `success`, `tables_created`, `tables_populated`
+- **Raises**: `RuntimeError` if TPC-H tables don't exist
+
+**`is_setup(connection) -> bool`**
+
+Check if staging tables are initialized.
+
+**`reset(connection) -> None`**
+
+Truncate and repopulate staging tables to initial state.
+
+**`teardown(connection) -> None`**
+
+Drop all staging tables.
+
+#### Execution Methods
+
+**`execute_operation(operation_id, connection) -> OperationResult`**
+
+Execute a single write operation with validation and cleanup.
+
+- **Parameters**:
+  - `operation_id`: Operation ID (e.g., "insert_single_row")
+  - `connection`: Database connection
+- **Returns**: `OperationResult` with execution metrics
+- **Raises**: `ValueError` if operation not found
+
+**`run_benchmark(connection, operation_ids=None, categories=None) -> List[OperationResult]`**
+
+Run multiple operations.
+
+- **Parameters**:
+  - `operation_ids`: List of specific operation IDs to run
+  - `categories`: List of categories to run (e.g., ["insert", "update"])
+- **Returns**: List of `OperationResult` objects
+
+#### Query Methods
+
+**`get_all_operations() -> Dict[str, WriteOperation]`**
+
+Get all available operations (109 total).
+
+**`get_operation(operation_id) -> WriteOperation`**
+
+Get specific operation by ID.
+
+**`get_operations_by_category(category) -> Dict[str, WriteOperation]`**
+
+Get operations filtered by category.
+
+**`get_operation_categories() -> List[str]`**
+
+Get list of available categories: `["insert", "update", "delete", "merge", "bulk_load", "ddl"]`
+
+**`get_schema(dialect="standard") -> Dict[str, Dict]`**
+
+Get staging table schema definitions.
+
+**`get_create_tables_sql(dialect="standard") -> str`**
+
+Get SQL to create staging tables.
+
+### OperationResult
+
+Result object returned by `execute_operation` and `run_benchmark`.
+
+**Fields**:
+- `operation_id: str` - Operation identifier
+- `success: bool` - Whether operation succeeded
+- `write_duration_ms: float` - Write execution time in milliseconds
+- `rows_affected: int` - Number of rows affected (-1 if unknown)
+- `validation_duration_ms: float` - Validation time in milliseconds
+- `validation_passed: bool` - Whether validation passed
+- `validation_results: List[Dict]` - Detailed validation results
+- `cleanup_duration_ms: float` - Cleanup time in milliseconds
+- `cleanup_success: bool` - Whether cleanup succeeded
+- `error: Optional[str]` - Error message if operation failed
+- `cleanup_warning: Optional[str]` - Warning for cleanup failures
+
+## Execution Examples
+
+### Prerequisites
+
+```python
+from benchbox import TPCH, WritePrimitives
+import duckdb
+
+# 1. Load TPC-H data
+tpch = TPCH(scale_factor=0.01, output_dir="_project/data")
+tpch.generate_data()
+
+conn = duckdb.connect(":memory:")
+tpch.load_data_to_database(conn)
+```
+
+### Setup Staging Tables
+
+```python
+# 2. Setup Write Primitives staging tables
+bench = WritePrimitives(scale_factor=0.01)
+setup_result = bench.setup(conn, force=True)
+
+print(f"Setup: {setup_result['success']}")
+print(f"Tables created: {len(setup_result['tables_created'])}")
+# Output:
+# Setup: True
+# Tables created: 16
+```
+
+### Execute Single Operation
+
+```python
+# 3. Execute with automatic validation and cleanup
+result = bench.execute_operation("insert_single_row", conn)
+
+print(f"Operation: {result.operation_id}")
+print(f"Success: {result.success}")
+print(f"Rows affected: {result.rows_affected}")
+print(f"Write time: {result.write_duration_ms:.2f}ms")
+print(f"Validation passed: {result.validation_passed}")
+
+# Output:
+# Operation: insert_single_row
+# Success: True
+# Rows affected: 1
+# Write time: 2.45ms
+# Validation passed: True
+```
+
+### Run Full Benchmark
+
+```python
+# 4. Run all operations
+results = bench.run_benchmark(conn)
+
+print(f"Total operations: {len(results)}")  # 109
+successful = [r for r in results if r.success]
+print(f"Successful: {len(successful)}")
+
+# Analyze results
+for result in results:
+    print(f"{result.operation_id}: {result.write_duration_ms:.2f}ms")
+```
+
+### Filter by Category
+
+```python
+# 5. Run only INSERT operations
+insert_results = bench.run_benchmark(conn, categories=["insert"])
+
+# 6. Run specific operations
+specific_ops = ["insert_single_row", "update_single_row_pk", "delete_single_row_pk"]
+results = bench.run_benchmark(conn, operation_ids=specific_ops)
+```
+
+## Platform-Specific Notes
+
+### DuckDB
+
+**Recommended for development and testing**.
+
+```python
+import duckdb
+conn = duckdb.connect(":memory:")
+```
+
+- Fast execution ✅
+- Full SQL support ✅
+- Easy setup ✅
+- Good for testing Write Primitives ✅
+
+### PostgreSQL
+
+**Full write operation support**.
+
+```python
+import psycopg2
+conn = psycopg2.connect("dbname=benchmark")
+```
+
+- Full SQL support ✅
+- All write operations supported ✅
+- Production-grade ✅
+
+### ClickHouse
+
+**Supported with limitations**.
+
+```python
+from clickhouse_driver import Client
+client = Client('localhost')
+```
+
+- No multi-statement transactions ✅ (Write Primitives doesn't require them)
+- MERGE may use ALTER TABLE UPDATE/DELETE syntax
+- Optimized for bulk data loading ✅
+
+### BigQuery
+
+**Supported with limitations**.
+
+```python
+from google.cloud import bigquery
+client = bigquery.Client()
+```
+
+- No multi-statement transactions ✅ (Write Primitives doesn't require them)
+- MERGE fully supported ✅
+- Excellent at scale ✅
+
+### Snowflake
+
+**Fully supported**.
+
+```python
+import snowflake.connector
+conn = snowflake.connector.connect(...)
+```
+
+- Full SQL support ✅
+- Excellent MERGE performance ✅
+- Good for large-scale testing ✅
+
+## Troubleshooting
+
+### "Required TPC-H table not found"
+
+**Error**: `RuntimeError: Required TPC-H table 'orders' not found`
+
+**Solution**: Load TPC-H data first before running Write Primitives.
+
+```python
+from benchbox import TPCH
+tpch = TPCH(scale_factor=0.01)
+tpch.generate_data()
+tpch.load_data_to_database(conn)
+```
+
+### "Staging tables not initialized"
+
+**Error**: `RuntimeError: Staging tables not initialized`
+
+**Solution**: Call setup() before executing operations.
+
+```python
+bench = WritePrimitives(scale_factor=0.01)
+bench.setup(conn)  # Must call setup first
+result = bench.execute_operation("insert_single_row", conn)
+```
+
+### Validation Failures
+
+**Issue**: Operations succeed but validation fails.
+
+**Possible causes**:
+1. **Data-dependent operations**: Some operations depend on TPC-H data distribution
+2. **Platform differences**: Different databases may return different rowcounts
+
+**Solution**: Check validation results for details.
+
+```python
+result = bench.execute_operation("insert_select_simple", conn)
+if not result.validation_passed:
+    for val_result in result.validation_results:
+        print(f"Query: {val_result['query_id']}")
+        print(f"Expected: {val_result['expected_rows']}")
+        print(f"Actual: {val_result['actual_rows']}")
+```
+
+### Performance Issues
+
+**Issue**: Operations running slower than expected.
+
+**Checks**:
+1. **Scale factor**: Larger scale factors = more data = slower operations
+2. **Indexes**: Ensure TPC-H tables have proper indexes
+3. **Hardware**: Check disk I/O and memory
+
+**Optimization**:
+```python
+# Use smaller scale factors for faster testing
+bench = WritePrimitives(scale_factor=0.001)
+```
+
+## Relationship to Transaction Primitives
+
+Write Primitives and Transaction Primitives are complementary benchmarks designed for different testing scenarios:
+
+### Write Primitives
+
+- **Focus**: Individual write operations (INSERT, UPDATE, DELETE, MERGE, BULK_LOAD, DDL)
+- **Platform support**: Broad (ClickHouse, BigQuery, DuckDB, PostgreSQL, Snowflake, Redshift)
+- **Transaction requirements**: None (uses explicit cleanup)
+- **Operations**: 109 operations across 6 categories
+- **Use case**: Testing write operation performance and correctness across diverse platforms
+
+### Transaction Primitives
+
+- **Focus**: Multi-statement transactions and ACID guarantees
+- **Platform support**: Designed for ACID-capable databases (PostgreSQL, MySQL, SQL Server, Oracle - adapters not yet available; currently limited support via DuckDB/SQLite)
+- **Transaction requirements**: Required (tests transaction semantics)
+- **Operations**: 8 operations focused on ACID behavior
+- **Use case**: Testing transaction isolation, atomicity, consistency, durability
+
+### Using Both Together
+
+For comprehensive database testing, use both benchmarks:
+
+```python
+from benchbox import WritePrimitives, TransactionPrimitives
+
+# Test write operations (works on all platforms)
+write_bench = WritePrimitives(scale_factor=0.01)
+write_results = write_bench.run_benchmark(conn)
+
+# Test transactions (ACID-capable databases only)
+if platform_supports_acid:
+    txn_bench = TransactionPrimitives(scale_factor=0.01)
+    txn_results = txn_bench.run_benchmark(conn)
+```
+
+## Testing
+
+```bash
+# Run unit tests
+uv run -- python -m pytest tests/unit/benchmarks/test_write_primitives_core.py -v
+
+# Run integration tests
+uv run -- python -m pytest tests/integration/test_write_primitives_duckdb.py -v
+
+# Test basic functionality
+uv run -- python -c "from benchbox import WritePrimitives; bench = WritePrimitives(0.01); print(bench.get_benchmark_info())"
+```
+
+## License
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License.

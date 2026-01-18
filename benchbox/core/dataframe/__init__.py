@@ -1,0 +1,214 @@
+"""Core DataFrame abstractions for BenchBox.
+
+This module provides the foundational abstractions for DataFrame benchmarking,
+enabling 95%+ code reuse across 8 dataframe platforms using a family-based
+architecture.
+
+Architecture:
+- DataFrameQuery: Query definition supporting dual-family implementations
+- DataFrameContext: Table access and expression helpers
+- DataFrameOps: Protocol defining common DataFrame operations
+- DataFrameGroupBy: Protocol for grouped operations
+
+Family-Based Design:
+Python dataframe libraries cluster into 2 syntactic families:
+1. Pandas-like: Pandas, Modin, cuDF, Vaex, Dask
+   - String-based column access: df['column']
+   - Boolean indexing: df[df['col'] > 5]
+   - Dict aggregation: .agg({'col': 'sum'})
+
+2. Expression-based: Polars, PySpark, DataFusion
+   - Expression column access: col('column')
+   - Expression filtering: df.filter(col('col') > 5)
+   - Expression aggregation: .agg(col('col').sum())
+
+Each query is implemented once per family, with platform differences
+isolated to thin adapters handling I/O and type conversions.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from benchbox.core.dataframe.benchmark_suite import (
+    PLATFORM_CAPABILITIES,
+    BenchmarkConfig,
+    ComparisonSummary,
+    DataFrameBenchmarkSuite,
+    DataFrameComparisonPlotter,
+    PlatformBenchmarkResult,
+    PlatformCapability,
+    PlatformCategory,
+    QueryBenchmarkResult,
+    SQLComparisonResult,
+    SQLVsDataFrameBenchmark,
+    SQLVsDataFramePlotter,
+    SQLVsDataFrameSummary,
+    run_quick_comparison,
+    run_sql_vs_dataframe,
+)
+from benchbox.core.dataframe.capabilities import (
+    DataFormat,
+    ExecutionModel,
+    MemoryCheckResult,
+    MemoryEstimate,
+    PlatformCapabilities,
+    check_sufficient_memory,
+    estimate_memory_required,
+    format_memory_warning,
+    get_available_memory_gb,
+    get_gpu_memory_gb,
+    get_platform_capabilities,
+    get_total_memory_gb,
+    list_platform_capabilities,
+    recommend_platform_for_sf,
+    validate_scale_factor,
+)
+from benchbox.core.dataframe.context import (
+    DataFrameContext,
+    DataFrameContextImpl,
+)
+from benchbox.core.dataframe.data_loader import (
+    CacheManifest,
+    ConversionStatus,
+    DataCache,
+    DataFrameDataLoader,
+    DataLoadResult,
+    FormatConverter,
+    LoadedTable,
+    SchemaMapper,
+    get_tpcds_column_names,
+    get_tpch_column_names,
+)
+from benchbox.core.dataframe.profiling import (
+    ComparisonResult,
+    DataFrameProfiler,
+    MemoryTracker,
+    ProfiledExecutionResult,
+    ProfileMetricType,
+    QueryExecutionProfile,
+    QueryPlan,
+    QueryProfileContext,
+    capture_datafusion_plan,
+    capture_polars_plan,
+    capture_pyspark_plan,
+    capture_query_plan,
+    compare_execution_modes,
+    get_current_memory_mb,
+    profile_query_execution,
+    track_memory,
+)
+from benchbox.core.dataframe.protocols import (
+    AggregateFunction,
+    DataFrameGroupBy,
+    DataFrameOps,
+    JoinType,
+    SortOrder,
+)
+from benchbox.core.dataframe.query import (
+    DataFrameQuery,
+    QueryCategory,
+    QueryRegistry,
+)
+from benchbox.core.dataframe.validation import (
+    ComparisonStatus,
+    DataFrameValidator,
+    ValidationConfig,
+    ValidationLevel,
+    ValidationResult,
+    compare_dataframes,
+    compare_with_sql,
+    fuzzy_float_compare,
+    validate_column_names,
+    validate_query_result,
+    validate_row_count,
+)
+
+__all__ = [
+    # Query definitions
+    "DataFrameQuery",
+    "QueryCategory",
+    "QueryRegistry",
+    # Context
+    "DataFrameContext",
+    "DataFrameContextImpl",
+    # Protocols
+    "DataFrameOps",
+    "DataFrameGroupBy",
+    # Enums
+    "JoinType",
+    "AggregateFunction",
+    "SortOrder",
+    "DataFormat",
+    "ExecutionModel",
+    # Capabilities
+    "PlatformCapabilities",
+    "MemoryEstimate",
+    "MemoryCheckResult",
+    "get_platform_capabilities",
+    "list_platform_capabilities",
+    "estimate_memory_required",
+    "get_available_memory_gb",
+    "get_total_memory_gb",
+    "get_gpu_memory_gb",
+    "check_sufficient_memory",
+    "validate_scale_factor",
+    "format_memory_warning",
+    "recommend_platform_for_sf",
+    # Validation
+    "ValidationResult",
+    "ValidationConfig",
+    "ValidationLevel",
+    "ComparisonStatus",
+    "DataFrameValidator",
+    "compare_dataframes",
+    "compare_with_sql",
+    "validate_query_result",
+    "validate_row_count",
+    "validate_column_names",
+    "fuzzy_float_compare",
+    # Data Loading
+    "DataFrameDataLoader",
+    "DataCache",
+    "DataLoadResult",
+    "LoadedTable",
+    "CacheManifest",
+    "ConversionStatus",
+    "FormatConverter",
+    "SchemaMapper",
+    "get_tpch_column_names",
+    "get_tpcds_column_names",
+    # Profiling
+    "DataFrameProfiler",
+    "QueryExecutionProfile",
+    "QueryPlan",
+    "QueryProfileContext",
+    "MemoryTracker",
+    "ProfiledExecutionResult",
+    "ProfileMetricType",
+    "ComparisonResult",
+    "capture_query_plan",
+    "capture_polars_plan",
+    "capture_datafusion_plan",
+    "capture_pyspark_plan",
+    "compare_execution_modes",
+    "profile_query_execution",
+    "track_memory",
+    "get_current_memory_mb",
+    # Benchmark Suite
+    "BenchmarkConfig",
+    "ComparisonSummary",
+    "DataFrameBenchmarkSuite",
+    "DataFrameComparisonPlotter",
+    "PlatformBenchmarkResult",
+    "PlatformCapability",
+    "PlatformCategory",
+    "QueryBenchmarkResult",
+    "SQLComparisonResult",
+    "SQLVsDataFrameBenchmark",
+    "SQLVsDataFramePlotter",
+    "SQLVsDataFrameSummary",
+    "PLATFORM_CAPABILITIES",
+    "run_quick_comparison",
+    "run_sql_vs_dataframe",
+]

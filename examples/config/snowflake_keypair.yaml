@@ -1,0 +1,14 @@
+type: snowflake
+connection:
+  extra_params:
+    account: "your-account.snowflakecomputing.com"
+    warehouse: "COMPUTE_WH"
+    database: "BENCHBOX"
+    schema: "PUBLIC"
+    authenticator: "snowflake"
+    private_key_path: "/path/to/private_key.p8"
+    private_key_passphrase: "${SNOWFLAKE_KEY_PASSPHRASE}"
+  username: "${SNOWFLAKE_USER}"
+settings:
+  warehouse_size: "LARGE"
+  multi_cluster_warehouse: true

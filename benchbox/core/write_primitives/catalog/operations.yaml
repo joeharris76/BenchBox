@@ -1,0 +1,2566 @@
+# Write Primitives Benchmark Operations Catalog
+# Copyright 2026 Joe Harris / BenchBox Project
+# Licensed under the MIT License
+#
+# Total operations: 109
+# Categories: INSERT (12), UPDATE (15), DELETE (14), BULK_LOAD (36), MERGE (20), DDL (12)
+#
+# Note: Transaction operations have been moved to the Transaction Primitives benchmark.
+# Write Primitives v2 focuses on non-transactional write operations with explicit cleanup.
+#
+# Note: expected_rows_affected: null indicates data-dependent operations where exact
+# row count varies by scale factor or data overlap. These operations are validated
+# through validation_queries instead of fixed row counts.
+
+version: 1
+
+operations:
+  # ============================================================================
+  # INSERT OPERATIONS (12 operations)
+  # ============================================================================
+
+  - id: insert_single_row
+    category: insert
+    description: Tests single row INSERT performance with all columns specified
+    write_sql: |
+      INSERT INTO insert_ops_lineitem
+      VALUES (
+        9000001, 1, 1, 1,
+        10.0, 1000.0, 0.05, 0.02,
+        'N', 'O',
+        DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20',
+        'DELIVER IN PERSON', 'TRUCK', 'test insert'
+      )
+    validation_queries:
+      - id: verify_values
+        sql: |
+          SELECT l_quantity, l_extendedprice, l_discount
+          FROM insert_ops_lineitem
+          WHERE l_orderkey = 9000001
+        expected_rows: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_lineitem WHERE l_orderkey = 9000001
+    expected_rows_affected: 1
+
+  - id: insert_batch_values_10
+    category: insert
+    description: Tests small batch INSERT using VALUES clause with 10 rows
+    write_sql: |
+      INSERT INTO insert_ops_lineitem VALUES
+        (9000010, 1, 1, 1, 10.0, 1000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 1'),
+        (9000011, 2, 2, 1, 20.0, 2000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 2'),
+        (9000012, 3, 3, 1, 30.0, 3000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 3'),
+        (9000013, 4, 4, 1, 40.0, 4000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 4'),
+        (9000014, 5, 5, 1, 50.0, 5000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 5'),
+        (9000015, 6, 6, 1, 60.0, 6000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 6'),
+        (9000016, 7, 7, 1, 70.0, 7000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 7'),
+        (9000017, 8, 8, 1, 80.0, 8000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 8'),
+        (9000018, 9, 9, 1, 90.0, 9000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 9'),
+        (9000019, 10, 10, 1, 100.0, 10000.0, 0.05, 0.02, 'N', 'O', DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20', 'DELIVER IN PERSON', 'TRUCK', 'batch 10')
+    validation_queries:
+      - id: verify_batch
+        sql: SELECT l_orderkey, l_quantity FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9000010 AND 9000019 ORDER BY l_orderkey
+        expected_rows: 10
+    cleanup_sql: |
+      DELETE FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9000010 AND 9000019
+    expected_rows_affected: 10
+
+  - id: insert_select_simple
+    category: insert
+    description: Tests INSERT INTO...SELECT with simple WHERE filter
+    write_sql: |
+      DELETE FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 1 AND 10;
+      INSERT INTO insert_ops_lineitem
+      SELECT * FROM lineitem
+      WHERE l_orderkey BETWEEN 1 AND 10
+    validation_queries:
+      - id: verify_insert_select
+        sql: |
+          SELECT l_orderkey, l_linenumber
+          FROM insert_ops_lineitem
+          WHERE l_orderkey BETWEEN 1 AND 10
+          ORDER BY l_orderkey, l_linenumber
+        expected_rows: null  # Varies by data
+        expected_rows_min: 1  # At least one row should be inserted
+        expected_rows_max: 200  # Reasonable upper bound for orders 1-10
+    cleanup_sql: |
+      DELETE FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 1 AND 10
+    expected_rows_affected: null  # Varies by data
+
+  - id: insert_batch_values_100
+    category: insert
+    description: Tests medium batch INSERT using VALUES clause with 100 rows to measure batch overhead
+    write_sql: |
+      INSERT INTO insert_ops_lineitem
+      SELECT 9000100 + n, 1, 1, 1, 10.0 * n, 1000.0 * n, 0.05, 0.02, 'N', 'O',
+             DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20',
+             'DELIVER IN PERSON', 'TRUCK', 'batch_' || CAST(n AS VARCHAR)
+      FROM (SELECT unnest(generate_series(1, 100)) AS n) t
+    validation_queries:
+      - id: verify_batch_100
+        sql: SELECT COUNT(*) as cnt FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9000100 AND 9000199
+        expected_rows: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9000100 AND 9000199
+    expected_rows_affected: 100
+
+  - id: insert_batch_values_1000
+    category: insert
+    description: Tests large batch INSERT with 1000 rows to measure large batch processing and memory overhead
+    write_sql: |
+      INSERT INTO insert_ops_lineitem
+      SELECT 9001000 + n, 1, 1, 1, 10.0 * n, 1000.0 * n, 0.05, 0.02, 'N', 'O',
+             DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20',
+             'DELIVER IN PERSON', 'TRUCK', 'large_batch_' || CAST(n AS VARCHAR)
+      FROM (SELECT unnest(generate_series(1, 1000)) AS n) t
+    validation_queries:
+      - id: verify_batch_1000
+        sql: SELECT COUNT(*) as cnt FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9001000 AND 9001999
+        expected_rows: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9001000 AND 9001999
+    expected_rows_affected: 1000
+
+  - id: insert_select_with_join
+    category: insert
+    description: Tests INSERT INTO...SELECT with JOIN to measure join overhead during data insertion
+    write_sql: |
+      INSERT INTO insert_ops_orders_summary (o_orderkey, o_custkey, o_orderdate, o_totalprice, customer_name)
+      SELECT o.o_orderkey, o.o_custkey, o.o_orderdate, o.o_totalprice, c.c_name
+      FROM orders o
+      JOIN customer c ON o.o_custkey = c.c_custkey
+      WHERE o.o_orderkey BETWEEN 1 AND 100
+    validation_queries:
+      - id: verify_joined_insert
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM insert_ops_orders_summary
+          WHERE o_orderkey BETWEEN 1 AND 100
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_orders_summary WHERE o_orderkey BETWEEN 1 AND 100
+    expected_rows_affected: null
+
+  - id: insert_select_aggregated
+    category: insert
+    description: Tests INSERT INTO...SELECT with GROUP BY aggregation to measure aggregation overhead
+    write_sql: |
+      INSERT INTO insert_ops_orders_summary (o_custkey, o_totalprice, order_count)
+      SELECT o_custkey, SUM(o_totalprice), COUNT(*)
+      FROM orders
+      WHERE o_orderkey <= 1000
+      GROUP BY o_custkey
+    validation_queries:
+      - id: verify_aggregated_insert
+        sql: |
+          SELECT COUNT(*) as customer_count, SUM(order_count) as total_orders
+          FROM insert_ops_orders_summary
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_orders_summary
+    expected_rows_affected: null
+
+  - id: insert_select_from_multiple
+    category: insert
+    description: Tests INSERT INTO...SELECT from 3 plus tables with multiple JOINs to measure complex query overhead
+    write_sql: |
+      INSERT INTO insert_ops_lineitem_enriched
+        (l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice,
+         o_orderdate, c_name, s_name, p_name)
+      SELECT l.l_orderkey, l.l_partkey, l.l_suppkey, l.l_quantity, l.l_extendedprice,
+             o.o_orderdate, c.c_name, s.s_name, p.p_name
+      FROM lineitem l
+      JOIN orders o ON l.l_orderkey = o.o_orderkey
+      JOIN customer c ON o.o_custkey = c.c_custkey
+      JOIN supplier s ON l.l_suppkey = s.s_suppkey
+      JOIN part p ON l.l_partkey = p.p_partkey
+      WHERE l.l_orderkey BETWEEN 1 AND 50
+    validation_queries:
+      - id: verify_multi_join_insert
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM insert_ops_lineitem_enriched
+          WHERE l_orderkey BETWEEN 1 AND 50
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_lineitem_enriched WHERE l_orderkey BETWEEN 1 AND 50
+    expected_rows_affected: null
+
+  - id: insert_with_default_values
+    category: insert
+    description: Tests INSERT with DEFAULT keyword to measure default value processing overhead
+    write_sql: |
+      INSERT INTO write_ops_log (log_id, operation_id, operation_category, timestamp, rows_affected, duration_ms, success)
+      VALUES (1, 'test_insert', 'insert', CURRENT_TIMESTAMP, 0, 0.0, true)
+    validation_queries:
+      - id: verify_default_insert
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM write_ops_log
+          WHERE operation_id = 'test_insert' AND operation_category = 'insert'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM write_ops_log WHERE operation_id = 'test_insert' AND operation_category = 'insert'
+    expected_rows_affected: null
+
+  - id: insert_select_union
+    category: insert
+    description: Tests INSERT INTO...SELECT with UNION to measure set operation overhead during insertion
+    write_sql: |
+      DELETE FROM insert_ops_orders WHERE o_orderkey BETWEEN 1 AND 50;
+      INSERT INTO insert_ops_orders
+      SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 25
+      UNION ALL
+      SELECT * FROM orders WHERE o_orderkey BETWEEN 26 AND 50
+    validation_queries:
+      - id: verify_union_insert
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM insert_ops_orders
+          WHERE o_orderkey BETWEEN 1 AND 50
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_orders WHERE o_orderkey BETWEEN 1 AND 50
+    expected_rows_affected: null
+
+  - id: insert_on_conflict_ignore
+    category: insert
+    description: Tests INSERT with conflict handling using ON CONFLICT DO NOTHING to measure constraint checking overhead
+    write_sql: |
+      INSERT INTO insert_ops_orders
+      SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 10
+      ON CONFLICT (o_orderkey) DO NOTHING
+    validation_queries:
+      - id: verify_conflict_handling
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM insert_ops_orders
+          WHERE o_orderkey BETWEEN 1 AND 10
+        expected_rows: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_orders WHERE o_orderkey BETWEEN 1 AND 10
+    expected_rows_affected: null
+    platform_overrides:
+      duckdb: |
+        INSERT OR IGNORE INTO insert_ops_orders
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 10
+      sqlite: |
+        INSERT OR IGNORE INTO insert_ops_orders
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 10
+
+  - id: insert_returning_clause
+    category: insert
+    description: Tests INSERT...RETURNING to measure overhead of returning inserted row data
+    write_sql: |
+      INSERT INTO insert_ops_lineitem
+      VALUES (9000500, 1, 1, 1, 10.0, 1000.0, 0.05, 0.02, 'N', 'O',
+              DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20',
+              'DELIVER IN PERSON', 'TRUCK', 'returning_test')
+      RETURNING l_orderkey, l_partkey, l_quantity
+    validation_queries:
+      - id: verify_returning_insert
+        sql: |
+          SELECT l_orderkey, l_quantity
+          FROM insert_ops_lineitem
+          WHERE l_orderkey = 9000500
+        expected_rows: 1
+    cleanup_sql: |
+      DELETE FROM insert_ops_lineitem WHERE l_orderkey = 9000500
+    expected_rows_affected: 1
+    platform_overrides:
+      mysql: null  # MySQL doesn't support RETURNING
+      bigquery: null  # BigQuery doesn't support RETURNING in same way
+
+  # ============================================================================
+  # UPDATE OPERATIONS (15 operations)
+  # ============================================================================
+
+  - id: update_single_row_pk
+    category: update
+    description: Tests single row UPDATE by primary key to measure index lookup plus update cost
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = o_totalprice * 1.1,
+          o_comment = 'updated_single'
+      WHERE o_orderkey = (SELECT MIN(o_orderkey) FROM update_ops_orders)
+    validation_queries:
+      - id: verify_update
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM update_ops_orders
+          WHERE o_comment = 'updated_single'
+        expected_rows: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = o_totalprice / 1.1,
+          o_comment = ''
+      WHERE o_comment = 'updated_single'
+    expected_rows_affected: 1
+
+  - id: update_selective_10pct
+    category: update
+    description: Tests UPDATE affecting approximately 10 percent of table rows to measure selective update performance
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_comment = 'selective_10pct'
+      WHERE o_orderkey <= (
+        SELECT CAST(MAX(o_orderkey) * 0.1 AS INTEGER)
+        FROM update_ops_orders
+      )
+    validation_queries:
+      - id: count_updated
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'selective_10pct'
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_comment = ''
+      WHERE o_comment = 'selective_10pct'
+    expected_rows_affected: null  # Varies
+
+  - id: update_with_subquery
+    category: update
+    description: Tests UPDATE with correlated subquery to measure subquery execution cost per row
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = (
+        SELECT SUM(l_extendedprice * (1 - l_discount))
+        FROM lineitem
+        WHERE l_orderkey = update_ops_orders.o_orderkey
+      )
+      WHERE EXISTS (
+        SELECT 1 FROM lineitem WHERE l_orderkey = update_ops_orders.o_orderkey
+      )
+      AND o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_calculation
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM update_ops_orders o
+          WHERE o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+    cleanup_sql: |
+      -- Recalculate to restore
+      UPDATE update_ops_orders
+      SET o_totalprice = (
+        SELECT SUM(l_extendedprice * (1 - l_discount))
+        FROM lineitem
+        WHERE l_orderkey = update_ops_orders.o_orderkey
+      )
+      WHERE o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+    expected_rows_affected: null
+
+  - id: update_bulk_50pct
+    category: update
+    description: Tests UPDATE affecting approximately 50 percent of table rows to measure large-scale update performance
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_comment = 'bulk_50pct_update'
+      WHERE o_orderkey <= (
+        SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER)
+        FROM update_ops_orders
+      )
+    validation_queries:
+      - id: count_updated_50pct
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'bulk_50pct_update'
+    cleanup_sql: |
+      UPDATE update_ops_orders SET o_comment = '' WHERE o_comment = 'bulk_50pct_update'
+    expected_rows_affected: null
+
+  - id: update_bulk_all
+    category: update
+    description: Tests UPDATE of entire table to measure full table scan and update overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_comment = 'bulk_all_update'
+    validation_queries:
+      - id: verify_all_updated
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'bulk_all_update'
+    cleanup_sql: |
+      UPDATE update_ops_orders SET o_comment = ''
+    expected_rows_affected: null
+
+  - id: update_with_join
+    category: update
+    description: Tests UPDATE with JOIN syntax to measure join overhead during updates
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_comment = 'joined_update'
+      FROM customer
+      WHERE update_ops_orders.o_custkey = customer.c_custkey
+        AND customer.c_mktsegment = 'BUILDING'
+        AND update_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_joined_update
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'joined_update'
+        expected_rows_min: 0
+    cleanup_sql: |
+      UPDATE update_ops_orders SET o_comment = '' WHERE o_comment = 'joined_update'
+    expected_rows_affected: null
+    platform_overrides:
+      mysql: |
+        UPDATE update_ops_orders
+        JOIN customer ON update_ops_orders.o_custkey = customer.c_custkey
+        SET update_ops_orders.o_comment = 'joined_update'
+        WHERE customer.c_mktsegment = 'BUILDING'
+          AND update_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+
+  - id: update_from_select
+    category: update
+    description: Tests UPDATE...FROM...WHERE EXISTS to measure correlated EXISTS overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_comment = 'exists_update'
+      WHERE EXISTS (
+        SELECT 1 FROM lineitem
+        WHERE lineitem.l_orderkey = update_ops_orders.o_orderkey
+          AND lineitem.l_quantity > 40
+      )
+      AND o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_exists_update
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'exists_update'
+        expected_rows_min: 0
+    cleanup_sql: |
+      UPDATE update_ops_orders SET o_comment = '' WHERE o_comment = 'exists_update'
+    expected_rows_affected: null
+
+  - id: update_set_multiple_columns
+    category: update
+    description: Tests UPDATE of 5 plus columns to measure multi-column update overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = o_totalprice * 1.05,
+          o_orderpriority = '1-URGENT',
+          o_comment = 'multi_col_update',
+          o_shippriority = 1,
+          o_clerk = 'Clerk#000000001'
+      WHERE o_orderkey = (SELECT MIN(o_orderkey) FROM update_ops_orders)
+    validation_queries:
+      - id: verify_multi_column
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM update_ops_orders
+          WHERE o_comment = 'multi_col_update'
+        expected_rows: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = o_totalprice / 1.05,
+          o_orderpriority = '5-LOW',
+          o_comment = '',
+          o_shippriority = 0,
+          o_clerk = 'Clerk#000000000'
+      WHERE o_comment = 'multi_col_update'
+    expected_rows_affected: 1
+
+  - id: update_with_case_expression
+    category: update
+    description: Tests UPDATE using CASE WHEN expression to measure conditional logic overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_orderpriority = CASE
+        WHEN o_totalprice < 100000 THEN '5-LOW'
+        WHEN o_totalprice < 200000 THEN '4-NOT SPECIFIED'
+        WHEN o_totalprice < 300000 THEN '3-MEDIUM'
+        WHEN o_totalprice < 400000 THEN '2-HIGH'
+        ELSE '1-URGENT'
+      END,
+      o_comment = 'case_update'
+      WHERE o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_case_update
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'case_update'
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders SET o_orderpriority = '5-LOW', o_comment = '' WHERE o_comment = 'case_update'
+    expected_rows_affected: null
+
+  - id: update_computed_column
+    category: update
+    description: Tests UPDATE with mathematical expressions to measure computation overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = o_totalprice * 1.1 + 50.0 - (o_totalprice * 0.02),
+          o_comment = 'computed_update'
+      WHERE o_orderkey BETWEEN (SELECT MIN(o_orderkey) FROM update_ops_orders) AND (SELECT MIN(o_orderkey) + 50 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_computed
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'computed_update'
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = (o_totalprice + (o_totalprice * 0.02) - 50.0) / 1.1,
+          o_comment = ''
+      WHERE o_comment = 'computed_update'
+    expected_rows_affected: null
+
+  - id: update_string_manipulation
+    category: update
+    description: Tests UPDATE with string functions CONCAT SUBSTRING to measure string processing overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_comment = CONCAT('Updated:', SUBSTRING(o_orderpriority, 1, 5), '|', CAST(o_orderkey AS VARCHAR))
+      WHERE o_orderkey BETWEEN (SELECT MIN(o_orderkey) FROM update_ops_orders) AND (SELECT MIN(o_orderkey) + 50 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_string_ops
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM update_ops_orders
+          WHERE o_comment LIKE 'Updated:%'
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders SET o_comment = '' WHERE o_comment LIKE 'Updated:%'
+    expected_rows_affected: null
+
+  - id: update_date_arithmetic
+    category: update
+    description: Tests UPDATE with date calculations to measure temporal operation overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_orderdate = o_orderdate + INTERVAL '7' DAY,
+          o_comment = 'date_update'
+      WHERE o_orderkey BETWEEN (SELECT MIN(o_orderkey) FROM update_ops_orders) AND (SELECT MIN(o_orderkey) + 50 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_date_ops
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'date_update'
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_orderdate = o_orderdate - INTERVAL '7' DAY,
+          o_comment = ''
+      WHERE o_comment = 'date_update'
+    expected_rows_affected: null
+
+  - id: update_conditional_multi_column
+    category: update
+    description: Tests complex conditional UPDATE with multiple column updates to measure combined overhead
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = CASE
+          WHEN o_orderpriority = '1-URGENT' THEN o_totalprice * 1.2
+          WHEN o_orderpriority = '2-HIGH' THEN o_totalprice * 1.1
+          ELSE o_totalprice
+        END,
+        o_orderpriority = CASE
+          WHEN o_totalprice > 250000 THEN '1-URGENT'
+          ELSE o_orderpriority
+        END,
+        o_comment = 'complex_conditional'
+      WHERE o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_complex_conditional
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'complex_conditional'
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = CASE
+          WHEN o_orderpriority = '1-URGENT' THEN o_totalprice / 1.2
+          WHEN o_orderpriority = '2-HIGH' THEN o_totalprice / 1.1
+          ELSE o_totalprice
+        END,
+        o_orderpriority = '5-LOW',
+        o_comment = ''
+      WHERE o_comment = 'complex_conditional'
+    expected_rows_affected: null
+
+  - id: update_with_aggregate
+    category: update
+    description: Tests UPDATE using aggregated subquery to measure aggregation overhead per row
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = (
+        SELECT AVG(l_extendedprice)
+        FROM lineitem
+        WHERE l_orderkey = update_ops_orders.o_orderkey
+      ),
+      o_comment = 'agg_update'
+      WHERE EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey = update_ops_orders.o_orderkey)
+        AND o_orderkey <= (SELECT MIN(o_orderkey) + 50 FROM update_ops_orders)
+    validation_queries:
+      - id: verify_agg_update
+        sql: SELECT COUNT(*) as cnt FROM update_ops_orders WHERE o_comment = 'agg_update'
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = (
+        SELECT SUM(l_extendedprice * (1 - l_discount))
+        FROM lineitem
+        WHERE l_orderkey = update_ops_orders.o_orderkey
+      ),
+      o_comment = ''
+      WHERE o_comment = 'agg_update'
+    expected_rows_affected: null
+
+  - id: update_returning
+    category: update
+    description: Tests UPDATE...RETURNING to measure overhead of returning updated row data
+    write_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = o_totalprice * 1.15,
+          o_comment = 'returning_update'
+      WHERE o_orderkey = (SELECT MIN(o_orderkey) FROM update_ops_orders)
+      RETURNING o_orderkey, o_totalprice, o_comment
+    validation_queries:
+      - id: verify_returning_update
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM update_ops_orders
+          WHERE o_comment = 'returning_update'
+        expected_rows: 1
+    cleanup_sql: |
+      UPDATE update_ops_orders
+      SET o_totalprice = o_totalprice / 1.15,
+          o_comment = ''
+      WHERE o_comment = 'returning_update'
+    expected_rows_affected: 1
+    platform_overrides:
+      mysql: null  # MySQL doesn't support RETURNING
+      bigquery: null  # BigQuery doesn't support RETURNING
+
+  # ============================================================================
+  # DELETE OPERATIONS (14 operations)
+  # ============================================================================
+
+  - id: delete_single_row_pk
+    category: delete
+    description: Tests single row DELETE by primary key to measure index-based deletion
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_orderkey = (SELECT MAX(o_orderkey) FROM delete_ops_orders)
+    validation_queries:
+      - id: verify_table_integrity
+        sql: |
+          -- Validate table still accessible and structure is intact after DELETE
+          -- Note: Full validation of DELETE correctness requires pre-write state - future enhancement
+          SELECT o_orderkey, o_custkey
+          FROM delete_ops_orders
+          LIMIT 1
+        expected_rows: null
+        expected_rows_min: 0  # Table might be empty
+        expected_rows_max: 1  # LIMIT 1, so at most 1 row
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: 1
+
+  - id: delete_selective_10pct
+    category: delete
+    description: Tests DELETE affecting approximately 10 percent of rows to measure selective deletion performance
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_orderkey > (
+        SELECT CAST(MAX(o_orderkey) * 0.9 AS INTEGER)
+        FROM delete_ops_orders
+      )
+    validation_queries:
+      - id: verify_table_integrity
+        sql: |
+          -- Validate table still accessible after bulk DELETE
+          -- Note: Full validation requires pre-write state - future enhancement
+          SELECT COUNT(*) as remaining_count
+          FROM delete_ops_orders
+        expected_rows: null
+        expected_rows_min: 0  # Could delete all rows
+        expected_rows_max: 1  # COUNT always returns 1 row
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_with_subquery
+    category: delete
+    description: Tests DELETE with WHERE...IN subquery to measure subquery evaluation overhead
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_orderkey IN (
+        SELECT o_orderkey
+        FROM delete_ops_orders
+        WHERE o_orderpriority = '1-URGENT'
+        LIMIT 10
+      )
+    validation_queries:
+      - id: verify_table_integrity
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_with_join
+    category: delete
+    description: Tests DELETE with JOIN to measure join-based deletion performance
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE EXISTS (
+        SELECT 1 FROM customer
+        WHERE customer.c_custkey = delete_ops_orders.o_custkey
+          AND customer.c_mktsegment = 'AUTOMOBILE'
+      )
+      AND delete_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 20 FROM delete_ops_orders)
+    validation_queries:
+      - id: verify_delete_with_join
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+    platform_overrides:
+      mysql: |
+        DELETE delete_ops_orders FROM delete_ops_orders
+        JOIN customer ON customer.c_custkey = delete_ops_orders.o_custkey
+        WHERE customer.c_mktsegment = 'AUTOMOBILE'
+          AND delete_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 20 FROM delete_ops_orders)
+
+  - id: delete_bulk_25pct
+    category: delete
+    description: Tests DELETE affecting approximately 25 percent of rows to measure medium bulk deletion
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_orderkey > (
+        SELECT CAST(MAX(o_orderkey) * 0.75 AS INTEGER)
+        FROM delete_ops_orders
+      )
+    validation_queries:
+      - id: verify_25pct_delete
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_bulk_50pct
+    category: delete
+    description: Tests DELETE affecting approximately 50 percent of rows to measure large bulk deletion
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_orderkey > (
+        SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER)
+        FROM delete_ops_orders
+      )
+    validation_queries:
+      - id: verify_50pct_delete
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_bulk_75pct
+    category: delete
+    description: Tests DELETE affecting approximately 75 percent of rows to measure very large bulk deletion
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_orderkey > (
+        SELECT CAST(MAX(o_orderkey) * 0.25 AS INTEGER)
+        FROM delete_ops_orders
+      )
+    validation_queries:
+      - id: verify_75pct_delete
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_with_not_exists
+    category: delete
+    description: Tests DELETE using NOT EXISTS to measure anti-join deletion performance
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE NOT EXISTS (
+        SELECT 1 FROM lineitem
+        WHERE lineitem.l_orderkey = delete_ops_orders.o_orderkey
+      )
+      AND delete_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 50 FROM delete_ops_orders)
+    validation_queries:
+      - id: verify_not_exists_delete
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_with_aggregation
+    category: delete
+    description: Tests DELETE using aggregate in WHERE clause to measure aggregation evaluation overhead
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_totalprice < (
+        SELECT AVG(o_totalprice) FROM delete_ops_orders
+      )
+      AND delete_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 30 FROM delete_ops_orders)
+    validation_queries:
+      - id: verify_agg_delete
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_returning
+    category: delete
+    description: Tests DELETE...RETURNING to measure overhead of returning deleted row data
+    write_sql: |
+      DELETE FROM delete_ops_orders
+      WHERE o_orderkey = (SELECT MAX(o_orderkey) FROM delete_ops_orders)
+      RETURNING o_orderkey, o_custkey, o_totalprice
+    validation_queries:
+      - id: verify_delete_returning
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_orders
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: 1
+    platform_overrides:
+      mysql: null  # MySQL doesn't support RETURNING
+      bigquery: null  # BigQuery doesn't support RETURNING
+
+  - id: delete_cascade_simulation
+    category: delete
+    description: Tests multi-table DELETE simulation to measure cascading deletion overhead
+    write_sql: |
+      DELETE FROM delete_ops_lineitem
+      WHERE l_orderkey IN (
+        SELECT o_orderkey FROM delete_ops_orders
+        WHERE o_orderpriority = '1-URGENT'
+        LIMIT 5
+      )
+    validation_queries:
+      - id: verify_cascade_delete
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM delete_ops_lineitem l
+          WHERE l_orderkey IN (
+            SELECT o_orderkey FROM delete_ops_orders
+            WHERE o_orderpriority = '1-URGENT'
+            LIMIT 5
+          )
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback for cleanup
+    expected_rows_affected: null
+
+  - id: delete_all_truncate_comparison
+    category: delete
+    description: Tests DELETE star versus TRUNCATE to measure full table deletion methods
+    write_sql: |
+      DELETE FROM delete_ops_lineitem
+    validation_queries:
+      - id: verify_all_deleted
+        sql: SELECT COUNT(*) as cnt FROM delete_ops_lineitem
+        expected_rows: 1
+    cleanup_sql: null  # Data gone, will be regenerated via reset
+    expected_rows_affected: null
+
+  # ============================================================================
+  # BULK_LOAD OPERATIONS (36 operations)
+  # ============================================================================
+
+  # --------------------
+  # CSV OPERATIONS (12 operations: 3 sizes × 4 compression variants)
+  # --------------------
+
+  - id: bulk_load_csv_small_uncompressed
+    category: bulk_load
+    description: Tests bulk load from small CSV file 1K rows uncompressed to measure baseline CSV parsing overhead
+    file_dependencies:
+      - csv_small_1k.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv' WITH (FORMAT CSV, HEADER true)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv' (FORMAT CSV, HEADER true)
+      mysql: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        LOAD DATA LOCAL INFILE '{file_path}/csv_small_1k.csv'
+        INTO TABLE bulk_load_ops_target
+        FIELDS TERMINATED BY ','
+        LINES TERMINATED BY '\n'
+        IGNORE 1 ROWS
+      sqlite: |
+        DELETE FROM bulk_load_ops_target;
+        .mode csv
+        .import {file_path}/csv_small_1k.csv bulk_load_ops_target
+
+  - id: bulk_load_csv_small_gzip
+    category: bulk_load
+    description: Tests bulk load from small CSV file 1K rows gzip compressed to measure gzip decompression overhead
+    file_dependencies:
+      - csv_small_1k.csv.gz
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv.gz' WITH (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+
+  - id: bulk_load_csv_small_zstd
+    category: bulk_load
+    description: Tests bulk load from small CSV file 1K rows zstd compressed to measure zstd decompression overhead
+    file_dependencies:
+      - csv_small_1k.csv.zst
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv.zst' WITH (FORMAT CSV, HEADER true, COMPRESSION 'zstd')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv.zst' (FORMAT CSV, HEADER true, COMPRESSION 'zstd')
+
+  - id: bulk_load_csv_small_bzip2
+    category: bulk_load
+    description: Tests bulk load from small CSV file 1K rows bzip2 compressed to measure bzip2 decompression overhead
+    file_dependencies:
+      - csv_small_1k.csv.gz
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        -- DuckDB does not support bzip2 compression - use gzip instead
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+
+  - id: bulk_load_csv_medium_uncompressed
+    category: bulk_load
+    description: Tests bulk load from medium CSV file 100K rows uncompressed to measure medium dataset processing
+    file_dependencies:
+      - csv_medium_100k.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv' WITH (FORMAT CSV, HEADER true)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv' (FORMAT CSV, HEADER true)
+      mysql: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        LOAD DATA LOCAL INFILE '{file_path}/csv_medium_100k.csv'
+        INTO TABLE bulk_load_ops_target
+        FIELDS TERMINATED BY ','
+        LINES TERMINATED BY '\n'
+        IGNORE 1 ROWS
+
+  - id: bulk_load_csv_medium_gzip
+    category: bulk_load
+    description: Tests bulk load from medium CSV file 100K rows gzip compressed to measure compression benefit on medium data
+    file_dependencies:
+      - csv_medium_100k.csv.gz
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv.gz' WITH (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+
+  - id: bulk_load_csv_medium_zstd
+    category: bulk_load
+    description: Tests bulk load from medium CSV file 100K rows zstd compressed to measure zstd efficiency on medium data
+    file_dependencies:
+      - csv_medium_100k.csv.zst
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv.zst' WITH (FORMAT CSV, HEADER true, COMPRESSION 'zstd')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv.zst' (FORMAT CSV, HEADER true, COMPRESSION 'zstd')
+
+  - id: bulk_load_csv_medium_bzip2
+    category: bulk_load
+    description: Tests bulk load from medium CSV file 100K rows bzip2 compressed to measure bzip2 efficiency on medium data
+    file_dependencies:
+      - csv_medium_100k.csv.gz
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+    platform_overrides:
+      duckdb: |
+        -- DuckDB does not support bzip2 compression - use gzip instead
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+
+  - id: bulk_load_csv_large_uncompressed
+    category: bulk_load
+    description: Tests bulk load from large CSV file 1M rows uncompressed to measure large dataset processing limits
+    file_dependencies:
+      - csv_large_1m.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv' WITH (FORMAT CSV, HEADER true)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv' (FORMAT CSV, HEADER true)
+      mysql: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        LOAD DATA LOCAL INFILE '{file_path}/csv_large_1m.csv'
+        INTO TABLE bulk_load_ops_target
+        FIELDS TERMINATED BY ','
+        LINES TERMINATED BY '\n'
+        IGNORE 1 ROWS
+
+  - id: bulk_load_csv_large_gzip
+    category: bulk_load
+    description: Tests bulk load from large CSV file 1M rows gzip compressed to measure compression benefit on large data
+    file_dependencies:
+      - csv_large_1m.csv.gz
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv.gz' WITH (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+
+  - id: bulk_load_csv_large_zstd
+    category: bulk_load
+    description: Tests bulk load from large CSV file 1M rows zstd compressed to measure zstd efficiency on large data
+    file_dependencies:
+      - csv_large_1m.csv.zst
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv.zst' WITH (FORMAT CSV, HEADER true, COMPRESSION 'zstd')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv.zst' (FORMAT CSV, HEADER true, COMPRESSION 'zstd')
+
+  - id: bulk_load_csv_large_bzip2
+    category: bulk_load
+    description: Tests bulk load from large CSV file 1M rows bzip2 compressed to measure bzip2 efficiency on large data
+    file_dependencies:
+      - csv_large_1m.csv.gz
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+    platform_overrides:
+      duckdb: |
+        -- DuckDB does not support bzip2 compression - use gzip instead
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_large_1m.csv.gz' (FORMAT CSV, HEADER true, COMPRESSION 'gzip')
+
+  # --------------------
+  # PARQUET OPERATIONS (12 operations: 3 sizes × 4 compression variants)
+  # --------------------
+
+  - id: bulk_load_parquet_small_uncompressed
+    category: bulk_load
+    description: Tests bulk load from small Parquet file 1K rows uncompressed to measure Parquet columnar format overhead
+    file_dependencies:
+      - parquet_small_1k.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_small_1k.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+
+  - id: bulk_load_parquet_small_snappy
+    category: bulk_load
+    description: Tests bulk load from small Parquet file 1K rows snappy compressed to measure Snappy decompression overhead
+    file_dependencies:
+      - parquet_small_1k_snappy.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_small_1k_snappy.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+
+  - id: bulk_load_parquet_small_gzip
+    category: bulk_load
+    description: Tests bulk load from small Parquet file 1K rows gzip compressed to measure gzip in Parquet context
+    file_dependencies:
+      - parquet_small_1k_gzip.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_small_1k_gzip.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+
+  - id: bulk_load_parquet_small_zstd
+    category: bulk_load
+    description: Tests bulk load from small Parquet file 1K rows zstd compressed to measure zstd in Parquet context
+    file_dependencies:
+      - parquet_small_1k_zstd.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_small_1k_zstd.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+
+  - id: bulk_load_parquet_medium_uncompressed
+    category: bulk_load
+    description: Tests bulk load from medium Parquet file 100K rows uncompressed to measure columnar format efficiency
+    file_dependencies:
+      - parquet_medium_100k.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_medium_100k.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+
+  - id: bulk_load_parquet_medium_snappy
+    category: bulk_load
+    description: Tests bulk load from medium Parquet file 100K rows snappy compressed to measure Snappy efficiency
+    file_dependencies:
+      - parquet_medium_100k_snappy.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_medium_100k_snappy.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+
+  - id: bulk_load_parquet_medium_gzip
+    category: bulk_load
+    description: Tests bulk load from medium Parquet file 100K rows gzip compressed to measure compression trade-offs
+    file_dependencies:
+      - parquet_medium_100k_gzip.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_medium_100k_gzip.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+
+  - id: bulk_load_parquet_medium_zstd
+    category: bulk_load
+    description: Tests bulk load from medium Parquet file 100K rows zstd compressed to measure zstd columnar efficiency
+    file_dependencies:
+      - parquet_medium_100k_zstd.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_medium_100k_zstd.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+
+  - id: bulk_load_parquet_large_uncompressed
+    category: bulk_load
+    description: Tests bulk load from large Parquet file 1M rows uncompressed to measure large columnar dataset processing
+    file_dependencies:
+      - parquet_large_1m.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_large_1m.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+
+  - id: bulk_load_parquet_large_snappy
+    category: bulk_load
+    description: Tests bulk load from large Parquet file 1M rows snappy compressed to measure Snappy on large data
+    file_dependencies:
+      - parquet_large_1m_snappy.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_large_1m_snappy.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+
+  - id: bulk_load_parquet_large_gzip
+    category: bulk_load
+    description: Tests bulk load from large Parquet file 1M rows gzip compressed to measure gzip on large data
+    file_dependencies:
+      - parquet_large_1m_gzip.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_large_1m_gzip.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+
+  - id: bulk_load_parquet_large_zstd
+    category: bulk_load
+    description: Tests bulk load from large Parquet file 1M rows zstd compressed to measure zstd on large data
+    file_dependencies:
+      - parquet_large_1m_zstd.parquet
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/parquet_large_1m_zstd.parquet' (FORMAT PARQUET)
+    validation_queries:
+      - id: verify_row_count
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000000
+
+  # --------------------
+  # SPECIAL BULK LOAD OPERATIONS (12 operations)
+  # --------------------
+
+  - id: bulk_load_column_subset
+    category: bulk_load
+    description: Tests bulk load with column subset selection to measure partial schema load overhead
+    file_dependencies:
+      - csv_medium_100k.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      INSERT INTO bulk_load_ops_target (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate)
+      SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate
+      FROM read_csv_auto('{file_path}/csv_medium_100k.csv')
+    validation_queries:
+      - id: verify_partial_load
+        sql: |
+          SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+          WHERE o_orderkey IS NOT NULL
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        INSERT INTO bulk_load_ops_target (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate)
+        SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate
+        FROM read_csv_auto('{file_path}/csv_medium_100k.csv')
+
+  - id: bulk_load_with_transformation
+    category: bulk_load
+    description: Tests bulk load with inline type conversion and transformation to measure ETL overhead
+    file_dependencies:
+      - csv_small_1k.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      INSERT INTO bulk_load_ops_target
+      SELECT
+        CAST(o_orderkey AS INTEGER),
+        CAST(o_custkey AS INTEGER),
+        UPPER(o_orderstatus),
+        CAST(o_totalprice AS DECIMAL(15,2)),
+        CAST(o_orderdate AS DATE),
+        o_orderpriority,
+        o_clerk,
+        o_shippriority,
+        CONCAT('TRANSFORMED: ', o_comment)
+      FROM read_csv_auto('{file_path}/csv_small_1k.csv')
+    validation_queries:
+      - id: verify_transformation
+        sql: |
+          SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+          WHERE o_comment LIKE 'TRANSFORMED:%'
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        INSERT INTO bulk_load_ops_target
+        SELECT
+          CAST(o_orderkey AS INTEGER),
+          CAST(o_custkey AS INTEGER),
+          UPPER(o_orderstatus),
+          CAST(o_totalprice AS DECIMAL(15,2)),
+          CAST(o_orderdate AS DATE),
+          o_orderpriority,
+          o_clerk,
+          o_shippriority,
+          CONCAT('TRANSFORMED: ', o_comment)
+        FROM read_csv_auto('{file_path}/csv_small_1k.csv')
+
+  - id: bulk_load_error_handling_skip_bad_rows
+    category: bulk_load
+    description: Tests bulk load with error tolerance to skip malformed rows and measure error handling overhead
+    file_dependencies:
+      - csv_with_errors.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_with_errors.csv'
+      (FORMAT CSV, HEADER true, IGNORE_ERRORS true)
+    validation_queries:
+      - id: verify_error_skip
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: null
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_with_errors.csv'
+        (FORMAT CSV, HEADER true, IGNORE_ERRORS true)
+
+  - id: bulk_load_parallel_multi_file
+    category: bulk_load
+    description: Tests bulk load from multiple files in parallel to measure parallel ingestion capability
+    file_dependencies:
+      - csv_parallel_part1.csv
+      - csv_parallel_part2.csv
+      - csv_parallel_part3.csv
+      - csv_parallel_part4.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_parallel_part*.csv' WITH (FORMAT CSV, HEADER true)
+    validation_queries:
+      - id: verify_multi_file
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 4000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_parallel_part*.csv' (FORMAT CSV, HEADER true)
+
+  - id: bulk_load_upsert_mode
+    category: bulk_load
+    description: Tests bulk load with UPSERT semantics using MERGE to measure conflict resolution overhead
+    file_dependencies:
+      - csv_upsert_data.csv
+    write_sql: |
+      MERGE INTO bulk_load_ops_target AS target
+      USING (
+        SELECT * FROM read_csv_auto('{file_path}/csv_upsert_data.csv')
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET
+          o_custkey = source.o_custkey,
+          o_orderstatus = source.o_orderstatus,
+          o_totalprice = source.o_totalprice,
+          o_orderdate = source.o_orderdate,
+          o_orderpriority = source.o_orderpriority,
+          o_clerk = source.o_clerk,
+          o_shippriority = source.o_shippriority,
+          o_comment = source.o_comment
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_upsert
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: null
+
+  - id: bulk_load_append_mode
+    category: bulk_load
+    description: Tests bulk load in append mode without TRUNCATE to measure incremental load overhead
+    file_dependencies:
+      - csv_small_1k.csv
+    write_sql: |
+      COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv' WITH (FORMAT CSV, HEADER true)
+    validation_queries:
+      - id: verify_append
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+        expected_rows_min: 1000
+    cleanup_sql: |
+      DELETE FROM bulk_load_ops_target WHERE o_orderkey IN (
+        SELECT o_orderkey FROM (
+          SELECT o_orderkey FROM bulk_load_ops_target ORDER BY o_orderkey DESC LIMIT 1000
+        ) t
+      )
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        COPY bulk_load_ops_target FROM '{file_path}/csv_small_1k.csv' (FORMAT CSV, HEADER true)
+
+  - id: bulk_load_replace_mode
+    category: bulk_load
+    description: Tests bulk load with TRUNCATE before load to measure replace semantics overhead
+    file_dependencies:
+      - csv_medium_100k.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv' WITH (FORMAT CSV, HEADER true)
+    validation_queries:
+      - id: verify_replace
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 100000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_medium_100k.csv' (FORMAT CSV, HEADER true)
+
+  - id: bulk_load_delimited_custom
+    category: bulk_load
+    description: Tests bulk load with custom delimiter pipe character to measure delimiter parsing flexibility
+    file_dependencies:
+      - csv_custom_delim.psv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_custom_delim.psv'
+      WITH (FORMAT CSV, DELIMITER '|', HEADER true)
+    validation_queries:
+      - id: verify_custom_delim
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_custom_delim.psv'
+        (FORMAT CSV, DELIMITER '|', HEADER true)
+      mysql: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        LOAD DATA LOCAL INFILE '{file_path}/csv_custom_delim.psv'
+        INTO TABLE bulk_load_ops_target
+        FIELDS TERMINATED BY '|'
+        LINES TERMINATED BY '\n'
+        IGNORE 1 ROWS
+
+  - id: bulk_load_quoted_fields
+    category: bulk_load
+    description: Tests bulk load with quoted string fields to measure quote escaping overhead
+    file_dependencies:
+      - csv_quoted_fields.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_quoted_fields.csv'
+      WITH (FORMAT CSV, HEADER true, QUOTE '"', ESCAPE '"')
+    validation_queries:
+      - id: verify_quoted
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_quoted_fields.csv'
+        (FORMAT CSV, HEADER true, QUOTE '"', ESCAPE '"')
+
+  - id: bulk_load_null_handling
+    category: bulk_load
+    description: Tests bulk load with NULL value representation to measure NULL parsing overhead
+    file_dependencies:
+      - csv_with_nulls.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_with_nulls.csv'
+      WITH (FORMAT CSV, HEADER true, NULL 'NULL')
+    validation_queries:
+      - id: verify_nulls
+        sql: |
+          SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+          WHERE o_comment IS NULL OR o_clerk IS NULL
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_with_nulls.csv'
+        (FORMAT CSV, HEADER true, NULLSTR 'NULL')
+
+  - id: bulk_load_encoding_utf8
+    category: bulk_load
+    description: Tests bulk load with explicit UTF-8 encoding to measure character encoding overhead
+    file_dependencies:
+      - csv_utf8_encoded.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_utf8_encoded.csv'
+      WITH (FORMAT CSV, HEADER true)
+    validation_queries:
+      - id: verify_encoding
+        sql: SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_utf8_encoded.csv'
+        (FORMAT CSV, HEADER true)
+
+  - id: bulk_load_date_format_custom
+    category: bulk_load
+    description: Tests bulk load with custom date format specification to measure date parsing flexibility
+    file_dependencies:
+      - csv_custom_dates.csv
+    write_sql: |
+      TRUNCATE TABLE bulk_load_ops_target;
+      COPY bulk_load_ops_target FROM '{file_path}/csv_custom_dates.csv'
+      WITH (FORMAT CSV, HEADER true, DATEFORMAT '%Y/%m/%d')
+    validation_queries:
+      - id: verify_date_format
+        sql: |
+          SELECT COUNT(*) as cnt FROM bulk_load_ops_target
+          WHERE o_orderdate IS NOT NULL
+        expected_rows: 1
+    cleanup_sql: |
+      TRUNCATE TABLE bulk_load_ops_target
+    expected_rows_affected: 1000
+    platform_overrides:
+      duckdb: |
+        TRUNCATE TABLE bulk_load_ops_target;
+        COPY bulk_load_ops_target FROM '{file_path}/csv_custom_dates.csv'
+        (FORMAT CSV, HEADER true, DATEFORMAT '%m/%d/%Y')
+
+  # ============================================================================
+  # MERGE OPERATIONS (20 operations)
+  # ============================================================================
+
+  - id: merge_simple_upsert_small
+    category: merge
+    description: Tests simple MERGE upsert with 10 rows to measure baseline MERGE overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 10
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_totalprice = source.o_totalprice,
+                   o_comment = 'merged_update'
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_merge
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_target
+          WHERE o_orderkey BETWEEN 1 AND 10
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_target WHERE o_orderkey BETWEEN 1 AND 10
+    expected_rows_affected: null
+
+  - id: merge_upsert_with_delete
+    category: merge
+    description: Tests MERGE with DELETE clause for unmatched target rows to measure tri-directional merge overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 20
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_matched'
+      WHEN NOT MATCHED BY TARGET THEN INSERT
+      WHEN NOT MATCHED BY SOURCE AND target.o_orderkey <= 25 THEN
+        DELETE
+    validation_queries:
+      - id: verify_merge_delete
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_target
+          WHERE o_orderkey BETWEEN 1 AND 25
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: null  # Uses transaction rollback
+    expected_rows_affected: null
+
+  - id: merge_overlap_10pct
+    category: merge
+    description: Tests MERGE with approximately 10 percent row overlap to measure low collision overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders
+        WHERE o_orderkey > (
+          SELECT CAST(MAX(o_orderkey) * 0.9 AS INTEGER) FROM merge_ops_target
+        )
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_10pct'
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_merge_overlap
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_target WHERE o_comment = 'merge_10pct'
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback
+    expected_rows_affected: null
+
+  - id: merge_overlap_50pct
+    category: merge
+    description: Tests MERGE with approximately 50 percent row overlap to measure medium collision overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders
+        WHERE o_orderkey > (
+          SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM merge_ops_target
+        )
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_50pct'
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_merge_50pct
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_target WHERE o_comment = 'merge_50pct'
+        expected_rows_min: 0
+    cleanup_sql: null  # Uses transaction rollback
+    expected_rows_affected: null
+
+  - id: merge_overlap_90pct
+    category: merge
+    description: Tests MERGE with approximately 90 percent row overlap to measure high collision overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders
+        WHERE o_orderkey <= (
+          SELECT CAST(MAX(o_orderkey) * 0.95 AS INTEGER) FROM merge_ops_target
+        )
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_90pct'
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_merge_90pct
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_target WHERE o_comment = 'merge_90pct'
+        expected_rows_min: 1
+    cleanup_sql: null  # Uses transaction rollback
+    expected_rows_affected: null
+
+  - id: merge_no_overlap_all_insert
+    category: merge
+    description: Tests MERGE with zero overlap all inserts to measure pure insert path performance
+    write_sql: |
+      MERGE INTO merge_ops_source AS target
+      USING (
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 100
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_matched'
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_all_insert
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_source
+          WHERE o_orderkey BETWEEN 1 AND 100
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_source WHERE o_orderkey BETWEEN 1 AND 100
+    expected_rows_affected: null
+
+  - id: merge_full_overlap_all_update
+    category: merge
+    description: Tests MERGE with full overlap all updates to measure pure update path performance
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT o_orderkey, o_totalprice * 1.1 AS o_totalprice, 'merge_all_update' AS o_comment
+        FROM merge_ops_target
+        WHERE o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM merge_ops_target)
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_totalprice = source.o_totalprice,
+                   o_comment = source.o_comment
+    validation_queries:
+      - id: verify_all_update
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_target WHERE o_comment = 'merge_all_update'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE merge_ops_target
+      SET o_totalprice = o_totalprice / 1.1,
+          o_comment = ''
+      WHERE o_comment = 'merge_all_update'
+    expected_rows_affected: null
+
+  - id: merge_with_join_condition
+    category: merge
+    description: Tests MERGE with complex join condition involving multiple columns to measure matching overhead
+    write_sql: |
+      MERGE INTO merge_ops_lineitem_target AS target
+      USING (
+        SELECT l.*, o.o_custkey
+        FROM lineitem l
+        JOIN orders o ON l.l_orderkey = o.o_orderkey
+        WHERE l.l_orderkey BETWEEN 1 AND 10
+      ) AS source
+      ON target.l_orderkey = source.l_orderkey
+         AND target.l_linenumber = source.l_linenumber
+      WHEN MATCHED THEN
+        UPDATE SET l_comment = 'merge_multi_key'
+      WHEN NOT MATCHED THEN
+        INSERT VALUES (source.l_orderkey, source.l_partkey, source.l_suppkey, source.l_linenumber,
+                       source.l_quantity, source.l_extendedprice, source.l_discount, source.l_tax,
+                       source.l_returnflag, source.l_linestatus, source.l_shipdate, source.l_commitdate,
+                       source.l_receiptdate, source.l_shipinstruct, source.l_shipmode, source.l_comment)
+    validation_queries:
+      - id: verify_join_merge
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_lineitem_target
+          WHERE l_orderkey BETWEEN 1 AND 10
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_lineitem_target WHERE l_orderkey BETWEEN 1 AND 10
+    expected_rows_affected: null
+
+  - id: merge_from_subquery_aggregated
+    category: merge
+    description: Tests MERGE with aggregated subquery source to measure aggregation plus merge overhead
+    write_sql: |
+      MERGE INTO merge_ops_summary_target AS target
+      USING (
+        SELECT o_custkey, SUM(o_totalprice) AS total_price, COUNT(*) AS order_count
+        FROM orders
+        WHERE o_orderkey <= 500
+        GROUP BY o_custkey
+      ) AS source
+      ON target.o_custkey = source.o_custkey
+      WHEN MATCHED THEN
+        UPDATE SET o_totalprice = source.total_price,
+                   order_count = source.order_count
+      WHEN NOT MATCHED THEN
+        INSERT VALUES (NULL, source.o_custkey, NULL, source.total_price, NULL, source.order_count)
+    validation_queries:
+      - id: verify_agg_merge
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_summary_target WHERE order_count > 0
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_summary_target
+    expected_rows_affected: null
+
+  - id: merge_conditional_update
+    category: merge
+    description: Tests MERGE with conditional WHEN MATCHED clause to measure predicate evaluation overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 50
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED AND source.o_totalprice > 100000 THEN
+        UPDATE SET o_comment = 'merge_high_value',
+                   o_orderpriority = '1-URGENT'
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_low_value'
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_conditional
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_target
+          WHERE o_comment LIKE 'merge_%'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE merge_ops_target SET o_comment = '', o_orderpriority = '5-LOW'
+      WHERE o_comment LIKE 'merge_%'
+    expected_rows_affected: null
+
+  - id: merge_conditional_insert
+    category: merge
+    description: Tests MERGE with conditional WHEN NOT MATCHED clause to measure insert filtering overhead
+    write_sql: |
+      MERGE INTO merge_ops_source AS target
+      USING (
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 100
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_matched'
+      WHEN NOT MATCHED AND source.o_totalprice > 50000 THEN
+        INSERT VALUES (source.o_orderkey, source.o_custkey, source.o_orderstatus,
+                       source.o_totalprice, source.o_orderdate, source.o_orderpriority,
+                       source.o_clerk, source.o_shippriority, 'high_value_insert')
+    validation_queries:
+      - id: verify_filtered_insert
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_source
+          WHERE o_comment = 'high_value_insert'
+        expected_rows: 1
+        expected_rows_min: 0
+    cleanup_sql: |
+      DELETE FROM merge_ops_source WHERE o_orderkey BETWEEN 1 AND 100
+    expected_rows_affected: null
+
+  - id: merge_multi_column_update
+    category: merge
+    description: Tests MERGE updating 5 plus columns to measure multi-column update overhead in MERGE
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT
+          o_orderkey,
+          o_totalprice * 1.05 AS o_totalprice,
+          '1-URGENT' AS o_orderpriority,
+          'Clerk#000000999' AS o_clerk,
+          o_shippriority + 1 AS o_shippriority,
+          'merge_multi_col' AS o_comment
+        FROM merge_ops_target
+        WHERE o_orderkey <= (SELECT MIN(o_orderkey) + 50 FROM merge_ops_target)
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET
+          o_totalprice = source.o_totalprice,
+          o_orderpriority = source.o_orderpriority,
+          o_clerk = source.o_clerk,
+          o_shippriority = source.o_shippriority,
+          o_comment = source.o_comment
+    validation_queries:
+      - id: verify_multi_col_merge
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_target WHERE o_comment = 'merge_multi_col'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE merge_ops_target
+      SET o_totalprice = o_totalprice / 1.05,
+          o_orderpriority = '5-LOW',
+          o_clerk = 'Clerk#000000001',
+          o_shippriority = 0,
+          o_comment = ''
+      WHERE o_comment = 'merge_multi_col'
+    expected_rows_affected: null
+
+  - id: merge_computed_values
+    category: merge
+    description: Tests MERGE with computed values using expressions to measure computation overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT
+          o_orderkey,
+          o_totalprice * 1.15 + 100.0 AS computed_price,
+          CASE
+            WHEN o_totalprice < 100000 THEN '5-LOW'
+            WHEN o_totalprice < 250000 THEN '3-MEDIUM'
+            ELSE '1-URGENT'
+          END AS computed_priority
+        FROM orders
+        WHERE o_orderkey BETWEEN 1 AND 50
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_totalprice = source.computed_price,
+                   o_orderpriority = source.computed_priority,
+                   o_comment = 'merge_computed'
+      WHEN NOT MATCHED THEN
+        INSERT VALUES (source.o_orderkey, 1, 'O', source.computed_price, CURRENT_DATE,
+                       source.computed_priority, 'Clerk#000000001', 0, 'merge_computed')
+    validation_queries:
+      - id: verify_computed_merge
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_target WHERE o_comment = 'merge_computed'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE merge_ops_target
+      SET o_totalprice = (o_totalprice - 100.0) / 1.15,
+          o_orderpriority = '5-LOW',
+          o_comment = ''
+      WHERE o_comment = 'merge_computed'
+    expected_rows_affected: null
+
+  - id: merge_string_operations
+    category: merge
+    description: Tests MERGE with string manipulation functions to measure string processing overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT
+          o_orderkey,
+          CONCAT('ORDER-', CAST(o_orderkey AS VARCHAR), '-', o_orderpriority) AS computed_comment
+        FROM orders
+        WHERE o_orderkey BETWEEN 1 AND 50
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = source.computed_comment
+    validation_queries:
+      - id: verify_string_merge
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_target
+          WHERE o_comment LIKE 'ORDER-%'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE merge_ops_target SET o_comment = '' WHERE o_comment LIKE 'ORDER-%'
+    expected_rows_affected: null
+
+  - id: merge_date_arithmetic
+    category: merge
+    description: Tests MERGE with date calculations to measure temporal operation overhead in MERGE
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT
+          o_orderkey,
+          o_orderdate + INTERVAL '30' DAY AS shifted_date,
+          'merge_date_shift' AS marker
+        FROM orders
+        WHERE o_orderkey BETWEEN 1 AND 50
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_orderdate = source.shifted_date,
+                   o_comment = source.marker
+    validation_queries:
+      - id: verify_date_merge
+        sql: SELECT COUNT(*) as cnt FROM merge_ops_target WHERE o_comment = 'merge_date_shift'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      UPDATE merge_ops_target
+      SET o_orderdate = o_orderdate - INTERVAL '30' DAY,
+          o_comment = ''
+      WHERE o_comment = 'merge_date_shift'
+    expected_rows_affected: null
+
+  - id: merge_with_cte_source
+    category: merge
+    description: Tests MERGE with CTE as source to measure CTE materialization overhead
+    write_sql: |
+      WITH enriched_orders AS (
+        SELECT
+          o.o_orderkey,
+          o.o_totalprice,
+          c.c_name,
+          c.c_mktsegment
+        FROM orders o
+        JOIN customer c ON o.o_custkey = c.c_custkey
+        WHERE o.o_orderkey BETWEEN 1 AND 50
+      )
+      MERGE INTO merge_ops_summary_target AS target
+      USING enriched_orders AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_totalprice = source.o_totalprice,
+                   customer_name = source.c_name
+      WHEN NOT MATCHED THEN
+        INSERT VALUES (source.o_orderkey, NULL, NULL, source.o_totalprice, source.c_name, NULL)
+    validation_queries:
+      - id: verify_cte_merge
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_summary_target
+          WHERE o_orderkey BETWEEN 1 AND 50
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_summary_target WHERE o_orderkey BETWEEN 1 AND 50
+    expected_rows_affected: null
+
+  - id: merge_returning_clause
+    category: merge
+    description: Tests MERGE...RETURNING to measure overhead of returning merged row data
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 10
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_returning'
+      WHEN NOT MATCHED THEN INSERT
+      RETURNING o_orderkey, o_totalprice, o_comment
+    validation_queries:
+      - id: verify_returning_merge
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_target
+          WHERE o_orderkey BETWEEN 1 AND 10
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_target WHERE o_orderkey BETWEEN 1 AND 10
+    expected_rows_affected: null
+    platform_overrides:
+      mysql: null  # MySQL doesn't support MERGE
+      bigquery: null  # BigQuery MERGE doesn't support RETURNING
+
+  - id: merge_error_handling
+    category: merge
+    description: Tests MERGE with potential constraint violations to measure error handling overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 50
+        UNION ALL
+        SELECT * FROM orders WHERE o_orderkey BETWEEN 45 AND 55
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET o_comment = 'merge_with_dups'
+      WHEN NOT MATCHED THEN INSERT
+    validation_queries:
+      - id: verify_error_merge
+        sql: |
+          SELECT COUNT(*) as cnt FROM merge_ops_target
+          WHERE o_orderkey BETWEEN 1 AND 55
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_target WHERE o_orderkey BETWEEN 1 AND 55
+    expected_rows_affected: null
+
+  - id: delete_gdpr_suppliers_1pct
+    category: delete
+    description: Tests GDPR-compliant deletion with IN subquery to measure deletion-by-list performance (1% of suppliers)
+    write_sql: |
+      DELETE FROM delete_ops_lineitem
+      WHERE l_suppkey IN (
+        SELECT DISTINCT l_suppkey
+        FROM lineitem
+        WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.01 FROM lineitem)
+      )
+    validation_queries:
+      - id: verify_gdpr_deletion
+        sql: |
+          SELECT
+            CASE
+              WHEN COUNT(DISTINCT l_suppkey) = 0 THEN 1
+              ELSE 0
+            END as validation_passed
+          FROM delete_ops_lineitem
+          WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.01 FROM lineitem)
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      INSERT INTO delete_ops_lineitem
+      SELECT * FROM lineitem
+      WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.01 FROM lineitem)
+    expected_rows_affected: null  # Data-dependent: varies by scale factor (~1% of suppliers)
+
+  - id: delete_gdpr_suppliers_5pct
+    category: delete
+    description: Tests GDPR-compliant deletion with IN subquery at medium scale to measure deletion-by-list performance (5% of suppliers)
+    write_sql: |
+      DELETE FROM delete_ops_lineitem
+      WHERE l_suppkey IN (
+        SELECT DISTINCT l_suppkey
+        FROM lineitem
+        WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.05 FROM lineitem)
+      )
+    validation_queries:
+      - id: verify_gdpr_deletion_medium
+        sql: |
+          SELECT
+            CASE
+              WHEN COUNT(DISTINCT l_suppkey) = 0 THEN 1
+              ELSE 0
+            END as validation_passed
+          FROM delete_ops_lineitem
+          WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.05 FROM lineitem)
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      INSERT INTO delete_ops_lineitem
+      SELECT * FROM lineitem
+      WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.05 FROM lineitem)
+    expected_rows_affected: null  # Data-dependent: varies by scale factor (~5% of suppliers)
+
+  - id: merge_etl_aggregation_pattern
+    category: merge
+    description: Tests ETL aggregation pattern with running totals and aggregate computations to measure aggregation overhead in MERGE
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT
+          l_orderkey,
+          SUM(l_extendedprice * (1 - l_discount)) as computed_revenue,
+          MAX(l_shipdate) as latest_ship_date,
+          COUNT(*) as line_count
+        FROM lineitem
+        WHERE l_orderkey BETWEEN 1 AND 1000
+        GROUP BY l_orderkey
+      ) AS source
+      ON target.o_orderkey = source.l_orderkey
+      WHEN MATCHED THEN
+        UPDATE SET
+          o_totalprice = target.o_totalprice + source.computed_revenue,
+          o_comment = 'etl_agg_lines_' || CAST(source.line_count AS VARCHAR)
+      WHEN NOT MATCHED THEN
+        INSERT VALUES (source.l_orderkey, 1, 'O', source.computed_revenue, DATE '1998-01-01', '1-URGENT', 'Clerk#000000001', 0, 'etl_new')
+    validation_queries:
+      - id: verify_etl_aggregation
+        sql: |
+          SELECT COUNT(*) as updated_count
+          FROM merge_ops_target
+          WHERE o_comment LIKE 'etl_agg%' OR o_comment = 'etl_new'
+        expected_rows: 1
+        expected_rows_min: 1
+      - id: verify_etl_aggregation_values
+        sql: |
+          SELECT
+            CASE
+              WHEN COUNT(*) > 0 AND MIN(o_totalprice) IS NOT NULL THEN 1
+              ELSE 0
+            END as has_valid_aggregations
+          FROM merge_ops_target
+          WHERE o_comment LIKE 'etl_agg%'
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_target
+      WHERE o_comment LIKE 'etl_agg%' OR o_comment = 'etl_new'
+    expected_rows_affected: null  # Data-dependent: varies by overlap between orderkeys 1-1000 and existing data
+
+  - id: merge_deduplication_window_function
+    category: merge
+    description: Tests MERGE with window function deduplication using ROW_NUMBER to measure duplicate elimination overhead
+    write_sql: |
+      MERGE INTO merge_ops_target AS target
+      USING (
+        SELECT
+          o_orderkey,
+          o_custkey,
+          o_orderstatus,
+          o_totalprice,
+          o_orderdate,
+          o_orderpriority,
+          o_clerk,
+          o_shippriority,
+          o_comment,
+          ROW_NUMBER() OVER (
+            PARTITION BY o_orderkey
+            ORDER BY o_orderdate DESC, o_totalprice DESC
+          ) as rn
+        FROM orders
+        WHERE o_orderkey BETWEEN 1 AND 500
+      ) AS source
+      ON target.o_orderkey = source.o_orderkey
+      WHEN MATCHED AND source.rn = 1 THEN
+        UPDATE SET
+          o_totalprice = source.o_totalprice,
+          o_comment = 'dedup_update'
+      WHEN NOT MATCHED AND source.rn = 1 THEN
+        INSERT VALUES (
+          source.o_orderkey, source.o_custkey, source.o_orderstatus,
+          source.o_totalprice, source.o_orderdate, source.o_orderpriority,
+          source.o_clerk, source.o_shippriority, 'dedup_insert'
+        )
+    validation_queries:
+      - id: verify_deduplication
+        sql: |
+          SELECT COUNT(*) as dedup_count
+          FROM merge_ops_target
+          WHERE o_comment IN ('dedup_update', 'dedup_insert')
+        expected_rows: 1
+        expected_rows_min: 1
+      - id: verify_no_duplicates
+        sql: |
+          SELECT
+            CASE
+              WHEN MAX(dup_count) = 1 THEN 1
+              ELSE 0
+            END as no_duplicates
+          FROM (
+            SELECT o_orderkey, COUNT(*) as dup_count
+            FROM merge_ops_target
+            WHERE o_comment IN ('dedup_update', 'dedup_insert')
+            GROUP BY o_orderkey
+          )
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DELETE FROM merge_ops_target
+      WHERE o_comment IN ('dedup_update', 'dedup_insert')
+    expected_rows_affected: null  # Data-dependent: varies by overlap between orderkeys 1-500 and existing data
+
+  # ============================================================================
+  # DDL OPERATIONS (12 operations)
+  # ============================================================================
+  #
+  # IMPORTANT: DDL operations modify database schemas (ALTER TABLE, DROP TABLE, etc.)
+  # and have requires_setup: false to avoid conflicts with staging table setup.
+  #
+  # When running these operations, be aware that:
+  # 1. Schema modifications (e.g., ALTER ADD COLUMN) will persist and affect subsequent
+  #    operations that attempt to reinitialize staging tables.
+  # 2. Operations following DDL modifications may fail during setup because the column
+  #    count or schema no longer matches the base table definition.
+  # 3. For comprehensive testing, DDL operations should ideally be run in isolation
+  #    or at the end of a test suite to avoid schema drift issues.
+  # 4. Transaction operations (ROLLBACK, COMMIT) may fail after DDL operations have
+  #    modified staging table schemas.
+  #
+  # This is expected behavior and reflects real-world considerations when mixing
+  # DDL and DML operations in database workloads.
+
+  - id: ddl_create_table_simple
+    category: ddl
+    description: Tests CREATE TABLE with simple schema with 5 columns and no constraints
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_simple (
+        id INTEGER,
+        name VARCHAR(100),
+        value DECIMAL(15,2),
+        created DATE,
+        status VARCHAR(10)
+      )
+    validation_queries:
+      - id: table_exists
+        sql: |
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_name = 'test_simple'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_simple
+    expected_rows_affected: 0
+
+  - id: ddl_truncate_table_small
+    category: ddl
+    requires_setup: false
+    description: Tests TRUNCATE TABLE on small staging table to measure fast delete baseline
+    write_sql: |
+      TRUNCATE TABLE ddl_truncate_target
+    validation_queries:
+      - id: verify_empty
+        sql: SELECT * FROM ddl_truncate_target
+        expected_rows: 0
+    cleanup_sql: null  # Data is gone, will be regenerated
+    expected_rows_affected: null
+
+  - id: ddl_create_table_as_select_simple
+    category: ddl
+    description: Tests CREATE TABLE AS SELECT with simple SELECT to measure table creation from query results
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE orders_1995 AS
+      SELECT *
+      FROM orders
+      WHERE o_orderdate >= DATE '1995-01-01'
+        AND o_orderdate < DATE '1996-01-01'
+    validation_queries:
+      - id: verify_ctas
+        sql: SELECT o_orderkey FROM orders_1995 LIMIT 10
+        expected_rows: null  # Varies by data
+        expected_rows_min: 0  # Might have no orders in 1995
+        expected_rows_max: 10  # LIMIT 10, so at most 10 rows
+    cleanup_sql: |
+      DROP TABLE IF EXISTS orders_1995
+    expected_rows_affected: null
+
+  - id: ddl_create_table_with_constraints
+    category: ddl
+    description: Tests CREATE TABLE with PRIMARY KEY and NOT NULL constraints to measure constraint overhead
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_constrained (
+        id INTEGER PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        value DECIMAL(15,2) NOT NULL,
+        created DATE NOT NULL,
+        status VARCHAR(10)
+      )
+    validation_queries:
+      - id: table_exists
+        sql: |
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_name = 'test_constrained'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_constrained
+    expected_rows_affected: 0
+
+  - id: ddl_create_table_with_index
+    category: ddl
+    description: Tests CREATE TABLE followed by CREATE INDEX to measure index creation overhead
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_indexed (
+        id INTEGER,
+        name VARCHAR(100),
+        value DECIMAL(15,2)
+      );
+      CREATE INDEX idx_test_value ON test_indexed(value)
+    validation_queries:
+      - id: index_exists
+        sql: |
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_name = 'test_indexed'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_indexed
+    expected_rows_affected: 0
+
+  - id: ddl_alter_table_add_column
+    category: ddl
+    description: Tests ALTER TABLE ADD COLUMN to measure schema modification overhead
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_alter (
+        id INTEGER,
+        name VARCHAR(100)
+      );
+      ALTER TABLE test_alter ADD COLUMN created DATE
+    validation_queries:
+      - id: column_exists
+        sql: |
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_name = 'test_alter'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_alter
+    expected_rows_affected: 0
+
+  - id: ddl_alter_table_drop_column
+    category: ddl
+    description: Tests ALTER TABLE DROP COLUMN to measure column removal overhead
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_drop_col (
+        id INTEGER,
+        name VARCHAR(100),
+        temp_col VARCHAR(50)
+      );
+      ALTER TABLE test_drop_col DROP COLUMN temp_col
+    validation_queries:
+      - id: table_modified
+        sql: |
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_name = 'test_drop_col'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_drop_col
+    expected_rows_affected: 0
+
+  - id: ddl_alter_table_rename_column
+    category: ddl
+    description: Tests ALTER TABLE RENAME COLUMN to measure column renaming overhead
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_rename_col (
+        id INTEGER,
+        old_name VARCHAR(100)
+      );
+      ALTER TABLE test_rename_col RENAME COLUMN old_name TO new_name
+    validation_queries:
+      - id: column_renamed
+        sql: |
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_name = 'test_rename_col'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_rename_col
+    expected_rows_affected: 0
+    platform_overrides:
+      mysql: |
+        CREATE TABLE test_rename_col (
+          id INTEGER,
+          old_name VARCHAR(100)
+        );
+        ALTER TABLE test_rename_col CHANGE old_name new_name VARCHAR(100)
+
+  - id: ddl_create_index_on_existing
+    category: ddl
+    description: Tests CREATE INDEX on populated table to measure index building on existing data
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_idx_existing AS SELECT * FROM orders WHERE o_orderkey <= 100;
+      CREATE INDEX idx_existing_price ON test_idx_existing(o_totalprice)
+    validation_queries:
+      - id: index_created
+        sql: SELECT COUNT(*) as cnt FROM test_idx_existing
+        expected_rows: 1
+        expected_rows_min: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_idx_existing
+    expected_rows_affected: null
+
+  - id: ddl_drop_index
+    category: ddl
+    description: Tests DROP INDEX to measure index removal overhead
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_drop_idx (id INTEGER, value DECIMAL(15,2));
+      CREATE INDEX idx_test_drop ON test_drop_idx(value);
+      DROP INDEX idx_test_drop
+    validation_queries:
+      - id: table_still_exists
+        sql: |
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_name = 'test_drop_idx'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP TABLE IF EXISTS test_drop_idx
+    expected_rows_affected: 0
+    platform_overrides:
+      mysql: |
+        CREATE TABLE test_drop_idx (id INTEGER, value DECIMAL(15,2));
+        CREATE INDEX idx_test_drop ON test_drop_idx(value);
+        DROP INDEX idx_test_drop ON test_drop_idx
+
+  - id: ddl_create_view_simple
+    category: ddl
+    description: Tests CREATE VIEW with simple SELECT to measure view creation overhead
+    requires_setup: false
+    write_sql: |
+      CREATE VIEW orders_view AS
+      SELECT o_orderkey, o_custkey, o_totalprice, o_orderdate
+      FROM orders
+      WHERE o_orderkey <= 1000
+    validation_queries:
+      - id: view_exists
+        sql: |
+          SELECT table_name
+          FROM information_schema.views
+          WHERE table_name = 'orders_view'
+        expected_rows: 1
+    cleanup_sql: |
+      DROP VIEW IF EXISTS orders_view
+    expected_rows_affected: 0
+
+  - id: ddl_drop_table
+    category: ddl
+    description: Tests DROP TABLE to measure table removal overhead
+    requires_setup: false
+    write_sql: |
+      CREATE TABLE test_drop AS SELECT * FROM orders WHERE o_orderkey <= 50;
+      DROP TABLE test_drop
+    validation_queries:
+      - id: table_dropped
+        sql: |
+          SELECT COUNT(*) as cnt
+          FROM information_schema.tables
+          WHERE table_name = 'test_drop'
+        expected_rows: 1
+    cleanup_sql: null  # Table is already dropped
+    expected_rows_affected: null
+

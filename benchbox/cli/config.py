@@ -1,0 +1,1346 @@
+"""Configuration management for BenchBox CLI.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import argparse
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional, Union
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
+
+from benchbox.core.config_utils import (
+    deep_merge_dicts,
+    load_config_file,
+    save_config_file,
+)
+from benchbox.core.tuning.interface import (
+    BenchmarkTunings,
+    TableTuning,
+    TuningColumn,
+    TuningType,
+    UnifiedTuningConfiguration,
+)
+from benchbox.utils.database_naming import generate_database_filename
+from benchbox.utils.printing import quiet_console
+from benchbox.utils.scale_factor import format_scale_factor
+
+console = quiet_console
+
+
+def load_config(
+    cli_args: Optional[dict[str, Any]] = None,
+    config_file: Optional[Path] = None,
+    validate: bool = True,
+) -> "BenchBoxConfig":
+    """Unified configuration loader with explicit precedence.
+
+    Loads configuration with the following precedence (highest to lowest):
+    1. CLI arguments (cli_args parameter)
+    2. Environment variables (BENCHBOX_* prefixed)
+    3. Configuration file (YAML/JSON)
+    4. Default values
+
+    Args:
+        cli_args: Dictionary of CLI argument overrides
+        config_file: Path to configuration file (optional, will search default locations)
+        validate: Whether to validate the configuration after loading
+
+    Returns:
+        Loaded and validated BenchBoxConfig instance
+
+    Example:
+        >>> # Load with defaults
+        >>> config = load_config()
+        >>>
+        >>> # Load with CLI overrides
+        >>> config = load_config(cli_args={'database': {'preferred': 'clickhouse'}})
+        >>>
+        >>> # Load from specific file
+        >>> config = load_config(config_file=Path('my_config.yaml'))
+    """
+    # Create ConfigManager to handle file loading
+    manager = ConfigManager(config_path=config_file)
+
+    # Start with file-based config (already has defaults merged)
+    config_dict = manager.config.model_dump()
+
+    # Apply environment variable overrides
+    config_dict = _apply_environment_overrides(config_dict)
+
+    # Apply CLI argument overrides (highest priority)
+    if cli_args:
+        config_dict = deep_merge_dicts(config_dict, cli_args)
+
+    # Create validated config
+    config = BenchBoxConfig(**config_dict)
+
+    # Validate if requested
+    if validate:
+        manager.config = config
+        if not manager.validate_config():
+            raise ValueError("Configuration validation failed")
+
+    return config
+
+
+def _apply_environment_overrides(config_dict: dict[str, Any]) -> dict[str, Any]:
+    """Apply environment variable overrides to configuration.
+
+    Supports the following environment variables:
+    - BENCHBOX_DATABASE_PREFERRED: Override database.preferred
+    - BENCHBOX_SCALE_FACTOR: Override benchmarks.default_scale
+    - BENCHBOX_VERBOSE: Override execution.verbose
+    - BENCHBOX_MAX_WORKERS: Override execution.max_workers
+    - BENCHBOX_TUNING_ENABLED: Override tuning.enabled
+    - BENCHBOX_TUNING_CONFIG: Override tuning.default_config_file
+
+    Args:
+        config_dict: Configuration dictionary
+
+    Returns:
+        Configuration dictionary with environment overrides applied
+    """
+    # Define environment variable mappings
+    env_mappings = {
+        "BENCHBOX_DATABASE_PREFERRED": ("database", "preferred", str),
+        "BENCHBOX_SCALE_FACTOR": ("benchmarks", "default_scale", float),
+        "BENCHBOX_VERBOSE": ("execution", "verbose", lambda v: v.lower() in ["true", "1", "yes", "on"]),
+        "BENCHBOX_MAX_WORKERS": ("execution", "max_workers", int),
+        "BENCHBOX_TUNING_ENABLED": ("tuning", "enabled", lambda v: v.lower() in ["true", "1", "yes", "on"]),
+        "BENCHBOX_TUNING_CONFIG": ("tuning", "default_config_file", str),
+        "BENCHBOX_OUTPUT_DIR": ("output", "directory", str),
+        "BENCHBOX_MEMORY_LIMIT_GB": ("execution", "memory_limit_gb", int),
+    }
+
+    for env_var, (section, key, converter) in env_mappings.items():
+        env_value = os.getenv(env_var)
+        if env_value is not None:
+            try:
+                converted_value = converter(env_value)
+                if section not in config_dict:
+                    config_dict[section] = {}
+                config_dict[section][key] = converted_value
+            except (ValueError, TypeError) as e:
+                console.print(f"[yellow]Warning: Invalid environment variable {env_var}={env_value}: {e}[/yellow]")
+
+    return config_dict
+
+
+class BenchBoxConfig(BaseModel):
+    """Main configuration model."""
+
+    model_config = ConfigDict(extra="allow")
+
+    system: dict[str, Any] = Field(default_factory=dict)
+    database: dict[str, Any] = Field(default_factory=dict)
+    benchmarks: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    execution: dict[str, Any] = Field(default_factory=dict)
+    tuning: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConfigManager:
+    """Configuration file and settings management."""
+
+    def __init__(self, config_path: Optional[Path] = None):
+        self.console = quiet_console
+        self.config_path = config_path or self._get_default_config_path()
+        self.config = self._load_config()
+        # Apply environment variable overrides for tuning settings
+        self.apply_environment_overrides()
+
+    def _get_default_config_path(self) -> Path:
+        """Get default configuration file path."""
+        # Check for config in current directory first
+        current_config = Path("benchbox.yaml")
+        if current_config.exists():
+            return current_config
+
+        # Check user home directory
+        home_config = Path.home() / ".benchbox" / "config.yaml"
+        return home_config
+
+    def _load_config(self) -> BenchBoxConfig:
+        """Load configuration from file or create default."""
+        try:
+            if self.config_path.exists():
+                try:
+                    with open(self.config_path) as f:
+                        config_data = yaml.safe_load(f) or {}
+
+                    # If config file is empty or doesn't have any of our main sections,
+                    # return default config
+                    if not config_data or not any(
+                        key in config_data
+                        for key in [
+                            "system",
+                            "database",
+                            "benchmarks",
+                            "output",
+                            "execution",
+                        ]
+                    ):
+                        return self._get_default_config()
+
+                    # Merge with defaults to ensure all required fields exist
+                    default_config = self._get_default_config()
+                    merged_config = deep_merge_dicts(default_config.model_dump(), config_data)
+                    return BenchBoxConfig(**merged_config)
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Failed to load config from {self.config_path}: {e}[/yellow]")
+                    return self._get_default_config()
+            else:
+                return self._get_default_config()
+        except (PermissionError, OSError) as e:
+            console.print(f"[yellow]Warning: Permission denied accessing {self.config_path}: {e}[/yellow]")
+            return self._get_default_config()
+
+    def _get_default_config(self) -> BenchBoxConfig:
+        """Get default configuration."""
+        return BenchBoxConfig(
+            system={
+                "auto_profile": True,
+                "save_profile": True,
+                "profile_cache_hours": 24,
+            },
+            database={
+                "preferred": "duckdb",
+                "connection_timeout": 30,
+                "auto_detect": True,
+            },
+            benchmarks={
+                "default_scale": 0.01,
+                "timeout_minutes": 60,
+                "max_memory_gb": 8,
+                "continue_on_error": False,
+            },
+            output={
+                "formats": ["json", "console"],
+                "directory": "./benchmark_runs/results",
+                "timestamp_format": "%Y%m%d_%H%M%S",
+                "submit_to_service": False,
+                "service_url": "https://api.benchbox.dev/v1",
+                "compression": {
+                    "enabled": True,
+                    "type": "zstd",
+                    "level": None,  # Use algorithm defaults
+                },
+            },
+            execution={
+                "parallel_queries": False,
+                "max_workers": 4,
+                "memory_limit_gb": 0,  # 0 = auto
+                "verbose": True,
+                "power_run": {
+                    "iterations": 3,  # Changed from 1 to 3: run 3 measurement iterations
+                    "warm_up_iterations": 1,
+                    "timeout_per_iteration_minutes": 60,
+                    "fail_fast": False,
+                    "collect_metrics": True,
+                },
+                "concurrent_queries": {
+                    "enabled": False,
+                    "max_concurrent": 2,
+                    "query_timeout_seconds": 300,
+                    "stream_timeout_seconds": 3600,
+                    "retry_failed_queries": True,
+                    "max_retries": 3,
+                },
+            },
+            tuning={
+                "enabled": False,
+                "default_config_file": None,
+                "validate_on_load": True,
+                "allow_platform_incompatible": False,
+                "environment_overrides": {
+                    "BENCHBOX_TUNING_ENABLED": "enabled",
+                    "BENCHBOX_TUNING_CONFIG": "default_config_file",
+                },
+            },
+        )
+
+    def save_config(self):
+        """Save current configuration to file."""
+        try:
+            # Create directory if it doesn't exist
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Convert to dict and save
+            config_dict = self.config.model_dump()
+
+            # Add metadata
+            config_dict["_metadata"] = {
+                "version": "1.0",
+                "created": datetime.now().isoformat(),
+                "generated_by": "benchbox-cli",
+            }
+
+            with open(self.config_path, "w") as f:
+                yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+
+            console.print(f"[green]✅ Configuration saved to {self.config_path}[/green]")
+        except Exception as e:
+            console.print(f"[red]❌ Failed to save configuration: {e}[/red]")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get configuration value using dot notation."""
+        keys = key.split(".")
+        value = self.config.model_dump()
+
+        for k in keys:
+            if isinstance(value, dict) and k in value:
+                value = value[k]
+            else:
+                return default
+
+        return value
+
+    def set(self, key: str, value: Any):
+        """Set configuration value using dot notation."""
+        keys = key.split(".")
+        config_dict = self.config.model_dump()
+        current = config_dict
+
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+
+        current[keys[-1]] = value
+        self.config = BenchBoxConfig(**config_dict)
+
+    def update_from_system_profile(self, profile):
+        """Update configuration based on system profile."""
+        self.set("system.detected_os", profile.os_name)
+        self.set("system.detected_arch", profile.architecture)
+        self.set("system.detected_memory_gb", profile.memory_total_gb)
+        self.set("system.detected_cpu_cores", profile.cpu_cores_logical)
+        self.set("system.available_databases", profile.available_databases)
+        self.set("system.last_profile_time", profile.timestamp.isoformat())
+
+        # Auto-configure based on system
+        if profile.memory_total_gb > 0:
+            # Set memory limit to 75% of available memory
+            memory_limit = max(1, int(profile.memory_total_gb * 0.75))
+            self.set("benchmarks.max_memory_gb", memory_limit)
+            self.set("execution.memory_limit_gb", memory_limit)
+
+        # Set max workers based on CPU cores
+        max_workers = min(8, max(2, profile.cpu_cores_logical // 2))
+        self.set("execution.max_workers", max_workers)
+
+        # Auto-configure concurrent queries based on system resources
+        concurrent_max = min(max_workers, max(2, profile.cpu_cores_logical // 4))
+        self.set("execution.concurrent_queries.max_concurrent", concurrent_max)
+
+        # Scale timeouts based on available memory (lower memory = longer timeouts)
+        if profile.memory_total_gb < 8:
+            # Low memory systems need longer timeouts
+            self.set("execution.power_run.timeout_per_iteration_minutes", 120)
+            self.set("execution.concurrent_queries.query_timeout_seconds", 600)
+        elif profile.memory_total_gb > 16:
+            # High memory systems can use shorter timeouts
+            self.set("execution.power_run.timeout_per_iteration_minutes", 45)
+            self.set("execution.concurrent_queries.query_timeout_seconds", 180)
+
+        # Prefer DuckDB if available
+        if "duckdb" in profile.available_databases:
+            self.set("database.preferred", "duckdb")
+        elif profile.available_databases:
+            self.set("database.preferred", profile.available_databases[0])
+
+    def validate_config(self) -> bool:
+        """Validate current configuration."""
+        try:
+            # Basic validation
+            if self.get("benchmarks.default_scale", 0) <= 0:
+                console.print("[red]❌ Invalid default scale factor[/red]")
+                return False
+
+            if self.get("benchmarks.timeout_minutes", 0) <= 0:
+                console.print("[red]❌ Invalid timeout value[/red]")
+                return False
+
+            if self.get("execution.max_workers", 0) <= 0:
+                console.print("[red]❌ Invalid max workers value[/red]")
+                return False
+
+            # Power run validation
+            power_iterations = self.get("execution.power_run.iterations", 4)
+            if power_iterations <= 0:
+                console.print("[red]❌ Invalid power run iterations value[/red]")
+                return False
+
+            power_warm_up = self.get("execution.power_run.warm_up_iterations", 0)
+            if power_warm_up < 0:
+                console.print("[red]❌ Invalid power run warm-up iterations value[/red]")
+                return False
+
+            power_timeout = self.get("execution.power_run.timeout_per_iteration_minutes", 60)
+            if power_timeout <= 0:
+                console.print("[red]❌ Invalid power run timeout value[/red]")
+                return False
+
+            # Concurrent queries validation
+            max_concurrent = self.get("execution.concurrent_queries.max_concurrent", 2)
+            if max_concurrent <= 0:
+                console.print("[red]❌ Invalid max concurrent queries value[/red]")
+                return False
+
+            query_timeout = self.get("execution.concurrent_queries.query_timeout_seconds", 300)
+            if query_timeout <= 0:
+                console.print("[red]❌ Invalid concurrent query timeout value[/red]")
+                return False
+
+            stream_timeout = self.get("execution.concurrent_queries.stream_timeout_seconds", 3600)
+            if stream_timeout <= 0:
+                console.print("[red]❌ Invalid concurrent stream timeout value[/red]")
+                return False
+
+            max_retries = self.get("execution.concurrent_queries.max_retries", 3)
+            if max_retries < 0:
+                console.print("[red]❌ Invalid max retries value[/red]")
+                return False
+
+            console.print("[green]✅ Configuration validation passed[/green]")
+            return True
+        except Exception as e:
+            console.print(f"[red]❌ Configuration validation failed: {e}[/red]")
+            return False
+
+    def show_config(self):
+        """Display current configuration."""
+        from rich.syntax import Syntax
+
+        config_yaml = yaml.dump(self.config.model_dump(), default_flow_style=False, sort_keys=False)
+        syntax = Syntax(config_yaml, "yaml", theme="monokai", line_numbers=True)
+
+        console.print("\n[bold]Current Configuration:[/bold]")
+        console.print(f"Config file: [cyan]{self.config_path}[/cyan]")
+        console.print(syntax)
+
+    def create_sample_config(self, path: Optional[Path] = None):
+        """Create a sample configuration file."""
+        if path is None:
+            path = Path("benchbox.yaml")
+
+        sample_config = self._get_default_config()
+
+        # Add comments for better understanding
+        config_dict = sample_config.model_dump()
+        config_dict["_comments"] = {
+            "system": "System profiling and detection settings",
+            "database": "Database connection and preference settings",
+            "benchmarks": "Default benchmark execution parameters",
+            "output": "Result formatting and export settings",
+            "execution": "Performance and execution control settings",
+            "execution.power_run": "Configuration for power run test iterations and metrics collection",
+            "execution.concurrent_queries": "Configuration for concurrent query execution and throughput testing",
+            "tuning": "Table tuning and optimization settings",
+        }
+
+        with open(path, "w") as f:
+            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+
+        console.print(f"[green]✅ Sample configuration created at {path}[/green]")
+        console.print("Edit this file to customize BenchBox behavior.")
+
+    def load_tuning_config(self, config_path: Union[str, Path]) -> dict[str, BenchmarkTunings]:
+        """Load tuning configuration from YAML or JSON file.
+
+        Args:
+            config_path: Path to the tuning configuration file
+
+        Returns:
+            Dictionary mapping benchmark names to their tuning configurations
+
+        Raises:
+            ValueError: If the configuration file is invalid or cannot be loaded
+        """
+        config_path = Path(config_path)
+
+        try:
+            config_data = load_config_file(config_path)
+            if not config_data:
+                raise ValueError("Configuration file is empty")
+
+            # Parse tuning configurations
+            benchmark_tunings = {}
+
+            for benchmark_name, benchmark_data in config_data.items():
+                # Skip metadata sections
+                if benchmark_name.startswith("_"):
+                    continue
+
+                if not isinstance(benchmark_data, dict):
+                    raise ValueError(f"Invalid benchmark configuration for '{benchmark_name}': must be a dictionary")
+
+                # Create BenchmarkTunings object
+                tunings = BenchmarkTunings(benchmark_name=benchmark_name)
+
+                # Parse table tunings
+                for table_name, table_data in benchmark_data.items():
+                    if table_name.startswith("_"):  # Skip metadata fields
+                        continue
+
+                    table_tuning = self._parse_table_tuning(table_name, table_data)
+                    tunings.add_table_tuning(table_tuning)
+
+                benchmark_tunings[benchmark_name] = tunings
+
+            # Validate configurations if enabled
+            if self.get("tuning.validate_on_load", True):
+                self._validate_tuning_configs(benchmark_tunings)
+
+            return benchmark_tunings
+
+        except (yaml.YAMLError, json.JSONDecodeError) as e:
+            raise ValueError(f"Failed to parse tuning configuration file: {e}")
+        except Exception as e:
+            raise ValueError(f"Error loading tuning configuration: {e}")
+
+    def _parse_table_tuning(self, table_name: str, table_data: dict[str, Any]) -> TableTuning:
+        """Parse table tuning configuration from dictionary data.
+
+        Args:
+            table_name: Name of the table
+            table_data: Dictionary containing tuning configuration
+
+        Returns:
+            TableTuning object
+        """
+        # Parse optional tuning type columns
+        partitioning: Optional[list[TuningColumn]] = None
+        clustering: Optional[list[TuningColumn]] = None
+        distribution: Optional[list[TuningColumn]] = None
+        sorting: Optional[list[TuningColumn]] = None
+
+        for tuning_type_str in [
+            "partitioning",
+            "clustering",
+            "distribution",
+            "sorting",
+        ]:
+            if tuning_type_str in table_data:
+                columns_data = table_data[tuning_type_str]
+                if not isinstance(columns_data, list):
+                    raise ValueError(f"'{tuning_type_str}' must be a list of column configurations")
+
+                columns = []
+                for i, col_data in enumerate(columns_data):
+                    if isinstance(col_data, str):
+                        # Simple format: just column name, infer order
+                        columns.append(TuningColumn(name=col_data, type="UNKNOWN", order=i + 1))
+                    elif isinstance(col_data, dict):
+                        # Full format with name, type, and order
+                        columns.append(TuningColumn.from_dict(col_data))
+                    else:
+                        raise ValueError(f"Invalid column configuration at index {i} in {tuning_type_str}")
+
+                # Assign to the appropriate variable
+                if tuning_type_str == "partitioning":
+                    partitioning = columns
+                elif tuning_type_str == "clustering":
+                    clustering = columns
+                elif tuning_type_str == "distribution":
+                    distribution = columns
+                elif tuning_type_str == "sorting":
+                    sorting = columns
+
+        # Create TableTuning with explicit parameters (helps type checker)
+        return TableTuning(
+            table_name=table_name,
+            partitioning=partitioning,
+            clustering=clustering,
+            distribution=distribution,
+            sorting=sorting,
+        )
+
+    def _validate_tuning_configs(self, benchmark_tunings: dict[str, BenchmarkTunings]) -> None:
+        """Validate loaded tuning configurations.
+
+        Args:
+            benchmark_tunings: Dictionary of benchmark tuning configurations
+        """
+        for benchmark_name, tunings in benchmark_tunings.items():
+            if not tunings.has_valid_tunings():
+                validation_results = tunings.validate_all()
+
+                error_messages = []
+                for table_name, errors in validation_results.items():
+                    if errors:
+                        error_messages.extend([f"{table_name}: {error}" for error in errors])
+
+                if error_messages:
+                    console.print(f"[red]⚠️ Tuning validation errors in '{benchmark_name}':[/red]")
+                    for msg in error_messages:
+                        console.print(f"  - {msg}")
+
+                    if not self.get("tuning.allow_platform_incompatible", False):
+                        raise ValueError(f"Invalid tuning configuration for benchmark '{benchmark_name}'")
+
+    def save_tuning_config(
+        self,
+        benchmark_tunings: dict[str, BenchmarkTunings],
+        config_path: Union[str, Path],
+        format: str = "yaml",
+    ) -> None:
+        """Save tuning configurations to file.
+
+        Args:
+            benchmark_tunings: Dictionary of benchmark tuning configurations
+            config_path: Path where to save the configuration
+            format: File format ('yaml' or 'json')
+        """
+        config_path = Path(config_path)
+
+        # Convert to serializable format
+        config_data = {}
+        for benchmark_name, tunings in benchmark_tunings.items():
+            config_data[benchmark_name] = tunings.to_dict()["table_tunings"]
+
+        # Add metadata
+        config_data["_metadata"] = {
+            "version": "1.0",
+            "created": datetime.now().isoformat(),
+            "generated_by": "benchbox-cli",
+        }
+
+        # Save to file
+        try:
+            save_config_file(config_data, config_path, format)
+            console.print(f"[green]✅ Tuning configuration saved to {config_path}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]❌ Failed to save tuning configuration: {e}[/red]")
+            raise
+
+    def apply_environment_overrides(self) -> None:
+        """Apply environment variable overrides for tuning settings."""
+        env_overrides = self.get("tuning.environment_overrides", {})
+
+        for env_var, config_key in env_overrides.items():
+            env_value = os.getenv(env_var)
+            if env_value is not None:
+                # Convert environment variable values to appropriate types
+                if config_key == "enabled":
+                    value = env_value.lower() in ["true", "1", "yes", "on", "enabled"]
+                    self.set(f"tuning.{config_key}", value)
+                else:
+                    self.set(f"tuning.{config_key}", env_value)
+
+                console.print(f"[yellow]Applied environment override: {env_var}={env_value}[/yellow]")
+
+    def load_unified_tuning_config(
+        self, config_path: Union[str, Path], platform: Optional[str] = None
+    ) -> UnifiedTuningConfiguration:
+        """Load unified tuning configuration from YAML or JSON file.
+
+        Args:
+            config_path: Path to the unified tuning configuration file
+            platform: Platform to validate against (default: uses configured preferred platform)
+
+        Returns:
+            UnifiedTuningConfiguration instance
+
+        Raises:
+            ValueError: If the configuration file is invalid or cannot be loaded
+        """
+        config_path = Path(config_path)
+
+        try:
+            config_data = load_config_file(config_path)
+            if not config_data:
+                raise ValueError("Configuration file is empty")
+
+            # Create unified configuration from data
+            unified_config = UnifiedTuningConfiguration.from_dict(config_data)
+
+            # Validate configuration if enabled
+            if self.get("tuning.validate_on_load", True):
+                self._validate_unified_tuning_config(unified_config, platform)
+
+            return unified_config
+
+        except (yaml.YAMLError, json.JSONDecodeError) as e:
+            raise ValueError(f"Failed to parse unified tuning configuration file: {e}")
+        except Exception as e:
+            raise ValueError(f"Error loading unified tuning configuration: {e}")
+
+    def save_unified_tuning_config(
+        self,
+        config: UnifiedTuningConfiguration,
+        config_path: Union[str, Path],
+        format: str = "yaml",
+    ) -> None:
+        """Save unified tuning configuration to file.
+
+        Args:
+            config: UnifiedTuningConfiguration to save
+            config_path: Path where to save the configuration
+            format: File format ('yaml' or 'json')
+        """
+        config_path = Path(config_path)
+
+        # Convert to serializable format
+        config_data = config.to_dict()
+
+        # Add metadata
+        config_data["_metadata"] = {
+            "version": "2.0",
+            "format": "unified_tuning",
+            "created": datetime.now().isoformat(),
+            "generated_by": "benchbox-cli",
+        }
+
+        # Save to file
+        try:
+            save_config_file(config_data, config_path, format)
+            console.print(f"[green]✅ Unified tuning configuration saved to {config_path}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]❌ Failed to save unified tuning configuration: {e}[/red]")
+            raise
+
+    def _validate_unified_tuning_config(
+        self, config: UnifiedTuningConfiguration, platform: Optional[str] = None
+    ) -> None:
+        """Validate unified tuning configuration.
+
+        Args:
+            config: UnifiedTuningConfiguration to validate
+            platform: Platform to validate against (default: uses configured preferred platform)
+        """
+        if platform is None:
+            platform = self.get("database.preferred", "duckdb")
+
+        # Validate constraint settings are explicitly specified
+        constraint_errors = []
+
+        if config.primary_keys.enabled is None:
+            constraint_errors.append("primary_keys.enabled must be explicitly specified (true or false)")
+
+        if config.foreign_keys.enabled is None:
+            constraint_errors.append("foreign_keys.enabled must be explicitly specified (true or false)")
+
+        # Validate platform-specific configuration
+        platform_errors = config.validate_for_platform(platform)
+
+        all_errors = constraint_errors + platform_errors
+
+        if all_errors:
+            console.print(f"[red]⚠️ Unified tuning validation errors for platform '{platform}':[/red]")
+            for error in all_errors:
+                console.print(f"  - {error}")
+
+            if not self.get("tuning.allow_platform_incompatible", False):
+                raise ValueError(f"Invalid unified tuning configuration for platform '{platform}'")
+
+    def create_sample_unified_tuning_config(self, path: Optional[Path] = None, platform: Optional[str] = None) -> None:
+        """Create a sample unified tuning configuration file.
+
+        Args:
+            path: Path where to create the sample configuration (default: unified_tuning.yaml)
+            platform: Target platform for compatibility (default: uses configured preferred platform)
+        """
+        if path is None:
+            path = Path("unified_tuning.yaml")
+
+        if platform is None:
+            platform = self.get("database.preferred", "duckdb")
+
+        # Create a sample configuration with platform-compatible options
+        sample_config = UnifiedTuningConfiguration()
+
+        # Configure constraints (supported by most platforms)
+        sample_config.primary_keys.enabled = True
+        sample_config.foreign_keys.enabled = True
+        sample_config.foreign_keys.on_delete_action = "CASCADE"
+
+        sample_config.unique_constraints.enabled = True
+        sample_config.check_constraints.enabled = True
+
+        # Configure platform-specific optimizations based on target platform
+        if platform.lower() == "databricks":
+            sample_config.platform_optimizations.z_ordering_enabled = True
+            sample_config.platform_optimizations.z_ordering_columns = [
+                "date_col",
+                "partition_col",
+            ]
+            sample_config.platform_optimizations.auto_optimize_enabled = True
+            sample_config.platform_optimizations.bloom_filters_enabled = True
+            sample_config.platform_optimizations.bloom_filter_columns = [
+                "customer_id",
+                "product_id",
+            ]
+        elif platform.lower() in ["snowflake", "bigquery"]:
+            sample_config.platform_optimizations.materialized_views_enabled = True
+        elif platform.lower() in ["postgresql", "redshift"]:
+            sample_config.platform_optimizations.bloom_filters_enabled = True
+            sample_config.platform_optimizations.bloom_filter_columns = ["customer_id"]
+            sample_config.platform_optimizations.materialized_views_enabled = True
+
+        # Add platform-compatible table tunings
+        from benchbox.core.tuning.interface import TableTuning, TuningColumn
+
+        if TuningType.PARTITIONING.is_compatible_with_platform(platform):
+            sample_config.table_tunings["orders"] = TableTuning(
+                table_name="orders",
+                partitioning=[TuningColumn(name="order_date", type="DATE", order=1)],
+            )
+
+            sample_config.table_tunings["lineitem"] = TableTuning(
+                table_name="lineitem",
+                partitioning=[TuningColumn(name="shipdate", type="DATE", order=1)],
+            )
+
+        if TuningType.CLUSTERING.is_compatible_with_platform(platform):
+            if "orders" in sample_config.table_tunings:
+                sample_config.table_tunings["orders"].clustering = [
+                    TuningColumn(name="customer_id", type="INTEGER", order=1)
+                ]
+
+        if TuningType.SORTING.is_compatible_with_platform(platform):
+            if "lineitem" not in sample_config.table_tunings:
+                sample_config.table_tunings["lineitem"] = TableTuning(table_name="lineitem")
+
+            sample_config.table_tunings["lineitem"].sorting = [
+                TuningColumn(name="orderkey", type="INTEGER", order=1),
+                TuningColumn(name="linenumber", type="INTEGER", order=2),
+            ]
+
+        self.save_unified_tuning_config(sample_config, path)
+        console.print(
+            f"[green]✅ Sample unified tuning configuration created for platform '{platform}' at {path}[/green]"
+        )
+
+        enabled_types = sample_config.get_enabled_tuning_types()
+        console.print("This configuration includes:")
+        console.print("  • Schema constraints (primary keys, foreign keys, unique, check)")
+        if any(t.value.startswith(("z_ordering", "auto_", "bloom_", "materialized_")) for t in enabled_types):
+            console.print(f"  • Platform optimizations for {platform}")
+        if any(
+            t
+            in [
+                TuningType.PARTITIONING,
+                TuningType.CLUSTERING,
+                TuningType.SORTING,
+                TuningType.DISTRIBUTION,
+            ]
+            for t in enabled_types
+        ):
+            console.print("  • Table-level tunings (partitioning, clustering, sorting)")
+        console.print(f"All settings are compatible with {platform}.")
+        console.print("Edit this file to customize your tuning settings.")
+
+
+class DirectoryManager:
+    """Manages BenchBox directory structure and file organization."""
+
+    def __init__(self, base_dir: Optional[str] = None):
+        """Initialize directory manager with configurable base directory."""
+        self.base_dir = Path(base_dir or "benchmark_runs")
+        self.results_dir = self.base_dir / "results"
+        self.datagen_dir = self.base_dir / "datagen"
+        self.databases_dir = self.base_dir / "databases"
+
+        # Create directories if they don't exist
+        self._ensure_directories()
+
+    def _ensure_directories(self):
+        """Create all required directories."""
+        for directory in [
+            self.base_dir,
+            self.results_dir,
+            self.datagen_dir,
+            self.databases_dir,
+        ]:
+            directory.mkdir(parents=True, exist_ok=True)
+
+    def _format_scale_factor(self, scale_factor: float) -> str:
+        """Format scale factor for filenames using centralized utility."""
+        return format_scale_factor(scale_factor)
+
+    def get_result_filename(
+        self,
+        benchmark_name: str,
+        scale_factor: float,
+        platform: str,
+        timestamp: str,
+        execution_id: str,
+    ) -> str:
+        """Generate standardized result filename."""
+        sf_str = self._format_scale_factor(scale_factor)
+        return f"{benchmark_name}_{sf_str}_{platform}_{timestamp}_{execution_id}.json"
+
+    def get_result_path(
+        self,
+        benchmark_name: str,
+        scale_factor: float,
+        platform: str,
+        timestamp: str,
+        execution_id: str,
+    ) -> Path:
+        """Get full path for result file."""
+        filename = self.get_result_filename(benchmark_name, scale_factor, platform, timestamp, execution_id)
+        return self.results_dir / filename
+
+    def get_database_filename(
+        self,
+        benchmark_name: str,
+        scale_factor: float,
+        platform: str,
+        tuning_config: Optional[dict[str, Any]] = None,
+        custom_name: Optional[str] = None,
+    ) -> str:
+        """Generate database filename with configuration characteristics.
+
+        Args:
+            benchmark_name: Name of the benchmark
+            scale_factor: Scale factor value
+            platform: Platform name
+            tuning_config: Unified tuning configuration (optional)
+            custom_name: Custom database name override (optional)
+
+        Returns:
+            Database filename with appropriate extension
+        """
+        return generate_database_filename(
+            benchmark_name=benchmark_name,
+            scale_factor=scale_factor,
+            platform=platform,
+            tuning_config=tuning_config,
+            custom_name=custom_name,
+        )
+
+    def get_database_path(
+        self,
+        benchmark_name: str,
+        scale_factor: float,
+        platform: str,
+        tuning_config: Optional[dict[str, Any]] = None,
+        custom_name: Optional[str] = None,
+    ) -> Path:
+        """Get full path for database file with configuration characteristics.
+
+        Args:
+            benchmark_name: Name of the benchmark
+            scale_factor: Scale factor value
+            platform: Platform name
+            tuning_config: Unified tuning configuration (optional)
+            custom_name: Custom database name override (optional)
+
+        Returns:
+            Full path to database file
+        """
+        filename = self.get_database_filename(benchmark_name, scale_factor, platform, tuning_config, custom_name)
+        return self.databases_dir / filename
+
+    def get_datagen_path(self, benchmark_name: str, scale_factor: float) -> Path:
+        """Get path for generated data directory."""
+        sf_str = self._format_scale_factor(scale_factor)
+        return self.datagen_dir / f"{benchmark_name}_{sf_str}"
+
+    def clean_old_files(self, benchmark_name: Optional[str] = None, max_age_days: int = 30):
+        """Clean old files from all directories."""
+        import time
+
+        current_time = time.time()
+        cutoff_time = current_time - (max_age_days * 24 * 60 * 60)
+
+        cleaned_files = []
+
+        for directory in [self.results_dir, self.datagen_dir, self.databases_dir]:
+            if not directory.exists():
+                continue
+
+            for file_path in directory.rglob("*"):
+                if file_path.is_file():
+                    # Check if file matches benchmark filter
+                    if benchmark_name and not file_path.name.startswith(benchmark_name):
+                        continue
+
+                    # Check file age
+                    if file_path.stat().st_mtime < cutoff_time:
+                        try:
+                            file_path.unlink()
+                            cleaned_files.append(str(file_path))
+                        except Exception as e:
+                            console.print(f"[yellow]Warning: Could not delete {file_path}: {e}[/yellow]")
+
+        return cleaned_files
+
+    def list_files(self, file_type: str = "all") -> dict[str, list[Path]]:
+        """List files by type."""
+        files = {
+            "results": list(self.results_dir.glob("*.json")) if self.results_dir.exists() else [],
+            "databases": list(self.databases_dir.glob("*")) if self.databases_dir.exists() else [],
+            "datagen": list(self.datagen_dir.glob("*")) if self.datagen_dir.exists() else [],
+        }
+
+        if file_type == "all":
+            return files
+        else:
+            return {file_type: files.get(file_type, [])}
+
+    def get_directory_sizes(self) -> dict[str, float]:
+        """Get size of each directory in MB."""
+
+        def get_dir_size(path: Path) -> float:
+            if not path.exists():
+                return 0.0
+            total = 0
+            for file_path in path.rglob("*"):
+                if file_path.is_file():
+                    total += file_path.stat().st_size
+            return total / (1024 * 1024)  # Convert to MB
+
+        return {
+            "results": get_dir_size(self.results_dir),
+            "datagen": get_dir_size(self.datagen_dir),
+            "databases": get_dir_size(self.databases_dir),
+            "total": get_dir_size(self.base_dir),
+        }
+
+
+class ExampleArgumentParser:
+    """Reusable argument parser for examples with standard patterns.
+
+    Consolidates repetitive argparse patterns found across example files
+    to provide consistent command-line interfaces and reduce duplication.
+    """
+
+    @classmethod
+    def create_benchmark_parser(cls, description: str, default_scale: float = 1.0) -> argparse.ArgumentParser:
+        """Create parser with common benchmark arguments.
+
+        Args:
+            description: Parser description
+            default_scale: Default scale factor value
+
+        Returns:
+            ArgumentParser with standard benchmark arguments
+        """
+        parser = argparse.ArgumentParser(
+            description=description,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
+
+        # Core benchmark arguments
+        parser.add_argument(
+            "--scale",
+            type=float,
+            default=default_scale,
+            help=f"Scale factor (default: {default_scale})",
+        )
+        parser.add_argument(
+            "--platform",
+            type=str,
+            help="Database file path or connection string (default: auto-generated)",
+        )
+        parser.add_argument(
+            "--output",
+            type=str,
+            help="Output directory for data files (default: auto-generated)",
+        )
+
+        # Execution control
+        parser.add_argument("--verbose", action="store_true", help="Show detailed execution information")
+        parser.add_argument(
+            "--quiet",
+            action="store_true",
+            help="Minimize output (only show essential information)",
+        )
+
+        return parser
+
+    @classmethod
+    def add_tuning_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        """Add standard tuning-related arguments.
+
+        Args:
+            parser: ArgumentParser to add tuning arguments to
+        """
+        tuning_group = parser.add_argument_group("Tuning Options", "Database optimization and constraint management")
+
+        tuning_group.add_argument(
+            "--tuning-config",
+            type=str,
+            metavar="FILE",
+            help="Load unified tuning configuration from YAML file",
+        )
+        tuning_group.add_argument(
+            "--create-sample-tuning",
+            type=str,
+            metavar="FILE",
+            help="Create a sample tuning configuration file and exit",
+        )
+        tuning_group.add_argument(
+            "--platform-name",
+            type=str,
+            dest="database_name",
+            help="Custom database name (overrides auto-generated naming)",
+        )
+        tuning_group.add_argument(
+            "--force",
+            action="store_true",
+            help="Force regeneration of data and recreation of database objects",
+        )
+
+    @classmethod
+    def add_execution_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        """Add execution-related arguments for power runs and concurrency.
+
+        Args:
+            parser: ArgumentParser to add execution arguments to
+        """
+        # Power run arguments
+        power_group = parser.add_argument_group("Power Run Options", "Multiple iterations with statistical analysis")
+
+        power_group.add_argument(
+            "--iterations",
+            type=int,
+            default=4,
+            help="Number of benchmark iterations (default: 4)",
+        )
+        power_group.add_argument(
+            "--warm-up",
+            type=int,
+            default=0,
+            help="Number of warm-up iterations (default: 0)",
+        )
+        power_group.add_argument(
+            "--profile",
+            choices=["quick", "standard", "thorough", "stress"],
+            help="Performance testing profile",
+        )
+
+        # Concurrent execution arguments
+        concurrent_group = parser.add_argument_group("Concurrent Queries", "Throughput testing with multiple streams")
+
+        concurrent_group.add_argument(
+            "--concurrent",
+            action="store_true",
+            help="Enable concurrent query execution",
+        )
+        concurrent_group.add_argument(
+            "--streams",
+            type=int,
+            default=2,
+            help="Number of concurrent query streams (default: 2)",
+        )
+
+        # Phase control arguments
+        phase_group = parser.add_argument_group("Phase Control", "Selective benchmark execution")
+
+        phase_group.add_argument(
+            "--phase",
+            type=str,
+            default="power",
+            help="Benchmark phases to run (comma-separated): generate,load,warmup,power,throughput,maintenance",
+        )
+
+    @classmethod
+    def add_output_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        """Add output and result-related arguments.
+
+        Args:
+            parser: ArgumentParser to add output arguments to
+        """
+        output_group = parser.add_argument_group("Output Options", "Result reporting and data export")
+
+        output_group.add_argument(
+            "--save-results",
+            type=str,
+            metavar="FILE",
+            help="Save detailed results to JSON file",
+        )
+        output_group.add_argument(
+            "--export-format",
+            choices=["json", "csv", "html"],
+            action="append",
+            help="Export result formats",
+        )
+        output_group.add_argument(
+            "--dry-run",
+            type=str,
+            metavar="DIR",
+            help="Show execution plan without running (output to directory)",
+        )
+
+    @classmethod
+    def add_platform_arguments(cls, parser: argparse.ArgumentParser, platform: str) -> None:
+        """Add platform-specific arguments.
+
+        Args:
+            parser: ArgumentParser to add platform arguments to
+            platform: Platform name (e.g., 'databricks', 'duckdb', 'clickhouse')
+        """
+        platform_title = platform.title()
+
+        if platform.lower() == "databricks":
+            cls._add_databricks_arguments(parser, platform_title)
+        elif platform.lower() == "duckdb":
+            cls._add_duckdb_arguments(parser, platform_title)
+        elif platform.lower() == "clickhouse":
+            cls._add_clickhouse_arguments(parser, platform_title)
+
+    @classmethod
+    def _add_databricks_arguments(cls, parser: argparse.ArgumentParser, platform_title: str) -> None:
+        """Add Databricks-specific arguments."""
+        databricks_group = parser.add_argument_group(
+            f"{platform_title} Configuration",
+            "Platform-specific settings and authentication",
+        )
+
+        databricks_group.add_argument("--server-hostname", type=str, help="Databricks server hostname")
+        databricks_group.add_argument("--http-path", type=str, help="SQL warehouse HTTP path")
+        databricks_group.add_argument("--access-token", type=str, help="Databricks access token")
+        databricks_group.add_argument(
+            "--catalog",
+            type=str,
+            default="main",
+            help="Unity Catalog name (default: main)",
+        )
+        databricks_group.add_argument(
+            "--schema",
+            type=str,
+            default="benchbox",
+            help="Database schema name (default: benchbox)",
+        )
+        databricks_group.add_argument(
+            "--create-catalog",
+            action="store_true",
+            help="Auto-create catalog if it doesn't exist",
+        )
+
+        # Delta Lake optimizations
+        delta_group = parser.add_argument_group("Delta Lake Optimizations", "Databricks-specific performance tuning")
+
+        delta_group.add_argument(
+            "--enable-delta-optimization",
+            action="store_true",
+            help="Enable Delta table optimizations",
+        )
+        delta_group.add_argument(
+            "--auto-optimize",
+            action="store_true",
+            help="Enable auto-optimization for Delta tables",
+        )
+        delta_group.add_argument(
+            "--auto-compact",
+            action="store_true",
+            help="Enable auto-compaction for Delta tables",
+        )
+        delta_group.add_argument(
+            "--cluster-size",
+            choices=["XS", "Small", "Medium", "Large", "XL"],
+            help="Databricks cluster size",
+        )
+
+    @classmethod
+    def _add_duckdb_arguments(cls, parser: argparse.ArgumentParser, platform_title: str) -> None:
+        """Add DuckDB-specific arguments."""
+        duckdb_group = parser.add_argument_group(
+            f"{platform_title} Configuration",
+            "Platform-specific settings and optimizations",
+        )
+
+        duckdb_group.add_argument(
+            "--memory-limit",
+            type=str,
+            help="DuckDB memory limit (e.g., '4GB', '512MB')",
+        )
+        duckdb_group.add_argument("--threads", type=int, help="Number of threads for query execution")
+        duckdb_group.add_argument("--temp-directory", type=str, help="Temporary directory for spill files")
+
+    @classmethod
+    def _add_clickhouse_arguments(cls, parser: argparse.ArgumentParser, platform_title: str) -> None:
+        """Add ClickHouse-specific arguments."""
+        clickhouse_group = parser.add_argument_group(
+            f"{platform_title} Configuration",
+            "Platform-specific settings and connection",
+        )
+
+        # Mode selection (server or embedded)
+        clickhouse_group.add_argument(
+            "--mode",
+            type=str,
+            choices=["server", "embedded"],
+            default="server",
+            help="ClickHouse mode: 'server' for remote/local server, 'local' for in-process (default: server)",
+        )
+
+        # Server mode arguments
+        server_group = parser.add_argument_group(
+            f"{platform_title} Server Mode",
+            "Arguments for server mode (when --mode=server)",
+        )
+        server_group.add_argument(
+            "--host",
+            type=str,
+            default="localhost",
+            help="ClickHouse server host (default: localhost)",
+        )
+        server_group.add_argument(
+            "--port",
+            type=int,
+            default=9000,
+            help="ClickHouse server port (default: 9000)",
+        )
+        server_group.add_argument(
+            "--user",
+            type=str,
+            default="default",
+            help="ClickHouse username (default: default)",
+        )
+        server_group.add_argument("--password", type=str, help="ClickHouse password")
+        server_group.add_argument("--secure", action="store_true", help="Use secure connection (TLS)")
+
+        # Embedded mode arguments
+        embedded_group = parser.add_argument_group(
+            f"{platform_title} Embedded Mode",
+            "Arguments for embedded mode (when --mode=embedded)",
+        )
+        embedded_group.add_argument(
+            "--data-path",
+            type=str,
+            help="Data path for embedded mode file operations (optional)",
+        )
+
+    @classmethod
+    def parse_and_validate_args(cls, parser: argparse.ArgumentParser) -> argparse.Namespace:
+        """Parse arguments and apply validation rules.
+
+        Args:
+            parser: Configured ArgumentParser
+
+        Returns:
+            Parsed and validated arguments
+
+        Raises:
+            SystemExit: If validation fails
+        """
+        args = parser.parse_args()
+
+        # Mutual exclusion validation
+        exclusive_groups = [
+            (["power_only", "throughput_only", "load_only"], "Phase control options"),
+            (["verbose", "quiet"], "Output verbosity options"),
+        ]
+
+        for group, description in exclusive_groups:
+            active_options = [opt for opt in group if getattr(args, opt, False)]
+            if len(active_options) > 1:
+                parser.error(
+                    f"{description} are mutually exclusive: {', '.join(['--' + opt.replace('_', '-') for opt in active_options])}"
+                )
+
+        return args

@@ -1,0 +1,40 @@
+# Project-specific terms to ignore in spell checking
+# Data warehouse and benchmark terminology
+olap
+tpch
+tpcds
+tpcdi
+datas
+clickbench
+benchbox
+duckdb
+databricks
+snowflake
+redshift
+clickhouse
+bigquery
+
+# Technical terms
+parquet
+dbfs
+abfss
+typeof
+param
+params
+isnull
+notnull
+numer
+
+# Common abbreviations
+num
+iff
+cond
+expr
+util
+utils
+prog
+coef
+stdev
+
+# Typos in external dependencies/specs
+Paramer

@@ -1,0 +1,239 @@
+<!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
+
+# Amazon Athena for Apache Spark Platform
+
+```{tags} intermediate, guide, athena-spark, cloud-platform
+```
+
+Athena for Apache Spark is AWS's interactive Spark service with sub-second startup times. Unlike EMR Serverless or Glue, it uses a notebook-style execution model with persistent sessions.
+
+## Features
+
+- **Sub-second Startup** - Pre-provisioned Spark capacity for instant execution
+- **Interactive Sessions** - Notebook-style execution with persistent state
+- **Serverless** - No cluster management required
+- **S3 Integration** - Native S3 and Glue Data Catalog support
+- **Session-based** - Efficient for multiple queries in a session
+
+## Installation
+
+```bash
+# Install with Athena Spark support
+uv add benchbox --extra athena-spark
+
+# Dependencies installed: boto3
+```
+
+## Prerequisites
+
+1. **Spark-enabled Athena workgroup** (created via Console or CLI)
+2. **S3 bucket** for data staging
+3. **AWS credentials** configured:
+   - AWS CLI: `aws configure`
+   - Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+   - IAM role (on EC2/ECS/Lambda)
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Required
+export ATHENA_SPARK_WORKGROUP=my-spark-workgroup
+export ATHENA_S3_STAGING_DIR=s3://my-bucket/benchbox
+
+# Optional
+export AWS_REGION=us-east-1
+```
+
+### CLI Usage
+
+```bash
+# Basic usage
+benchbox run --platform athena-spark --benchmark tpch --scale 1.0 \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox
+
+# With custom region
+benchbox run --platform athena-spark --benchmark tpch --scale 1.0 \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox \
+  --platform-option region=eu-west-1
+
+# With custom DPU configuration
+benchbox run --platform athena-spark --benchmark tpch --scale 1.0 \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox \
+  --platform-option coordinator_dpu_size=2 \
+  --platform-option max_concurrent_dpus=40
+
+# Dry-run to preview queries
+benchbox run --platform athena-spark --benchmark tpch --dry-run ./preview \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox
+```
+
+### Platform Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `workgroup` | *required* | Spark-enabled Athena workgroup name |
+| `s3_staging_dir` | *required* | S3 path for data staging |
+| `region` | us-east-1 | AWS region |
+| `database` | benchbox | Glue Data Catalog database |
+| `coordinator_dpu_size` | 1 | Coordinator DPU size |
+| `max_concurrent_dpus` | 20 | Maximum concurrent DPUs |
+| `default_executor_dpu_size` | 1 | Default executor DPU size |
+| `session_idle_timeout_minutes` | 15 | Session idle timeout |
+| `timeout_minutes` | 60 | Calculation timeout |
+
+## Python API
+
+```python
+from benchbox.platforms.aws import AthenaSparkAdapter
+
+# Initialize with workgroup and staging
+adapter = AthenaSparkAdapter(
+    workgroup="my-spark-workgroup",
+    s3_staging_dir="s3://my-bucket/benchbox",
+    region="us-east-1",
+)
+
+# Start session
+adapter.create_connection()
+
+# Create schema
+adapter.create_schema("tpch_benchmark")
+
+# Load data to S3 and create tables
+adapter.load_data(
+    tables=["lineitem", "orders", "customer"],
+    source_dir="/path/to/tpch/data",
+)
+
+# Execute query via session
+result = adapter.execute_query("SELECT COUNT(*) FROM lineitem")
+
+# Terminate session
+adapter.close()
+```
+
+## Execution Model
+
+Athena Spark uses a session-based execution model:
+
+1. **Session Start** - Start a session in a Spark-enabled workgroup
+2. **Calculation Submit** - Submit SQL or PySpark calculations
+3. **Result Retrieval** - Results written to S3 automatically
+4. **Session End** - Terminate session when complete (or auto-terminate on idle)
+
+## Creating a Spark-Enabled Workgroup
+
+### Via AWS Console
+
+1. Go to Athena Console
+2. Navigate to **Workgroups**
+3. Click **Create workgroup**
+4. Select **Apache Spark** as the engine type
+5. Configure:
+   - Name: e.g., "spark-benchbox"
+   - Query result location: s3://your-bucket/athena-results/
+   - DPU allocation settings
+6. Create workgroup
+
+### Via AWS CLI
+
+```bash
+aws athena create-work-group \
+  --name spark-benchbox \
+  --configuration '{"EngineVersion": {"SelectedEngineVersion": "PySpark engine version 3"}}' \
+  --description "Spark workgroup for BenchBox"
+```
+
+## DPU Configuration
+
+| Size | vCPUs | Memory | Use Case |
+|------|-------|--------|----------|
+| 1 DPU | 4 | 16 GB | Development, small datasets |
+| 2 DPU | 8 | 32 GB | General benchmarking |
+| 4 DPU | 16 | 64 GB | Large scale factors |
+
+## Authentication
+
+Athena Spark uses standard AWS authentication:
+
+### AWS CLI (Development)
+
+```bash
+aws configure
+```
+
+### Environment Variables (Automation)
+
+```bash
+export AWS_ACCESS_KEY_ID=your-access-key
+export AWS_SECRET_ACCESS_KEY=your-secret-key
+export AWS_REGION=us-east-1
+```
+
+### IAM Role (EC2/ECS/Lambda)
+
+No configuration needed - automatically uses instance/task role.
+
+## Cost Estimation
+
+Athena Spark uses DPU-hour billing:
+
+| Resource | Price |
+|----------|-------|
+| DPU-hour | ~$0.35 |
+
+| Scale Factor | Data Size | Est. Runtime | Est. Cost* |
+|--------------|-----------|--------------|------------|
+| 0.01 | ~10 MB | ~15 min | ~$0.10 |
+| 1.0 | ~1 GB | ~45 min | ~$0.75 |
+| 10.0 | ~10 GB | ~2 hours | ~$3.00 |
+| 100.0 | ~100 GB | ~5 hours | ~$10.00 |
+
+*Estimates based on 2 DPUs. Actual costs vary.
+
+## Session vs Batch Comparison
+
+| Aspect | Athena Spark (Sessions) | EMR Serverless (Batches) |
+|--------|------------------------|--------------------------|
+| Startup | Sub-second | Seconds to minutes |
+| Model | Interactive sessions | Batch jobs |
+| State | Persists in session | Stateless per job |
+| Use Case | Ad-hoc, exploration | Production pipelines |
+| Billing | DPU-hour | vCPU-hour + GB-hour |
+
+## Troubleshooting
+
+### Common Issues
+
+**Workgroup not Spark-enabled:**
+- Athena Spark requires a workgroup with Apache Spark engine
+- SQL workgroups will not work
+- Create a new Spark-enabled workgroup
+
+**Session fails to start:**
+- Check workgroup DPU limits
+- Verify IAM permissions for Athena and S3
+- Check service quotas
+
+**Calculation timeout:**
+- Increase `timeout_minutes` for large scale factors
+- Check session hasn't auto-terminated
+- Review calculation logs in CloudWatch
+
+**S3 access denied:**
+- Check S3 bucket permissions
+- Verify IAM role has S3 read/write access
+- Ensure bucket is in same region
+
+## Related
+
+- [Amazon Athena SQL](athena.md) - SQL-based Athena (Trino)
+- [EMR Serverless](emr-serverless.md) - Batch Spark workloads
+- [AWS Glue](glue.md) - ETL-focused Spark
+- [Cloud Platforms Overview](cloud-platforms.rst) - All cloud platforms

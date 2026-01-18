@@ -1,0 +1,431 @@
+"""TPC-H Power Test Implementation.
+
+This module implements the TPC-H Power Test according to the official TPC-H
+specification. The Power Test measures the time to execute all 22 TPC-H queries
+sequentially in a single stream to calculate the Power@Size metric.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+TPC Benchmark™ H (TPC-H) - Copyright © Transaction Processing Performance Council
+This implementation is based on the TPC-H specification.
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import logging
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Optional
+
+
+@dataclass
+class TPCHPowerTestConfig:
+    """Configuration for TPC-H Power Test."""
+
+    scale_factor: float = 1.0
+    seed: int = 1
+    stream_id: int = 0  # TPC-H stream ID for query permutation (0-40)
+    timeout: Optional[float] = None
+    warm_up: bool = True
+    validation: bool = True
+    validation_mode: str = "exact"  # "exact", "loose", or "disabled"
+    verbose: bool = False
+    query_subset: Optional[list[str]] = None  # If set, run only these queries in specified order
+
+
+@dataclass
+class TPCHPowerTestResult:
+    """Result of TPC-H Power Test."""
+
+    config: TPCHPowerTestConfig
+    start_time: str
+    end_time: str
+    total_time: float
+    power_at_size: float
+    queries_executed: int
+    queries_successful: int
+    query_results: list[dict[str, Any]]
+    success: bool
+    errors: list[str]
+
+    @property
+    def scale_factor(self) -> float:
+        """Get scale factor from config."""
+        return self.config.scale_factor
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert result to dictionary."""
+        return {
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "total_time": self.total_time,
+            "power_at_size": self.power_at_size,
+            "queries_executed": self.queries_executed,
+            "queries_successful": self.queries_successful,
+            "query_results": self.query_results,
+            "success": self.success,
+            "errors": self.errors,
+            "config": {
+                "scale_factor": self.config.scale_factor,
+                "seed": self.config.seed,
+                "stream_id": self.config.stream_id,
+                "timeout": self.config.timeout,
+                "warm_up": self.config.warm_up,
+                "validation": self.config.validation,
+                "validation_mode": self.config.validation_mode,
+            },
+        }
+
+
+class TPCHPowerTest:
+    """TPC-H Power Test implementation."""
+
+    def __init__(
+        self,
+        benchmark: Any,
+        connection: Any,
+        scale_factor: float = 1.0,
+        seed: Optional[int] = None,
+        stream_id: int = 0,
+        dialect: str = "standard",
+        verbose: bool = False,
+        timeout: Optional[float] = None,
+        warm_up: bool = True,
+        validation: bool = True,
+        validation_mode: Optional[str] = None,
+        query_subset: Optional[list[str]] = None,
+    ) -> None:
+        """Initialize TPC-H Power Test.
+
+        Args:
+            benchmark: TPCHBenchmark instance
+            connection: Database connection object
+            scale_factor: Scale factor for the benchmark
+            seed: Random seed for parameter generation (None = auto-select based on validation mode)
+            stream_id: TPC-H stream ID for query permutation (0-40, default: 0)
+            dialect: SQL dialect
+            verbose: Enable verbose logging
+            timeout: Query timeout in seconds
+            warm_up: Perform database warm-up
+            validation: Enable result validation
+            validation_mode: Validation mode ("exact", "loose", or "disabled", None = auto-select)
+            query_subset: Optional list of specific query IDs to run (overrides stream permutation)
+        """
+        self.benchmark = benchmark
+        self.connection = connection
+        self.dialect = dialect
+
+        self.logger = logging.getLogger(__name__)
+        if verbose:
+            self.logger.setLevel(logging.INFO)
+
+        # Import reference seed function
+        from benchbox.core.tpch.benchmark import get_reference_seed
+
+        # Determine seed and validation mode based on user input and reference seed availability
+        reference_seed = get_reference_seed(scale_factor)
+        user_provided_seed = seed is not None
+        actual_seed = seed if seed is not None else 1
+        actual_validation_mode = validation_mode or "exact"
+
+        # Seed selection and validation mode logic
+        if user_provided_seed:
+            # User provided a custom seed
+            actual_seed = seed
+            if validation and reference_seed and seed != reference_seed:
+                # Custom seed conflicts with exact validation
+                if validation_mode is None:
+                    # Auto-switch to loose validation
+                    actual_validation_mode = "loose"
+                    if verbose:
+                        self.logger.warning(
+                            f"⚠️  Custom seed {seed} with validation enabled.\n"
+                            f"   Reference seed for SF={scale_factor} is {reference_seed}.\n"
+                            f"   Switching to LOOSE validation (±50% tolerance)."
+                        )
+                elif validation_mode == "exact":
+                    # User explicitly requested exact mode with wrong seed - warn but honor request
+                    if verbose:
+                        self.logger.warning(
+                            f"⚠️  Custom seed {seed} with EXACT validation mode.\n"
+                            f"   Reference seed for SF={scale_factor} is {reference_seed}.\n"
+                            f"   Validation will likely FAIL due to parameter mismatch."
+                        )
+        else:
+            # No seed provided by user - auto-select
+            if validation and reference_seed:
+                # Use reference seed for exact validation
+                actual_seed = reference_seed
+                actual_validation_mode = "exact" if validation_mode is None else validation_mode
+                if verbose:
+                    self.logger.info(f"Using reference seed {reference_seed} for SF={scale_factor} (exact validation)")
+            else:
+                # No reference seed available or validation disabled
+                actual_seed = 1
+                if validation_mode is None:
+                    actual_validation_mode = "disabled" if not validation else "loose"
+
+        # If validation is disabled, override mode
+        if not validation:
+            actual_validation_mode = "disabled"
+
+        self.config = TPCHPowerTestConfig(
+            scale_factor=scale_factor,
+            seed=actual_seed,
+            stream_id=stream_id,
+            timeout=timeout,
+            warm_up=warm_up,
+            validation=validation,
+            validation_mode=actual_validation_mode,
+            verbose=verbose,
+            query_subset=query_subset,
+        )
+
+        # Initialize captured items for dry-run SQL preview
+        self.captured_items: list[tuple[str, str]] = []
+
+    def run(self) -> TPCHPowerTestResult:
+        """Execute the TPC-H Power Test.
+
+        Returns:
+            Power Test results with Power@Size metric
+
+        Raises:
+            RuntimeError: If Power Test execution fails
+        """
+        start_time = time.time()
+        start_time_str = datetime.now().isoformat()
+
+        result = TPCHPowerTestResult(
+            config=self.config,
+            start_time=start_time_str,
+            end_time="",
+            total_time=0.0,
+            power_at_size=0.0,
+            queries_executed=0,
+            queries_successful=0,
+            query_results=[],
+            success=True,
+            errors=[],
+        )
+
+        # Log and prepare
+        if self.config.verbose:
+            self.logger.info("Starting TPC-H Power Test")
+            self.logger.info(f"Scale factor: {self.config.scale_factor}")
+            self.logger.info(f"Seed: {self.config.seed}")
+
+        # Determine query execution order
+        if self.config.query_subset:
+            # User specified specific queries - run in their order
+            query_permutation = [int(qid) for qid in self.config.query_subset]
+            if self.config.verbose:
+                self.logger.info(f"Using user-specified query subset: {query_permutation}")
+            # Warn about TPC-H compliance impact
+            self.logger.warning(
+                "⚠️  query_subset overrides TPC-H stream permutation - results are NOT TPC-H compliant. "
+                "Official TPC-H benchmarks require running all 22 queries in the specified stream order."
+            )
+        else:
+            # Execute all 22 TPC-H queries in proper TPC-H permutation order
+            # Import the permutation matrix from streams module
+            from benchbox.core.tpch.streams import TPCHStreams
+
+            # Use stream 0 permutation for power test (TPC-H specification)
+            stream_id = getattr(self.config, "stream_id", 0)
+            query_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id % len(TPCHStreams.PERMUTATION_MATRIX)]
+
+            if self.config.verbose:
+                self.logger.info(f"Using TPC-H stream {stream_id} permutation: {query_permutation}")
+
+        # Preflight: ensure all queries can be generated for this seed/stream
+        # Let preflight failures propagate as RuntimeError (tests expect this)
+        self._preflight_validate_generation(query_permutation)
+
+        try:
+            for position, query_id in enumerate(query_permutation):
+                query_start = time.time()
+                query_result = {
+                    "query_id": query_id,
+                    "position": position + 1,
+                    "stream_id": self.config.stream_id,
+                    "execution_time": 0.0,
+                    "success": False,
+                    "error": None,
+                    "result_count": 0,
+                }
+
+                try:
+                    if self.config.verbose:
+                        self.logger.info(
+                            f"Executing Query {query_id} (position {position + 1}/{len(query_permutation)})"
+                        )
+
+                    # Get the query with proper stream-aware parameters
+                    # Use stream-specific seed as per TPC-H specification
+                    # NOTE: All queries in a stream use the SAME seed (base_seed + stream_id * 1000)
+                    # The position only determines query execution ORDER via permutation matrix
+                    stream_seed = self.config.seed + self.config.stream_id * 1000
+                    query_text = self.benchmark.get_query(
+                        query_id,
+                        seed=stream_seed,
+                        stream_id=self.config.stream_id,
+                        scale_factor=self.config.scale_factor,
+                        dialect=self.dialect,
+                    )
+
+                    # Execute the actual query against the database
+                    label = f"Position_{position + 1}_Query_{query_id}"
+                    try:
+                        # Set query context for validation
+                        # NOTE: Answer files are only available for stream 0 (seed 17039360 for SF=1.0)
+                        # Other streams use different seeds and will have different expected row counts
+                        if hasattr(self.connection, "set_query_context"):
+                            self.connection.set_query_context(query_id, stream_id=self.config.stream_id)
+
+                        cursor = self.connection.execute(query_text)
+                        rows = cursor.fetchall() if hasattr(cursor, "fetchall") else []
+
+                        # Check for validation failures from platform adapter
+                        if hasattr(cursor, "platform_result"):
+                            result_dict = cursor.platform_result
+                            if result_dict.get("status") == "FAILED":
+                                error_msg = result_dict.get(
+                                    "error", result_dict.get("row_count_validation_error", "Query validation failed")
+                                )
+                                raise RuntimeError(error_msg)
+
+                        if hasattr(self.connection, "commit"):
+                            self.connection.commit()
+                    finally:
+                        # Capture labeled SQL for dry-run preview
+                        self.captured_items.append((label, query_text))
+
+                    execution_time = time.time() - query_start
+
+                    query_result.update(
+                        {
+                            "execution_time": execution_time,
+                            "success": True,
+                            "result_count": len(rows),
+                        }
+                    )
+
+                    result.queries_successful += 1
+
+                    if self.config.verbose:
+                        self.logger.info(f"Query {query_id} completed in {execution_time:.3f}s")
+
+                except Exception as e:
+                    execution_time = time.time() - query_start
+                    query_result.update(
+                        {
+                            "execution_time": execution_time,
+                            "success": False,
+                            "error": str(e),
+                        }
+                    )
+
+                    result.errors.append(f"Query {query_id} failed: {e}")
+
+                    if self.config.verbose:
+                        self.logger.error(f"Query {query_id} failed: {e}")
+
+                result.query_results.append(query_result)
+                result.queries_executed += 1
+
+            # Calculate Power@Size metric
+            total_execution_time = time.time() - start_time
+
+            # Power@Size = 3600 * SF / Power_Test_Time (in seconds)
+            if total_execution_time > 0:
+                result.power_at_size = (3600.0 * self.config.scale_factor) / total_execution_time
+
+            result.total_time = total_execution_time
+            result.end_time = datetime.now().isoformat()
+            result.success = result.queries_successful == len(query_permutation)  # All queries must succeed
+
+            if self.config.verbose:
+                self.logger.info(f"Power Test completed in {total_execution_time:.3f}s")
+                self.logger.info(f"Successful queries: {result.queries_successful}/{len(query_permutation)}")
+                self.logger.info(f"Power@Size: {result.power_at_size:.2f}")
+
+            return result
+        except Exception as e:
+            # Only capture unexpected execution errors after preflight
+            result.total_time = time.time() - start_time
+            result.end_time = datetime.now().isoformat()
+            result.success = False
+            result.errors.append(f"Power Test execution failed: {e}")
+            if self.config.verbose:
+                self.logger.error(f"Power Test failed: {e}")
+            return result
+
+    def get_all_queries(self) -> dict[str, str]:
+        """Get all queries for the power test."""
+        from benchbox.core.tpch.streams import TPCHStreams
+
+        stream_id = getattr(self.config, "stream_id", 0)
+        query_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id % len(TPCHStreams.PERMUTATION_MATRIX)]
+
+        queries = {}
+        # All queries in a stream use the SAME seed (base_seed + stream_id * 1000)
+        stream_seed = self.config.seed + self.config.stream_id * 1000
+        for position, query_id in enumerate(query_permutation):
+            try:
+                query_text = self.benchmark.get_query(
+                    query_id,
+                    seed=stream_seed,
+                    stream_id=self.config.stream_id,
+                    scale_factor=self.config.scale_factor,
+                    dialect=self.dialect,
+                )
+                queries[f"Position_{position + 1}_Query_{query_id}"] = query_text
+            except Exception as e:
+                self.logger.error(f"Failed to get query {query_id}: {e}")
+        return queries
+
+    def _preflight_validate_generation(self, query_permutation: list[int]) -> None:
+        """Validate all TPCH queries can be generated for this stream/seed.
+
+        Raises RuntimeError with details if any query generation fails.
+        """
+        failures = []
+        # All queries in a stream use the SAME seed (base_seed + stream_id * 1000)
+        stream_seed = self.config.seed + self.config.stream_id * 1000
+        for position, query_id in enumerate(query_permutation):
+            try:
+                _ = self.benchmark.get_query(
+                    query_id,
+                    seed=stream_seed,
+                    stream_id=self.config.stream_id,
+                    scale_factor=self.config.scale_factor,
+                    dialect=self.dialect,
+                )
+            except Exception as e:
+                failures.append(f"{query_id}: {e}")
+        if failures:
+            msg = f"TPC-H PowerTest preflight failed for {len(failures)} queries. Examples: {', '.join(failures[:3])}"
+            raise RuntimeError(msg)
+
+    def validate_results(self, result: TPCHPowerTestResult) -> bool:
+        """Validate Power Test results against TPC-H specification.
+
+        Args:
+            result: Power Test results to validate
+
+        Returns:
+            True if results are valid, False otherwise
+        """
+        if not result.success:
+            return False
+
+        if result.queries_successful != 22:
+            return False
+
+        if result.power_at_size <= 0:
+            return False
+
+        # Additional validation logic would go here
+        return True

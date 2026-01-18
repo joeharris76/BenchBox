@@ -1,0 +1,408 @@
+"""Tests for platform comparison engine.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from datetime import datetime
+
+import pytest
+
+from benchbox.core.analysis.comparison import (
+    ComparisonConfig,
+    PlatformComparison,
+)
+from benchbox.core.results.models import BenchmarkResults
+
+pytestmark = pytest.mark.fast
+
+
+def create_mock_result(
+    platform: str,
+    query_times: dict[str, float],
+    benchmark_name: str = "TPC-H",
+    scale_factor: float = 10.0,
+    cost_summary: dict | None = None,
+) -> BenchmarkResults:
+    """Create a mock BenchmarkResults for testing.
+
+    Args:
+        platform: Platform name
+        query_times: Dict of query_id to execution time in ms
+        benchmark_name: Benchmark name
+        scale_factor: Scale factor
+        cost_summary: Optional cost summary
+
+    Returns:
+        BenchmarkResults instance
+    """
+    query_results = [
+        {"query_id": qid, "execution_time_ms": time, "status": "success"} for qid, time in query_times.items()
+    ]
+
+    return BenchmarkResults(
+        benchmark_name=benchmark_name,
+        platform=platform,
+        scale_factor=scale_factor,
+        execution_id=f"{platform}-test-001",
+        timestamp=datetime.now(),
+        duration_seconds=sum(query_times.values()) / 1000,
+        total_queries=len(query_times),
+        successful_queries=len(query_times),
+        failed_queries=0,
+        query_results=query_results,
+        total_execution_time=sum(query_times.values()),
+        average_query_time=sum(query_times.values()) / len(query_times) if query_times else 0,
+        cost_summary=cost_summary,
+    )
+
+
+class TestComparisonConfig:
+    """Tests for ComparisonConfig."""
+
+    def test_default_config(self):
+        """Test default configuration values."""
+        config = ComparisonConfig()
+
+        assert config.significance_level == 0.05
+        assert config.min_sample_size == 3
+        assert config.outlier_method == "iqr"
+        assert config.performance_ratio_threshold == 1.05
+        assert config.apply_bonferroni is True
+
+    def test_custom_config(self):
+        """Test custom configuration."""
+        config = ComparisonConfig(
+            significance_level=0.01,
+            outlier_method="zscore",
+            apply_bonferroni=False,
+        )
+
+        assert config.significance_level == 0.01
+        assert config.outlier_method == "zscore"
+        assert config.apply_bonferroni is False
+
+
+class TestPlatformComparison:
+    """Tests for PlatformComparison class."""
+
+    @pytest.fixture
+    def duckdb_result(self) -> BenchmarkResults:
+        """Create a mock DuckDB result."""
+        return create_mock_result(
+            platform="duckdb",
+            query_times={
+                "Q1": 100.0,
+                "Q2": 150.0,
+                "Q3": 200.0,
+                "Q4": 120.0,
+                "Q5": 180.0,
+            },
+        )
+
+    @pytest.fixture
+    def clickhouse_result(self) -> BenchmarkResults:
+        """Create a mock ClickHouse result."""
+        return create_mock_result(
+            platform="clickhouse",
+            query_times={
+                "Q1": 120.0,
+                "Q2": 180.0,
+                "Q3": 160.0,
+                "Q4": 140.0,
+                "Q5": 200.0,
+            },
+        )
+
+    @pytest.fixture
+    def snowflake_result(self) -> BenchmarkResults:
+        """Create a mock Snowflake result."""
+        return create_mock_result(
+            platform="snowflake",
+            query_times={
+                "Q1": 200.0,
+                "Q2": 250.0,
+                "Q3": 300.0,
+                "Q4": 220.0,
+                "Q5": 280.0,
+            },
+        )
+
+    def test_init_requires_results(self):
+        """Test that initialization requires at least one result."""
+        with pytest.raises(ValueError, match="At least one"):
+            PlatformComparison([])
+
+    def test_init_with_results(self, duckdb_result, clickhouse_result):
+        """Test initialization with results."""
+        comparison = PlatformComparison([duckdb_result, clickhouse_result])
+
+        assert len(comparison.results) == 2
+        assert comparison.platforms == ["duckdb", "clickhouse"]
+
+    def test_platforms_property(self, duckdb_result, clickhouse_result, snowflake_result):
+        """Test platforms property."""
+        comparison = PlatformComparison([duckdb_result, clickhouse_result, snowflake_result])
+
+        assert len(comparison.platforms) == 3
+        assert "duckdb" in comparison.platforms
+        assert "clickhouse" in comparison.platforms
+        assert "snowflake" in comparison.platforms
+
+    def test_benchmark_name_property(self, duckdb_result):
+        """Test benchmark_name property."""
+        comparison = PlatformComparison([duckdb_result])
+        assert comparison.benchmark_name == "TPC-H"
+
+    def test_scale_factor_property(self, duckdb_result):
+        """Test scale_factor property."""
+        comparison = PlatformComparison([duckdb_result])
+        assert comparison.scale_factor == 10.0
+
+
+class TestPlatformComparisonValidation:
+    """Tests for comparison validation."""
+
+    def test_validate_single_result(self):
+        """Test validation fails with single result."""
+        result = create_mock_result("duckdb", {"Q1": 100.0})
+        comparison = PlatformComparison([result])
+
+        validation = comparison.validate()
+
+        assert validation.is_valid is False
+        assert any("two results" in e for e in validation.errors)
+
+    def test_validate_mismatched_benchmarks(self):
+        """Test validation fails with different benchmarks."""
+        result1 = create_mock_result("duckdb", {"Q1": 100.0}, benchmark_name="TPC-H")
+        result2 = create_mock_result("clickhouse", {"Q1": 120.0}, benchmark_name="TPC-DS")
+        comparison = PlatformComparison([result1, result2])
+
+        validation = comparison.validate()
+
+        assert validation.is_valid is False
+        assert any("different benchmarks" in e for e in validation.errors)
+
+    def test_validate_different_scale_factors(self):
+        """Test validation warns about different scale factors."""
+        result1 = create_mock_result("duckdb", {"Q1": 100.0}, scale_factor=10.0)
+        result2 = create_mock_result("clickhouse", {"Q1": 120.0}, scale_factor=100.0)
+        comparison = PlatformComparison([result1, result2])
+
+        validation = comparison.validate()
+
+        # Should warn but not error
+        assert any("scale factors" in w for w in validation.warnings)
+
+    def test_validate_no_common_queries(self):
+        """Test validation fails with no common queries."""
+        result1 = create_mock_result("duckdb", {"Q1": 100.0, "Q2": 150.0})
+        result2 = create_mock_result("clickhouse", {"Q3": 120.0, "Q4": 180.0})
+        comparison = PlatformComparison([result1, result2])
+
+        validation = comparison.validate()
+
+        assert validation.is_valid is False
+        assert any("No common queries" in e for e in validation.errors)
+
+    def test_validate_partial_query_overlap(self):
+        """Test validation warns about partial overlap."""
+        result1 = create_mock_result("duckdb", {"Q1": 100.0, "Q2": 150.0, "Q3": 200.0})
+        result2 = create_mock_result("clickhouse", {"Q1": 120.0, "Q2": 180.0})
+        comparison = PlatformComparison([result1, result2])
+
+        validation = comparison.validate()
+
+        assert validation.is_valid is True
+        assert any("missing" in w.lower() for w in validation.warnings)
+        assert "Q1" in validation.common_queries
+        assert "Q2" in validation.common_queries
+
+
+class TestPlatformComparisonResults:
+    """Tests for comparison results."""
+
+    @pytest.fixture
+    def two_platform_comparison(self) -> PlatformComparison:
+        """Create a two-platform comparison."""
+        duckdb = create_mock_result(
+            "duckdb",
+            {"Q1": 100.0, "Q2": 150.0, "Q3": 200.0, "Q4": 120.0, "Q5": 180.0},
+        )
+        clickhouse = create_mock_result(
+            "clickhouse",
+            {"Q1": 150.0, "Q2": 200.0, "Q3": 250.0, "Q4": 170.0, "Q5": 220.0},
+        )
+        return PlatformComparison([duckdb, clickhouse])
+
+    @pytest.fixture
+    def three_platform_comparison(self) -> PlatformComparison:
+        """Create a three-platform comparison."""
+        duckdb = create_mock_result(
+            "duckdb",
+            {"Q1": 100.0, "Q2": 150.0, "Q3": 200.0},
+        )
+        clickhouse = create_mock_result(
+            "clickhouse",
+            {"Q1": 150.0, "Q2": 200.0, "Q3": 250.0},
+        )
+        snowflake = create_mock_result(
+            "snowflake",
+            {"Q1": 200.0, "Q2": 250.0, "Q3": 300.0},
+        )
+        return PlatformComparison([duckdb, clickhouse, snowflake])
+
+    def test_compare_produces_report(self, two_platform_comparison):
+        """Test that compare() produces a report."""
+        report = two_platform_comparison.compare()
+
+        assert report is not None
+        assert report.benchmark_name == "TPC-H"
+        assert report.scale_factor == 10.0
+        assert len(report.platforms) == 2
+
+    def test_compare_identifies_winner(self, two_platform_comparison):
+        """Test that compare() identifies the winner."""
+        report = two_platform_comparison.compare()
+
+        # DuckDB has faster times, should be winner
+        assert report.winner == "duckdb"
+
+    def test_compare_rankings(self, three_platform_comparison):
+        """Test that compare() generates correct rankings."""
+        report = three_platform_comparison.compare()
+
+        assert len(report.rankings) == 3
+        assert report.rankings[0].platform == "duckdb"
+        assert report.rankings[0].rank == 1
+        assert report.rankings[1].platform == "clickhouse"
+        assert report.rankings[1].rank == 2
+        assert report.rankings[2].platform == "snowflake"
+        assert report.rankings[2].rank == 3
+
+    def test_compare_query_comparisons(self, two_platform_comparison):
+        """Test that compare() generates per-query comparisons."""
+        report = two_platform_comparison.compare()
+
+        assert len(report.query_comparisons) == 5
+        assert "Q1" in report.query_comparisons
+        assert "Q2" in report.query_comparisons
+
+        # Check Q1 comparison
+        q1_comp = report.query_comparisons["Q1"]
+        assert q1_comp.winner == "duckdb"
+        assert "duckdb" in q1_comp.metrics
+        assert "clickhouse" in q1_comp.metrics
+
+    def test_compare_win_loss_matrix(self, two_platform_comparison):
+        """Test that compare() generates win/loss matrix."""
+        report = two_platform_comparison.compare()
+
+        assert "duckdb" in report.win_loss_matrix
+        assert "clickhouse" in report.win_loss_matrix
+
+        duckdb_record = report.win_loss_matrix["duckdb"]
+        assert duckdb_record.total == 5
+        assert duckdb_record.wins >= 0
+
+    def test_compare_head_to_head(self, two_platform_comparison):
+        """Test that compare() generates head-to-head comparisons."""
+        report = two_platform_comparison.compare()
+
+        assert len(report.head_to_head) >= 1
+        h2h = report.head_to_head[0]
+        assert h2h.platform_a in ["duckdb", "clickhouse"]
+        assert h2h.platform_b in ["duckdb", "clickhouse"]
+
+    def test_compare_generates_insights(self, two_platform_comparison):
+        """Test that compare() generates insights."""
+        report = two_platform_comparison.compare()
+
+        assert len(report.insights) > 0
+
+    def test_compare_by_query(self, two_platform_comparison):
+        """Test compare_by_query method."""
+        query_comparisons = two_platform_comparison.compare_by_query()
+
+        assert isinstance(query_comparisons, dict)
+        assert len(query_comparisons) == 5
+
+    def test_get_head_to_head(self, two_platform_comparison):
+        """Test get_head_to_head method."""
+        h2h = two_platform_comparison.get_head_to_head("duckdb", "clickhouse")
+
+        assert h2h is not None
+        assert h2h.platform_a in ["duckdb", "clickhouse"]
+        assert h2h.platform_b in ["duckdb", "clickhouse"]
+
+    def test_get_head_to_head_not_found(self, two_platform_comparison):
+        """Test get_head_to_head with non-existent platform."""
+        h2h = two_platform_comparison.get_head_to_head("duckdb", "nonexistent")
+
+        assert h2h is None
+
+
+class TestComparisonWithCost:
+    """Tests for comparison with cost data."""
+
+    def test_compare_with_cost_analysis(self):
+        """Test comparison includes cost analysis when data available."""
+        duckdb = create_mock_result(
+            "duckdb",
+            {"Q1": 100.0, "Q2": 150.0, "Q3": 200.0},
+            cost_summary={"total_cost": 0.50},
+        )
+        snowflake = create_mock_result(
+            "snowflake",
+            {"Q1": 200.0, "Q2": 250.0, "Q3": 300.0},
+            cost_summary={"total_cost": 2.00},
+        )
+        comparison = PlatformComparison([duckdb, snowflake])
+
+        report = comparison.compare()
+
+        assert report.cost_analysis is not None
+        assert "duckdb" in report.cost_analysis.platforms
+        assert "snowflake" in report.cost_analysis.platforms
+        assert report.cost_analysis.best_value == "duckdb"  # Better perf/cost
+
+    def test_compare_cost_performance_method(self):
+        """Test compare_cost_performance method."""
+        duckdb = create_mock_result(
+            "duckdb",
+            {"Q1": 100.0},
+            cost_summary={"total_cost": 0.50},
+        )
+        snowflake = create_mock_result(
+            "snowflake",
+            {"Q1": 200.0},
+            cost_summary={"total_cost": 2.00},
+        )
+        comparison = PlatformComparison([duckdb, snowflake])
+
+        cost_analysis = comparison.compare_cost_performance()
+
+        assert cost_analysis is not None
+        assert cost_analysis.best_value == "duckdb"
+
+
+class TestComparisonReportSerialization:
+    """Tests for report serialization."""
+
+    def test_report_to_dict(self):
+        """Test that report can be serialized to dict."""
+        duckdb = create_mock_result("duckdb", {"Q1": 100.0, "Q2": 150.0})
+        clickhouse = create_mock_result("clickhouse", {"Q1": 150.0, "Q2": 200.0})
+        comparison = PlatformComparison([duckdb, clickhouse])
+        report = comparison.compare()
+
+        result = report.to_dict()
+
+        assert isinstance(result, dict)
+        assert "benchmark_name" in result
+        assert "platforms" in result
+        assert "winner" in result
+        assert "rankings" in result
+        assert "query_comparisons" in result

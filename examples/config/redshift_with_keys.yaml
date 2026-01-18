@@ -1,0 +1,15 @@
+type: redshift
+connection:
+  host: "your-cluster.redshift.amazonaws.com"
+  port: 5439
+  database: "benchbox"
+  username: "${REDSHIFT_USER}"
+  password: "${REDSHIFT_PASSWORD}"
+  ssl_enabled: true
+  extra_params:
+    aws_access_key_id: "${AWS_ACCESS_KEY_ID}"
+    aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
+    aws_region: "us-east-1"
+settings:
+  s3_bucket: "your-s3-bucket"
+  compression_encoding: "AUTO"

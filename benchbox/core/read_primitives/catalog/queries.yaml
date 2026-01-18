@@ -1,0 +1,2467 @@
+# Read Primitives Query Catalog
+#
+# This catalog combines queries from multiple sources:
+#
+# 1. Apache Impala targeted-perf workload (majority of queries):
+#    https://github.com/apache/impala/tree/master/testdata/workloads/targeted-perf
+#    License: Apache License 2.0
+#    Purpose: Focused performance testing of database primitives including aggregations,
+#    joins, filters, sorting, and exchange operations.
+#
+# 2. Optimizer Sniff Tests (optimizer_* queries):
+#    Based on Justin Jaffray's optimizer sniff test concepts:
+#    https://buttondown.com/jaffray/archive/a-sniff-test-for-some-query-optimizers/
+#    13 queries testing common optimizer patterns (subquery decorrelation, predicate pushdown,
+#    join reordering, constant folding, etc.)
+#
+# BenchBox extends these foundations with additional modern SQL features:
+# - Window functions (ROW_NUMBER, RANK, LAG, LEAD, aggregate windows)
+# - OLAP operations (CUBE, ROLLUP)
+# - Statistical functions (PERCENTILE_CONT, VARIANCE, CORR)
+# - JSON operations, full-text search, time series analysis
+# - QUALIFY clause, MIN_BY/MAX_BY aggregates
+# - ANY_VALUE, GROUP BY ALL, ORDER BY ALL (December 2025)
+# - Semi-structured data: ARRAY, STRUCT, MAP types (December 2025)
+# - Higher-order functions: TRANSFORM, FILTER, REDUCE (December 2025)
+# - ASOF JOIN for time series, PIVOT/UNPIVOT operations (December 2025)
+#
+# Original sources used under their respective licenses.
+# BenchBox extensions: Copyright 2026 Joe Harris / BenchBox Project, MIT License.
+#
+version: 1
+queries:
+- id: aggregation_distinct
+  category: aggregation
+  sql: |2
+
+    -- Distinct count of high cardinality key on a large table
+    SELECT COUNT(DISTINCT o_custkey) as unique_customers
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01';
+- id: aggregation_distinct_groupby
+  category: aggregation
+  sql: |2
+
+    -- Distinct count of high cardinality keys in low cardinality groups.
+    SELECT
+        l_returnflag,
+        l_linestatus,
+        COUNT(DISTINCT l_orderkey) as unique_orders,
+        COUNT(DISTINCT l_partkey) as unique_parts
+    FROM lineitem
+    GROUP BY l_returnflag, l_linestatus;
+- id: aggregation_groupby_large
+  category: aggregation
+  sql: |2
+
+    -- Aggregates within high cardinality grouping
+    SELECT
+        l_orderkey,
+        l_partkey,
+        l_suppkey,
+        SUM(l_quantity) as total_qty,
+        AVG(l_extendedprice) as avg_price
+    FROM lineitem
+    GROUP BY l_orderkey, l_partkey, l_suppkey;
+- id: aggregation_groupby_small
+  category: aggregation
+  sql: |2
+
+    -- Aggregates within low cardinality grouping
+    SELECT
+        n_regionkey,
+        COUNT(*) as nation_count,
+        MAX(n_name) as last_nation
+    FROM nation
+    GROUP BY n_regionkey;
+- id: aggregation_materialize
+  category: aggregation
+  sql: |2
+
+    -- Nested aggregation requiring CTE materialization
+    WITH order_totals AS (
+        SELECT
+            o_custkey,
+            SUM(o_totalprice) as customer_total
+        FROM orders
+        GROUP BY o_custkey
+    )
+    SELECT AVG(customer_total) as avg_customer_spending
+    FROM order_totals;
+- id: aggregation_materialize_subquery
+  category: aggregation
+  sql: |2
+
+    -- Complex nested aggregation requiring materialization of a subquery with joins
+    SELECT
+        c_mktsegment,
+        AVG(order_total) as avg_segment_order
+    FROM (
+        SELECT
+            c.c_mktsegment,
+            o.o_orderkey,
+            SUM(l.l_extendedprice * (1 - l.l_discount)) as order_total
+        FROM customer c
+        JOIN orders o ON c.c_custkey = o.o_custkey
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        GROUP BY c.c_mktsegment, o.o_orderkey
+    ) subq
+    GROUP BY c_mktsegment;
+- id: aggregation_partition
+  category: aggregation
+  sql: |2
+
+    -- Aggregates over the partition key
+    SELECT
+        l_shipdate,
+        l_shipmode,
+        SUM(l_quantity) as daily_quantity,
+        COUNT(*) as shipment_count
+    FROM lineitem
+    WHERE l_shipdate >= DATE '1995-01-01'
+      AND l_shipdate < DATE '1996-01-01'
+    GROUP BY l_shipdate, l_shipmode;
+- id: aggregation_selective
+  category: aggregation
+  sql: |2
+
+    -- Aggregate on a small subset of rows
+    SELECT
+        SUM(l_extendedprice * l_discount) as total_discount_amount
+    FROM lineitem
+    WHERE l_discount > 0.05
+      AND l_quantity < 24;
+- id: aggregation_simple
+  category: aggregation
+  sql: |2
+
+    -- Aggregate over all rows in table
+    SELECT
+        COUNT(*) as total_orders,
+        SUM(o_totalprice) as total_revenue
+    FROM orders;
+- id: broadcast_join_two_tables
+  category: broadcast
+  sql: |2
+
+    -- One small table broadcast to join with one large table. Hint is optional.
+    SELECT /*+ BROADCAST(n) */
+        COUNT(*) as supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey;
+- id: broadcast_join_three_tables
+  category: broadcast
+  sql: |2
+
+    -- Two small tables broadcast to join with one large table. Hints are optional.
+    SELECT /*+ BROADCAST(n), BROADCAST(r) */
+        r.r_name,
+        n.n_name,
+        COUNT(*) as supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY r.r_name, n.n_name;
+- id: broadcast_join_four_tables
+  category: broadcast
+  sql: |2
+
+    -- Three small tables broadcast to join with one large table. Hints are optional.
+    SELECT /*+ BROADCAST(n), BROADCAST(r), BROADCAST(p) */
+        r.r_name,
+        p.p_type,
+        SUM(ps.ps_supplycost * ps.ps_availqty) as total_value
+    FROM partsupp ps
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    WHERE p.p_size = 15
+    GROUP BY r.r_name, p.p_type;
+- id: predicate_ordering_aggregation
+  category: predicate
+  sql: |2
+
+    -- Order filter predicates by selectivity for aggregation
+    SELECT
+        SUM(l_extendedprice) as total_price
+    FROM lineitem
+    WHERE l_shipdate >= DATE '1994-01-01'
+      AND l_shipdate < DATE '1995-01-01'
+      AND l_discount BETWEEN 0.05 AND 0.07
+      AND l_quantity < 24;
+- id: predicate_ordering_aggregation_groupby
+  category: predicate
+  sql: |2
+
+    -- Order filter predicates by selectivity for aggregation within a low cardinality grouping
+    SELECT
+        l_returnflag,
+        SUM(l_quantity) as total_qty
+    FROM lineitem
+    WHERE l_shipdate <= DATE '1998-09-01'
+      AND l_discount > 0.05
+      AND l_tax < 0.08
+      AND l_quantity BETWEEN 10 AND 30
+    GROUP BY l_returnflag;
+- id: predicate_ordering_costs
+  category: predicate
+  sql: |2
+
+    -- Order filter predicates by selectivity with result projection only
+    SELECT *
+    FROM lineitem
+    WHERE l_quantity > 45
+      AND l_extendedprice > 50000
+      AND l_discount < 0.05
+      AND l_shipinstruct = 'DELIVER IN PERSON'
+      AND l_shipmode IN ('AIR', 'AIR REG')
+    LIMIT 100;
+- id: predicate_ordering_subquery
+  category: predicate
+  sql: |2
+
+    -- Order filter predicates by selectivity with subquery predicate
+    SELECT
+        o_orderkey,
+        o_totalprice
+    FROM orders
+    WHERE o_totalprice > 100000
+      AND o_orderdate >= DATE '1995-01-01'
+      AND o_custkey IN (
+        SELECT c_custkey
+        FROM customer
+        WHERE c_mktsegment = 'BUILDING'
+          AND c_nationkey = 1
+      );
+- id: count_star
+  category: count
+  sql: |2
+
+    -- metadata-based count optimization vs full table scan performance
+    SELECT COUNT(*) as total_lineitems
+    FROM lineitem;
+- id: decimal_arithmetic
+  category: decimal
+  sql: |2
+
+    -- decimal precision arithmetic with complex expressions
+    SELECT
+        l_orderkey,
+        l_extendedprice * (1 - l_discount) * (1 + l_tax) as final_price,
+        l_extendedprice / l_quantity as unit_price
+    FROM lineitem
+    WHERE l_quantity > 0
+    LIMIT 1000;
+- id: empty_build_join
+  category: empty
+  sql: |2
+
+    -- join when build side produces no rows (edge case handling)
+    SELECT l.*
+    FROM lineitem l
+    LEFT JOIN (
+        SELECT * FROM orders WHERE o_totalprice < 0
+    ) o ON l.l_orderkey = o.o_orderkey;
+- id: exchange_broadcast
+  category: exchange
+  sql: |2
+
+    -- One small table is copied to all nodes that have the large table. The `BROADCAST(small_parts)` hint is optional
+    SELECT /*+ BROADCAST(small_parts) */
+        l.l_orderkey,
+        SUM(l.l_quantity) as total_qty
+    FROM lineitem l
+    JOIN (
+        SELECT p_partkey
+        FROM part
+        WHERE p_size = 1
+    ) small_parts ON l.l_partkey = small_parts.p_partkey
+    GROUP BY l.l_orderkey;
+- id: exchange_merge
+  category: exchange
+  sql: |2
+
+    -- Sorted data from multiple nodes is combined while keeping the sort order.
+    SELECT
+        o.o_orderkey,
+        l.l_linenumber,
+        l.l_quantity
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    ORDER BY o.o_orderkey, l.l_linenumber;
+- id: exchange_shuffle
+  category: exchange
+  sql: |2
+
+    -- Data is redistributed based on the join keys so matching rows end up on the same node
+    SELECT
+        ps1.ps_partkey,
+        ps1.ps_suppkey as supp1,
+        ps2.ps_suppkey as supp2
+    FROM partsupp ps1
+    JOIN partsupp ps2 ON ps1.ps_partkey = ps2.ps_partkey
+    WHERE ps1.ps_suppkey < ps2.ps_suppkey
+      AND ps1.ps_supplycost > 100;
+- id: filter_bigint_in_list_selective
+  category: filter
+  sql: |2
+
+    -- IN-list predicate with highly selective integer values
+    SELECT *
+    FROM orders
+    WHERE o_orderkey IN (1, 100, 1000, 10000, 100000);
+- id: filter_bigint_non_selective
+  category: filter
+  sql: |2
+
+    -- range predicate with low selectivity on large table
+    SELECT COUNT(*)
+    FROM lineitem
+    WHERE l_orderkey > 1000;
+- id: filter_bigint_selective
+  category: filter
+  sql: |2
+
+    -- equality predicate with high selectivity on integer column
+    SELECT *
+    FROM orders
+    WHERE o_orderkey = 1234567;
+- id: filter_decimal_in_list_selective
+  category: filter
+  sql: |2
+
+    -- IN-list predicate with decimal values and selectivity
+    SELECT *
+    FROM lineitem
+    WHERE l_extendedprice IN (1000.00, 5000.00, 10000.00, 50000.00);
+- id: filter_decimal_non_selective
+  category: filter
+  sql: |2
+
+    -- range predicate on decimal column with low selectivity
+    SELECT COUNT(*)
+    FROM lineitem
+    WHERE l_extendedprice > 1000.00;
+- id: filter_decimal_selective
+  category: filter
+  sql: |2
+
+    -- compound equality predicate with multiple decimal columns
+    SELECT *
+    FROM lineitem
+    WHERE l_extendedprice = 12345.67
+      AND l_discount = 0.05;
+- id: filter_in_predicate_selective
+  category: filter
+  sql: |2
+
+    -- IN predicate with subquery and selective filtering
+    SELECT *
+    FROM part
+    WHERE p_partkey IN (
+        SELECT l_partkey
+        FROM lineitem
+        WHERE l_quantity > 45
+    );
+- id: filter_string_like
+  category: filter
+  sql: |2
+
+    -- LIKE predicate with substring pattern matching
+    SELECT *
+    FROM part
+    WHERE p_name LIKE '%COPPER%';
+- id: filter_string_non_selective
+  category: filter
+  sql: |2
+
+    -- string comparison with low selectivity (most rows match)
+    SELECT COUNT(*)
+    FROM customer
+    WHERE c_mktsegment >= 'A';
+- id: filter_string_selective
+  category: filter
+  sql: |2
+
+    -- Exact string equality with high selectivity on varchar column
+    SELECT *
+    FROM customer
+    WHERE c_name = 'Customer#000001234';
+- id: groupby_bigint_highndv
+  category: groupby
+  sql: |2
+
+    -- GROUP BY with high distinct value count (many groups)
+    SELECT
+        l_orderkey,
+        COUNT(*) as line_count
+    FROM lineitem
+    GROUP BY l_orderkey;
+- id: groupby_bigint_lowndv
+  category: groupby
+  sql: |2
+
+    -- GROUP BY with low distinct value count (few groups)
+    SELECT
+        o_orderpriority,
+        COUNT(*) as order_count
+    FROM orders
+    GROUP BY o_orderpriority;
+- id: groupby_bigint_pk
+  category: groupby
+  sql: |2
+
+    -- GROUP BY on primary key (one row per group)
+    SELECT
+        c_custkey,
+        MAX(c_name) as customer_name
+    FROM customer
+    GROUP BY c_custkey;
+- id: groupby_decimal_highndv
+  category: groupby
+  sql: |2
+
+    -- GROUP BY with high cardinality decimal column
+    SELECT
+        l_extendedprice,
+        COUNT(*) as price_frequency
+    FROM lineitem
+    GROUP BY l_extendedprice;
+- id: groupby_decimal_lowndv
+  category: groupby
+  sql: |2
+
+    -- GROUP BY with low cardinality decimal column
+    SELECT
+        l_discount,
+        COUNT(*) as discount_frequency,
+        AVG(l_quantity) as avg_qty
+    FROM lineitem
+    GROUP BY l_discount;
+- id: intrinsic_appx_median
+  category: intrinsic
+  sql: |2
+
+    -- Approximate statistical function (PERCENTILE_CONT)
+    SELECT
+        l_shipmode,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l_quantity) as median_quantity
+    FROM lineitem
+    GROUP BY l_shipmode;
+- id: intrinsic_to_date
+  category: intrinsic
+  sql: |2
+
+    -- Date parsing and conversion function performance
+    SELECT
+        COUNT(*) as orders_by_month
+    FROM orders
+    WHERE o_orderdate = TO_DATE('1995-03-15', 'yyyy-MM-dd');
+- id: limit
+  category: limit
+  sql: |2
+
+    -- LIMIT clause with ordering on large result set
+    SELECT *
+    FROM lineitem
+    ORDER BY l_orderkey, l_linenumber
+    LIMIT 100;
+- id: long_predicate
+  category: long
+  sql: |2
+
+    -- Query with many conjunctive predicates across multiple tables
+    SELECT COUNT(*)
+    FROM lineitem l
+    JOIN orders o ON l.l_orderkey = o.o_orderkey
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE l.l_shipdate >= DATE '1994-01-01'
+      AND l.l_shipdate < DATE '1995-01-01'
+      AND l.l_discount BETWEEN 0.05 AND 0.07
+      AND l.l_quantity < 24
+      AND o.o_orderpriority = '1-URGENT'
+      AND c.c_mktsegment = 'BUILDING'
+      AND l.l_returnflag = 'R'
+      AND l.l_linestatus = 'F'
+      AND o.o_totalprice > 100000
+      AND c.c_nationkey IN (1, 2, 3, 4, 5);
+- id: min_max_runtime_filter
+  category: min
+  sql: |2
+
+    -- Bloom filter and runtime filter effectiveness for join optimization
+    SELECT
+        l.*
+    FROM lineitem l
+    WHERE l.l_orderkey IN (
+        SELECT o_orderkey
+        FROM orders
+        WHERE o_orderdate BETWEEN DATE '1995-01-01' AND DATE '1995-03-31'
+    );
+- id: orderby_all
+  category: orderby
+  sql: |2
+
+    -- Sort on full table with simple integer ordering
+    SELECT *
+    FROM customer
+    ORDER BY c_custkey;
+- id: orderby_bigint
+  category: orderby
+  sql: |2
+
+    -- Sort with aggregation results on integer column
+    SELECT
+        l_orderkey,
+        SUM(l_quantity) as total_qty
+    FROM lineitem
+    GROUP BY l_orderkey
+    ORDER BY l_orderkey;
+- id: orderby_bigint_expression
+  category: orderby
+  sql: |2
+
+    -- Sort on computed expressions with DESC ordering
+    SELECT
+        l_orderkey,
+        l_partkey,
+        l_quantity * l_extendedprice as total_value
+    FROM lineitem
+    ORDER BY l_quantity * l_extendedprice DESC
+    LIMIT 100;
+- id: orderby_decimal16
+  category: orderby
+  sql: |2
+
+    -- Multi-column sort with mixed ASC/DESC on decimal columns
+    SELECT
+        l_orderkey,
+        l_extendedprice,
+        l_discount
+    FROM lineitem
+    ORDER BY l_extendedprice DESC, l_discount ASC
+    LIMIT 100;
+- id: orderby_multicol
+  category: orderby
+  sql: |2
+
+    -- Complex multi-column sort with string, date, and decimal columns
+    SELECT *
+    FROM orders
+    ORDER BY o_orderpriority, o_orderdate DESC, o_totalprice DESC
+    LIMIT 100;
+- id: orderby_shortstrings
+  category: orderby
+  sql: |2
+
+    -- Sort on short string columns with DISTINCT operation
+    SELECT DISTINCT l_returnflag, l_linestatus
+    FROM lineitem
+    ORDER BY l_returnflag, l_linestatus;
+- id: shuffle_1mb_rows
+  category: shuffle
+  sql: |2
+
+    -- Self-join with hash collision handling on large table
+    SELECT
+        l1.l_orderkey,
+        COUNT(*) as match_count
+    FROM lineitem l1
+    JOIN lineitem l2 ON l1.l_partkey = l2.l_partkey
+    WHERE l1.l_orderkey != l2.l_orderkey
+      AND l1.l_shipdate = l2.l_shipdate
+    GROUP BY l1.l_orderkey
+    LIMIT 10000;
+- id: shuffle_full_join_one_to_many_string_with_groupby
+  category: shuffle
+  sql: |2
+
+    -- FULL OUTER JOIN with string grouping and aggregation
+    SELECT
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) as order_count,
+        COUNT(c.c_custkey) as customer_count
+    FROM customer c
+    FULL OUTER JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_mktsegment;
+- id: shuffle_inner_join_one_to_many_string_with_groupby
+  category: shuffle
+  sql: |2
+
+    -- Standard inner join with one-to-many relationship
+    SELECT
+        c.c_mktsegment,
+        COUNT(*) as order_count,
+        SUM(o.o_totalprice) as total_revenue
+    FROM customer c
+    INNER JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_mktsegment;
+- id: shuffle_inner_join_union_all_with_groupby
+  category: shuffle
+  sql: |2
+
+    -- Complex join with UNION ALL and different data sources
+    SELECT
+        source_type,
+        COUNT(*) as record_count
+    FROM (
+        SELECT 'ORDER' as source_type, o_custkey as cust_id
+        FROM orders
+        WHERE o_orderdate >= DATE '1995-01-01'
+        UNION ALL
+        SELECT 'LINEITEM' as source_type, o_custkey as cust_id
+        FROM orders o
+        JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+        WHERE l.l_shipdate >= DATE '1995-01-01'
+    ) combined
+    GROUP BY source_type;
+- id: shuffle_left_join_one_to_many_string_with_groupby
+  category: shuffle
+  sql: |2
+
+    -- LEFT JOIN with preservation of all left-side rows
+    SELECT
+        c.c_mktsegment,
+        COUNT(o.o_orderkey) as order_count,
+        COUNT(*) as total_rows
+    FROM customer c
+    LEFT JOIN orders o ON c.c_custkey = o.o_custkey
+    GROUP BY c.c_mktsegment;
+- id: string_equal_predicate
+  category: string
+  sql: |2
+
+    -- Exact string equality with selective matching
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_brand = 'Brand#23';
+- id: string_equal_predicate_lower
+  category: string
+  sql: |2
+
+    -- Equality predicate after applying case conversion to the base table
+    SELECT COUNT(*)
+    FROM part
+    WHERE LOWER(p_brand) = 'brand#23';
+- id: string_in_predicate
+  category: string
+  sql: |2
+
+    -- IN predicate with string values
+    SELECT COUNT(*)
+    FROM orders
+    WHERE o_orderpriority IN ('1-URGENT', '2-HIGH');
+- id: string_like_predicate_center
+  category: string
+  sql: |2
+
+    -- Case sensitive matching pattern in any location
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name LIKE '%STEEL%';
+- id: string_like_predicate_center_insensitive
+  category: string
+  sql: |2
+
+    -- Case insensitive matching pattern in any location
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name LIKE '%steel%';
+- id: string_like_predicate_multi
+  category: string
+  sql: |2
+
+    -- Case sensitive matching multipart pattern
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name LIKE '%STEEL%BRASS%';
+- id: string_ilike_predicate_multi
+  category: string
+  sql: |2
+
+    -- Case insensitive matching multipart pattern
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name LIKE '%sTeEl%bRaSs%';
+- id: string_like_predicate_end
+  category: string
+  sql: |2
+
+    -- Case sensitive matching suffix pattern
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name LIKE '%COPPER';
+- id: string_ilike_predicate_end
+  category: string
+  sql: |2
+
+    -- Case insensitive matching suffix pattern
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name LIKE '%copper';
+- id: string_like_predicate_start
+  category: string
+  sql: |2
+
+    -- Case sensitive matching prefix pattern
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name LIKE 'STANDARD%';
+- id: string_ilike_predicate_start
+  category: string
+  sql: |2
+
+    -- Case insensitive matching prefix pattern
+    SELECT COUNT(*)
+    FROM part
+    WHERE p_name ILIKE 'standard%';
+- id: topn_ordered_allcols
+  category: topn
+  sql: |2
+
+    -- Top-10 limit returning all columns after ordering over all table rows
+    SELECT *
+    FROM lineitem
+    ORDER BY l_extendedprice DESC
+    LIMIT 10;
+- id: topn_aggregate_2columns
+  category: topn
+  sql: |2
+
+    -- Top 10 limit returning 2 columns after aggregation and computed ordering
+    SELECT
+        l_orderkey,
+        SUM(l_quantity) as total_quantity
+    FROM lineitem
+    GROUP BY l_orderkey
+    ORDER BY total_quantity DESC
+    LIMIT 10;
+- id: window_growing_frame
+  category: window
+  sql: |2
+
+    -- Running sum window aggregation with growing frame size
+    SELECT
+        l_orderkey,
+        l_linenumber,
+        l_quantity,
+        SUM(l_quantity) OVER (
+            PARTITION BY l_orderkey
+            ORDER BY l_linenumber
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) as running_quantity
+    FROM lineitem
+    WHERE l_orderkey <= 1000;
+- id: window_lead_lag_same_frame
+  category: window
+  sql: |2
+
+    -- Offset window functions over the same frame with 'natural' ordering
+    SELECT
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        LAG(o_totalprice, 1) OVER (
+            PARTITION BY o_custkey
+            ORDER BY o_orderdate
+        ) as prev_order_price,
+        LEAD(o_totalprice, 1) OVER (
+            PARTITION BY o_custkey
+            ORDER BY o_orderdate
+        ) as next_order_price
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+      AND o_orderdate < DATE '1996-01-01';
+- id: window_row_number
+  category: window
+  sql: |2
+
+    -- Row number calculation window function with different ordering
+    SELECT
+        o_custkey,
+        o_orderkey,
+        o_totalprice,
+        ROW_NUMBER() OVER (
+            PARTITION BY o_custkey
+            ORDER BY o_totalprice DESC
+        ) as order_rank
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+      AND o_orderdate < DATE '1996-01-01';
+- id: window_multiple_orderings
+  category: window
+  sql: |2
+
+    -- Ranking window aggregations with multiple frame orderings
+    SELECT
+        l_orderkey,
+        l_partkey,
+        l_quantity,
+        l_extendedprice,
+        DENSE_RANK() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice DESC) as price_rank,
+        PERCENT_RANK() OVER (PARTITION BY l_orderkey ORDER BY l_quantity) as quantity_percentile,
+        CUME_DIST() OVER (PARTITION BY l_orderkey ORDER BY l_extendedprice) as price_distribution
+    FROM lineitem
+    WHERE l_orderkey <= 10000
+    ORDER BY l_orderkey, price_rank;
+- id: window_moving_frame
+  category: window
+  sql: |2
+
+    -- Window aggregations with complex moving frame definitions
+    SELECT
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        -- Moving average with preceding rows
+        AVG(o_totalprice) OVER (
+            ORDER BY o_orderdate
+            ROWS BETWEEN 5 PRECEDING AND CURRENT ROW
+        ) as moving_avg_6_orders,
+        -- Running total with range-based frame
+        SUM(o_totalprice) OVER (
+            ORDER BY o_orderdate
+            RANGE BETWEEN INTERVAL '30' DAY PRECEDING AND CURRENT ROW
+        ) as monthly_running_total
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+      AND o_orderdate < DATE '1996-01-01'
+    ORDER BY o_orderdate;
+- id: window_unbounded_frame
+  category: window
+  sql: |2
+
+    -- Window aggregations with the same unbounded frame definition
+    SELECT
+        l_orderkey,
+        l_linenumber,
+        l_shipdate,
+        l_quantity,
+        FIRST_VALUE(l_quantity) OVER (
+            PARTITION BY l_orderkey
+            ORDER BY l_linenumber
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) as first_line_qty,
+        LAST_VALUE(l_quantity) OVER (
+            PARTITION BY l_orderkey
+            ORDER BY l_linenumber
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) as last_line_qty
+    FROM lineitem
+    WHERE l_orderkey BETWEEN 1 AND 5000;
+- id: json_extract_simple
+  category: json
+  sql: |2
+
+    -- Extract from JSON with simple path expressions
+    SELECT
+        o_orderkey,
+        JSON_EXTRACT(o_comment, '$.priority') as order_priority,
+        JSON_EXTRACT(o_comment, '$.notes') as order_notes
+    FROM orders
+    WHERE JSON_EXTRACT(o_comment, '$.priority') IS NOT NULL
+    LIMIT 1000;
+  skip_on: [duckdb]
+  description: "TPC-H o_comment contains plain text, not valid JSON"
+- id: json_extract_nested
+  category: json
+  sql: |2
+
+    -- Extract from JSON with complex path expressions
+    SELECT
+        c_custkey,
+        JSON_EXTRACT(c_comment, '$.profile.segment') as customer_segment,
+        JSON_EXTRACT(c_comment, '$.profile.preferences[0]') as primary_preference,
+        JSON_EXTRACT(c_comment, '$.history.last_order.date') as last_order_date
+    FROM customer
+    WHERE JSON_VALID(c_comment)
+    LIMIT 500;
+- id: json_aggregates
+  category: json
+  sql: |2
+
+    -- Create JSON array and object with JSON aggregate functions
+    SELECT
+        JSON_ARRAYAGG(p_name) as part_names,
+        JSON_OBJECTAGG(p_partkey, p_retailprice) as part_prices,
+        COUNT(*) as part_count
+    FROM part
+    WHERE p_type LIKE '%STEEL%'
+    GROUP BY p_brand
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      -- DuckDB uses JSON_GROUP_ARRAY and JSON_GROUP_OBJECT instead
+      SELECT
+          JSON_GROUP_ARRAY(p_name) as part_names,
+          JSON_GROUP_OBJECT(p_partkey, p_retailprice) as part_prices,
+          COUNT(*) as part_count
+      FROM part
+      WHERE p_type LIKE '%STEEL%'
+      GROUP BY p_brand
+      LIMIT 100;
+- id: fulltext_simple_search
+  category: fulltext
+  sql: |2
+
+    -- Basic full-text search capabilities on text columns
+    SELECT
+        p_partkey,
+        p_name,
+        p_mfgr,
+        p_comment
+    FROM part
+    WHERE MATCH(p_name, p_comment) AGAINST ('STEEL COPPER' IN NATURAL LANGUAGE MODE)
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      -- DuckDB doesn't support MATCH...AGAINST, use LIKE instead
+      SELECT
+          p_partkey,
+          p_name,
+          p_mfgr,
+          p_comment
+      FROM part
+      WHERE p_name LIKE '%STEEL%' OR p_name LIKE '%COPPER%'
+         OR p_comment LIKE '%STEEL%' OR p_comment LIKE '%COPPER%'
+      LIMIT 100;
+- id: fulltext_boolean_search
+  category: fulltext
+  sql: |2
+
+    -- Boolean full-text search with operators
+    SELECT
+        c_custkey,
+        c_name,
+        c_comment,
+        MATCH(c_comment) AGAINST ('+BUILDING -FURNITURE' IN BOOLEAN MODE) as relevance_score
+    FROM customer
+    WHERE MATCH(c_comment) AGAINST ('+BUILDING -FURNITURE' IN BOOLEAN MODE)
+    ORDER BY relevance_score DESC
+    LIMIT 50;
+  variants:
+    duckdb: |2
+
+      -- DuckDB doesn't support MATCH...AGAINST, use LIKE with AND/NOT logic
+      SELECT
+          c_custkey,
+          c_name,
+          c_comment
+      FROM customer
+      WHERE c_comment LIKE '%BUILDING%'
+        AND c_comment NOT LIKE '%FURNITURE%'
+      LIMIT 50;
+- id: fulltext_phrase_search
+  category: fulltext
+  sql: |2
+
+    -- Phrase-based full-text search with ranking
+    SELECT
+        s_suppkey,
+        s_name,
+        s_comment,
+        MATCH(s_comment) AGAINST ('"Customer Complaints"' IN BOOLEAN MODE) as phrase_match_score
+    FROM supplier
+    WHERE MATCH(s_comment) AGAINST ('"Customer Complaints"' IN BOOLEAN MODE)
+    ORDER BY phrase_match_score DESC;
+  variants:
+    duckdb: |2
+
+      -- DuckDB doesn't support MATCH...AGAINST, use LIKE with exact phrase
+      SELECT
+          s_suppkey,
+          s_name,
+          s_comment
+      FROM supplier
+      WHERE s_comment LIKE '%Customer Complaints%'
+      ORDER BY s_suppkey;
+- id: statistical_percentiles
+  category: statistical
+  sql: |2
+
+    -- Percentile calculation functions for distribution analysis
+    SELECT
+        l_returnflag,
+        l_linestatus,
+        COUNT(*) as record_count,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY l_quantity) as quantity_q1,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY l_quantity) as quantity_median,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY l_quantity) as quantity_q3,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY l_extendedprice) as price_p95
+    FROM lineitem
+    GROUP BY l_returnflag, l_linestatus;
+- id: statistical_variance_stddev
+  category: statistical
+  sql: |2
+
+    -- Variance and standard deviation calculations
+    SELECT
+        o_orderpriority,
+        COUNT(*) as order_count,
+        AVG(o_totalprice) as avg_price,
+        VARIANCE(o_totalprice) as price_variance,
+        STDDEV(o_totalprice) as price_stddev,
+        STDDEV_POP(o_totalprice) as price_stddev_pop,
+        STDDEV_SAMP(o_totalprice) as price_stddev_samp
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+    GROUP BY o_orderpriority;
+- id: statistical_correlation
+  category: statistical
+  sql: |2
+
+    -- Correlation analysis between numeric columns
+    SELECT
+        CORR(l_quantity, l_extendedprice) as qty_price_correlation,
+        COVAR_POP(l_quantity, l_discount) as qty_discount_covariance,
+        COVAR_SAMP(l_tax, l_extendedprice) as tax_price_covariance,
+        REGR_SLOPE(l_extendedprice, l_quantity) as price_qty_slope,
+        REGR_INTERCEPT(l_extendedprice, l_quantity) as price_qty_intercept,
+        REGR_R2(l_extendedprice, l_quantity) as regression_r_squared
+    FROM lineitem
+    WHERE l_shipdate >= DATE '1995-01-01'
+      AND l_shipdate < DATE '1996-01-01';
+- id: olap_cube_analysis
+  category: olap
+  sql: |2
+
+    -- CUBE operation for multidimensional analysis
+    SELECT
+        n.n_name as nation,
+        r.r_name as region,
+        EXTRACT(YEAR FROM o.o_orderdate) as order_year,
+        EXTRACT(QUARTER FROM o.o_orderdate) as order_quarter,
+        COUNT(*) as order_count,
+        SUM(o.o_totalprice) as total_revenue,
+        AVG(o.o_totalprice) as avg_order_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+      AND o.o_orderdate < DATE '1997-01-01'
+    GROUP BY CUBE(n.n_name, r.r_name,
+                  EXTRACT(YEAR FROM o.o_orderdate),
+                  EXTRACT(QUARTER FROM o.o_orderdate));
+- id: olap_rollup_analysis
+  category: olap
+  sql: |2
+
+    -- ROLLUP operation for hierarchical aggregation
+    SELECT
+        r.r_name as region,
+        n.n_name as nation,
+        c.c_mktsegment as market_segment,
+        COUNT(DISTINCT c.c_custkey) as customer_count,
+        COUNT(*) as order_count,
+        SUM(o.o_totalprice) as total_revenue,
+        AVG(o.o_totalprice) as avg_order_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    WHERE o.o_orderdate >= DATE '1995-01-01'
+    GROUP BY ROLLUP(r.r_name, n.n_name, c.c_mktsegment)
+    ORDER BY r.r_name NULLS LAST, n.n_name NULLS LAST, c.c_mktsegment NULLS LAST;
+- id: timeseries_trend_analysis
+  category: timeseries
+  sql: |2
+
+    -- Time series trend analysis with linear regression
+    SELECT
+        DATE_TRUNC('month', o_orderdate) as order_month,
+        COUNT(*) as order_count,
+        SUM(o_totalprice) as monthly_revenue,
+        AVG(o_totalprice) as avg_order_value,
+        -- Linear trend calculation
+        REGR_SLOPE(SUM(o_totalprice), EXTRACT(EPOCH FROM o_orderdate)) as revenue_trend_slope,
+        -- Month-over-month growth
+        LAG(SUM(o_totalprice), 1) OVER (ORDER BY DATE_TRUNC('month', o_orderdate)) as prev_month_revenue,
+        (SUM(o_totalprice) - LAG(SUM(o_totalprice), 1) OVER (ORDER BY DATE_TRUNC('month', o_orderdate)))
+        / NULLIF(LAG(SUM(o_totalprice), 1) OVER (ORDER BY DATE_TRUNC('month', o_orderdate)), 0) * 100 as mom_growth_pct
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+      AND o_orderdate < DATE '1997-01-01'
+    GROUP BY DATE_TRUNC('month', o_orderdate)
+    ORDER BY order_month;
+  variants:
+    duckdb: |2
+
+      -- DuckDB doesn't allow nested aggregates, use CTE to pre-aggregate
+      WITH monthly_totals AS (
+        SELECT
+          DATE_TRUNC('month', o_orderdate) as order_month,
+          COUNT(*) as order_count,
+          SUM(o_totalprice) as monthly_revenue,
+          AVG(o_totalprice) as avg_order_value,
+          EXTRACT(EPOCH FROM DATE_TRUNC('month', o_orderdate)) as month_epoch
+        FROM orders
+        WHERE o_orderdate >= DATE '1995-01-01'
+          AND o_orderdate < DATE '1997-01-01'
+        GROUP BY DATE_TRUNC('month', o_orderdate)
+      ),
+      monthly_with_lag AS (
+        SELECT
+          order_month,
+          order_count,
+          monthly_revenue,
+          avg_order_value,
+          month_epoch,
+          LAG(monthly_revenue, 1) OVER (ORDER BY order_month) as prev_month_revenue
+        FROM monthly_totals
+      )
+      SELECT
+        order_month,
+        order_count,
+        monthly_revenue,
+        avg_order_value,
+        REGR_SLOPE(monthly_revenue, month_epoch) OVER () as revenue_trend_slope,
+        prev_month_revenue,
+        (monthly_revenue - prev_month_revenue) / NULLIF(prev_month_revenue, 0) * 100 as mom_growth_pct
+      FROM monthly_with_lag
+      ORDER BY order_month;
+- id: max_by_simple
+  category: max
+  sql: |2
+
+    -- Find the customer with the highest account balance in each nation
+    SELECT
+        n_name,
+        MAX_BY(c_name, c_acctbal) as richest_customer,
+        MAX(c_acctbal) as max_balance
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n_name
+    ORDER BY max_balance DESC;
+- id: min_by_simple
+  category: min
+  sql: |2
+
+    -- Find the customer with the lowest account balance in each nation
+    SELECT
+        n_name,
+        MIN_BY(c_name, c_acctbal) as poorest_customer,
+        MIN(c_acctbal) as min_balance
+    FROM customer c
+    JOIN nation n ON c.c_nationkey = n.n_nationkey
+    GROUP BY n_name
+    ORDER BY min_balance ASC;
+- id: max_by_complex
+  category: max
+  sql: |2
+
+    -- Find the most expensive order for each customer segment
+    SELECT
+        c_mktsegment,
+        MAX_BY(o_orderkey, o_totalprice) as most_expensive_order_id,
+        MAX_BY(o_orderdate, o_totalprice) as most_expensive_order_date,
+        MAX(o_totalprice) as max_order_value
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    GROUP BY c_mktsegment
+    ORDER BY max_order_value DESC;
+- id: min_by_complex
+  category: min
+  sql: |2
+
+    -- Find the cheapest part for each brand
+    SELECT
+        p_brand,
+        MIN_BY(p_name, p_retailprice) as cheapest_part_name,
+        MIN_BY(p_type, p_retailprice) as cheapest_part_type,
+        MIN(p_retailprice) as min_price
+    FROM part
+    GROUP BY p_brand
+    ORDER BY min_price ASC;
+- id: max_by_with_ties
+  category: max
+  sql: |2
+
+    -- Find the supplier with the highest supply cost for each part (handling ties)
+    SELECT
+        p_partkey,
+        p_name,
+        MAX_BY(s_name, ps_supplycost) as supplier_name,
+        MAX(ps_supplycost) as max_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p_partkey, p_name
+    ORDER BY max_supply_cost DESC
+    LIMIT 100;
+- id: min_by_with_ties
+  category: min
+  sql: |2
+
+    -- Find the supplier with the lowest supply cost for each part (handling ties)
+    SELECT
+        p_partkey,
+        p_name,
+        MIN_BY(s_name, ps_supplycost) as supplier_name,
+        MIN(ps_supplycost) as min_supply_cost
+    FROM partsupp ps
+    JOIN part p ON ps.ps_partkey = p.p_partkey
+    JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+    GROUP BY p_partkey, p_name
+    ORDER BY min_supply_cost ASC
+    LIMIT 100;
+- id: qualify_row_number
+  category: qualify
+  sql: |2
+
+    -- Find the top 3 orders by total price for each customer using QUALIFY
+    SELECT
+        c_custkey,
+        c_name,
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        ROW_NUMBER() OVER (PARTITION BY c_custkey ORDER BY o_totalprice DESC) as order_rank
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o_orderdate >= DATE '1995-01-01'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY c_custkey ORDER BY o_totalprice DESC) <= 3
+    ORDER BY c_custkey, order_rank;
+- id: qualify_dense_rank
+  category: qualify
+  sql: |2
+
+    -- Find the top 2 most expensive parts in each category using QUALIFY
+    SELECT
+        p_type,
+        p_name,
+        p_retailprice,
+        DENSE_RANK() OVER (PARTITION BY p_type ORDER BY p_retailprice DESC) as price_rank
+    FROM part
+    QUALIFY DENSE_RANK() OVER (PARTITION BY p_type ORDER BY p_retailprice DESC) <= 2
+    ORDER BY p_type, price_rank;
+- id: qualify_percentile
+  category: qualify
+  sql: |2
+
+    -- Find orders in the top 10% by value for each order priority using QUALIFY
+    SELECT
+        o_orderpriority,
+        o_orderkey,
+        o_totalprice,
+        PERCENT_RANK() OVER (PARTITION BY o_orderpriority ORDER BY o_totalprice) as price_percentile
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+    QUALIFY PERCENT_RANK() OVER (PARTITION BY o_orderpriority ORDER BY o_totalprice) >= 0.9
+    ORDER BY o_orderpriority, o_totalprice DESC;
+- id: qualify_ntile
+  category: qualify
+  sql: |2
+
+    -- Find orders in the top quartile by value for each market segment using QUALIFY
+    SELECT
+        c_mktsegment,
+        o_orderkey,
+        o_totalprice,
+        NTILE(4) OVER (PARTITION BY c_mktsegment ORDER BY o_totalprice) as quartile
+    FROM orders o
+    JOIN customer c ON o.o_custkey = c.c_custkey
+    WHERE o_orderdate >= DATE '1995-01-01'
+    QUALIFY NTILE(4) OVER (PARTITION BY c_mktsegment ORDER BY o_totalprice) = 4
+    ORDER BY c_mktsegment, o_totalprice DESC;
+- id: qualify_cume_dist
+  category: qualify
+  sql: |2
+
+    -- Find lineitems with quantity in the top 5% of their shipment date using QUALIFY
+    SELECT
+        l_shipdate,
+        l_orderkey,
+        l_linenumber,
+        l_quantity,
+        CUME_DIST() OVER (PARTITION BY l_shipdate ORDER BY l_quantity) as quantity_cumulative_dist
+    FROM lineitem
+    WHERE l_shipdate >= DATE '1995-01-01'
+      AND l_shipdate < DATE '1996-01-01'
+    QUALIFY CUME_DIST() OVER (PARTITION BY l_shipdate ORDER BY l_quantity) >= 0.95
+    ORDER BY l_shipdate, l_quantity DESC;
+- id: qualify_lag_lead
+  category: qualify
+  sql: |2
+
+    -- Find orders where the price increased from the previous order for each customer using QUALIFY
+    SELECT
+        c_custkey,
+        c_name,
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        LAG(o_totalprice) OVER (PARTITION BY c_custkey ORDER BY o_orderdate) as prev_order_price
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE o_orderdate >= DATE '1995-01-01'
+    QUALIFY o_totalprice > LAG(o_totalprice) OVER (PARTITION BY c_custkey ORDER BY o_orderdate)
+    ORDER BY c_custkey, o_orderdate;
+- id: optimizer_exists_to_semijoin
+  category: optimizer
+  sql: "\n-- Test EXISTS subquery decorrelation to semijoin optimization\n-- Good optimizers should convert the EXISTS to\
+    \ a semijoin for better performance\nSELECT\n    c_custkey,\n    c_name,\n    c_mktsegment,\n    c_nationkey\nFROM customer\
+    \ c\nWHERE EXISTS (\n    SELECT 1 \n    FROM orders o \n    WHERE o.o_custkey = c.c_custkey \n      AND o.o_orderdate\
+    \ >= DATE '1995-01-01'\n      AND o.o_orderdate < DATE '1996-01-01'\n      AND o.o_totalprice > 100000\n)\nORDER BY c_custkey\n\
+    LIMIT 1000;\n"
+- id: optimizer_distinct_elimination
+  category: optimizer
+  sql: |2
+
+    -- Test DISTINCT elimination optimization
+    -- Good optimizers should eliminate the DISTINCT when it's redundant due to primary key
+    SELECT DISTINCT
+        o_orderkey,
+        o_custkey,
+        o_orderdate,
+        o_totalprice
+    FROM orders o
+    WHERE o_orderdate >= DATE '1995-01-01'
+      AND o_orderdate < DATE '1996-01-01'
+      AND o_totalprice > 50000
+    ORDER BY o_orderkey
+    LIMIT 2000;
+- id: optimizer_common_subexpression
+  category: optimizer
+  sql: "\n-- Test Common Subexpression Elimination (CSE) optimization\n-- Good optimizers should compute the complex expression\
+    \ once and reuse it\nSELECT\n    l_orderkey,\n    l_partkey,\n    l_suppkey,\n    l_linenumber,\n    l_quantity * l_extendedprice\
+    \ * (1 - l_discount) * (1 + l_tax) as revenue_with_tax,\n    CASE \n        WHEN l_quantity * l_extendedprice * (1 - l_discount)\
+    \ * (1 + l_tax) > 50000 THEN 'High Value'\n        WHEN l_quantity * l_extendedprice * (1 - l_discount) * (1 + l_tax)\
+    \ > 10000 THEN 'Medium Value'\n        ELSE 'Low Value'\n    END as value_category,\n    ROUND(l_quantity * l_extendedprice\
+    \ * (1 - l_discount) * (1 + l_tax), 2) as rounded_revenue\nFROM lineitem\nWHERE l_shipdate >= DATE '1995-01-01'\n  AND\
+    \ l_shipdate < DATE '1996-01-01'\n  AND l_quantity * l_extendedprice * (1 - l_discount) * (1 + l_tax) > 1000\nORDER BY\
+    \ l_quantity * l_extendedprice * (1 - l_discount) * (1 + l_tax) DESC\nLIMIT 5000;\n"
+- id: optimizer_predicate_pushdown
+  category: optimizer
+  sql: |2
+
+    -- Test predicate pushdown through joins optimization
+    -- Good optimizers should push predicates down past joins to reduce intermediate results
+    SELECT
+        c.c_name,
+        c.c_mktsegment,
+        o.o_orderdate,
+        o.o_totalprice
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_nationkey = 15  -- Should push down before join to reduce customer rows
+      AND o.o_orderdate >= DATE '1995-01-01'  -- Should push down before join to reduce order rows
+      AND o.o_orderdate < DATE '1996-01-01'
+      AND c.c_mktsegment = 'BUILDING'  -- Additional selectivity on customer
+    ORDER BY o.o_totalprice DESC
+    LIMIT 1000;
+- id: optimizer_join_reordering
+  category: optimizer
+  sql: |2
+
+    -- Test join reordering optimization
+    -- Good optimizers should reorder joins based on cardinality (nation smallest, then customer, then orders)
+    SELECT
+        n.n_name,
+        c.c_name,
+        COUNT(o.o_orderkey) as order_count,
+        SUM(o.o_totalprice) as total_value
+    FROM orders o  -- Largest table listed first (suboptimal order)
+    JOIN customer c ON o.o_custkey = c.c_custkey  -- Medium table
+    JOIN nation n ON c.c_nationkey = n.n_nationkey  -- Smallest table
+    WHERE n.n_regionkey = 1  -- High selectivity on smallest table
+      AND o.o_orderdate >= DATE '1995-01-01'
+      AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY n.n_name, c.c_name
+    HAVING COUNT(o.o_orderkey) > 5
+    ORDER BY total_value DESC
+    LIMIT 100;
+- id: optimizer_limit_pushdown
+  category: optimizer
+  sql: |2
+
+    -- Test limit pushdown through operations optimization
+    -- Good optimizers should push partial limits down to reduce work in upstream operations
+    SELECT
+        c.c_name,
+        c.c_mktsegment,
+        o.o_orderdate,
+        o.o_totalprice,
+        o.o_orderpriority
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_mktsegment = 'BUILDING'
+      AND o.o_orderdate >= DATE '1995-01-01'
+      AND o.o_orderdate < DATE '1996-01-01'
+    ORDER BY o.o_totalprice DESC
+    LIMIT 100;  -- Should push partial limit down through join
+- id: optimizer_aggregate_pushdown
+  category: optimizer
+  sql: |2
+
+    -- Test aggregate pushdown through joins optimization
+    -- Good optimizers should partially compute aggregates before joins when possible
+    SELECT
+        c.c_name,
+        c.c_mktsegment,
+        c.c_nationkey,
+        COUNT(o.o_orderkey) as order_count,
+        SUM(o.o_totalprice) as total_spent,
+        AVG(o.o_totalprice) as avg_order_value
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey
+    WHERE c.c_nationkey = 15
+      AND o.o_orderdate >= DATE '1995-01-01'
+      AND o.o_orderdate < DATE '1996-01-01'
+    GROUP BY c.c_custkey, c.c_name, c.c_mktsegment, c.c_nationkey
+    HAVING SUM(o.o_totalprice) > 500000  -- HAVING can influence pushdown strategy
+    ORDER BY total_spent DESC
+    LIMIT 50;
+- id: optimizer_scalar_subquery_flattening
+  category: optimizer
+  sql: "\n-- Test scalar subquery flattening optimization\n-- Good optimizers should convert scalar subqueries to joins for\
+    \ better performance\nSELECT\n    c.c_name,\n    c.c_mktsegment,\n    c.c_acctbal,\n    (SELECT AVG(o.o_totalprice) \n\
+    \     FROM orders o \n     WHERE o.o_custkey = c.c_custkey \n       AND o.o_orderdate >= DATE '1995-01-01') as avg_order_value,\n\
+    \    (SELECT COUNT(o.o_orderkey)\n     FROM orders o \n     WHERE o.o_custkey = c.c_custkey \n       AND o.o_orderdate\
+    \ >= DATE '1995-01-01') as order_count\nFROM customer c\nWHERE c.c_nationkey = 15\n  AND c.c_acctbal > 5000\nORDER BY\
+    \ avg_order_value DESC\nLIMIT 100;\n"
+- id: optimizer_constant_folding
+  category: optimizer
+  sql: |2
+
+    -- Test constant folding and expression simplification optimization
+    -- Good optimizers should pre-compute constants and simplify expressions at compile time
+    SELECT
+        l_orderkey,
+        l_partkey,
+        l_suppkey,
+        l_linenumber,
+        l_quantity * (1.0 + 0.0) as simplified_qty,  -- Should fold to l_quantity
+        l_extendedprice * (2 * 3 + 4) as constant_folded,  -- Should fold to l_extendedprice * 10
+        l_discount + 0.0 - 0.0 as zero_folded,  -- Should fold to l_discount
+        CASE WHEN 1 = 1 THEN l_tax ELSE 0 END as condition_folded,  -- Should fold to l_tax
+        l_quantity / 1.0 as division_folded,  -- Should fold to l_quantity
+        l_extendedprice + (5 - 5) as addition_folded  -- Should fold to l_extendedprice
+    FROM lineitem
+    WHERE l_quantity * 1 > 10  -- Should simplify to l_quantity > 10
+      AND l_shipdate >= DATE '1995-01-01'
+      AND l_discount + 0 < 0.1  -- Should simplify to l_discount < 0.1
+    ORDER BY l_quantity * (1 + 0) DESC  -- Should simplify to l_quantity DESC
+    LIMIT 1000;
+- id: optimizer_column_pruning
+  category: optimizer
+  sql: |2
+
+    -- Test column pruning (projection pushdown) optimization
+    -- Good optimizers should only read columns needed for the query result
+    SELECT
+        c.c_name  -- Only need c_name from customer table
+    FROM customer c
+    JOIN orders o ON c.c_custkey = o.o_custkey  -- Only need c_custkey for join from customer
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey  -- Only need o_orderkey for join from orders
+    WHERE o.o_orderdate >= DATE '1995-01-01'  -- Only need o_orderdate for filtering
+      AND o.o_orderdate < DATE '1996-01-01'
+      AND l.l_quantity > 40  -- Only need l_quantity for filtering
+      AND c.c_nationkey = 15  -- Only need c_nationkey for filtering
+    ORDER BY c.c_name
+    LIMIT 500;
+- id: optimizer_in_to_exists
+  category: optimizer
+  sql: |2
+
+    -- Test IN-to-EXISTS transformation optimization
+    -- Good optimizers should transform IN subqueries to EXISTS when beneficial
+    SELECT
+        c.c_name,
+        c.c_mktsegment,
+        c.c_nationkey,
+        c.c_acctbal
+    FROM customer c
+    WHERE c.c_custkey IN (
+        SELECT o.o_custkey
+        FROM orders o
+        WHERE o.o_orderdate >= DATE '1995-01-01'
+          AND o.o_orderdate < DATE '1996-01-01'
+          AND o.o_totalprice > 100000
+    )
+      AND c.c_nationkey IN (1, 2, 3, 4, 5)  -- Additional IN predicate
+    ORDER BY c.c_acctbal DESC
+    LIMIT 200;
+- id: optimizer_union_optimization
+  category: optimizer
+  sql: |2
+
+    -- Test union/set operation optimization
+    -- Good optimizers should optimize UNION ALL operations and eliminate redundant sorting
+    SELECT c_name, c_mktsegment, 'high_value' as customer_type, c_acctbal
+    FROM customer
+    WHERE c_acctbal > 8000
+      AND c_nationkey IN (1, 2, 3)
+    UNION ALL
+    SELECT c_name, c_mktsegment, 'medium_value' as customer_type, c_acctbal
+    FROM customer
+    WHERE c_acctbal BETWEEN 4000 AND 8000
+      AND c_nationkey IN (1, 2, 3)
+    UNION ALL
+    SELECT c_name, c_mktsegment, 'low_value' as customer_type, c_acctbal
+    FROM customer
+    WHERE c_acctbal BETWEEN 1000 AND 4000
+      AND c_nationkey IN (1, 2, 3)
+    ORDER BY c_acctbal DESC
+    LIMIT 300;
+- id: optimizer_runtime_filter
+  category: optimizer
+  sql: |2
+
+    -- Test runtime filter generation optimization
+    -- Good optimizers should generate bloom filters or hash filters for selective joins
+    SELECT
+        l.l_orderkey,
+        l.l_partkey,
+        l.l_suppkey,
+        l.l_quantity,
+        l.l_extendedprice,
+        p.p_name,
+        p.p_type
+    FROM lineitem l
+    JOIN part p ON l.l_partkey = p.p_partkey
+    WHERE p.p_type LIKE '%STEEL%'  -- Selective filter should generate runtime filter
+      AND p.p_size BETWEEN 10 AND 20
+      AND l.l_shipdate >= DATE '1995-01-01'
+      AND l.l_shipdate < DATE '1996-01-01'
+      AND l.l_quantity > 20
+    ORDER BY l.l_extendedprice DESC
+    LIMIT 1000;
+# ============================================================================
+# Modern SQL Features - Added December 2025
+# Features below are supported by multiple leading OLAP platforms
+# ============================================================================
+
+# ANY_VALUE aggregate function - non-deterministic value selection
+- id: any_value_simple
+  category: aggregation
+  sql: |2
+
+    -- Select any customer name per market segment (faster than MIN/MAX)
+    SELECT
+        c_mktsegment,
+        ANY_VALUE(c_name) as sample_customer,
+        COUNT(*) as customer_count
+    FROM customer
+    GROUP BY c_mktsegment;
+  variants:
+    clickhouse: |2
+
+      SELECT
+          c_mktsegment,
+          any(c_name) as sample_customer,
+          COUNT(*) as customer_count
+      FROM customer
+      GROUP BY c_mktsegment;
+- id: any_value_with_filter
+  category: aggregation
+  sql: |2
+
+    -- Any value with additional aggregates
+    SELECT
+        n_regionkey,
+        ANY_VALUE(n_name) as sample_nation,
+        ANY_VALUE(n_comment) as sample_comment,
+        COUNT(*) as nation_count
+    FROM nation
+    GROUP BY n_regionkey;
+  variants:
+    clickhouse: |2
+
+      SELECT
+          n_regionkey,
+          any(n_name) as sample_nation,
+          any(n_comment) as sample_comment,
+          COUNT(*) as nation_count
+      FROM nation
+      GROUP BY n_regionkey;
+
+# GROUP BY ALL - automatic grouping by all non-aggregate columns
+- id: groupby_all_simple
+  category: aggregation
+  sql: |2
+
+    -- Automatic grouping by all non-aggregate columns
+    SELECT
+        l_returnflag,
+        l_linestatus,
+        SUM(l_quantity) as total_qty,
+        AVG(l_extendedprice) as avg_price
+    FROM lineitem
+    GROUP BY ALL;
+- id: groupby_all_complex
+  category: aggregation
+  sql: |2
+
+    -- GROUP BY ALL with multiple non-aggregate expressions
+    SELECT
+        DATE_TRUNC('month', o_orderdate) as order_month,
+        o_orderpriority,
+        COUNT(*) as order_count,
+        SUM(o_totalprice) as monthly_revenue
+    FROM orders
+    WHERE o_orderdate >= DATE '1995-01-01'
+    GROUP BY ALL
+    ORDER BY order_month, o_orderpriority;
+
+# ORDER BY ALL - automatic ordering by all SELECT columns
+- id: orderby_all_simple
+  category: orderby
+  sql: |2
+
+    -- Order by all columns in SELECT list
+    SELECT
+        r_name,
+        n_name,
+        COUNT(*) as supplier_count
+    FROM supplier s
+    JOIN nation n ON s.s_nationkey = n.n_nationkey
+    JOIN region r ON n.n_regionkey = r.r_regionkey
+    GROUP BY r_name, n_name
+    ORDER BY ALL;
+- id: orderby_all_desc
+  category: orderby
+  sql: |2
+
+    -- ORDER BY ALL with direction
+    SELECT
+        p_brand,
+        p_type,
+        AVG(p_retailprice) as avg_price
+    FROM part
+    GROUP BY p_brand, p_type
+    ORDER BY ALL DESC
+    LIMIT 100;
+
+# ============================================================================
+# ARRAY type operations - semi-structured data via ARRAY_AGG
+# ============================================================================
+
+- id: array_agg_simple
+  category: array
+  sql: |2
+
+    -- Aggregate part keys into arrays per supplier
+    SELECT
+        ps_suppkey,
+        ARRAY_AGG(ps_partkey ORDER BY ps_partkey) as supplied_parts,
+        COUNT(*) as part_count
+    FROM partsupp
+    GROUP BY ps_suppkey
+    HAVING COUNT(*) <= 10
+    LIMIT 100;
+  variants:
+    clickhouse: |2
+
+      SELECT
+          ps_suppkey,
+          groupArray(ps_partkey) as supplied_parts,
+          COUNT(*) as part_count
+      FROM partsupp
+      GROUP BY ps_suppkey
+      HAVING COUNT(*) <= 10
+      LIMIT 100;
+- id: array_agg_distinct
+  category: array
+  sql: |2
+
+    -- Distinct array aggregation
+    SELECT
+        c_mktsegment,
+        ARRAY_AGG(DISTINCT c_nationkey ORDER BY c_nationkey) as nation_keys
+    FROM customer
+    GROUP BY c_mktsegment;
+  variants:
+    clickhouse: |2
+
+      SELECT
+          c_mktsegment,
+          groupUniqArray(c_nationkey) as nation_keys
+      FROM customer
+      GROUP BY c_mktsegment;
+- id: array_unnest
+  category: array
+  sql: |2
+
+    -- Unnest/explode array back to rows
+    WITH supplier_parts AS (
+        SELECT
+            ps_suppkey,
+            ARRAY_AGG(ps_partkey) as parts
+        FROM partsupp
+        WHERE ps_suppkey <= 10
+        GROUP BY ps_suppkey
+    )
+    SELECT
+        ps_suppkey,
+        UNNEST(parts) as part_key
+    FROM supplier_parts;
+  variants:
+    bigquery: |2
+
+      WITH supplier_parts AS (
+          SELECT
+              ps_suppkey,
+              ARRAY_AGG(ps_partkey) as parts
+          FROM partsupp
+          WHERE ps_suppkey <= 10
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          part_key
+      FROM supplier_parts, UNNEST(parts) as part_key;
+    clickhouse: |2
+
+      WITH supplier_parts AS (
+          SELECT
+              ps_suppkey,
+              groupArray(ps_partkey) as parts
+          FROM partsupp
+          WHERE ps_suppkey <= 10
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          arrayJoin(parts) as part_key
+      FROM supplier_parts;
+- id: array_contains
+  category: array
+  sql: |2
+
+    -- Check if array contains a value
+    WITH supplier_parts AS (
+        SELECT
+            ps_suppkey,
+            ARRAY_AGG(ps_partkey) as parts
+        FROM partsupp
+        GROUP BY ps_suppkey
+    )
+    SELECT
+        ps_suppkey,
+        ARRAY_CONTAINS(parts, 100) as has_part_100
+    FROM supplier_parts
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      WITH supplier_parts AS (
+          SELECT
+              ps_suppkey,
+              ARRAY_AGG(ps_partkey) as parts
+          FROM partsupp
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          list_contains(parts, 100) as has_part_100
+      FROM supplier_parts
+      LIMIT 100;
+    clickhouse: |2
+
+      WITH supplier_parts AS (
+          SELECT
+              ps_suppkey,
+              groupArray(ps_partkey) as parts
+          FROM partsupp
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          has(parts, 100) as has_part_100
+      FROM supplier_parts
+      LIMIT 100;
+    bigquery: |2
+
+      WITH supplier_parts AS (
+          SELECT
+              ps_suppkey,
+              ARRAY_AGG(ps_partkey) as parts
+          FROM partsupp
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          100 IN UNNEST(parts) as has_part_100
+      FROM supplier_parts
+      LIMIT 100;
+- id: array_length
+  category: array
+  sql: |2
+
+    -- Get array length/cardinality
+    WITH supplier_parts AS (
+        SELECT
+            ps_suppkey,
+            ARRAY_AGG(ps_partkey) as parts
+        FROM partsupp
+        GROUP BY ps_suppkey
+    )
+    SELECT
+        ps_suppkey,
+        CARDINALITY(parts) as num_parts
+    FROM supplier_parts
+    ORDER BY num_parts DESC
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      WITH supplier_parts AS (
+          SELECT
+              ps_suppkey,
+              ARRAY_AGG(ps_partkey) as parts
+          FROM partsupp
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          len(parts) as num_parts
+      FROM supplier_parts
+      ORDER BY num_parts DESC
+      LIMIT 100;
+    clickhouse: |2
+
+      WITH supplier_parts AS (
+          SELECT
+              ps_suppkey,
+              groupArray(ps_partkey) as parts
+          FROM partsupp
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          length(parts) as num_parts
+      FROM supplier_parts
+      ORDER BY num_parts DESC
+      LIMIT 100;
+- id: array_slice
+  category: array
+  sql: |2
+
+    -- Get array slice/subset
+    WITH order_prices AS (
+        SELECT
+            o_custkey,
+            ARRAY_AGG(o_totalprice ORDER BY o_totalprice DESC) as prices
+        FROM orders
+        GROUP BY o_custkey
+        HAVING COUNT(*) >= 5
+    )
+    SELECT
+        o_custkey,
+        ARRAY_SLICE(prices, 1, 3) as top_3_orders
+    FROM order_prices
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      WITH order_prices AS (
+          SELECT
+              o_custkey,
+              ARRAY_AGG(o_totalprice ORDER BY o_totalprice DESC) as prices
+          FROM orders
+          GROUP BY o_custkey
+          HAVING COUNT(*) >= 5
+      )
+      SELECT
+          o_custkey,
+          prices[1:3] as top_3_orders
+      FROM order_prices
+      LIMIT 100;
+    clickhouse: |2
+
+      WITH order_prices AS (
+          SELECT
+              o_custkey,
+              arrayReverseSort(groupArray(o_totalprice)) as prices
+          FROM orders
+          GROUP BY o_custkey
+          HAVING COUNT(*) >= 5
+      )
+      SELECT
+          o_custkey,
+          arraySlice(prices, 1, 3) as top_3_orders
+      FROM order_prices
+      LIMIT 100;
+- id: array_min_max
+  category: array
+  sql: |2
+
+    -- Get min/max from array
+    WITH order_prices AS (
+        SELECT
+            o_custkey,
+            ARRAY_AGG(o_totalprice) as prices
+        FROM orders
+        GROUP BY o_custkey
+    )
+    SELECT
+        o_custkey,
+        ARRAY_MIN(prices) as min_order,
+        ARRAY_MAX(prices) as max_order
+    FROM order_prices
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      WITH order_prices AS (
+          SELECT
+              o_custkey,
+              ARRAY_AGG(o_totalprice) as prices
+          FROM orders
+          GROUP BY o_custkey
+      )
+      SELECT
+          o_custkey,
+          list_min(prices) as min_order,
+          list_max(prices) as max_order
+      FROM order_prices
+      LIMIT 100;
+    clickhouse: |2
+
+      WITH order_prices AS (
+          SELECT
+              o_custkey,
+              groupArray(o_totalprice) as prices
+          FROM orders
+          GROUP BY o_custkey
+      )
+      SELECT
+          o_custkey,
+          arrayMin(prices) as min_order,
+          arrayMax(prices) as max_order
+      FROM order_prices
+      LIMIT 100;
+  skip_on: [bigquery]
+- id: array_sort
+  category: array
+  sql: |2
+
+    -- Sort array elements
+    WITH part_sizes AS (
+        SELECT
+            p_brand,
+            ARRAY_AGG(p_size) as sizes
+        FROM part
+        GROUP BY p_brand
+    )
+    SELECT
+        p_brand,
+        ARRAY_SORT(sizes) as sorted_sizes
+    FROM part_sizes
+    LIMIT 50;
+  variants:
+    duckdb: |2
+
+      WITH part_sizes AS (
+          SELECT
+              p_brand,
+              ARRAY_AGG(p_size) as sizes
+          FROM part
+          GROUP BY p_brand
+      )
+      SELECT
+          p_brand,
+          list_sort(sizes) as sorted_sizes
+      FROM part_sizes
+      LIMIT 50;
+    clickhouse: |2
+
+      WITH part_sizes AS (
+          SELECT
+              p_brand,
+              groupArray(p_size) as sizes
+          FROM part
+          GROUP BY p_brand
+      )
+      SELECT
+          p_brand,
+          arraySort(sizes) as sorted_sizes
+      FROM part_sizes
+      LIMIT 50;
+  skip_on: [bigquery]
+- id: array_distinct
+  category: array
+  sql: |2
+
+    -- Get distinct array elements
+    WITH ship_modes AS (
+        SELECT
+            l_orderkey,
+            ARRAY_AGG(l_shipmode) as modes
+        FROM lineitem
+        GROUP BY l_orderkey
+    )
+    SELECT
+        l_orderkey,
+        ARRAY_DISTINCT(modes) as unique_modes
+    FROM ship_modes
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      WITH ship_modes AS (
+          SELECT
+              l_orderkey,
+              ARRAY_AGG(l_shipmode) as modes
+          FROM lineitem
+          GROUP BY l_orderkey
+      )
+      SELECT
+          l_orderkey,
+          list_distinct(modes) as unique_modes
+      FROM ship_modes
+      LIMIT 100;
+    clickhouse: |2
+
+      WITH ship_modes AS (
+          SELECT
+              l_orderkey,
+              groupArray(l_shipmode) as modes
+          FROM lineitem
+          GROUP BY l_orderkey
+      )
+      SELECT
+          l_orderkey,
+          arrayDistinct(modes) as unique_modes
+      FROM ship_modes
+      LIMIT 100;
+  skip_on: [bigquery]
+
+# ============================================================================
+# STRUCT type operations - composite data types
+# ============================================================================
+
+- id: struct_construction
+  category: struct
+  sql: |2
+
+    -- Construct struct/row from columns
+    SELECT
+        c_custkey,
+        STRUCT(c_name, c_address, c_phone) as contact_info,
+        c_acctbal
+    FROM customer
+    WHERE c_nationkey = 1
+    LIMIT 100;
+  variants:
+    clickhouse: |2
+
+      SELECT
+          c_custkey,
+          tuple(c_name, c_address, c_phone) as contact_info,
+          c_acctbal
+      FROM customer
+      WHERE c_nationkey = 1
+      LIMIT 100;
+    duckdb: |2
+
+      SELECT
+          c_custkey,
+          ROW(c_name, c_address, c_phone) as contact_info,
+          c_acctbal
+      FROM customer
+      WHERE c_nationkey = 1
+      LIMIT 100;
+- id: struct_access
+  category: struct
+  sql: |2
+
+    -- Access struct fields
+    WITH customer_info AS (
+        SELECT
+            c_custkey,
+            STRUCT(c_name AS name, c_phone AS phone, c_acctbal AS balance) as info
+        FROM customer
+        WHERE c_nationkey = 1
+    )
+    SELECT
+        c_custkey,
+        info.name,
+        info.balance
+    FROM customer_info
+    WHERE info.balance > 5000
+    LIMIT 100;
+  variants:
+    clickhouse: |2
+
+      WITH customer_info AS (
+          SELECT
+              c_custkey,
+              tuple(c_name, c_phone, c_acctbal) as info
+          FROM customer
+          WHERE c_nationkey = 1
+      )
+      SELECT
+          c_custkey,
+          info.1 as name,
+          info.3 as balance
+      FROM customer_info
+      WHERE info.3 > 5000
+      LIMIT 100;
+- id: array_of_struct
+  category: struct
+  sql: |2
+
+    -- Array of structs - orders with line items summary
+    SELECT
+        o_orderkey,
+        ARRAY_AGG(
+            STRUCT(l_linenumber, l_partkey, l_quantity, l_extendedprice)
+            ORDER BY l_linenumber
+        ) as line_items
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    WHERE o_orderdate = DATE '1995-03-15'
+    GROUP BY o_orderkey
+    LIMIT 50;
+  variants:
+    clickhouse: |2
+
+      SELECT
+          o_orderkey,
+          groupArray(tuple(l_linenumber, l_partkey, l_quantity, l_extendedprice)) as line_items
+      FROM orders o
+      JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+      WHERE o_orderdate = '1995-03-15'
+      GROUP BY o_orderkey
+      LIMIT 50;
+
+# ============================================================================
+# MAP type operations - key-value collections
+# ============================================================================
+
+- id: map_construction
+  category: map
+  sql: |2
+
+    -- Construct map from key-value pairs
+    SELECT
+        ps_suppkey,
+        MAP_FROM_ENTRIES(
+            ARRAY_AGG(STRUCT(CAST(ps_partkey AS VARCHAR), ps_supplycost))
+        ) as part_costs
+    FROM partsupp
+    WHERE ps_suppkey <= 10
+    GROUP BY ps_suppkey;
+  variants:
+    duckdb: |2
+
+      SELECT
+          ps_suppkey,
+          map_from_entries(
+              list(struct_pack(k := CAST(ps_partkey AS VARCHAR), v := ps_supplycost))
+          ) as part_costs
+      FROM partsupp
+      WHERE ps_suppkey <= 10
+      GROUP BY ps_suppkey;
+    clickhouse: |2
+
+      SELECT
+          ps_suppkey,
+          CAST(
+              (groupArray(CAST(ps_partkey AS String)), groupArray(ps_supplycost)),
+              'Map(String, Decimal(15,2))'
+          ) as part_costs
+      FROM partsupp
+      WHERE ps_suppkey <= 10
+      GROUP BY ps_suppkey;
+  skip_on: [bigquery]
+- id: map_access
+  category: map
+  sql: |2
+
+    -- Access map values by key
+    WITH supplier_costs AS (
+        SELECT
+            ps_suppkey,
+            MAP_FROM_ENTRIES(
+                ARRAY_AGG(STRUCT(CAST(ps_partkey AS VARCHAR), ps_supplycost))
+            ) as part_costs
+        FROM partsupp
+        WHERE ps_suppkey <= 10
+        GROUP BY ps_suppkey
+    )
+    SELECT
+        ps_suppkey,
+        part_costs['1'] as cost_for_part_1,
+        part_costs['5'] as cost_for_part_5
+    FROM supplier_costs
+    LIMIT 10;
+  skip_on: [bigquery]
+- id: map_keys_values
+  category: map
+  sql: |2
+
+    -- Extract map keys and values
+    WITH supplier_costs AS (
+        SELECT
+            ps_suppkey,
+            MAP_FROM_ENTRIES(
+                ARRAY_AGG(STRUCT(CAST(ps_partkey AS VARCHAR), ps_supplycost))
+            ) as part_costs
+        FROM partsupp
+        WHERE ps_suppkey <= 5
+        GROUP BY ps_suppkey
+    )
+    SELECT
+        ps_suppkey,
+        MAP_KEYS(part_costs) as part_ids,
+        MAP_VALUES(part_costs) as costs
+    FROM supplier_costs;
+  variants:
+    clickhouse: |2
+
+      WITH supplier_costs AS (
+          SELECT
+              ps_suppkey,
+              CAST(
+                  (groupArray(CAST(ps_partkey AS String)), groupArray(ps_supplycost)),
+                  'Map(String, Decimal(15,2))'
+              ) as part_costs
+          FROM partsupp
+          WHERE ps_suppkey <= 5
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          mapKeys(part_costs) as part_ids,
+          mapValues(part_costs) as costs
+      FROM supplier_costs;
+  skip_on: [bigquery]
+
+# ============================================================================
+# Higher-order functions - lambda operations on arrays
+# ============================================================================
+
+- id: list_transform
+  category: lambda
+  sql: |2
+
+    -- Transform each array element
+    WITH part_prices AS (
+        SELECT
+            p_brand,
+            ARRAY_AGG(p_retailprice) as prices
+        FROM part
+        GROUP BY p_brand
+    )
+    SELECT
+        p_brand,
+        TRANSFORM(prices, x -> x * 1.1) as prices_with_tax
+    FROM part_prices
+    LIMIT 50;
+  variants:
+    duckdb: |2
+
+      WITH part_prices AS (
+          SELECT
+              p_brand,
+              ARRAY_AGG(p_retailprice) as prices
+          FROM part
+          GROUP BY p_brand
+      )
+      SELECT
+          p_brand,
+          list_transform(prices, x -> x * 1.1) as prices_with_tax
+      FROM part_prices
+      LIMIT 50;
+    clickhouse: |2
+
+      WITH part_prices AS (
+          SELECT
+              p_brand,
+              groupArray(p_retailprice) as prices
+          FROM part
+          GROUP BY p_brand
+      )
+      SELECT
+          p_brand,
+          arrayMap(x -> x * 1.1, prices) as prices_with_tax
+      FROM part_prices
+      LIMIT 50;
+  skip_on: [bigquery]
+- id: list_filter
+  category: lambda
+  sql: |2
+
+    -- Filter array elements by condition
+    WITH order_prices AS (
+        SELECT
+            o_custkey,
+            ARRAY_AGG(o_totalprice) as prices
+        FROM orders
+        GROUP BY o_custkey
+    )
+    SELECT
+        o_custkey,
+        FILTER(prices, x -> x > 100000) as large_orders
+    FROM order_prices
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      WITH order_prices AS (
+          SELECT
+              o_custkey,
+              ARRAY_AGG(o_totalprice) as prices
+          FROM orders
+          GROUP BY o_custkey
+      )
+      SELECT
+          o_custkey,
+          list_filter(prices, x -> x > 100000) as large_orders
+      FROM order_prices
+      LIMIT 100;
+    clickhouse: |2
+
+      WITH order_prices AS (
+          SELECT
+              o_custkey,
+              groupArray(o_totalprice) as prices
+          FROM orders
+          GROUP BY o_custkey
+      )
+      SELECT
+          o_custkey,
+          arrayFilter(x -> x > 100000, prices) as large_orders
+      FROM order_prices
+      LIMIT 100;
+  skip_on: [bigquery]
+- id: list_reduce
+  category: lambda
+  sql: |2
+
+    -- Reduce array to single value
+    WITH quantities AS (
+        SELECT
+            l_orderkey,
+            ARRAY_AGG(l_quantity) as qtys
+        FROM lineitem
+        GROUP BY l_orderkey
+    )
+    SELECT
+        l_orderkey,
+        REDUCE(qtys, 0, (acc, x) -> acc + x) as total_qty
+    FROM quantities
+    LIMIT 100;
+  variants:
+    duckdb: |2
+
+      WITH quantities AS (
+          SELECT
+              l_orderkey,
+              ARRAY_AGG(l_quantity) as qtys
+          FROM lineitem
+          GROUP BY l_orderkey
+      )
+      SELECT
+          l_orderkey,
+          list_reduce(qtys, (acc, x) -> acc + x) as total_qty
+      FROM quantities
+      LIMIT 100;
+    clickhouse: |2
+
+      WITH quantities AS (
+          SELECT
+              l_orderkey,
+              groupArray(l_quantity) as qtys
+          FROM lineitem
+          GROUP BY l_orderkey
+      )
+      SELECT
+          l_orderkey,
+          arrayReduce('sum', qtys) as total_qty
+      FROM quantities
+      LIMIT 100;
+  skip_on: [bigquery]
+
+# ============================================================================
+# ASOF JOIN - time series fuzzy temporal lookups
+# ============================================================================
+
+- id: asof_join_basic
+  category: timeseries
+  sql: |2
+
+    -- ASOF join: find closest prior order for each lineitem shipment
+    SELECT
+        l.l_orderkey,
+        l.l_shipdate,
+        o.o_orderdate,
+        o.o_totalprice,
+        l.l_shipdate - o.o_orderdate as days_to_ship
+    FROM lineitem l
+    ASOF JOIN orders o
+        ON l.l_orderkey = o.o_orderkey
+        AND l.l_shipdate >= o.o_orderdate
+    WHERE l.l_shipdate >= DATE '1995-01-01'
+      AND l.l_shipdate < DATE '1995-02-01'
+    LIMIT 100;
+  variants:
+    snowflake: |2
+
+      SELECT
+          l.l_orderkey,
+          l.l_shipdate,
+          o.o_orderdate,
+          o.o_totalprice,
+          l.l_shipdate - o.o_orderdate as days_to_ship
+      FROM lineitem l
+      ASOF JOIN orders o
+          MATCH_CONDITION (l.l_shipdate >= o.o_orderdate)
+          ON l.l_orderkey = o.o_orderkey
+      WHERE l.l_shipdate >= DATE '1995-01-01'
+        AND l.l_shipdate < DATE '1995-02-01'
+      LIMIT 100;
+  skip_on: [bigquery, databricks]
+
+# ============================================================================
+# PIVOT/UNPIVOT operations - row-to-column and column-to-row transformations
+# ============================================================================
+
+- id: pivot_basic
+  category: pivot
+  sql: |2
+
+    -- Pivot ship modes into columns
+    SELECT *
+    FROM (
+        SELECT
+            l_returnflag,
+            l_shipmode,
+            l_quantity
+        FROM lineitem
+        WHERE l_shipdate >= DATE '1995-01-01'
+          AND l_shipdate < DATE '1995-04-01'
+    )
+    PIVOT (
+        SUM(l_quantity)
+        FOR l_shipmode IN ('AIR', 'RAIL', 'SHIP', 'TRUCK')
+    );
+  skip_on: [clickhouse]
+- id: unpivot_basic
+  category: pivot
+  sql: |2
+
+    -- Unpivot part dimensions into rows
+    SELECT
+        p_partkey,
+        dimension_name,
+        dimension_value
+    FROM (
+        SELECT
+            p_partkey,
+            CAST(p_size AS DECIMAL(15, 2)) as p_size,
+            p_retailprice
+        FROM part
+        WHERE p_partkey <= 100
+    )
+    UNPIVOT (
+        dimension_value
+        FOR dimension_name IN (p_size, p_retailprice)
+    );
+  skip_on: [clickhouse]

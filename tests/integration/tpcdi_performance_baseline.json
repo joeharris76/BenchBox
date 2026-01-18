@@ -1,0 +1,8 @@
+{
+  "schema_creation_time": 0.00664210319519043,
+  "data_generation_time": 2.042325019836426,
+  "data_files_generated": 16,
+  "etl_pipeline_time": 0.609551191329956,
+  "etl_records_processed": 1,
+  "validation_time": 0.004548072814941406
+}
