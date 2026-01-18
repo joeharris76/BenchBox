@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 from benchbox.utils.cloud_storage import CloudStorageGeneratorMixin, create_path_handler
-
 from benchbox.utils.compression_mixin import CompressionMixin
 from benchbox.utils.datagen_manifest import DataGenerationManifest, resolve_compression_metadata
 

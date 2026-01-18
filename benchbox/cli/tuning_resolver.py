@@ -163,9 +163,9 @@ def resolve_tuning(
     tuning_arg: str,
     platform: str | None,
     benchmark: str | None,
-    config_manager: "ConfigManager",
+    config_manager: ConfigManager,
     console: Console,
-    logger: "Logger | None" = None,
+    logger: Logger | None = None,
     quiet: bool = False,
     non_interactive: bool = False,
 ) -> TuningResolution:
@@ -400,7 +400,7 @@ def display_tuning_list(
 
 def display_tuning_show(
     console: Console,
-    config: "UnifiedTuningConfiguration | None",
+    config: UnifiedTuningConfiguration | None,
     resolution: TuningResolution,
 ) -> None:
     """Display the resolved tuning configuration details.

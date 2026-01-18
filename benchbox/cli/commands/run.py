@@ -13,7 +13,6 @@ from rich.prompt import Confirm
 from rich.text import Text
 
 from benchbox.cli.benchmarks import BenchmarkConfig, BenchmarkManager
-from benchbox.core.config import DatabaseConfig
 from benchbox.cli.cloud_storage import prompt_cloud_output_location
 from benchbox.cli.composite_params import (
     COMPRESSION,
@@ -51,6 +50,7 @@ from benchbox.cli.tuning_resolver import (
     display_tuning_resolution,
     resolve_tuning,
 )
+from benchbox.core.config import DatabaseConfig
 from benchbox.core.platform_registry import PlatformRegistry
 from benchbox.platforms import is_dataframe_platform, list_available_dataframe_platforms
 from benchbox.utils.cloud_storage import is_cloud_path

@@ -7,7 +7,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import sys
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 import click
 import yaml

@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Optional, Union
 
 from benchbox.core.tpch.generator import TPCHDataGenerator
-
 from benchbox.utils.cloud_storage import CloudStorageGeneratorMixin, create_path_handler
 from benchbox.utils.compression_mixin import CompressionMixin
 from benchbox.utils.path_utils import get_benchmark_runs_datagen_path

@@ -306,9 +306,8 @@ class TestToolCallContext:
         collector = get_metrics_collector()
         collector.reset()
 
-        with pytest.raises(ValueError):
-            with ToolCallContext("exception_tool"):
-                raise ValueError("Test error")
+        with pytest.raises(ValueError), ToolCallContext("exception_tool"):
+            raise ValueError("Test error")
 
         stats = collector.get_stats("exception_tool")
         assert stats["errors"] >= 1

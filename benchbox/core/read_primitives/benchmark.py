@@ -25,7 +25,6 @@ from benchbox.core.connection import DatabaseConnection
 from benchbox.core.read_primitives.generator import ReadPrimitivesDataGenerator
 from benchbox.core.read_primitives.queries import ReadPrimitivesQueryManager
 from benchbox.core.read_primitives.schema import TABLES, get_all_create_table_sql
-
 from benchbox.utils.cloud_storage import create_path_handler
 from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
 

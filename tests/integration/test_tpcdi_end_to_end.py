@@ -30,9 +30,9 @@ import concurrent.futures
 import shutil
 import tempfile
 import time
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from collections.abc import Generator
 from typing import Any
 from unittest.mock import patch
 
