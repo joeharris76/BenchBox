@@ -1,0 +1,13 @@
+"""Security module for BenchBox.
+
+Provides credential management, secure storage, and validation
+for cloud platform authentication.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from .credentials import CredentialManager, CredentialStatus
+
+__all__ = ["CredentialManager", "CredentialStatus"]

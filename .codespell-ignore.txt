@@ -1,0 +1,78 @@
+# Project-specific terms to ignore in spell checking
+# Data warehouse and benchmark terminology
+olap
+tpch
+tpcds
+tpcdi
+datas
+clickbench
+benchbox
+duckdb
+databricks
+snowflake
+redshift
+clickhouse
+bigquery
+
+# Technical terms
+parquet
+dbfs
+abfss
+typeof
+param
+params
+isnull
+notnull
+numer
+
+# Common abbreviations
+num
+iff
+cond
+expr
+util
+utils
+prog
+coef
+stdev
+
+# Typos in external dependencies/specs
+Paramer
+
+# TPC benchmark terminology (cannot change - per spec)
+ans
+inactivate
+Inactivate
+CLOS
+ND
+
+# HTTP standard spelling (Referer header is intentionally misspelled per HTTP spec)
+referers
+
+# External dataset column names (cannot change)
+Dorp
+
+# Visualization library terms
+serie
+
+# SQL pattern fragments
+fo
+
+# TUI keyboard shortcut fragments (e.g., [c]ategory, [s]earch)
+ategory
+earch
+
+# Test data fragments (truncated words in generated test data)
+ot
+ges
+agai
+uests
+aroun
+accoun
+platforma
+
+# Valid English variants
+unparseable
+
+# Code identifiers/aliases (intentional naming)
+asceding

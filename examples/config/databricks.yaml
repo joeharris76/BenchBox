@@ -1,0 +1,13 @@
+type: databricks
+connection:
+  server_hostname: "your-workspace.databricks.com"
+  http_path: "/sql/1.0/warehouses/your-warehouse-id"
+  access_token: "${DATABRICKS_TOKEN}"
+  extra_params:
+    catalog: "workspace"
+    schema: "benchbox"
+settings:
+  cluster_size: "Medium"
+  enable_delta_optimization: true
+  delta_auto_optimize: true
+  delta_auto_compact: true

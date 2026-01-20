@@ -1,0 +1,308 @@
+"""Tests for BenchBox MCP error handling module.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from benchbox.mcp.errors import (
+    ERROR_CATEGORIES,
+    ErrorCategory,
+    ErrorCode,
+    MCPError,
+    make_error,
+    make_execution_error,
+    make_not_found_error,
+    make_platform_error,
+    make_validation_error,
+)
+
+
+class TestErrorCode:
+    """Tests for ErrorCode enum."""
+
+    def test_validation_error_codes_exist(self):
+        """Test that validation error codes are defined."""
+        assert ErrorCode.VALIDATION_ERROR.value == "VALIDATION_ERROR"
+        assert ErrorCode.VALIDATION_UNKNOWN_PLATFORM.value == "VALIDATION_UNKNOWN_PLATFORM"
+        assert ErrorCode.VALIDATION_UNKNOWN_BENCHMARK.value == "VALIDATION_UNKNOWN_BENCHMARK"
+        assert ErrorCode.VALIDATION_INVALID_SCALE_FACTOR.value == "VALIDATION_INVALID_SCALE_FACTOR"
+
+    def test_platform_error_codes_exist(self):
+        """Test that platform error codes are defined."""
+        assert ErrorCode.PLATFORM_UNAVAILABLE.value == "PLATFORM_UNAVAILABLE"
+        assert ErrorCode.PLATFORM_DEPENDENCIES_MISSING.value == "PLATFORM_DEPENDENCIES_MISSING"
+        assert ErrorCode.PLATFORM_CREDENTIALS_MISSING.value == "PLATFORM_CREDENTIALS_MISSING"
+
+    def test_benchmark_error_codes_exist(self):
+        """Test that benchmark error codes are defined."""
+        assert ErrorCode.BENCHMARK_EXECUTION_FAILED.value == "BENCHMARK_EXECUTION_FAILED"
+        assert ErrorCode.BENCHMARK_DATA_GENERATION_FAILED.value == "BENCHMARK_DATA_GENERATION_FAILED"
+        assert ErrorCode.BENCHMARK_QUERY_FAILED.value == "BENCHMARK_QUERY_FAILED"
+
+    def test_resource_error_codes_exist(self):
+        """Test that resource error codes are defined."""
+        assert ErrorCode.RESOURCE_NOT_FOUND.value == "RESOURCE_NOT_FOUND"
+        assert ErrorCode.RESOURCE_INVALID_FORMAT.value == "RESOURCE_INVALID_FORMAT"
+
+    def test_internal_error_codes_exist(self):
+        """Test that internal error codes are defined."""
+        assert ErrorCode.INTERNAL_ERROR.value == "INTERNAL_ERROR"
+        assert ErrorCode.INTERNAL_TIMEOUT.value == "INTERNAL_TIMEOUT"
+
+
+class TestErrorCategory:
+    """Tests for ErrorCategory enum."""
+
+    def test_categories_defined(self):
+        """Test that all categories are defined."""
+        assert ErrorCategory.CLIENT.value == "client"
+        assert ErrorCategory.PLATFORM.value == "platform"
+        assert ErrorCategory.EXECUTION.value == "execution"
+        assert ErrorCategory.SERVER.value == "server"
+
+
+class TestErrorCategories:
+    """Tests for error code to category mapping."""
+
+    def test_validation_errors_are_client_category(self):
+        """Test that validation errors map to client category."""
+        assert ERROR_CATEGORIES[ErrorCode.VALIDATION_ERROR] == ErrorCategory.CLIENT
+        assert ERROR_CATEGORIES[ErrorCode.VALIDATION_UNKNOWN_PLATFORM] == ErrorCategory.CLIENT
+        assert ERROR_CATEGORIES[ErrorCode.VALIDATION_UNKNOWN_BENCHMARK] == ErrorCategory.CLIENT
+
+    def test_platform_errors_are_platform_category(self):
+        """Test that platform errors map to platform category."""
+        assert ERROR_CATEGORIES[ErrorCode.PLATFORM_UNAVAILABLE] == ErrorCategory.PLATFORM
+        assert ERROR_CATEGORIES[ErrorCode.PLATFORM_DEPENDENCIES_MISSING] == ErrorCategory.PLATFORM
+
+    def test_benchmark_errors_are_execution_category(self):
+        """Test that benchmark errors map to execution category."""
+        assert ERROR_CATEGORIES[ErrorCode.BENCHMARK_EXECUTION_FAILED] == ErrorCategory.EXECUTION
+        assert ERROR_CATEGORIES[ErrorCode.BENCHMARK_QUERY_FAILED] == ErrorCategory.EXECUTION
+
+    def test_internal_errors_are_server_category(self):
+        """Test that internal errors map to server category."""
+        assert ERROR_CATEGORIES[ErrorCode.INTERNAL_ERROR] == ErrorCategory.SERVER
+        assert ERROR_CATEGORIES[ErrorCode.INTERNAL_TIMEOUT] == ErrorCategory.SERVER
+
+
+class TestMCPError:
+    """Tests for MCPError dataclass."""
+
+    def test_basic_error_creation(self):
+        """Test creating a basic MCPError."""
+        error = MCPError(
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Test error message",
+        )
+        assert error.code == ErrorCode.VALIDATION_ERROR
+        assert error.message == "Test error message"
+        assert error.details == {}
+        assert error.suggestion is None
+        assert error.retry_hint is False
+
+    def test_error_with_all_fields(self):
+        """Test creating MCPError with all fields."""
+        error = MCPError(
+            code=ErrorCode.PLATFORM_CONNECTION_FAILED,
+            message="Connection failed",
+            details={"host": "localhost", "port": 5432},
+            suggestion="Check database is running",
+            retry_hint=True,
+        )
+        assert error.code == ErrorCode.PLATFORM_CONNECTION_FAILED
+        assert error.details == {"host": "localhost", "port": 5432}
+        assert error.suggestion == "Check database is running"
+        assert error.retry_hint is True
+
+    def test_category_property(self):
+        """Test that category property returns correct category."""
+        error = MCPError(code=ErrorCode.VALIDATION_ERROR, message="test")
+        assert error.category == ErrorCategory.CLIENT
+
+        error = MCPError(code=ErrorCode.INTERNAL_ERROR, message="test")
+        assert error.category == ErrorCategory.SERVER
+
+    def test_to_dict_basic(self):
+        """Test converting MCPError to dict."""
+        error = MCPError(
+            code=ErrorCode.VALIDATION_UNKNOWN_PLATFORM,
+            message="Unknown platform: xyz",
+        )
+        result = error.to_dict()
+
+        assert result["error"] is True
+        assert result["error_code"] == "VALIDATION_UNKNOWN_PLATFORM"
+        assert result["error_category"] == "client"
+        assert result["message"] == "Unknown platform: xyz"
+        assert "details" not in result
+        assert "suggestion" not in result
+        assert "retry_hint" not in result
+
+    def test_to_dict_with_all_fields(self):
+        """Test converting MCPError with all fields to dict."""
+        error = MCPError(
+            code=ErrorCode.INTERNAL_TIMEOUT,
+            message="Operation timed out",
+            details={"timeout_seconds": 30},
+            suggestion="Try a smaller scale factor",
+            retry_hint=True,
+        )
+        result = error.to_dict()
+
+        assert result["error"] is True
+        assert result["error_code"] == "INTERNAL_TIMEOUT"
+        assert result["error_category"] == "server"
+        assert result["message"] == "Operation timed out"
+        assert result["details"] == {"timeout_seconds": 30}
+        assert result["suggestion"] == "Try a smaller scale factor"
+        assert result["retry_hint"] is True
+
+
+class TestMakeError:
+    """Tests for make_error helper function."""
+
+    def test_basic_error(self):
+        """Test creating a basic error."""
+        result = make_error(
+            ErrorCode.VALIDATION_ERROR,
+            "Invalid input",
+        )
+        assert result["error"] is True
+        assert result["error_code"] == "VALIDATION_ERROR"
+        assert result["message"] == "Invalid input"
+
+    def test_error_with_details(self):
+        """Test creating error with details."""
+        result = make_error(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            "File not found",
+            details={"file": "test.json"},
+        )
+        assert result["details"] == {"file": "test.json"}
+
+    def test_error_with_suggestion(self):
+        """Test creating error with suggestion."""
+        result = make_error(
+            ErrorCode.PLATFORM_UNAVAILABLE,
+            "DuckDB not available",
+            suggestion="Install with: pip install duckdb",
+        )
+        assert result["suggestion"] == "Install with: pip install duckdb"
+
+    def test_error_with_retry_hint(self):
+        """Test creating error with retry hint."""
+        result = make_error(
+            ErrorCode.INTERNAL_TIMEOUT,
+            "Timeout",
+            retry_hint=True,
+        )
+        assert result["retry_hint"] is True
+
+
+class TestMakeValidationError:
+    """Tests for make_validation_error helper function."""
+
+    def test_basic_validation_error(self):
+        """Test creating a basic validation error."""
+        result = make_validation_error("Invalid scale factor")
+        assert result["error"] is True
+        assert result["error_code"] == "VALIDATION_ERROR"
+        assert result["error_category"] == "client"
+        assert result["message"] == "Invalid scale factor"
+
+    def test_validation_error_with_details(self):
+        """Test validation error with details and suggestion."""
+        result = make_validation_error(
+            "Scale factor out of range",
+            details={"value": -1, "valid_range": "0.001 to 10000"},
+            suggestion="Use a positive scale factor",
+        )
+        assert result["details"]["value"] == -1
+        assert result["suggestion"] == "Use a positive scale factor"
+
+
+class TestMakeNotFoundError:
+    """Tests for make_not_found_error helper function."""
+
+    def test_basic_not_found_error(self):
+        """Test creating a basic not found error."""
+        result = make_not_found_error("benchmark", "xyz")
+        assert result["error"] is True
+        assert result["error_code"] == "RESOURCE_NOT_FOUND"
+        assert result["message"] == "Benchmark 'xyz' not found"
+        assert result["details"]["resource_type"] == "benchmark"
+        assert result["details"]["requested"] == "xyz"
+
+    def test_not_found_error_with_available(self):
+        """Test not found error with available options."""
+        result = make_not_found_error(
+            "platform",
+            "invalid",
+            available=["duckdb", "polars", "sqlite"],
+        )
+        assert result["details"]["available"] == ["duckdb", "polars", "sqlite"]
+        assert result["suggestion"] == "Use list_platforms() to see available options"
+
+
+class TestMakePlatformError:
+    """Tests for make_platform_error helper function."""
+
+    def test_basic_platform_error(self):
+        """Test creating a basic platform error."""
+        result = make_platform_error(
+            ErrorCode.PLATFORM_UNAVAILABLE,
+            "snowflake",
+            "Snowflake dependencies not installed",
+        )
+        assert result["error"] is True
+        assert result["error_code"] == "PLATFORM_UNAVAILABLE"
+        assert result["details"]["platform"] == "snowflake"
+
+    def test_platform_error_with_installation(self):
+        """Test platform error with installation command."""
+        result = make_platform_error(
+            ErrorCode.PLATFORM_DEPENDENCIES_MISSING,
+            "clickhouse",
+            "ClickHouse driver not installed",
+            installation_command="pip install clickhouse-driver",
+        )
+        assert result["suggestion"] == "pip install clickhouse-driver"
+
+
+class TestMakeExecutionError:
+    """Tests for make_execution_error helper function."""
+
+    def test_basic_execution_error(self):
+        """Test creating a basic execution error."""
+        result = make_execution_error("Benchmark failed")
+        assert result["error"] is True
+        assert result["error_code"] == "BENCHMARK_EXECUTION_FAILED"
+        assert result["message"] == "Benchmark failed"
+
+    def test_execution_error_with_execution_id(self):
+        """Test execution error with execution ID."""
+        result = make_execution_error(
+            "Query timeout",
+            execution_id="mcp_abc123",
+        )
+        assert result["details"]["execution_id"] == "mcp_abc123"
+
+    def test_execution_error_with_exception(self):
+        """Test execution error with exception details."""
+        exc = ValueError("Invalid configuration")
+        result = make_execution_error(
+            "Configuration error",
+            exception=exc,
+        )
+        assert result["details"]["exception_type"] == "ValueError"
+        assert result["details"]["exception_message"] == "Invalid configuration"
+
+    def test_execution_error_with_retry_hint(self):
+        """Test execution error with retry hint."""
+        result = make_execution_error(
+            "Transient failure",
+            retry_hint=True,
+        )
+        assert result["retry_hint"] is True

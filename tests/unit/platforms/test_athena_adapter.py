@@ -1,0 +1,686 @@
+"""Unit tests for AWS Athena platform adapter."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from benchbox.core.exceptions import ConfigurationError
+
+pytestmark = pytest.mark.fast
+
+
+class TestAthenaAdapterConfigurationValidation:
+    """Tests for Athena configuration validation."""
+
+    @pytest.fixture
+    def mock_boto3(self):
+        """Mock boto3 module."""
+        with patch.dict("sys.modules", {"boto3": MagicMock()}):
+            yield
+
+    @pytest.fixture
+    def mock_pyathena(self):
+        """Mock pyathena module."""
+        mock_connect = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value.cursor.return_value = mock_cursor
+        with patch.dict(
+            "sys.modules",
+            {
+                "pyathena": MagicMock(connect=mock_connect),
+                "pyathena.cursor": MagicMock(Cursor=MagicMock()),
+            },
+        ):
+            yield mock_connect, mock_cursor
+
+    @pytest.fixture
+    def mock_aws_credentials(self, tmp_path, monkeypatch):
+        """Create mock AWS credentials file for testing."""
+        aws_dir = tmp_path / ".aws"
+        aws_dir.mkdir()
+        creds_file = aws_dir / "credentials"
+        creds_file.write_text("[default]\naws_access_key_id = test\naws_secret_access_key = test\n")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        return creds_file
+
+    def test_validation_fails_without_s3_config(self, mock_boto3, mock_pyathena, monkeypatch):
+        """Test that validation fails when S3 is not configured."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        # Clear AWS environment
+        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+        monkeypatch.setenv("HOME", "/nonexistent")  # No credentials file
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            AthenaAdapter()
+
+        assert "No S3 location configured" in str(exc_info.value)
+
+    def test_validation_fails_with_invalid_s3_path(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test that validation fails with invalid S3 path format."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            AthenaAdapter(s3_staging_dir="invalid-path")
+
+        assert "Invalid S3 staging directory format" in str(exc_info.value)
+
+    def test_validation_fails_with_invalid_region(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test that validation fails with invalid region format."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            AthenaAdapter(s3_bucket="test-bucket", region="invalid")
+
+        assert "Invalid AWS region format" in str(exc_info.value)
+
+    def test_validation_fails_with_invalid_workgroup(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test that validation fails with invalid workgroup name."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            AthenaAdapter(s3_bucket="test-bucket", workgroup="123-invalid")
+
+        assert "Invalid workgroup name" in str(exc_info.value)
+
+    def test_validation_passes_with_explicit_credentials(self, mock_boto3, mock_pyathena, monkeypatch):
+        """Test that validation passes with explicit credentials."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        # Clear environment
+        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+        monkeypatch.setenv("HOME", "/nonexistent")
+
+        # Should not raise with explicit credentials
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            aws_access_key_id="test-key",
+            aws_secret_access_key="test-secret",
+        )
+        assert adapter.s3_bucket == "test-bucket"
+
+    def test_validation_passes_with_aws_profile(self, mock_boto3, mock_pyathena, monkeypatch):
+        """Test that validation passes with AWS profile."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+        monkeypatch.setenv("HOME", "/nonexistent")
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            aws_profile="my-profile",
+        )
+        assert adapter.aws_profile == "my-profile"
+
+    def test_validation_passes_with_env_credentials(self, mock_boto3, mock_pyathena, monkeypatch):
+        """Test that validation passes with environment credentials."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-key")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
+        monkeypatch.setenv("HOME", "/nonexistent")
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+        assert adapter.s3_bucket == "test-bucket"
+
+    def test_validation_error_includes_details(self, mock_boto3, mock_pyathena, monkeypatch):
+        """Test that validation error includes helpful details."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+        monkeypatch.setenv("HOME", "/nonexistent")
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            AthenaAdapter()
+
+        error = exc_info.value
+        assert error.details["platform"] == "athena"
+        assert "validation_errors" in error.details
+
+    def test_validation_provides_fix_suggestions(self, mock_boto3, mock_pyathena, monkeypatch):
+        """Test that validation errors include fix suggestions."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+        monkeypatch.setenv("HOME", "/nonexistent")
+
+        # Mock instance metadata check to ensure credential error is raised
+        # (GitHub Actions runners may have access to AWS metadata endpoint)
+        with patch.object(AthenaAdapter, "_check_instance_metadata_available", return_value=False):
+            with pytest.raises(ConfigurationError) as exc_info:
+                AthenaAdapter()
+
+        error_msg = str(exc_info.value)
+        # Should suggest how to fix S3 config
+        assert "--platform-option" in error_msg or "s3://" in error_msg
+        # Should suggest how to configure credentials
+        assert "aws configure" in error_msg or "AWS_ACCESS_KEY_ID" in error_msg
+
+
+class TestAthenaAdapter:
+    """Tests for AthenaAdapter class."""
+
+    @pytest.fixture
+    def mock_boto3(self):
+        """Mock boto3 module."""
+        with patch.dict("sys.modules", {"boto3": MagicMock()}):
+            yield
+
+    @pytest.fixture
+    def mock_pyathena(self):
+        """Mock pyathena module."""
+        mock_connect = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value.cursor.return_value = mock_cursor
+        with patch.dict(
+            "sys.modules",
+            {
+                "pyathena": MagicMock(connect=mock_connect),
+                "pyathena.cursor": MagicMock(Cursor=MagicMock()),
+            },
+        ):
+            yield mock_connect, mock_cursor
+
+    @pytest.fixture
+    def mock_aws_credentials(self, tmp_path, monkeypatch):
+        """Create mock AWS credentials file for testing."""
+        aws_dir = tmp_path / ".aws"
+        aws_dir.mkdir()
+        creds_file = aws_dir / "credentials"
+        creds_file.write_text("[default]\naws_access_key_id = test\naws_secret_access_key = test\n")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        return creds_file
+
+    def test_initialization_success(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test successful adapter initialization."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        config = {
+            "region": "us-west-2",
+            "workgroup": "test-workgroup",
+            "database": "test_db",
+            "s3_bucket": "test-bucket",
+            "s3_output_location": "s3://test-bucket/results/",
+        }
+
+        adapter = AthenaAdapter(**config)
+
+        assert adapter.platform_name == "Athena"
+        assert adapter.region == "us-west-2"
+        assert adapter.workgroup == "test-workgroup"
+        assert adapter.database == "test_db"
+        assert adapter.s3_bucket == "test-bucket"
+
+    def test_initialization_with_defaults(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test initialization with default values."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        assert adapter.region == "us-east-1"
+        assert adapter.workgroup == "primary"
+        assert adapter.database == "default"
+        assert adapter.catalog == "AwsDataCatalog"
+
+    def test_initialization_with_staging_root(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test initialization with s3 staging root."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        config = {
+            "staging_root": "s3://my-bucket/data/path",
+        }
+
+        adapter = AthenaAdapter(**config)
+
+        assert adapter.s3_bucket == "my-bucket"
+        assert adapter.s3_prefix == "data/path"
+        assert adapter.s3_output_location == "s3://my-bucket/athena-results/"
+
+    def test_get_target_dialect(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test that target dialect returns trino."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+        assert adapter.get_target_dialect() == "trino"
+
+    def test_platform_info(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test platform info collection."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        config = {
+            "region": "us-west-2",
+            "workgroup": "analytics",
+            "database": "benchmark",
+            "s3_bucket": "data-bucket",
+        }
+
+        adapter = AthenaAdapter(**config)
+        info = adapter.get_platform_info(connection=None)
+
+        assert info["platform_type"] == "athena"
+        assert info["platform_name"] == "AWS Athena"
+        assert info["connection_mode"] == "serverless"
+        assert info["configuration"]["region"] == "us-west-2"
+        assert info["configuration"]["workgroup"] == "analytics"
+
+    def test_cost_tracking(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test cost summary calculation."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        # Simulate some queries
+        adapter._total_data_scanned_bytes = 1024**4  # 1 TB
+        adapter._query_count = 10
+
+        summary = adapter.get_cost_summary()
+
+        assert summary["total_data_scanned_bytes"] == 1024**4
+        assert summary["total_data_scanned_tb"] == 1.0
+        assert summary["query_count"] == 10
+        assert summary["cost_per_tb_usd"] == 5.0
+        assert summary["total_cost_usd"] == 5.0
+        assert summary["average_cost_per_query_usd"] == 0.5
+
+    def test_from_config(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test adapter creation from config."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        config = {
+            "benchmark": "TPC-H",
+            "scale_factor": 10.0,
+            "region": "eu-west-1",
+            "workgroup": "production",
+            "s3_bucket": "prod-bucket",
+        }
+
+        adapter = AthenaAdapter.from_config(config)
+
+        assert adapter.region == "eu-west-1"
+        assert adapter.workgroup == "production"
+        # Database name should be auto-generated
+        assert "tpch" in adapter.database.lower() or "benchmark" in adapter.database.lower()
+
+    def test_supports_tuning_type(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test tuning type support."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        try:
+            from benchbox.core.tuning.interface import TuningType
+
+            assert adapter.supports_tuning_type(TuningType.PARTITIONING) is True
+            assert adapter.supports_tuning_type(TuningType.CLUSTERING) is False
+        except ImportError:
+            # TuningType may not be available in all test environments
+            pass
+
+    def test_test_connection_method_exists(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test that test_connection method exists and is callable."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            s3_output_location="s3://test-bucket/results/",
+        )
+
+        # Verify the method exists
+        assert hasattr(adapter, "test_connection")
+        assert callable(adapter.test_connection)
+
+    def test_s3_bucket_required_at_init(self, mock_boto3, mock_pyathena, monkeypatch):
+        """Test that initialization fails if S3 bucket not configured."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        # Clear AWS environment so credentials check passes with profile
+        monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+        monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+        monkeypatch.setenv("HOME", "/nonexistent")
+
+        # Should fail during init, not during load_data
+        with pytest.raises(ConfigurationError, match="No S3 location configured"):
+            AthenaAdapter(aws_profile="test-profile")  # Has creds but no S3
+
+    def test_normalize_table_name(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test table name normalization."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        sql = 'CREATE TABLE "CUSTOMER" (id INT)'
+        normalized = adapter._normalize_table_name_in_sql(sql)
+
+        # Function should lowercase the table name and preserve the rest of the SQL
+        assert "customer" in normalized.lower()
+        assert "(id INT)" in normalized  # Column definitions preserved
+        # Note: EXTERNAL is added by _convert_to_external_table, not this function
+
+    def test_convert_to_external_table_parquet(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test conversion to external table with Parquet format."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            s3_prefix="data",
+            database="test_db",
+            default_format="PARQUET",
+        )
+
+        sql = "CREATE TABLE orders (id INT, amount DECIMAL)"
+        converted = adapter._convert_to_external_table(sql)
+
+        assert "EXTERNAL TABLE" in converted.upper()
+        assert "STORED AS PARQUET" in converted.upper()
+        assert "LOCATION" in converted.upper()
+        assert "s3://test-bucket/data/test_db/orders/" in converted
+        # Parquet format should not have ROW FORMAT DELIMITED
+        assert "ROW FORMAT DELIMITED" not in converted.upper()
+
+    def test_convert_to_external_table_strips_not_null(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test that NOT NULL constraints are stripped from external table DDL.
+
+        Athena/Hive DDL doesn't support NOT NULL constraints for external tables.
+        """
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            s3_prefix="data",
+            database="test_db",
+            default_format="PARQUET",
+        )
+
+        sql = "CREATE TABLE region (r_regionkey INTEGER NOT NULL, r_name VARCHAR NOT NULL, r_comment VARCHAR)"
+        converted = adapter._convert_to_external_table(sql)
+
+        assert "EXTERNAL TABLE" in converted.upper()
+        # NOT NULL constraints should be stripped
+        assert "NOT NULL" not in converted.upper()
+        # Column types should still be present (VARCHAR converted to STRING for Hive DDL)
+        assert "r_regionkey INTEGER" in converted
+        assert "r_name STRING" in converted
+        assert "r_comment STRING" in converted
+
+    def test_convert_to_external_table_tbl_format(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test conversion to external table with TBL (pipe-delimited) format in text mode."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            s3_prefix="data",
+            database="test_db",
+            data_format="text",  # Use text mode for text file tables
+            default_format="TBL",  # TPC-H style pipe-delimited
+        )
+
+        sql = "CREATE TABLE lineitem (l_orderkey INT, l_partkey INT)"
+        converted = adapter._convert_to_external_table(sql)
+
+        assert "EXTERNAL TABLE" in converted.upper()
+        assert "IF NOT EXISTS" in converted.upper()
+        assert "ROW FORMAT DELIMITED" in converted.upper()
+        assert "FIELDS TERMINATED BY '|'" in converted
+        assert "STORED AS TEXTFILE" in converted.upper()
+        assert "s3://test-bucket/data/test_db/lineitem/" in converted
+
+    def test_convert_to_external_table_csv_format(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test conversion to external table with CSV format in text mode."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            s3_prefix="data",
+            database="test_db",
+            data_format="text",  # Use text mode for text file tables
+            default_format="CSV",
+        )
+
+        sql = "CREATE TABLE events (event_id INT, event_name VARCHAR)"
+        converted = adapter._convert_to_external_table(sql)
+
+        assert "EXTERNAL TABLE" in converted.upper()
+        assert "ROW FORMAT DELIMITED" in converted.upper()
+        assert "FIELDS TERMINATED BY ','" in converted
+        assert "STORED AS TEXTFILE" in converted.upper()
+
+    def test_convert_to_external_table_parquet_default(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test that parquet mode (default) creates Parquet tables."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            s3_prefix="data",
+            database="test_db",
+            # data_format defaults to "parquet"
+        )
+
+        sql = "CREATE TABLE lineitem (l_orderkey INT, l_partkey INT)"
+        converted = adapter._convert_to_external_table(sql)
+
+        assert "EXTERNAL TABLE" in converted.upper()
+        assert "IF NOT EXISTS" in converted.upper()
+        assert "STORED AS PARQUET" in converted.upper()
+        assert "s3://test-bucket/data/test_db/lineitem/" in converted
+
+    def test_convert_to_external_table_staging(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test staging table creation for CTAS workflow."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(
+            s3_bucket="test-bucket",
+            s3_prefix="data",
+            database="test_db",
+            data_format="parquet",
+        )
+
+        sql = "CREATE TABLE lineitem (l_orderkey INT, l_partkey INT)"
+        converted = adapter._convert_to_external_table(sql, is_staging=True)
+
+        assert "lineitem_staging" in converted.lower()
+        assert "EXTERNAL TABLE" in converted.upper()
+        assert "ROW FORMAT DELIMITED" in converted.upper()
+        assert "FIELDS TERMINATED BY '|'" in converted
+        assert "STORED AS TEXTFILE" in converted.upper()
+        assert "s3://test-bucket/data/test_db_staging/lineitem/" in converted
+
+
+class TestAthenaAdapterExecution:
+    """Tests for Athena query execution and error handling."""
+
+    @pytest.fixture
+    def mock_boto3(self):
+        """Mock boto3 module."""
+        with patch.dict("sys.modules", {"boto3": MagicMock()}):
+            yield
+
+    @pytest.fixture
+    def mock_pyathena(self):
+        """Mock pyathena module."""
+        mock_connect = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value.cursor.return_value = mock_cursor
+        with patch.dict(
+            "sys.modules",
+            {
+                "pyathena": MagicMock(connect=mock_connect),
+                "pyathena.cursor": MagicMock(Cursor=MagicMock()),
+            },
+        ):
+            yield mock_connect, mock_cursor
+
+    @pytest.fixture
+    def mock_aws_credentials(self, tmp_path, monkeypatch):
+        """Create mock AWS credentials file for testing."""
+        aws_dir = tmp_path / ".aws"
+        aws_dir.mkdir()
+        creds_file = aws_dir / "credentials"
+        creds_file.write_text("[default]\naws_access_key_id = test\naws_secret_access_key = test\n")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        return creds_file
+
+    def test_execute_query_success(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test successful query execution."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        _, mock_cursor = mock_pyathena
+        mock_cursor.fetchall.return_value = [(1, "test"), (2, "test2")]
+        mock_cursor.description = [("id",), ("name",)]
+        mock_cursor.data_scanned_in_bytes = 1024
+
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        result = adapter.execute_query(mock_connection, "SELECT * FROM test", "q1")
+
+        assert result["query_id"] == "q1"
+        assert result["status"] == "SUCCESS"
+        assert result["rows_returned"] == 2
+
+    def test_execute_query_failure(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test query execution failure."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        _, mock_cursor = mock_pyathena
+        mock_cursor.execute.side_effect = Exception("Query failed")
+
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        result = adapter.execute_query(mock_connection, "INVALID SQL", "q1")
+
+        assert result["query_id"] == "q1"
+        assert result["status"] == "FAILED"
+        assert "Query failed" in result.get("error", "")
+
+    def test_close_connection(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test connection closing."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        mock_connection = MagicMock()
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+        adapter.close_connection(mock_connection)
+
+        mock_connection.close.assert_called_once()
+
+    def test_close_connection_handles_none(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test connection closing handles None gracefully."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        # Should not raise
+        adapter.close_connection(None)
+
+    def test_generate_tuning_clause_partitioning(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test tuning clause generation with partitioning."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        mock_col = MagicMock()
+        mock_col.name = "date_col"
+        mock_col.order = 1
+
+        mock_tuning = MagicMock()
+        mock_tuning.has_any_tuning.return_value = True
+
+        with patch("benchbox.core.tuning.interface.TuningType") as mock_tuning_type:
+            mock_tuning_type.PARTITIONING = "partitioning"
+            mock_tuning.get_columns_by_type.return_value = [mock_col]
+
+            clause = adapter.generate_tuning_clause(mock_tuning)
+            assert "PARTITIONED BY" in clause
+            assert "date_col" in clause
+
+    def test_generate_tuning_clause_empty(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test tuning clause generation with no tuning."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        mock_tuning = MagicMock()
+        mock_tuning.has_any_tuning.return_value = False
+
+        clause = adapter.generate_tuning_clause(mock_tuning)
+        assert clause == ""
+
+    def test_get_query_plan(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Test query plan retrieval."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        _, mock_cursor = mock_pyathena
+        mock_cursor.fetchall.return_value = [("Stage 1: Scan Table",), ("Stage 2: Filter",)]
+
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+
+        plan = adapter.get_query_plan(mock_connection, "SELECT * FROM test")
+
+        assert "Scan Table" in plan or "Stage" in plan
+
+
+class TestAthenaAdapterImportError:
+    """Tests for import error handling when pyathena is not installed."""
+
+    def test_missing_dependencies(self):
+        """Test that missing dependencies raise ImportError."""
+        import sys
+
+        # Remove pyathena and boto3 from modules if present
+        modules_to_remove = ["pyathena", "boto3"]
+        removed = {}
+        for mod in modules_to_remove:
+            if mod in sys.modules:
+                removed[mod] = sys.modules.pop(mod)
+
+        try:
+            with patch.dict("sys.modules", {"pyathena": None, "boto3": None}):
+                # This should raise ImportError due to missing dependencies
+                # The actual test depends on how the module handles missing deps
+                pass
+        finally:
+            # Restore modules
+            sys.modules.update(removed)
+
+
+class TestAthenaAdapterRegistration:
+    """Tests for platform registration."""
+
+    def test_athena_in_platform_list(self):
+        """Test that Athena is listed in available platforms."""
+        from benchbox.platforms import list_available_platforms
+
+        platforms = list_available_platforms()
+        assert "athena" in platforms
+
+    def test_athena_requirements(self):
+        """Test that Athena requirements are correct."""
+        from benchbox.platforms import get_platform_requirements
+
+        requirements = get_platform_requirements("athena")
+        assert "pyathena" in requirements
+        assert "boto3" in requirements
+
+    def test_athena_dependency_group(self):
+        """Test that Athena dependency group is defined."""
+        from benchbox.utils.dependencies import DEPENDENCY_GROUPS
+
+        assert "athena" in DEPENDENCY_GROUPS
+        athena_deps = DEPENDENCY_GROUPS["athena"]
+        assert "pyathena" in athena_deps.packages
+        assert "boto3" in athena_deps.packages

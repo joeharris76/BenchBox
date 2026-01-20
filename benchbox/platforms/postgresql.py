@@ -1,0 +1,976 @@
+"""PostgreSQL platform adapter for BenchBox benchmarking.
+
+Provides PostgreSQL-specific functionality including:
+- COPY command for efficient bulk data loading
+- EXPLAIN/EXPLAIN ANALYZE for query plan capture
+- Support for TimescaleDB extensions (optional)
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from __future__ import annotations
+
+import io
+import re
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from benchbox.core.tuning.interface import (
+        ForeignKeyConfiguration,
+        PlatformOptimizationConfiguration,
+        PrimaryKeyConfiguration,
+        TableTuning,
+        UnifiedTuningConfiguration,
+    )
+
+from ..utils.dependencies import (
+    check_platform_dependencies,
+    get_dependency_error_message,
+)
+from .base import PlatformAdapter
+
+# PostgreSQL dialect for SQLGlot
+POSTGRES_DIALECT = "postgres"
+
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
+
+
+class PostgreSQLAdapter(PlatformAdapter):
+    """PostgreSQL platform adapter with COPY-based data loading.
+
+    Supports PostgreSQL 12+ and optional TimescaleDB extensions.
+    Uses psycopg2 for database connectivity with efficient COPY loading.
+    """
+
+    @property
+    def platform_name(self) -> str:
+        return "PostgreSQL"
+
+    def get_target_dialect(self) -> str:
+        """Return the target SQL dialect for PostgreSQL."""
+        return POSTGRES_DIALECT
+
+    @staticmethod
+    def add_cli_arguments(parser) -> None:
+        """Add PostgreSQL-specific CLI arguments."""
+        if not hasattr(parser, "add_argument"):
+            return
+        try:
+            parser.add_argument(
+                "--postgres-host",
+                dest="host",
+                default="localhost",
+                help="PostgreSQL server hostname",
+            )
+            parser.add_argument(
+                "--postgres-port",
+                dest="port",
+                type=int,
+                default=5432,
+                help="PostgreSQL server port",
+            )
+            parser.add_argument(
+                "--postgres-database",
+                dest="database",
+                help="PostgreSQL database name (auto-generated if not specified)",
+            )
+            parser.add_argument(
+                "--postgres-username",
+                dest="username",
+                default="postgres",
+                help="PostgreSQL username",
+            )
+            parser.add_argument(
+                "--postgres-password",
+                dest="password",
+                help="PostgreSQL password",
+            )
+            parser.add_argument(
+                "--postgres-schema",
+                dest="schema",
+                default="public",
+                help="PostgreSQL schema name",
+            )
+            parser.add_argument(
+                "--postgres-work-mem",
+                dest="work_mem",
+                default="256MB",
+                help="PostgreSQL work_mem setting for queries",
+            )
+            parser.add_argument(
+                "--postgres-maintenance-work-mem",
+                dest="maintenance_work_mem",
+                default="512MB",
+                help="PostgreSQL maintenance_work_mem for VACUUM/CREATE INDEX",
+            )
+            parser.add_argument(
+                "--postgres-enable-timescale",
+                dest="enable_timescale",
+                action="store_true",
+                help="Enable TimescaleDB extensions if available",
+            )
+        except Exception:
+            pass
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> PostgreSQLAdapter:
+        """Create PostgreSQL adapter from unified configuration."""
+        adapter_config = {}
+
+        # Connection parameters
+        adapter_config["host"] = config.get("host", "localhost")
+        adapter_config["port"] = config.get("port", 5432)
+        adapter_config["username"] = config.get("username", "postgres")
+        adapter_config["password"] = config.get("password")
+        adapter_config["schema"] = config.get("schema", "public")
+        adapter_config["sslmode"] = config.get("sslmode", "prefer")
+
+        # Database name - use provided or generate from benchmark config
+        if config.get("database"):
+            adapter_config["database"] = config["database"]
+        elif config.get("benchmark") and config.get("scale_factor") is not None:
+            from benchbox.utils.scale_factor import format_benchmark_name
+
+            benchmark_name = format_benchmark_name(config["benchmark"], config["scale_factor"])
+            adapter_config["database"] = f"benchbox_{benchmark_name}".lower().replace("-", "_")
+        else:
+            adapter_config["database"] = "benchbox"
+
+        # Admin database for CREATE/DROP DATABASE operations
+        adapter_config["admin_database"] = config.get("admin_database", "postgres")
+
+        # Performance settings
+        adapter_config["work_mem"] = config.get("work_mem", "256MB")
+        adapter_config["maintenance_work_mem"] = config.get("maintenance_work_mem", "512MB")
+        adapter_config["effective_cache_size"] = config.get("effective_cache_size", "1GB")
+        adapter_config["max_parallel_workers_per_gather"] = config.get("max_parallel_workers_per_gather", 2)
+
+        # Connection pool settings
+        adapter_config["connect_timeout"] = config.get("connect_timeout", 10)
+        adapter_config["statement_timeout"] = config.get("statement_timeout", 0)  # 0 = no timeout
+
+        # TimescaleDB support
+        adapter_config["enable_timescale"] = config.get("enable_timescale", False)
+
+        # Force recreate
+        adapter_config["force_recreate"] = config.get("force", False)
+
+        # Pass through other config
+        for key in ["tuning_config", "verbose_enabled", "very_verbose"]:
+            if key in config:
+                adapter_config[key] = config[key]
+
+        return cls(**adapter_config)
+
+    def __init__(self, **config):
+        super().__init__(**config)
+
+        # Check dependencies
+        if psycopg2 is None:
+            available, missing = check_platform_dependencies("postgresql")
+            if not available:
+                error_msg = get_dependency_error_message("postgresql", missing)
+                raise ImportError(error_msg)
+
+        self._dialect = POSTGRES_DIALECT
+
+        # Connection configuration
+        self.host = config.get("host", "localhost")
+        self.port = config.get("port", 5432)
+        self.database = config.get("database", "benchbox")
+        self.username = config.get("username", "postgres")
+        self.password = config.get("password")
+        self.schema = config.get("schema", "public")
+        self.sslmode = config.get("sslmode", "prefer")
+
+        # Admin database for metadata operations
+        self.admin_database = config.get("admin_database", "postgres")
+
+        # Connection settings
+        self.connect_timeout = config.get("connect_timeout", 10)
+        self.statement_timeout = config.get("statement_timeout", 0)
+
+        # Performance settings
+        self.work_mem = config.get("work_mem", "256MB")
+        self.maintenance_work_mem = config.get("maintenance_work_mem", "512MB")
+        self.effective_cache_size = config.get("effective_cache_size", "1GB")
+        self.max_parallel_workers_per_gather = config.get("max_parallel_workers_per_gather", 2)
+
+        # TimescaleDB support
+        self.enable_timescale = config.get("enable_timescale", False)
+
+    def _get_connection_params(self, database: str | None = None) -> dict[str, Any]:
+        """Build psycopg2 connection parameters."""
+        params = {
+            "host": self.host,
+            "port": self.port,
+            "dbname": database or self.database,
+            "user": self.username,
+            "connect_timeout": self.connect_timeout,
+            "options": f"-c statement_timeout={self.statement_timeout}" if self.statement_timeout else None,
+        }
+
+        if self.password:
+            params["password"] = self.password
+
+        if self.sslmode:
+            params["sslmode"] = self.sslmode
+
+        # Remove None values
+        return {k: v for k, v in params.items() if v is not None}
+
+    def _validate_identifier(self, identifier: str) -> bool:
+        """Validate SQL identifier to prevent injection."""
+        if not identifier or not isinstance(identifier, str):
+            return False
+        if len(identifier) > 63:  # PostgreSQL identifier limit
+            return False
+        # Allow alphanumeric, underscore, and must start with letter/underscore
+        pattern = r"^[a-zA-Z_][a-zA-Z0-9_]*$"
+        return bool(re.match(pattern, identifier))
+
+    def check_server_database_exists(
+        self,
+        schema: str | None = None,
+        catalog: str | None = None,
+        database: str | None = None,
+    ) -> bool:
+        """Check if a database exists on the PostgreSQL server."""
+        db_name = database or self.database
+
+        try:
+            # Connect to admin database to check for target database
+            params = self._get_connection_params(database=self.admin_database)
+            conn = psycopg2.connect(**params)
+            conn.autocommit = True
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s",
+                (db_name,),
+            )
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            return result is not None
+
+        except Exception as e:
+            self.logger.debug(f"Failed to check database existence: {e}")
+            return False
+
+    def drop_database(
+        self,
+        schema: str | None = None,
+        catalog: str | None = None,
+        database: str | None = None,
+    ) -> None:
+        """Drop a database from PostgreSQL server."""
+        db_name = database or self.database
+
+        if not self._validate_identifier(db_name):
+            raise ValueError(f"Invalid database identifier: {db_name}")
+
+        try:
+            # Connect to admin database
+            params = self._get_connection_params(database=self.admin_database)
+            conn = psycopg2.connect(**params)
+            conn.autocommit = True
+            cursor = conn.cursor()
+
+            # Terminate existing connections to the database
+            cursor.execute(
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = %s AND pid <> pg_backend_pid()
+                """,
+                (db_name,),
+            )
+
+            # Drop the database
+            # Safety: db_name validated by _validate_identifier() above (alphanumeric + underscore only)
+            cursor.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
+
+            cursor.close()
+            conn.close()
+            self.logger.info(f"Dropped database: {db_name}")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to drop database {db_name}: {e}")
+            raise
+
+    def _create_database(self) -> None:
+        """Create the target database if it doesn't exist."""
+        if not self._validate_identifier(self.database):
+            raise ValueError(f"Invalid database identifier: {self.database}")
+
+        try:
+            params = self._get_connection_params(database=self.admin_database)
+            conn = psycopg2.connect(**params)
+            conn.autocommit = True
+            cursor = conn.cursor()
+
+            # Create database if not exists
+            cursor.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s",
+                (self.database,),
+            )
+            if not cursor.fetchone():
+                # Safety: self.database validated by _validate_identifier() above
+                cursor.execute(f'CREATE DATABASE "{self.database}"')
+                self.logger.info(f"Created database: {self.database}")
+
+            cursor.close()
+            conn.close()
+
+        except Exception as e:
+            self.logger.error(f"Failed to create database: {e}")
+            raise
+
+    def create_connection(self, **connection_config) -> Any:
+        """Create PostgreSQL connection."""
+        self.log_operation_start("PostgreSQL connection")
+
+        # Handle existing database
+        self.handle_existing_database(**connection_config)
+
+        # Create database if needed
+        if not self.check_server_database_exists():
+            self._create_database()
+
+        # Connect to target database
+        params = self._get_connection_params()
+        conn = psycopg2.connect(**params)
+
+        # Apply session settings
+        cursor = conn.cursor()
+        settings_applied = []
+
+        try:
+            cursor.execute(f"SET work_mem = '{self.work_mem}'")
+            settings_applied.append(f"work_mem={self.work_mem}")
+        except Exception as e:
+            self.logger.debug(f"Could not set work_mem: {e}")
+
+        try:
+            cursor.execute(f"SET maintenance_work_mem = '{self.maintenance_work_mem}'")
+            settings_applied.append(f"maintenance_work_mem={self.maintenance_work_mem}")
+        except Exception as e:
+            self.logger.debug(f"Could not set maintenance_work_mem: {e}")
+
+        try:
+            cursor.execute(f"SET effective_cache_size = '{self.effective_cache_size}'")
+            settings_applied.append(f"effective_cache_size={self.effective_cache_size}")
+        except Exception as e:
+            self.logger.debug(f"Could not set effective_cache_size: {e}")
+
+        try:
+            cursor.execute(f"SET max_parallel_workers_per_gather = {self.max_parallel_workers_per_gather}")
+            settings_applied.append(f"max_parallel_workers_per_gather={self.max_parallel_workers_per_gather}")
+        except Exception as e:
+            self.logger.debug(f"Could not set max_parallel_workers_per_gather: {e}")
+
+        # Create schema if needed
+        # Safety: self.schema validated by _validate_identifier() before use in f-string
+        if self.schema != "public" and self._validate_identifier(self.schema):
+            cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
+            cursor.execute(f'SET search_path TO "{self.schema}", public')
+            settings_applied.append(f"schema={self.schema}")
+
+        conn.commit()
+        cursor.close()
+
+        # Verify connection
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        cursor.close()
+
+        self.log_operation_complete("PostgreSQL connection", details=f"Applied: {', '.join(settings_applied)}")
+        return conn
+
+    def create_schema(self, benchmark, connection: Any) -> float:
+        """Create schema using benchmark's SQL definitions."""
+        start_time = time.time()
+        self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
+
+        # Get schema SQL and translate to PostgreSQL dialect
+        schema_sql = self._create_schema_with_tuning(benchmark, source_dialect="duckdb")
+
+        self.log_very_verbose(f"Executing schema creation script ({len(schema_sql)} characters)")
+
+        cursor = connection.cursor()
+
+        # Execute each statement separately
+        statements = [s.strip() for s in schema_sql.split(";") if s.strip()]
+        for stmt in statements:
+            try:
+                cursor.execute(stmt)
+            except Exception as e:
+                self.logger.warning(f"Schema statement failed: {e}")
+                # Continue with other statements
+
+        connection.commit()
+        cursor.close()
+
+        duration = time.time() - start_time
+        self.log_operation_complete("Schema creation", duration, "Schema and tables created")
+        return duration
+
+    def load_data(
+        self,
+        benchmark,
+        connection: Any,
+        data_dir: Path,
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Load benchmark data using PostgreSQL COPY command for efficiency."""
+        start_time = time.time()
+        table_stats = {}
+
+        self.log_operation_start("Data loading", f"source: {data_dir}")
+
+        cursor = connection.cursor()
+
+        for table_name, table_path in benchmark.tables.items():
+            table_name_lower = table_name.lower()
+
+            if not self._validate_identifier(table_name_lower):
+                self.logger.warning(f"Skipping table with invalid identifier: {table_name}")
+                table_stats[table_name_lower] = 0
+                continue
+
+            data_file = Path(table_path)
+            if not data_file.exists():
+                self.logger.warning(f"Data file not found: {data_file}")
+                table_stats[table_name_lower] = 0
+                continue
+
+            # Determine delimiter based on file extension
+            if data_file.suffix == ".tbl":
+                delimiter = "|"
+            elif data_file.suffix == ".csv":
+                delimiter = ","
+            else:
+                delimiter = ","
+
+            try:
+                # Use COPY FROM for efficient bulk loading
+                qualified_table = (
+                    f'"{self.schema}"."{table_name_lower}"' if self.schema != "public" else f'"{table_name_lower}"'
+                )
+
+                with open(data_file) as f:
+                    # For .tbl files, remove trailing delimiter
+                    if data_file.suffix == ".tbl":
+                        # Read and preprocess data
+                        lines = f.readlines()
+                        cleaned_lines = []
+                        for line in lines:
+                            # Remove trailing pipe if present
+                            if line.rstrip().endswith("|"):
+                                line = line.rstrip()[:-1] + "\n"
+                            cleaned_lines.append(line)
+
+                        # Create StringIO for COPY
+                        data_buffer = io.StringIO("".join(cleaned_lines))
+                        cursor.copy_expert(
+                            f"COPY {qualified_table} FROM STDIN WITH (FORMAT csv, DELIMITER '{delimiter}')",
+                            data_buffer,
+                        )
+                    else:
+                        cursor.copy_expert(
+                            f"COPY {qualified_table} FROM STDIN WITH (FORMAT csv, DELIMITER '{delimiter}')",
+                            f,
+                        )
+
+                connection.commit()
+
+                # Get row count
+                cursor.execute(f"SELECT COUNT(*) FROM {qualified_table}")
+                row_count = cursor.fetchone()[0]
+                table_stats[table_name_lower] = row_count
+
+                self.log_verbose(f"Loaded {row_count:,} rows into {table_name_lower}")
+
+            except Exception as e:
+                self.logger.error(f"Failed to load {table_name_lower}: {e}")
+                connection.rollback()
+                table_stats[table_name_lower] = 0
+
+        cursor.close()
+        loading_time = time.time() - start_time
+
+        total_rows = sum(table_stats.values())
+        self.log_operation_complete("Data loading", loading_time, f"Loaded {total_rows:,} total rows")
+
+        return table_stats, loading_time, None
+
+    def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
+        """Apply PostgreSQL optimizations for benchmark type."""
+        cursor = connection.cursor()
+
+        if benchmark_type == "olap":
+            # OLAP optimizations
+            cursor.execute("SET enable_seqscan = on")
+            cursor.execute("SET enable_hashjoin = on")
+            cursor.execute("SET enable_mergejoin = on")
+            cursor.execute("SET random_page_cost = 1.1")  # Assume fast storage
+            cursor.execute("SET cpu_tuple_cost = 0.01")
+        elif benchmark_type == "oltp":
+            # OLTP optimizations
+            cursor.execute("SET synchronous_commit = on")
+            cursor.execute("SET random_page_cost = 4.0")
+
+        connection.commit()
+        cursor.close()
+
+    def execute_query(
+        self,
+        connection: Any,
+        query: str,
+        query_id: str,
+        benchmark_type: str | None = None,
+        scale_factor: float | None = None,
+        validate_row_count: bool = True,
+        stream_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Execute a single query and return detailed results."""
+        start_time = time.time()
+        self.log_verbose(f"Executing query {query_id}")
+
+        try:
+            cursor = connection.cursor()
+            cursor.execute(query)
+            results = cursor.fetchall()
+            cursor.close()
+
+            execution_time = time.time() - start_time
+            actual_row_count = len(results)
+
+            # Validate row count if enabled
+            validation_result = None
+            if validate_row_count and benchmark_type:
+                from benchbox.core.validation.query_validation import QueryValidator
+
+                validator = QueryValidator()
+                validation_result = validator.validate_query_result(
+                    benchmark_type=benchmark_type,
+                    query_id=query_id,
+                    actual_row_count=actual_row_count,
+                    scale_factor=scale_factor,
+                    stream_id=stream_id,
+                )
+
+            result = self._build_query_result_with_validation(
+                query_id=query_id,
+                execution_time=execution_time,
+                actual_row_count=actual_row_count,
+                first_row=results[0] if results else None,
+                validation_result=validation_result,
+            )
+
+            return result
+
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return {
+                "query_id": query_id,
+                "status": "FAILED",
+                "execution_time": execution_time,
+                "rows_returned": 0,
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }
+
+    def get_query_plan(
+        self,
+        connection: Any,
+        query: str,
+        explain_options: dict[str, Any] | None = None,
+    ) -> str:
+        """Get query execution plan using EXPLAIN ANALYZE."""
+        cursor = connection.cursor()
+
+        # Build EXPLAIN options
+        options = ["ANALYZE", "BUFFERS", "FORMAT TEXT"]
+        if explain_options:
+            if explain_options.get("verbose"):
+                options.append("VERBOSE")
+            if explain_options.get("costs", True):
+                options.append("COSTS")
+
+        options_str = ", ".join(options)
+        explain_query = f"EXPLAIN ({options_str}) {query}"
+
+        try:
+            cursor.execute(explain_query)
+            plan_rows = cursor.fetchall()
+            cursor.close()
+
+            return "\n".join(row[0] for row in plan_rows)
+
+        except Exception as e:
+            cursor.close()
+            return f"Failed to get query plan: {e}"
+
+    def analyze_table(self, connection: Any, table_name: str) -> None:
+        """Run ANALYZE on a table to update statistics."""
+        if not self._validate_identifier(table_name):
+            self.logger.warning(f"Invalid table identifier: {table_name}")
+            return
+
+        cursor = connection.cursor()
+        qualified_table = f'"{self.schema}"."{table_name}"' if self.schema != "public" else f'"{table_name}"'
+
+        try:
+            cursor.execute(f"ANALYZE {qualified_table}")
+            connection.commit()
+        except Exception as e:
+            self.logger.warning(f"ANALYZE failed for {table_name}: {e}")
+        finally:
+            cursor.close()
+
+    def close_connection(self, connection: Any) -> None:
+        """Close PostgreSQL connection."""
+        if connection:
+            try:
+                connection.close()
+            except Exception as e:
+                self.logger.debug(f"Error closing connection: {e}")
+
+    def get_platform_info(self, connection: Any = None) -> dict[str, Any]:
+        """Get PostgreSQL platform information."""
+        platform_info = {
+            "platform_type": "postgresql",
+            "platform_name": "PostgreSQL",
+            "host": self.host,
+            "port": self.port,
+            "dialect": POSTGRES_DIALECT,
+            "configuration": {
+                "database": self.database,
+                "schema": self.schema,
+                "work_mem": self.work_mem,
+                "maintenance_work_mem": self.maintenance_work_mem,
+                "max_parallel_workers_per_gather": self.max_parallel_workers_per_gather,
+            },
+        }
+
+        if connection:
+            try:
+                cursor = connection.cursor()
+
+                # Get PostgreSQL version
+                cursor.execute("SELECT version()")
+                version_row = cursor.fetchone()
+                if version_row:
+                    platform_info["platform_version"] = version_row[0].split()[1] if version_row[0] else None
+
+                # Check for TimescaleDB
+                cursor.execute(
+                    """
+                    SELECT extname, extversion
+                    FROM pg_extension
+                    WHERE extname = 'timescaledb'
+                    """
+                )
+                timescale = cursor.fetchone()
+                if timescale:
+                    platform_info["configuration"]["timescaledb_version"] = timescale[1]
+
+                # Get database size
+                cursor.execute(
+                    "SELECT pg_size_pretty(pg_database_size(%s))",
+                    (self.database,),
+                )
+                size_row = cursor.fetchone()
+                if size_row:
+                    platform_info["configuration"]["database_size"] = size_row[0]
+
+                cursor.close()
+
+            except Exception as e:
+                self.logger.debug(f"Error getting platform info: {e}")
+
+        # Add client library version
+        if psycopg2:
+            platform_info["client_library_version"] = psycopg2.__version__
+
+        return platform_info
+
+    def test_connection(self) -> bool:
+        """Test if connection can be established."""
+        try:
+            params = self._get_connection_params()
+            conn = psycopg2.connect(**params)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as e:
+            self.logger.debug(f"Connection test failed: {e}")
+            return False
+
+    def _get_existing_tables(self, connection: Any) -> list[str]:
+        """Get list of existing tables in the database."""
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = %s AND table_type = 'BASE TABLE'
+                """,
+                (self.schema,),
+            )
+            result = cursor.fetchall()
+            cursor.close()
+            return [row[0].lower() for row in result]
+        except Exception as e:
+            self.logger.debug(f"Failed to get existing tables: {e}")
+            return []
+
+    def apply_table_tunings(self, table_tuning: TableTuning, connection: Any) -> None:
+        """Apply tuning configurations to PostgreSQL tables."""
+        # PostgreSQL tuning is primarily handled through indexes and ANALYZE
+
+    def generate_tuning_clause(self, table_tuning: TableTuning | None) -> str:
+        """Generate PostgreSQL-specific tuning clauses."""
+        if not table_tuning:
+            return ""
+        # PostgreSQL doesn't use WITH clause for table tuning like columnar stores
+        return ""
+
+    def apply_unified_tuning(self, unified_config: UnifiedTuningConfiguration, connection: Any) -> None:
+        """Apply unified tuning configuration."""
+        # Most PostgreSQL tuning is session-based and already applied in create_connection
+
+    def apply_platform_optimizations(
+        self,
+        platform_config: PlatformOptimizationConfiguration,
+        connection: Any,
+    ) -> None:
+        """Apply PostgreSQL-specific optimizations."""
+        # Optimizations applied in configure_for_benchmark
+
+    def apply_constraint_configuration(
+        self,
+        primary_key_config: PrimaryKeyConfiguration,
+        foreign_key_config: ForeignKeyConfiguration,
+        connection: Any,
+    ) -> None:
+        """Apply constraint configurations to PostgreSQL."""
+        # PostgreSQL enforces constraints by default
+        # Could defer foreign key checks if needed
+
+    def validate_platform_capabilities(self, benchmark_type: str):
+        """Validate PostgreSQL-specific capabilities for the benchmark.
+
+        Args:
+            benchmark_type: Type of benchmark (e.g., 'tpcds', 'tpch')
+
+        Returns:
+            ValidationResult with PostgreSQL capability validation status
+        """
+        errors = []
+        warnings = []
+
+        # Check if psycopg2 is available
+        if psycopg2 is None:
+            errors.append("psycopg2 library not available - install with 'pip install psycopg2-binary'")
+        else:
+            # Check psycopg2 version
+            try:
+                version = psycopg2.__version__
+                # Warn if using very old versions (< 2.8)
+                version_parts = version.split(".")
+                major = int(version_parts[0])
+                minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+                if major < 2 or (major == 2 and minor < 8):
+                    warnings.append(f"psycopg2 version {version} is older - consider upgrading for better performance")
+            except (AttributeError, ValueError, IndexError):
+                warnings.append("Could not determine psycopg2 version")
+
+        # Check work_mem configuration
+        if hasattr(self, "work_mem") and self.work_mem:
+            try:
+                # Parse work_mem if it's a string (e.g., "256MB")
+                work_mem_str = str(self.work_mem).upper()
+                if work_mem_str.endswith("GB"):
+                    memory_mb = float(work_mem_str[:-2]) * 1024
+                elif work_mem_str.endswith("MB"):
+                    memory_mb = float(work_mem_str[:-2])
+                elif work_mem_str.endswith("KB"):
+                    memory_mb = float(work_mem_str[:-2]) / 1024
+                else:
+                    memory_mb = float(work_mem_str) / (1024 * 1024)  # Assume bytes
+
+                if memory_mb < 64:
+                    warnings.append(f"work_mem ({self.work_mem}) may be too low for complex analytical queries")
+            except (ValueError, TypeError):
+                warnings.append(f"Could not parse work_mem setting: {self.work_mem}")
+
+        # Platform-specific details
+        platform_info = {
+            "platform": self.platform_name,
+            "benchmark_type": benchmark_type,
+            "dry_run_mode": self.dry_run_mode,
+            "psycopg2_available": psycopg2 is not None,
+            "host": getattr(self, "host", None),
+            "port": getattr(self, "port", None),
+            "database": getattr(self, "database", None),
+            "schema": getattr(self, "schema", None),
+            "work_mem": getattr(self, "work_mem", None),
+        }
+
+        if psycopg2:
+            platform_info["psycopg2_version"] = getattr(psycopg2, "__version__", "unknown")
+
+        # Import ValidationResult here to avoid circular imports
+        try:
+            from benchbox.core.validation import ValidationResult
+
+            return ValidationResult(
+                is_valid=len(errors) == 0,
+                errors=errors,
+                warnings=warnings,
+                details=platform_info,
+            )
+        except ImportError:
+            # Fallback if validation module not available
+            return None
+
+    def validate_connection_health(self, connection: Any):
+        """Validate PostgreSQL connection health and capabilities.
+
+        Args:
+            connection: PostgreSQL connection object
+
+        Returns:
+            ValidationResult with connection health status
+        """
+        errors = []
+        warnings = []
+        connection_info = {}
+
+        try:
+            cursor = connection.cursor()
+
+            # Test basic query execution
+            cursor.execute("SELECT 1 as test_value")
+            result = cursor.fetchone()
+            if result[0] != 1:
+                errors.append("Basic query execution test failed")
+            else:
+                connection_info["basic_query_test"] = "passed"
+
+            # Check PostgreSQL version
+            try:
+                cursor.execute("SELECT version()")
+                version_result = cursor.fetchone()
+                if version_result:
+                    connection_info["server_version"] = version_result[0]
+                    # Extract major version number
+                    version_match = re.search(r"PostgreSQL (\d+)", version_result[0])
+                    if version_match:
+                        major_version = int(version_match.group(1))
+                        if major_version < 12:
+                            warnings.append(f"PostgreSQL {major_version} is older than recommended minimum (12)")
+            except Exception:
+                warnings.append("Could not query PostgreSQL version")
+
+            # Check available work_mem setting
+            try:
+                cursor.execute("SHOW work_mem")
+                work_mem_result = cursor.fetchone()
+                if work_mem_result:
+                    connection_info["work_mem_setting"] = work_mem_result[0]
+            except Exception:
+                warnings.append("Could not query work_mem setting")
+
+            # Check if TimescaleDB extension is available
+            try:
+                cursor.execute("SELECT extname FROM pg_extension WHERE extname = 'timescaledb'")
+                timescale_result = cursor.fetchone()
+                connection_info["timescaledb_available"] = timescale_result is not None
+            except Exception:
+                connection_info["timescaledb_available"] = False
+
+            cursor.close()
+
+        except Exception as e:
+            errors.append(f"Connection health check failed: {str(e)}")
+
+        # Import ValidationResult here to avoid circular imports
+        try:
+            from benchbox.core.validation import ValidationResult
+
+            return ValidationResult(
+                is_valid=len(errors) == 0,
+                errors=errors,
+                warnings=warnings,
+                details={
+                    "platform": self.platform_name,
+                    "connection_type": type(connection).__name__,
+                    **connection_info,
+                },
+            )
+        except ImportError:
+            # Fallback if validation module not available
+            return None
+
+    def supports_tuning_type(self, tuning_type: Any) -> bool:
+        """Check if PostgreSQL supports a specific tuning type."""
+        # Import here to avoid circular imports
+        try:
+            from benchbox.core.tuning.interface import TuningType
+
+            supported = {
+                TuningType.PARTITIONING: True,  # PostgreSQL supports declarative partitioning
+                TuningType.SORTING: False,  # No native sort keys like columnar stores
+                TuningType.DISTRIBUTION: False,  # No distribution keys (not distributed)
+                TuningType.CLUSTERING: True,  # CLUSTER command available
+                TuningType.PRIMARY_KEYS: True,  # Full constraint support
+                TuningType.FOREIGN_KEYS: True,  # Full constraint support
+            }
+            return supported.get(tuning_type, False)
+        except ImportError:
+            return False
+
+
+def _build_postgresql_config(benchmark_config: dict, platform_options: dict) -> dict:
+    """Build PostgreSQL configuration from benchmark and platform options.
+
+    This function is registered with PlatformHookRegistry to provide
+    PostgreSQL-specific configuration handling.
+    """
+    config = {
+        "host": platform_options.get("host", "localhost"),
+        "port": platform_options.get("port", 5432),
+        "username": platform_options.get("username", "postgres"),
+        "password": platform_options.get("password"),
+        "schema": platform_options.get("schema", "public"),
+        "database": platform_options.get("database"),
+        "admin_database": platform_options.get("admin_database", "postgres"),
+        "sslmode": platform_options.get("sslmode", "prefer"),
+        "work_mem": platform_options.get("work_mem", "256MB"),
+        "maintenance_work_mem": platform_options.get("maintenance_work_mem", "512MB"),
+        "effective_cache_size": platform_options.get("effective_cache_size", "1GB"),
+        "max_parallel_workers_per_gather": platform_options.get("max_parallel_workers_per_gather", 2),
+        "enable_timescale": platform_options.get("enable_timescale", False),
+    }
+
+    # Merge benchmark configuration
+    config.update(benchmark_config)
+
+    return config

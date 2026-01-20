@@ -1,0 +1,276 @@
+"""Local ClickHouse client implementation."""
+
+from __future__ import annotations
+
+import contextlib
+import csv
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ClickHouseLocalClient:
+    """Minimal client for interacting with local ClickHouse (chdb) instances."""
+
+    _conn: object
+    _is_persistent: bool
+
+    def __init__(self, db_path: str | None = None):
+        """Initialize local client with optional persistent storage path."""
+        self._initialized = True
+        # Use persistent session if path provided, otherwise use in-memory connection
+        if db_path:
+            from chdb.session import Session
+
+            self._conn = Session(path=db_path)
+            self._is_persistent = True
+        else:
+            import chdb
+
+            self._conn = chdb.connect()
+            self._is_persistent = False
+
+    def execute(self, query: str, params=None):
+        """Execute query using chDB."""
+        try:
+            # Handle INSERT with data values specially
+            if query.strip().upper().startswith("INSERT") and params:
+                return self._execute_insert(query, params)
+
+            # Use different API for persistent session vs connection
+            # Session API: query(sql, format) vs Connection API: query(sql, format=format)
+            result = self._conn.query(query, "CSV") if self._is_persistent else self._conn.query(query, format="CSV")
+
+            # Parse result into list of tuples (similar to clickhouse-driver format)
+            if result:
+                # Convert chDB result to string data
+                result_str = str(result).strip()
+                if result_str:
+                    rows = []
+                    for line in result_str.split("\n"):
+                        if line.strip():  # Skip empty lines
+                            # Enhanced CSV parsing
+                            row = self._parse_csv_line(line)
+                            rows.append(row)
+                    return rows
+            return []
+
+        except Exception as e:
+            # Re-raise with more context
+            raise RuntimeError(f"ClickHouse local query failed: {e}") from e
+
+    def close(self):
+        """Close the local connection and ensure data is persisted."""
+        if hasattr(self, "_conn"):
+            try:
+                # For persistent sessions, ensure proper cleanup
+                if hasattr(self._conn, "close"):
+                    self._conn.close()
+                elif hasattr(self._conn, "__del__"):
+                    del self._conn
+            except Exception:
+                pass
+        self._conn = None
+
+    def _execute_insert(self, query: str, params):
+        """Handle INSERT queries with data parameters."""
+        # For INSERT operations with data, we need to format the query differently
+        if isinstance(params, list) and params:
+            # Convert list of rows into VALUES format
+            values_list = []
+            for row in params:
+                # Convert row to properly formatted values
+                formatted_values = []
+                for val in row:
+                    if isinstance(val, str):
+                        # Escape single quotes and wrap in quotes
+                        escaped_val = val.replace("'", "''")
+                        formatted_values.append(f"'{escaped_val}'")
+                    elif val is None:
+                        formatted_values.append("NULL")
+                    else:
+                        formatted_values.append(str(val))
+                values_list.append(f"({', '.join(formatted_values)})")
+
+            # Construct full INSERT query
+            full_query = f"{query} {', '.join(values_list)}"
+            if self._is_persistent:
+                self._conn.query(full_query)
+            else:
+                self._conn.query(full_query, format="CSV")
+            return []  # INSERT typically doesn't return data
+        else:
+            # Regular query execution
+            if self._is_persistent:
+                self._conn.query(query)
+            else:
+                self._conn.query(query, format="CSV")
+            return []
+
+    def _parse_csv_line(self, line: str) -> tuple:
+        """Parse a CSV line into a tuple with proper type conversion."""
+        import io
+
+        # Use proper CSV parsing
+        reader = csv.reader(io.StringIO(line))
+        row = next(reader)
+
+        # Convert types
+        converted_row = []
+        for val in row:
+            if val == "":
+                converted_row.append(None)
+            else:
+                try:
+                    # Try integer first
+                    if "." not in val and val.lstrip("-").isdigit():
+                        converted_row.append(int(val))
+                    elif self._is_float(val):
+                        # Try float
+                        converted_row.append(float(val))
+                    else:
+                        # Keep as string
+                        converted_row.append(val)
+                except (ValueError, TypeError):
+                    # Keep as string if conversion fails
+                    converted_row.append(val)
+
+        return tuple(converted_row)
+
+    def _is_float(self, val: str) -> bool:
+        """Check if string represents a float."""
+        try:
+            float(val)
+            return True
+        except ValueError:
+            return False
+
+    def disconnect(self):
+        """Local mode doesn't need explicit disconnect."""
+
+    def commit(self):
+        """ClickHouse auto-commits, so this is a no-op for compatibility."""
+
+
+class ClickHouseCloudClient:
+    """Client for ClickHouse Cloud using clickhouse-connect (HTTPS protocol).
+
+    This client provides a compatible interface with ClickHouseLocalClient and
+    clickhouse-driver's Client, enabling ClickHouse Cloud connections via HTTPS.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int = 8443,
+        user: str = "default",
+        password: str = "",
+        database: str = "default",
+        secure: bool = True,
+        **kwargs,
+    ):
+        """Initialize cloud client.
+
+        Args:
+            host: ClickHouse Cloud hostname (e.g., abc123.us-east-2.aws.clickhouse.cloud)
+            port: HTTPS port (default: 8443)
+            user: Username (default: default)
+            password: Password for authentication
+            database: Database name (default: default)
+            secure: Use HTTPS (default: True, required for cloud)
+            **kwargs: Additional clickhouse-connect options
+        """
+        from ._dependencies import clickhouse_connect
+
+        if clickhouse_connect is None:
+            raise ImportError(
+                "ClickHouse Cloud mode requires clickhouse-connect but it is not installed.\n"
+                "Install with: uv add clickhouse-connect\n"
+            )
+
+        self._host = host
+        self._port = port
+        self._database = database
+
+        # Create clickhouse-connect client
+        self._client = clickhouse_connect.get_client(
+            host=host,
+            port=port,
+            username=user,
+            password=password,
+            database=database,
+            secure=secure,
+            **kwargs,
+        )
+
+        logger.info(f"ClickHouse Cloud client initialized: {host}:{port}")
+
+    def execute(self, query: str, params=None):
+        """Execute query against ClickHouse Cloud.
+
+        Args:
+            query: SQL query to execute
+            params: Optional query parameters (for INSERT operations)
+
+        Returns:
+            List of tuples containing query results
+        """
+        try:
+            # Handle INSERT with data
+            if query.strip().upper().startswith("INSERT") and params:
+                return self._execute_insert(query, params)
+
+            # Execute query
+            result = self._client.query(query)
+
+            # Convert to list of tuples (matching clickhouse-driver format)
+            if result.result_set:
+                return [tuple(row) for row in result.result_set]
+            return []
+
+        except Exception as e:
+            raise RuntimeError(f"ClickHouse Cloud query failed: {e}") from e
+
+    def _execute_insert(self, query: str, params):
+        """Handle INSERT operations with data."""
+        if isinstance(params, list) and params:
+            # Extract table name from INSERT statement
+            # Format: INSERT INTO table_name [(columns)] VALUES
+            import re
+
+            match = re.match(r"INSERT\s+INTO\s+(\S+)", query, re.IGNORECASE)
+            if match:
+                table_name = match.group(1)
+                # Use clickhouse-connect's insert method for efficient bulk insert
+                self._client.insert(table_name, params)
+                return []
+
+        # Fall back to regular execute
+        self._client.command(query)
+        return []
+
+    def command(self, query: str):
+        """Execute a command (DDL/DML) that doesn't return results."""
+        return self._client.command(query)
+
+    def close(self):
+        """Close the cloud connection."""
+        if hasattr(self, "_client") and self._client:
+            with contextlib.suppress(Exception):
+                self._client.close()
+            self._client = None
+
+    def disconnect(self):
+        """Alias for close() for compatibility."""
+        self.close()
+
+    def commit(self):
+        """ClickHouse auto-commits, so this is a no-op for compatibility."""
+
+    @property
+    def database(self) -> str:
+        """Return the current database name."""
+        return self._database
+
+
+__all__ = ["ClickHouseLocalClient", "ClickHouseCloudClient"]

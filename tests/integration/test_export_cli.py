@@ -1,0 +1,322 @@
+"""Integration tests for export CLI command via subprocess."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+
+import pytest
+
+from tests.integration._cli_e2e_utils import run_cli_command
+
+
+def make_v2_result_data(
+    benchmark_name: str = "Test Benchmark",
+    benchmark_id: str = "test_bench",
+    execution_id: str = "test123",
+    platform: str = "TestPlatform",
+    scale_factor: float = 1.0,
+    queries: list | None = None,
+) -> dict:
+    """Create a valid v2.0 schema result for testing.
+
+    Schema v2.0 requires: version, run, benchmark, platform, summary, queries
+    """
+    if queries is None:
+        queries = [
+            {"id": "1", "ms": 100.0, "rows": 10},
+            {"id": "2", "ms": 200.0, "rows": 20},
+        ]
+
+    total_ms = sum(q.get("ms", 0) for q in queries)
+    return {
+        "version": "2.0",
+        "run": {
+            "id": execution_id,
+            "timestamp": datetime.now().isoformat(),
+            "total_duration_ms": total_ms + 500,
+            "query_time_ms": total_ms,
+        },
+        "benchmark": {
+            "id": benchmark_id,
+            "name": benchmark_name,
+            "scale_factor": scale_factor,
+        },
+        "platform": {
+            "name": platform,
+        },
+        "summary": {
+            "queries": {
+                "total": len(queries),
+                "successful": len(queries),
+                "failed": 0,
+            },
+            "timing": {
+                "total_ms": total_ms,
+                "avg_ms": total_ms / len(queries) if queries else 0,
+            },
+        },
+        "queries": queries,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.fast
+def test_export_command_help():
+    """Test that export command shows help correctly."""
+    result = run_cli_command(["export", "--help"])
+
+    assert result.returncode == 0
+    assert "Export benchmark results to various formats" in result.stdout
+    assert "--format" in result.stdout
+    assert "--output-dir" in result.stdout
+    assert "--last" in result.stdout
+    assert "--benchmark" in result.stdout
+    assert "--platform" in result.stdout
+    assert "--force" in result.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.fast
+def test_export_command_no_args_shows_guidance():
+    """Test export with no arguments shows usage guidance."""
+    result = run_cli_command(["export"])
+
+    assert result.returncode == 0
+    assert "Please specify a result file or use --last" in result.stdout
+    assert "Examples:" in result.stdout
+
+
+@pytest.mark.integration
+def test_export_last_with_no_results(tmp_path):
+    """Test export --last with no results shows appropriate message."""
+    # Use empty directory
+    result = run_cli_command(["export", "--last"], cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert "No results found" in result.stdout
+
+
+@pytest.mark.integration
+def test_export_nonexistent_file():
+    """Test export with nonexistent file shows error."""
+    result = run_cli_command(["export", "/nonexistent/file.json"])
+
+    # Command should complete but show error
+    assert "not found" in result.stdout.lower() or result.returncode != 0
+
+
+@pytest.mark.integration
+def test_export_specific_file_to_csv(tmp_path):
+    """Test exporting specific result file to CSV format."""
+    # Create a minimal valid v2.0 result file
+    result_file = tmp_path / "test_result.json"
+    result_data = make_v2_result_data()
+
+    with open(result_file, "w") as f:
+        json.dump(result_data, f)
+
+    output_dir = tmp_path / "exports"
+    output_dir.mkdir()
+
+    # Export to CSV
+    result = run_cli_command(["export", str(result_file), "--format", "csv", "--output-dir", str(output_dir)])
+
+    assert result.returncode == 0
+    assert "Loaded: Test Benchmark" in result.stdout
+    assert "Export complete" in result.stdout
+    assert "CSV:" in result.stdout
+
+    # Verify CSV file was created
+    csv_files = list(output_dir.glob("*.csv"))
+    assert len(csv_files) == 1
+    assert csv_files[0].exists()
+
+    # Verify CSV content
+    csv_content = csv_files[0].read_text()
+    assert "query_id" in csv_content or "id" in csv_content
+
+
+@pytest.mark.integration
+def test_export_multiple_formats(tmp_path):
+    """Test exporting to multiple formats simultaneously."""
+    # Create v2.0 test result
+    result_file = tmp_path / "test_result.json"
+    result_data = make_v2_result_data()
+
+    with open(result_file, "w") as f:
+        json.dump(result_data, f)
+
+    output_dir = tmp_path / "exports"
+    output_dir.mkdir()
+
+    # Export to multiple formats
+    result = run_cli_command(
+        [
+            "export",
+            str(result_file),
+            "--format",
+            "csv",
+            "--format",
+            "html",
+            "--format",
+            "json",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    assert result.returncode == 0
+    assert "Exporting to 3 format(s)" in result.stdout
+    assert "Export complete" in result.stdout
+
+    # Verify all three formats were created
+    assert len(list(output_dir.glob("*.csv"))) == 1
+    assert len(list(output_dir.glob("*.html"))) == 1
+    assert len(list(output_dir.glob("*.json"))) == 1
+
+
+@pytest.mark.integration
+def test_export_with_force_flag(tmp_path):
+    """Test export with --force flag to skip confirmation."""
+    # Create v2.0 test result
+    result_file = tmp_path / "test_result.json"
+    result_data = make_v2_result_data()
+
+    with open(result_file, "w") as f:
+        json.dump(result_data, f)
+
+    output_dir = tmp_path / "exports"
+    output_dir.mkdir()
+
+    # First export
+    result1 = run_cli_command(
+        ["export", str(result_file), "--format", "csv", "--output-dir", str(output_dir), "--force"]
+    )
+
+    assert result1.returncode == 0
+
+    # Second export with --force (should not prompt)
+    result2 = run_cli_command(
+        ["export", str(result_file), "--format", "csv", "--output-dir", str(output_dir), "--force"]
+    )
+
+    assert result2.returncode == 0
+    assert "Export complete" in result2.stdout
+
+
+@pytest.mark.integration
+def test_export_invalid_schema_version(tmp_path):
+    """Test export with unsupported schema version shows error."""
+    result_file = tmp_path / "old_schema.json"
+
+    result_data = {
+        "schema_version": "0.5",  # Unsupported version
+        "benchmark": {"name": "Test"},
+    }
+
+    with open(result_file, "w") as f:
+        json.dump(result_data, f)
+
+    result = run_cli_command(["export", str(result_file), "--format", "csv"])
+
+    assert result.returncode == 0  # Command completes but shows error
+    assert "Unsupported schema version" in result.stdout or "Error" in result.stdout
+
+
+@pytest.mark.integration
+def test_export_corrupted_json(tmp_path):
+    """Test export with corrupted JSON shows error."""
+    result_file = tmp_path / "corrupted.json"
+
+    with open(result_file, "w") as f:
+        f.write("{ invalid json content")
+
+    result = run_cli_command(["export", str(result_file), "--format", "csv"])
+
+    assert result.returncode == 0  # Command completes but shows error
+    assert "Error" in result.stdout or "Invalid" in result.stdout
+
+
+@pytest.mark.integration
+def test_export_command_appears_in_main_help():
+    """Test that export command is listed in main CLI help."""
+    result = run_cli_command(["--help"])
+
+    assert result.returncode == 0
+    assert "export" in result.stdout
+
+
+@pytest.mark.integration
+def test_export_preserves_content(tmp_path):
+    """Test that export preserves all content from original file."""
+    result_file = tmp_path / "test_result.json"
+
+    # Create v2.0 result with specific values we want to verify are preserved
+    result_data = make_v2_result_data(
+        benchmark_name="TPC-H Benchmark",
+        benchmark_id="tpc_h_benchmark",
+        execution_id="preserve_test",
+        platform="DuckDB",
+        scale_factor=10.0,
+        queries=[
+            {"id": "1", "ms": 100.0, "rows": 10},
+            {"id": "2", "ms": 200.0, "rows": 20},
+            {"id": "3", "ms": 150.0, "rows": 15},
+            {"id": "4", "ms": 180.0, "rows": 18},
+            {"id": "5", "ms": 170.0, "rows": 17},
+        ],
+    )
+
+    with open(result_file, "w") as f:
+        json.dump(result_data, f)
+
+    output_dir = tmp_path / "exports"
+    output_dir.mkdir()
+
+    # Export to JSON
+    result = run_cli_command(
+        ["export", str(result_file), "--format", "json", "--output-dir", str(output_dir), "--force"]
+    )
+
+    assert result.returncode == 0
+
+    # Read exported JSON
+    json_files = list(output_dir.glob("*.json"))
+    assert len(json_files) == 1
+
+    with open(json_files[0]) as f:
+        exported_data = json.load(f)
+
+    # Verify key fields are preserved (v2.0 schema structure)
+    assert exported_data["version"] == "2.0"
+    assert exported_data["benchmark"]["name"] == "TPC-H Benchmark"
+    assert exported_data["run"]["id"] == "preserve_test"
+    assert exported_data["benchmark"]["scale_factor"] == 10.0
+    assert exported_data["summary"]["queries"]["total"] == 5
+
+
+@pytest.mark.integration
+def test_export_html_format_creates_standalone_file(tmp_path):
+    """Test that HTML export creates a standalone viewable file."""
+    result_file = tmp_path / "test_result.json"
+    result_data = make_v2_result_data(execution_id="html_test")
+
+    with open(result_file, "w") as f:
+        json.dump(result_data, f)
+
+    output_dir = tmp_path / "exports"
+    output_dir.mkdir()
+
+    result = run_cli_command(["export", str(result_file), "--format", "html", "--output-dir", str(output_dir)])
+
+    assert result.returncode == 0
+
+    # Verify HTML file was created and has expected content
+    html_files = list(output_dir.glob("*.html"))
+    assert len(html_files) == 1
+
+    html_content = html_files[0].read_text()
+    assert "<!DOCTYPE html>" in html_content or "<html" in html_content
+    assert "Test Benchmark" in html_content
+    assert "TestPlatform" in html_content

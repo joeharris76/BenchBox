@@ -1,0 +1,8 @@
+type: duckdb
+connection:
+  database: ":memory:"  # Use in-memory database
+  pool_size: 1
+settings:
+  memory_limit: "4GB"
+  thread_limit: 4
+  enable_progress_bar: true

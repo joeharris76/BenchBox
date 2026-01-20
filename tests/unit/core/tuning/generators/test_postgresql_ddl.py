@@ -1,0 +1,251 @@
+"""Unit tests for PostgreSQL DDL Generator.
+
+Tests the PostgreSQLDDLGenerator class for:
+- PARTITION BY RANGE/LIST/HASH generation
+- CLUSTER command generation
+- Partition child table generation
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from benchbox.core.tuning import TuningColumn
+from benchbox.core.tuning.ddl_generator import ColumnDefinition, ColumnNullability
+from benchbox.core.tuning.generators.postgresql import (
+    PartitionStrategy,
+    PostgreSQLDDLGenerator,
+)
+from benchbox.core.tuning.interface import TableTuning
+
+
+class TestPostgreSQLDDLGeneratorBasics:
+    """Tests for PostgreSQLDDLGenerator basic properties."""
+
+    def test_platform_name(self) -> None:
+        """Test platform name property."""
+        generator = PostgreSQLDDLGenerator()
+        assert generator.platform_name == "postgresql"
+
+    def test_supported_tuning_types(self) -> None:
+        """Test supported tuning types."""
+        generator = PostgreSQLDDLGenerator()
+        assert generator.supports_tuning_type("partitioning")
+        assert generator.supports_tuning_type("clustering")
+        assert generator.supports_tuning_type("sorting")
+        assert not generator.supports_tuning_type("distribution")
+
+
+class TestPartitioningGeneration:
+    """Tests for PARTITION BY clause generation."""
+
+    def test_range_partitioning_date(self) -> None:
+        """Test PARTITION BY RANGE for date column."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="orders",
+            partitioning=[TuningColumn(name="o_orderdate", type="DATE", order=1)],
+        )
+        clauses = generator.generate_tuning_clauses(table_tuning)
+        assert clauses.partition_by == "PARTITION BY RANGE (o_orderdate)"
+
+    def test_hash_partitioning_integer(self) -> None:
+        """Test PARTITION BY HASH for integer column."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="lineitem",
+            partitioning=[TuningColumn(name="l_orderkey", type="BIGINT", order=1)],
+        )
+        clauses = generator.generate_tuning_clauses(table_tuning)
+        assert clauses.partition_by == "PARTITION BY HASH (l_orderkey)"
+
+    def test_list_partitioning_varchar(self) -> None:
+        """Test PARTITION BY LIST for varchar column."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="orders",
+            partitioning=[TuningColumn(name="o_orderpriority", type="VARCHAR", order=1)],
+        )
+        clauses = generator.generate_tuning_clauses(table_tuning)
+        assert clauses.partition_by == "PARTITION BY LIST (o_orderpriority)"
+
+    def test_multiple_partition_columns(self) -> None:
+        """Test multiple partition columns."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="orders",
+            partitioning=[
+                TuningColumn(name="o_orderdate", type="DATE", order=1),
+                TuningColumn(name="o_custkey", type="BIGINT", order=2),
+            ],
+        )
+        clauses = generator.generate_tuning_clauses(table_tuning)
+        assert clauses.partition_by == "PARTITION BY RANGE (o_orderdate, o_custkey)"
+
+
+class TestClusteringGeneration:
+    """Tests for CLUSTER command generation."""
+
+    def test_clustering_creates_index_and_cluster(self) -> None:
+        """Test that clustering generates index and CLUSTER statements."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="orders",
+            clustering=[
+                TuningColumn(name="o_orderdate", type="DATE", order=1),
+                TuningColumn(name="o_orderkey", type="BIGINT", order=2),
+            ],
+        )
+        clauses = generator.generate_tuning_clauses(table_tuning)
+
+        assert len(clauses.post_create_statements) == 2
+        assert "CREATE INDEX IF NOT EXISTS idx_orders_cluster" in clauses.post_create_statements[0]
+        assert "o_orderdate, o_orderkey" in clauses.post_create_statements[0]
+        assert "CLUSTER {table_name} USING idx_orders_cluster" in clauses.post_create_statements[1]
+
+    def test_sorting_maps_to_clustering(self) -> None:
+        """Test that sorting columns are treated as clustering."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="lineitem",
+            sorting=[TuningColumn(name="l_shipdate", type="DATE", order=1)],
+        )
+        clauses = generator.generate_tuning_clauses(table_tuning)
+
+        assert len(clauses.post_create_statements) == 2
+        assert "l_shipdate" in clauses.post_create_statements[0]
+
+
+class TestDistributionWarning:
+    """Tests for distribution warning (not supported in PostgreSQL)."""
+
+    def test_distribution_logs_warning(self) -> None:
+        """Test that distribution columns trigger a warning."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="orders",
+            distribution=[TuningColumn(name="o_orderkey", type="BIGINT", order=1)],
+        )
+
+        with patch("benchbox.core.tuning.generators.postgresql.logger") as mock_logger:
+            generator.generate_tuning_clauses(table_tuning)
+            mock_logger.warning.assert_called_once()
+            assert "single-node" in mock_logger.warning.call_args[0][0]
+
+
+class TestPartitionChildGeneration:
+    """Tests for partition child table generation."""
+
+    def test_hash_partition_children(self) -> None:
+        """Test HASH partition child table generation."""
+        generator = PostgreSQLDDLGenerator(default_hash_partitions=4)
+        table_tuning = TableTuning(
+            table_name="lineitem",
+            partitioning=[TuningColumn(name="l_orderkey", type="BIGINT", order=1)],
+        )
+        columns = [ColumnDefinition("l_orderkey", "BIGINT")]
+        tuning = generator.generate_tuning_clauses(table_tuning)
+
+        children = generator.generate_partition_children("lineitem", columns, tuning, table_tuning)
+
+        assert len(children) == 4
+        assert "lineitem_p0 PARTITION OF lineitem" in children[0]
+        assert "FOR VALUES WITH (MODULUS 4, REMAINDER 0)" in children[0]
+        assert "lineitem_p3 PARTITION OF lineitem" in children[3]
+        assert "FOR VALUES WITH (MODULUS 4, REMAINDER 3)" in children[3]
+
+    def test_range_partition_children_yearly(self) -> None:
+        """Test RANGE partition child table generation with yearly granularity."""
+        generator = PostgreSQLDDLGenerator(default_date_granularity="YEARLY")
+        table_tuning = TableTuning(
+            table_name="orders",
+            partitioning=[TuningColumn(name="o_orderdate", type="DATE", order=1)],
+        )
+        columns = [ColumnDefinition("o_orderdate", "DATE")]
+        tuning = generator.generate_tuning_clauses(table_tuning)
+
+        children = generator.generate_partition_children("orders", columns, tuning, table_tuning)
+
+        # Default is 2020-2026 = 6 years
+        assert len(children) == 6
+        assert "orders_2020 PARTITION OF orders" in children[0]
+        assert "FOR VALUES FROM ('2020-01-01') TO ('2021-01-01')" in children[0]
+        assert "orders_2025 PARTITION OF orders" in children[5]
+
+    def test_no_children_without_partitioning(self) -> None:
+        """Test that no children are generated without partitioning."""
+        generator = PostgreSQLDDLGenerator()
+        table_tuning = TableTuning(
+            table_name="orders",
+            clustering=[TuningColumn(name="o_orderkey", type="BIGINT", order=1)],
+        )
+        columns = [ColumnDefinition("o_orderkey", "BIGINT")]
+        tuning = generator.generate_tuning_clauses(table_tuning)
+
+        children = generator.generate_partition_children("orders", columns, tuning, table_tuning)
+
+        assert len(children) == 0
+
+
+class TestCreateTableDDL:
+    """Tests for CREATE TABLE DDL generation."""
+
+    def test_basic_create_table(self) -> None:
+        """Test basic CREATE TABLE without tuning."""
+        generator = PostgreSQLDDLGenerator()
+        columns = [
+            ColumnDefinition("id", "BIGINT", ColumnNullability.NOT_NULL),
+            ColumnDefinition("name", "VARCHAR"),
+        ]
+        ddl = generator.generate_create_table_ddl("customers", columns)
+        assert "CREATE TABLE customers" in ddl
+        assert "id BIGINT NOT NULL" in ddl
+        assert "name VARCHAR" in ddl
+        assert ddl.endswith(";")
+
+    def test_create_table_with_partitioning(self) -> None:
+        """Test CREATE TABLE with PARTITION BY."""
+        generator = PostgreSQLDDLGenerator()
+        columns = [
+            ColumnDefinition("o_orderkey", "BIGINT", ColumnNullability.NOT_NULL),
+            ColumnDefinition("o_orderdate", "DATE"),
+        ]
+        tuning = generator.generate_tuning_clauses(
+            TableTuning(
+                table_name="orders",
+                partitioning=[TuningColumn(name="o_orderdate", type="DATE", order=1)],
+            )
+        )
+        ddl = generator.generate_create_table_ddl("orders", columns, tuning=tuning)
+
+        assert "CREATE TABLE orders" in ddl
+        assert "PARTITION BY RANGE (o_orderdate)" in ddl
+        assert ddl.endswith(";")
+
+    def test_create_table_if_not_exists(self) -> None:
+        """Test CREATE TABLE IF NOT EXISTS."""
+        generator = PostgreSQLDDLGenerator()
+        columns = [ColumnDefinition("id", "BIGINT")]
+        ddl = generator.generate_create_table_ddl("test", columns, if_not_exists=True)
+        assert "CREATE TABLE IF NOT EXISTS test" in ddl
+
+    def test_create_table_with_schema(self) -> None:
+        """Test CREATE TABLE with schema prefix."""
+        generator = PostgreSQLDDLGenerator()
+        columns = [ColumnDefinition("id", "BIGINT")]
+        ddl = generator.generate_create_table_ddl("orders", columns, schema="tpch")
+        assert "CREATE TABLE tpch.orders" in ddl
+
+
+class TestPartitionStrategyEnum:
+    """Tests for PartitionStrategy enum."""
+
+    def test_enum_values(self) -> None:
+        """Test enum values."""
+        assert PartitionStrategy.RANGE.value == "RANGE"
+        assert PartitionStrategy.LIST.value == "LIST"
+        assert PartitionStrategy.HASH.value == "HASH"

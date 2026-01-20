@@ -1,0 +1,18 @@
+# Dask DataFrame Tuning - Default Configuration
+# Balanced defaults for parallel processing
+
+parallelism:
+  threads_per_worker: 2
+
+memory:
+  spill_to_disk: true
+
+data_types:
+  dtype_backend: pyarrow
+
+_metadata:
+  version: "1.0"
+  format: dataframe_tuning
+  platform: dask
+  description: Default Dask configuration for parallel workloads
+  generated_by: benchbox

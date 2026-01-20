@@ -1,0 +1,496 @@
+"""Test Read Primitives catalog loader variant and skip_on functionality.
+
+Copyright 2026 Joe Harris / BenchBox Project
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import pytest
+
+from benchbox.core.read_primitives.catalog import PrimitiveQuery, PrimitivesCatalogError, load_primitives_catalog
+
+pytestmark = pytest.mark.fast
+
+
+class TestPrimitiveQueryDataclass:
+    """Test the PrimitiveQuery dataclass structure."""
+
+    def test_primitive_query_basic_fields(self):
+        """Test PrimitiveQuery with only required fields."""
+        query = PrimitiveQuery(
+            id="test_query",
+            category="test",
+            sql="SELECT 1",
+        )
+        assert query.id == "test_query"
+        assert query.category == "test"
+        assert query.sql == "SELECT 1"
+        assert query.description is None
+        assert query.variants is None
+        assert query.skip_on is None
+
+    def test_primitive_query_with_variants(self):
+        """Test PrimitiveQuery with dialect variants."""
+        query = PrimitiveQuery(
+            id="test_query",
+            category="test",
+            sql="SELECT 1",
+            variants={"duckdb": "SELECT 1 AS result", "bigquery": "SELECT 1 as result"},
+        )
+        assert query.variants == {"duckdb": "SELECT 1 AS result", "bigquery": "SELECT 1 as result"}
+
+    def test_primitive_query_with_skip_on(self):
+        """Test PrimitiveQuery with skip_on list."""
+        query = PrimitiveQuery(id="test_query", category="test", sql="SELECT 1", skip_on=["duckdb", "sqlite"])
+        assert query.skip_on == ["duckdb", "sqlite"]
+
+    def test_primitive_query_with_all_fields(self):
+        """Test PrimitiveQuery with all fields populated."""
+        query = PrimitiveQuery(
+            id="test_query",
+            category="test",
+            sql="SELECT 1",
+            description="Test query description",
+            variants={"duckdb": "SELECT 1 AS result"},
+            skip_on=["sqlite"],
+        )
+        assert query.id == "test_query"
+        assert query.category == "test"
+        assert query.sql == "SELECT 1"
+        assert query.description == "Test query description"
+        assert query.variants == {"duckdb": "SELECT 1 AS result"}
+        assert query.skip_on == ["sqlite"]
+
+
+class TestCatalogLoaderVariantParsing:
+    """Test catalog loader parsing of variants from YAML."""
+
+    def test_load_query_with_single_variant(self, monkeypatch, tmp_path):
+        """Test loading a query with a single dialect variant."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: |
+      SELECT * FROM orders
+    variants:
+      duckdb: |
+        SELECT * FROM orders USING SAMPLE 10%
+"""
+        # Mock the catalog file
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        # Monkey-patch the resources.files to return our test file
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        catalog = load_primitives_catalog()
+
+        assert "test_query" in catalog.queries
+        query = catalog.queries["test_query"]
+        assert query.variants is not None
+        assert "duckdb" in query.variants
+        assert "USING SAMPLE" in query.variants["duckdb"]
+
+    def test_load_query_with_multiple_variants(self, monkeypatch, tmp_path):
+        """Test loading a query with multiple dialect variants."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT * FROM orders
+    variants:
+      duckdb: SELECT * FROM orders USING SAMPLE 10%
+      bigquery: SELECT * FROM orders TABLESAMPLE SYSTEM (10 PERCENT)
+      snowflake: SELECT * FROM orders SAMPLE (10)
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        catalog = load_primitives_catalog()
+        query = catalog.queries["test_query"]
+
+        assert query.variants is not None
+        assert len(query.variants) == 3
+        assert "duckdb" in query.variants
+        assert "bigquery" in query.variants
+        assert "snowflake" in query.variants
+
+    def test_variant_dialect_normalized_to_lowercase(self, monkeypatch, tmp_path):
+        """Test that variant dialect names are normalized to lowercase."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    variants:
+      DuckDB: SELECT 1 AS result
+      BIGQUERY: SELECT 1 as result
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        catalog = load_primitives_catalog()
+        query = catalog.queries["test_query"]
+
+        assert "duckdb" in query.variants
+        assert "bigquery" in query.variants
+        assert "DuckDB" not in query.variants
+        assert "BIGQUERY" not in query.variants
+
+    def test_variant_sql_must_be_non_empty(self, monkeypatch, tmp_path):
+        """Test that variant SQL must be non-empty."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    variants:
+      duckdb: ""
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        with pytest.raises(PrimitivesCatalogError) as exc_info:
+            load_primitives_catalog()
+
+        assert "variant SQL for dialect 'duckdb' must be non-empty" in str(exc_info.value)
+
+    def test_variant_dialect_must_be_non_empty_string(self, monkeypatch, tmp_path):
+        """Test that variant dialect name must be non-empty string."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    variants:
+      "": SELECT 1 AS result
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        with pytest.raises(PrimitivesCatalogError) as exc_info:
+            load_primitives_catalog()
+
+        assert "variant dialect must be a non-empty string" in str(exc_info.value)
+
+    def test_variants_must_be_dict(self, monkeypatch, tmp_path):
+        """Test that variants field must be a dictionary."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    variants: ["duckdb", "bigquery"]
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        with pytest.raises(PrimitivesCatalogError) as exc_info:
+            load_primitives_catalog()
+
+        assert "invalid 'variants'" in str(exc_info.value)
+        assert "expected mapping" in str(exc_info.value)
+
+
+class TestCatalogLoaderSkipOnParsing:
+    """Test catalog loader parsing of skip_on from YAML."""
+
+    def test_load_query_with_single_skip_on(self, monkeypatch, tmp_path):
+        """Test loading a query with a single skip_on dialect."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    skip_on: [duckdb]
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        catalog = load_primitives_catalog()
+        query = catalog.queries["test_query"]
+
+        assert query.skip_on is not None
+        assert query.skip_on == ["duckdb"]
+
+    def test_load_query_with_multiple_skip_on(self, monkeypatch, tmp_path):
+        """Test loading a query with multiple skip_on dialects."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    skip_on: [duckdb, sqlite, mysql]
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        catalog = load_primitives_catalog()
+        query = catalog.queries["test_query"]
+
+        assert query.skip_on is not None
+        assert len(query.skip_on) == 3
+        assert "duckdb" in query.skip_on
+        assert "sqlite" in query.skip_on
+        assert "mysql" in query.skip_on
+
+    def test_skip_on_normalized_to_lowercase(self, monkeypatch, tmp_path):
+        """Test that skip_on dialect names are normalized to lowercase."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    skip_on: [DuckDB, SQLITE]
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        catalog = load_primitives_catalog()
+        query = catalog.queries["test_query"]
+
+        assert "duckdb" in query.skip_on
+        assert "sqlite" in query.skip_on
+        assert "DuckDB" not in query.skip_on
+        assert "SQLITE" not in query.skip_on
+
+    def test_skip_on_dialect_must_be_non_empty_string(self, monkeypatch, tmp_path):
+        """Test that skip_on dialects must be non-empty strings."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    skip_on: ["duckdb", ""]
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        with pytest.raises(PrimitivesCatalogError) as exc_info:
+            load_primitives_catalog()
+
+        assert "skip_on dialect must be a non-empty string" in str(exc_info.value)
+
+    def test_skip_on_must_be_list(self, monkeypatch, tmp_path):
+        """Test that skip_on field must be a list."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT 1
+    skip_on: "duckdb"
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        with pytest.raises(PrimitivesCatalogError) as exc_info:
+            load_primitives_catalog()
+
+        assert "invalid 'skip_on'" in str(exc_info.value)
+        assert "expected list" in str(exc_info.value)
+
+
+class TestCatalogLoaderCombinedFeatures:
+    """Test catalog loader with both variants and skip_on."""
+
+    def test_query_with_both_variants_and_skip_on(self, monkeypatch, tmp_path):
+        """Test query can have both variants and skip_on."""
+        catalog_yaml = """
+version: 1
+queries:
+  - id: test_query
+    category: test
+    sql: SELECT * FROM orders
+    variants:
+      bigquery: SELECT * FROM `orders`
+    skip_on: [sqlite]
+    description: Test query with both features
+"""
+        catalog_file = tmp_path / "queries.yaml"
+        catalog_file.write_text(catalog_yaml)
+
+        import importlib.resources
+
+        class MockPath:
+            def __init__(self, path):
+                self.path = path
+
+            def joinpath(self, name):
+                return self.path / name
+
+            def open(self, *args, **kwargs):
+                return open(self.path / "queries.yaml", *args, **kwargs)
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: MockPath(tmp_path))
+
+        catalog = load_primitives_catalog()
+        query = catalog.queries["test_query"]
+
+        assert query.variants is not None
+        assert "bigquery" in query.variants
+        assert query.skip_on is not None
+        assert "sqlite" in query.skip_on
+        assert query.description == "Test query with both features"

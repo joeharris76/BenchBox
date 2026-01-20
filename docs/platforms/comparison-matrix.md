@@ -1,0 +1,677 @@
+# Platform Comparison Matrix
+
+```{tags} intermediate, reference
+```
+
+This matrix provides a comprehensive comparison of all **37 supported platforms** in BenchBox, organized by category to help you choose the right platform for your benchmarking needs.
+
+## Platform Overview
+
+BenchBox supports platforms across six categories:
+
+| Category                                                       | Platforms | Description                                    |
+| -------------------------------------------------------------- | --------- | ---------------------------------------------- |
+| [Local/Embedded](#localembedded-platforms)                     | 5         | In-process engines, no infrastructure required |
+| [Cloud Data Warehouses](#cloud-data-warehouses)                | 8         | Managed cloud analytics platforms              |
+| [Distributed SQL Engines](#distributed-sql-engines)            | 4         | Federated and cluster-based query engines      |
+| [Relational & Time-Series](#relational--time-series-databases) | 3         | Traditional RDBMS and time-series databases    |
+| [Managed Spark Services](#managed-spark-services)              | 7         | Cloud-managed Spark execution environments     |
+| [DataFrame Platforms](#dataframe-platforms)                    | 10        | Native DataFrame API libraries                 |
+
+**Total: 37 platforms** (27 SQL + 10 DataFrame)
+
+```{note}
+**CLI Naming Convention**: DataFrame platforms use the `-df` suffix (e.g., `polars-df`, `pandas-df`) to distinguish them from SQL mode platforms. Some platforms like DataFusion support both modes - see [Hybrid Platforms](#hybrid-platforms-sql--dataframe) for details.
+```
+
+---
+
+## Quick Decision Guide
+
+```
+1. Local development or testing?
+   └── Yes → DuckDB (default) or DataFusion (Arrow-native)
+   └── No → Continue to #2
+
+2. Need DataFrame API (not SQL)?
+   └── Yes → Polars-df (single-node) or PySpark-df (distributed)
+   └── No → Continue to #3
+
+3. Already using Snowflake and want DataFrame API?
+   └── Yes → snowpark-connect (PySpark-compatible)
+   └── No → Continue to #4
+
+4. Cost is primary concern?
+   └── Yes → DuckDB, ClickHouse, or PostgreSQL (self-hosted)
+   └── No → Continue to #5
+
+5. Data > 100GB?
+   └── No → DuckDB, ClickHouse, or DataFusion
+   └── Yes → Continue to #6
+
+6. Which cloud provider?
+   └── AWS → Redshift, Athena, or EMR Serverless
+   └── GCP → BigQuery or Dataproc Serverless
+   └── Azure → Synapse, Fabric Warehouse, or Fabric Spark
+   └── Multi-cloud → Snowflake or Databricks
+```
+
+---
+
+## Deployment Modes
+
+BenchBox supports multiple deployment modes for platforms, enabling the same benchmark to run against local, self-hosted, and cloud-managed instances. Use the colon syntax to specify deployment modes: `--platform platform:mode`.
+
+### Platforms with Multiple Deployment Modes
+
+| Platform        | Default Mode  | Available Modes            | Syntax Examples                                             |
+| --------------- | ------------- | -------------------------- | ----------------------------------------------------------- |
+| **ClickHouse**  | `local`       | `local`, `server`, `cloud` | `clickhouse:local`, `clickhouse:server`, `clickhouse:cloud` |
+| **Firebolt**    | `core`        | `core`, `cloud`            | `firebolt:core`, `firebolt:cloud`                           |
+| **TimescaleDB** | `self-hosted` | `self-hosted`, `cloud`     | `timescaledb`, `timescaledb:cloud`                          |
+| **PySpark**     | `local`       | `local`                    | `pyspark`                                                   |
+
+### Cloud-Only Platforms (Dialect Inheritance)
+
+| Platform       | Mode    | Inherits Dialect From | CLI Name     |
+| -------------- | ------- | --------------------- | ------------ |
+| **MotherDuck** | managed | DuckDB                | `motherduck` |
+| **Starburst**  | managed | Trino                 | `starburst`  |
+
+
+### Deployment Mode Characteristics
+
+| Mode            | Credentials | Network | Cloud Storage | Examples                                       |
+| --------------- | ----------- | ------- | ------------- | ---------------------------------------------- |
+| **local**       | No          | No      | No            | DuckDB, chDB, Firebolt Core                    |
+| **self-hosted** | Yes         | Yes     | No            | ClickHouse Server, Trino, TimescaleDB          |
+| **managed**     | Yes         | Yes     | Sometimes     | MotherDuck, ClickHouse Cloud, Starburst Galaxy |
+
+```{note}
+For detailed deployment mode configuration, see [Deployment Modes Guide](deployment-modes.md).
+```
+
+---
+
+## Local/Embedded Platforms
+
+Zero-infrastructure platforms that run in-process. Ideal for development, testing, and medium-scale analytics.
+
+### Architecture Comparison
+
+| Feature            | DuckDB            | DataFusion         | SQLite             | Polars             | ClickHouse               |
+| ------------------ | ----------------- | ------------------ | ------------------ | ------------------ | ------------------------ |
+| **CLI Name**       | `duckdb`          | `datafusion`       | `sqlite`           | `polars-df`        | `clickhouse`             |
+| **Architecture**   | Embedded Columnar | In-memory Columnar | Embedded Row-based | In-memory Columnar | Embedded/Server Columnar |
+| **Storage Format** | Native/Parquet    | Arrow/Parquet      | B-tree Pages       | Arrow/Parquet      | MergeTree                |
+| **Query Engine**   | Vectorized        | Vectorized (Rust)  | B-tree             | Vectorized (Rust)  | Vectorized               |
+| **Concurrency**    | Read-heavy        | In-memory Only     | Limited Write      | Read-heavy         | High Concurrent          |
+| **ACID Support**   | Limited           | None               | Full               | None               | Limited                  |
+| **SQL Support**    | Full              | Full               | Full               | **DataFrame only** | Full                     |
+
+```{note}
+**ClickHouse Deployment**: The `clickhouse` CLI name works for both local mode (via chdb, zero-config) and server mode (requires running ClickHouse instance). BenchBox auto-detects the mode based on connection configuration.
+```
+
+### Relative Performance Characteristics
+
+Performance varies based on workload, query complexity, data size, and hardware. The following are general architectural characteristics:
+
+| Feature                | DuckDB             | DataFusion       | SQLite | Polars         | ClickHouse   |
+| ---------------------- | ------------------ | ---------------- | ------ | -------------- | ------------ |
+| **Storage Type**       | Columnar           | In-memory Arrow  | Row    | In-memory Arrow| Columnar     |
+| **Parallelism**        | Multi-threaded     | Multi-threaded   | Single | Multi-threaded | Multi-threaded |
+| **Data Loading**       | CSV/Parquet        | Parquet/CSV      | CSV    | Parquet        | Multiple     |
+| **Memory Model**       | Disk + RAM         | In-memory        | Disk   | In-memory      | Configurable |
+| **Max Recommended SF** | 100                | 50+              | 1      | 100            | 100+         |
+
+### Use Cases
+
+| Use Case                    | Recommended    | Alternatives        |
+| --------------------------- | -------------- | ------------------- |
+| **Development/Testing**     | DuckDB         | DataFusion, SQLite  |
+| **CI/CD Validation**        | DuckDB, SQLite | DataFusion          |
+| **PyArrow Workflows**       | DataFusion     | DuckDB              |
+| **Research/Academia**       | DuckDB         | ClickHouse          |
+| **Cost-Sensitive**          | DuckDB         | ClickHouse          |
+| **DataFrame API Preferred** | Polars (`-df`) | PySpark, DataFusion |
+
+### Installation
+
+```bash
+# DuckDB (default, included with BenchBox)
+uv add duckdb
+
+# DataFusion
+uv add datafusion
+
+# SQLite (built-in Python)
+# No installation needed
+
+# Polars (DataFrame API only - use polars-df platform)
+uv add polars
+
+# ClickHouse (local mode via chdb, or server mode)
+uv add clickhouse-driver chdb
+```
+
+---
+
+## Cloud Data Warehouses
+
+Managed cloud platforms with enterprise features, auto-scaling, and petabyte-scale capacity.
+
+### Architecture Comparison
+
+| Feature           | BigQuery     | Snowflake          | Databricks           | Redshift               | Synapse         | Fabric DW      | Athena               | Firebolt             |
+| ----------------- | ------------ | ------------------ | -------------------- | ---------------------- | --------------- | -------------- | -------------------- | -------------------- |
+| **CLI Name**      | `bigquery`   | `snowflake`        | `databricks`         | `redshift`             | `synapse`       | `fabric_dw`    | `athena`             | `firebolt`           |
+| **Cloud**         | GCP          | Multi-cloud        | Multi-cloud          | AWS                    | Azure           | Azure          | AWS                  | Multi-cloud          |
+| **Architecture**  | Columnar MPP | Columnar MPP       | Columnar MPP (Spark) | Columnar MPP           | Columnar MPP    | Columnar MPP   | Columnar MPP (Trino) | Columnar MPP (Trino) |
+| **Storage**       | Capacitor    | Micro-partitions   | Delta Lake           | Columnar Blocks        | Distributed     | OneLake/Delta  | S3/Parquet           | Proprietary          |
+| **Compute Model** | Serverless   | Virtual Warehouses | Clusters/Serverless  | Provisioned/Serverless | Dedicated Pools | Capacity Units | Serverless           | Engines              |
+
+### Cost Analysis
+
+*Pricing as of January 2026. Verify current rates with providers.*
+
+| Platform       | Compute Pricing    | Storage Pricing     | Data Transfer | Free Tier         |
+| -------------- | ------------------ | ------------------- | ------------- | ----------------- |
+| **BigQuery**   | $5/TB queried      | $20/TB/month        | $0.12/GB      | 1TB/month queries |
+| **Snowflake**  | $2-40/credit/hour  | Included in compute | $0.023/GB     | 30-day trial      |
+| **Databricks** | $0.07-0.65/DBU     | Cloud storage       | $0.087/GB     | 14-day trial      |
+| **Redshift**   | $0.25-16/hour      | $0.024/GB SSD       | $0.02/GB      | 2-month trial     |
+| **Synapse**    | $1.20-14/DWU/hour  | $0.023/GB           | $0.05/GB      | 30-day trial      |
+| **Fabric DW**  | Capacity Units     | Included            | Included      | 60-day trial      |
+| **Athena**     | $5/TB scanned      | S3 pricing          | S3 pricing    | None              |
+| **Firebolt**   | Per-engine pricing | Included            | Included      | Free local mode   |
+
+**Cost estimate context**: Monthly costs assume SF=10 workload (~10GB), 100 queries/day, standard configurations. Actual costs vary significantly based on query complexity, concurrency, and data volume.
+
+### Security & Compliance
+
+| Feature                   | BigQuery  | Snowflake | Databricks | Redshift  | Synapse  | Fabric DW | Athena  | Firebolt  |
+| ------------------------- | --------- | --------- | ---------- | --------- | -------- | --------- | ------- | --------- |
+| **Encryption at Rest**    | Default   | Default   | Default    | Default   | Default  | Default   | Default | Default   |
+| **Encryption in Transit** | HTTPS     | TLS       | HTTPS      | TLS       | TLS      | TLS       | HTTPS   | TLS       |
+| **Authentication**        | IAM/OAuth | Users/SSO | Users/SSO  | IAM/Users | Entra ID | Entra ID  | IAM     | Users/SSO |
+| **SOC 2**                 | Yes       | Yes       | Yes        | Yes       | Yes      | Yes       | Yes     | Yes       |
+| **HIPAA**                 | Yes       | Yes       | Yes        | Yes       | Yes      | Yes       | Yes     | Contact   |
+| **FedRAMP**               | Yes       | Yes       | Yes        | Yes       | Yes      | Pending   | Yes     | No        |
+
+### Installation
+
+```bash
+# BigQuery
+uv add google-cloud-bigquery google-cloud-storage
+
+# Snowflake
+uv add snowflake-connector-python
+
+# Databricks (SQL mode)
+uv add databricks-sql-connector
+
+# Redshift
+uv add redshift-connector boto3
+
+# Azure Synapse
+uv add pyodbc azure-storage-blob azure-identity
+
+# Fabric Warehouse
+uv add pyodbc azure-identity azure-storage-file-datalake
+
+# AWS Athena
+uv add pyathena boto3
+
+# Firebolt
+uv add firebolt-sdk
+```
+
+---
+
+## Distributed SQL Engines
+
+Federated and distributed query engines for multi-source analytics.
+
+### Architecture Comparison
+
+| Feature          | Trino           | PrestoDB        | Spark SQL           | ClickHouse           |
+| ---------------- | --------------- | --------------- | ------------------- | -------------------- |
+| **CLI Name**     | `trino`         | `presto`        | `spark`             | `clickhouse`         |
+| **Architecture** | Distributed MPP | Distributed MPP | Distributed (Spark) | Distributed Columnar |
+| **Query Engine** | Vectorized      | Vectorized      | Spark Catalyst      | Vectorized           |
+| **Federation**   | Native          | Native          | Via connectors      | Limited              |
+| **Concurrency**  | High            | High            | Job-based           | Very High            |
+| **Execution Model** | Interactive MPP | Interactive MPP | Batch-oriented      | Interactive          |
+
+### Architectural Characteristics
+
+| Feature              | Trino               | PrestoDB            | Spark SQL                | ClickHouse         |
+| -------------------- | ------------------- | ------------------- | ------------------------ | ------------------ |
+| **Execution Model**  | Interactive MPP     | Interactive MPP     | Batch/micro-batch        | Interactive columnar |
+| **Optimization**     | Cost-based          | Cost-based          | Catalyst optimizer       | Columnar vectorized |
+| **Max Scale Factor** | 1000+               | 1000+               | 10000+                   | 1000+              |
+| **Memory Model**     | Distributed         | Distributed         | Distributed              | Distributed        |
+| **Typical Use Case** | Ad-hoc federation   | Ad-hoc federation   | Large-scale batch ETL    | Analytical queries |
+
+### Use Cases
+
+| Use Case                    | Recommended      | Notes                         |
+| --------------------------- | ---------------- | ----------------------------- |
+| **Data Lake Analytics**     | Trino, Spark SQL | S3/GCS/ADLS support           |
+| **Multi-source Federation** | Trino, PrestoDB  | Native connector ecosystem    |
+| **Real-time Analytics**     | ClickHouse       | Interactive columnar queries  |
+| **Batch ETL**               | Spark SQL        | Native Spark integration      |
+| **Starburst Enterprise**    | Trino            | Commercial Trino distribution |
+
+### Installation
+
+```bash
+# Trino
+uv add trino
+
+# PrestoDB
+uv add presto-python-client
+
+# Apache Spark SQL
+uv add pyspark
+
+# ClickHouse (server mode - requires running instance)
+uv add clickhouse-driver
+```
+
+---
+
+## Relational & Time-Series Databases
+
+Traditional relational databases and specialized time-series engines.
+
+### Architecture Comparison
+
+| Feature            | PostgreSQL       | TimescaleDB                | InfluxDB           |
+| ------------------ | ---------------- | -------------------------- | ------------------ |
+| **CLI Name**       | `postgresql`     | `timescaledb`              | `influxdb`         |
+| **Type**           | Relational RDBMS | Time-series (PG extension) | Time-series        |
+| **Storage**        | Row-based (heap) | Hypertables + compression  | Columnar (Parquet) |
+| **Query Language** | PostgreSQL SQL   | PostgreSQL SQL             | SQL (FlightSQL)    |
+| **ACID Support**   | Full             | Full                       | Limited            |
+| **Compression**    | Optional (TOAST) | Native                     | Native             |
+
+### Performance Characteristics
+
+| Feature                 | PostgreSQL          | TimescaleDB         | InfluxDB            |
+| ----------------------- | ------------------- | ------------------- | ------------------- |
+| **Query Latency**       | Low                 | Low                 | Very Low            |
+| **Write Throughput**    | Medium              | High                | Very High           |
+| **Time-series Queries** | Manual optimization | Native optimization | Native optimization |
+| **Max Recommended SF**  | 10                  | 100                 | 100                 |
+| **Best For**            | OLTP workloads      | Time-series OLAP    | IoT/metrics         |
+
+### Use Cases
+
+| Use Case                  | Recommended | Notes                    |
+| ------------------------- | ----------- | ------------------------ |
+| **OLTP Benchmarking**     | PostgreSQL  | Traditional workloads    |
+| **Time-series Analytics** | TimescaleDB | Continuous aggregates    |
+| **IoT/Metrics**           | InfluxDB    | High-cardinality support |
+| **Hybrid OLTP/OLAP**      | TimescaleDB | Best of both worlds      |
+
+### Installation
+
+```bash
+# PostgreSQL
+uv add psycopg2-binary
+
+# TimescaleDB (uses same driver as PostgreSQL)
+uv add psycopg2-binary
+
+# InfluxDB
+uv add influxdb3-python
+```
+
+---
+
+## Managed Spark Services
+
+Cloud-managed Apache Spark environments for distributed processing.
+
+### AWS Spark Services
+
+| Feature          | AWS Glue       | EMR Serverless             | Athena for Spark           |
+| ---------------- | -------------- | -------------------------- | -------------------------- |
+| **CLI Name**     | `glue`         | `emr-serverless`           | `athena-spark`             |
+| **Type**         | Managed ETL    | Serverless Spark           | Interactive Spark          |
+| **Startup Time** | 2-5 minutes    | ~30s (warm), 2-3min (cold) | ~30s (warm), 1-2min (cold) |
+| **Pricing**      | $0.44/DPU-hour | vCPU + Memory              | DPU-hour                   |
+| **Use Case**     | ETL pipelines  | Batch processing           | Interactive analysis       |
+| **Data Catalog** | Glue Catalog   | Glue Catalog               | Glue Catalog               |
+
+### GCP Spark Services
+
+| Feature          | Dataproc              | Dataproc Serverless   |
+| ---------------- | --------------------- | --------------------- |
+| **CLI Name**     | `dataproc`            | `dataproc-serverless` |
+| **Type**         | Managed Clusters      | Serverless Batches    |
+| **Startup Time** | 1-2 minutes           | 30-60 seconds         |
+| **Pricing**      | Per-second            | Per-second            |
+| **Use Case**     | Long-running clusters | Ad-hoc batches        |
+| **Metastore**    | Hive Metastore        | Hive Metastore        |
+
+### Azure Spark Services
+
+| Feature      | Fabric Spark     | Synapse Spark        |
+| ------------ | ---------------- | -------------------- |
+| **CLI Name** | `fabric-spark`   | `synapse-spark`      |
+| **Type**     | SaaS Spark       | Enterprise Spark     |
+| **Storage**  | OneLake          | ADLS Gen2            |
+| **Auth**     | Entra ID         | Entra ID             |
+| **Pricing**  | Capacity Units   | vCore-hour           |
+| **Use Case** | Fabric ecosystem | Enterprise analytics |
+
+### Cross-Cloud Comparison
+
+| Feature              | Glue | EMR Serverless | Dataproc | Dataproc Serverless | Fabric Spark | Synapse Spark |
+| -------------------- | ---- | -------------- | -------- | ------------------- | ------------ | ------------- |
+| **Serverless**       | Yes  | Yes            | No       | Yes                 | Yes          | No            |
+| **DataFrame Mode**   | Yes  | Yes            | Yes      | Yes                 | Yes          | Yes           |
+| **SQL Mode**         | Yes  | Yes            | Yes      | Yes                 | Yes          | Yes           |
+| **Auto-scaling**     | Yes  | Yes            | Manual   | Yes                 | Yes          | Manual        |
+| **Spot/Preemptible** | No   | Yes            | Yes      | No                  | No           | No            |
+
+### Installation
+
+```bash
+# AWS Spark Services (Glue, EMR Serverless, Athena for Spark)
+uv add boto3
+
+# GCP Spark Services (Dataproc, Dataproc Serverless)
+uv add google-cloud-dataproc google-cloud-storage
+
+# Azure Spark Services (Fabric Spark, Synapse Spark)
+uv add azure-identity azure-storage-file-datalake requests
+```
+
+---
+
+## DataFrame Platforms
+
+Native DataFrame API libraries for programmatic data manipulation.
+
+```{important}
+**Naming Convention**: All DataFrame platforms use the `-df` suffix in CLI names to distinguish them from SQL-mode platforms. For example, use `polars-df` for Polars DataFrame API or `datafusion-df` for DataFusion DataFrame API.
+```
+
+### Expression Family (Lazy Evaluation)
+
+| Feature          | Polars                | PySpark        | DataFusion      | Databricks      | Snowpark Connect     |
+| ---------------- | --------------------- | -------------- | --------------- | --------------- | -------------------- |
+| **CLI Name**     | `polars-df`           | `pyspark-df`   | `datafusion-df` | `databricks-df` | `snowpark-connect`   |
+| **Language**     | Rust + Python         | Scala + Python | Rust + Python   | Scala + Python  | Python               |
+| **Execution**    | Lazy                  | Lazy           | Lazy            | Lazy            | Lazy (pushdown)      |
+| **Parallelism**  | Multi-threaded        | Distributed    | Multi-threaded  | Distributed     | Snowflake compute    |
+| **Memory Model** | In-memory + streaming | Cluster-bound  | In-memory       | Cluster-bound   | Snowflake-managed    |
+| **Arrow Native** | Yes                   | Yes            | Yes             | Yes             | No (Snowflake types) |
+
+### Pandas Family (Eager/Lazy)
+
+| Feature               | Pandas          | Modin            | Dask         | cuDF             |
+| --------------------- | --------------- | ---------------- | ------------ | ---------------- |
+| **CLI Name**          | `pandas-df`     | `modin-df`       | `dask-df`    | `cudf-df`        |
+| **Execution**         | Eager           | Eager            | Lazy         | Eager            |
+| **Parallelism**       | Single-threaded | Ray/Dask         | Distributed  | GPU              |
+| **API Compatibility** | Reference       | Drop-in          | Near drop-in | Near drop-in     |
+| **Best For**          | Small datasets  | Pandas scale-out | Distributed  | GPU acceleration |
+
+### Performance Characteristics
+
+| Platform             | Query Latency | Throughput | Memory Usage      | Max SF |
+| -------------------- | ------------- | ---------- | ----------------- | ------ |
+| **Polars**           | Very Low      | Very High  | Efficient         | 100    |
+| **PySpark**          | Medium        | Very High  | Cluster-bound     | 1000+  |
+| **DataFusion**       | Very Low      | High       | Efficient         | 50     |
+| **Databricks**       | Medium        | Very High  | Cluster-bound     | 1000+  |
+| **Snowpark Connect** | Medium        | High       | Snowflake-managed | 1000+  |
+| **Pandas**           | Low           | Medium     | High              | 10     |
+| **Modin**            | Low-Medium    | High       | Distributed       | 100    |
+| **Dask**             | Medium        | High       | Distributed       | 1000+  |
+| **cuDF**             | Very Low      | Very High  | GPU VRAM          | 50     |
+
+### GPU Acceleration
+
+| Feature      | cuDF            | PySpark (RAPIDS) |
+| ------------ | --------------- | ---------------- |
+| **Hardware** | NVIDIA GPU      | NVIDIA GPU       |
+| **Platform** | Linux only      | Linux only       |
+| **API**      | Pandas-like     | Spark DataFrame  |
+| **Memory**   | GPU VRAM        | GPU + Host       |
+| **Use Case** | Single-node GPU | Distributed GPU  |
+
+### Installation
+
+```bash
+# Expression Family
+uv add polars                    # Polars DataFrame
+uv add pyspark                   # PySpark DataFrame (requires Java 17/21)
+uv add datafusion                # DataFusion DataFrame
+
+# Databricks DataFrame (requires Databricks Connect)
+uv add databricks-connect
+
+# Snowpark Connect (PySpark-compatible on Snowflake)
+uv add "snowflake-snowpark-python[pandas]"
+
+# Pandas Family
+uv add pandas                    # Pandas DataFrame
+uv add modin[ray]                # Modin (with Ray backend)
+uv add dask[distributed]         # Dask DataFrame
+
+# cuDF (GPU - requires NVIDIA GPU, Linux only)
+# Note: cuDF requires pip due to CUDA dependencies
+pip install cudf-cu12 --extra-index-url=https://pypi.nvidia.com
+```
+
+---
+
+## Hybrid Platforms (SQL + DataFrame)
+
+These platforms support both SQL and native DataFrame execution modes. Use the appropriate CLI name based on your preferred execution paradigm.
+
+| Platform             | SQL Mode     | DataFrame Mode     | Default Mode | Notes                               |
+| -------------------- | ------------ | ------------------ | ------------ | ----------------------------------- |
+| **DataFusion**       | `datafusion` | `datafusion-df`    | SQL          | Arrow-native both modes             |
+| **PySpark**          | `spark`      | `pyspark-df`       | DataFrame    | SparkSQL vs DataFrame API           |
+| **Databricks**       | `databricks` | `databricks-df`    | SQL          | SQL Warehouse vs Databricks Connect |
+| **Snowpark Connect** | N/A          | `snowpark-connect` | DataFrame    | PySpark-compatible API on Snowflake |
+
+```{note}
+**Polars** is DataFrame-only (`polars-df`). SQL mode was removed due to fundamental limitations in Polars' SQL implementation (no implicit joins, limited subquery support) that make it incompatible with TPC benchmarks. For SQL benchmarks, use `duckdb` or another SQL-native platform.
+```
+
+**Usage Example:**
+```bash
+# Polars: DataFrame mode only
+benchbox run --platform polars-df --benchmark tpch --scale 1    # DataFrame mode
+
+# DataFusion: SQL and DataFrame modes
+benchbox run --platform datafusion --benchmark tpch --scale 1   # SQL mode
+benchbox run --platform datafusion-df --benchmark tpch --scale 1 # DataFrame mode
+
+# Databricks: SQL Warehouse vs DataFrame
+benchbox run --platform databricks --benchmark tpch --scale 10    # SQL Warehouse
+benchbox run --platform databricks-df --benchmark tpch --scale 10 # Databricks Connect
+
+# Snowpark Connect: DataFrame on Snowflake
+benchbox run --platform snowpark-connect --benchmark tpch --scale 10
+```
+
+---
+
+## Benchmark Support Matrix
+
+### TPC Benchmarks
+
+| Benchmark  | Local              | Cloud DW | Distributed | Time-Series             | DataFrame                   |
+| ---------- | ------------------ | -------- | ----------- | ----------------------- | --------------------------- |
+| **TPC-H**  | All                | All      | All         | PostgreSQL, TimescaleDB | All                         |
+| **TPC-DS** | DuckDB, ClickHouse | All      | All         | N/A                     | Polars, PySpark, Databricks |
+| **SSB**    | All                | All      | All         | N/A                     | All                         |
+
+### Analytics Benchmarks
+
+| Benchmark      | Local              | Cloud DW | Distributed       | Time-Series | DataFrame           |
+| -------------- | ------------------ | -------- | ----------------- | ----------- | ------------------- |
+| **ClickBench** | DuckDB, ClickHouse | All      | ClickHouse        | N/A         | Polars              |
+| **H2O.ai**     | DuckDB             | All      | Spark             | N/A         | All                 |
+| **AMPLab**     | DuckDB             | All      | Spark, Databricks | N/A         | PySpark, Databricks |
+
+### Time-Series Benchmarks
+
+| Benchmark       | PostgreSQL | TimescaleDB | InfluxDB |
+| --------------- | ---------- | ----------- | -------- |
+| **TSBS DevOps** | Limited    | Full        | Native   |
+| **TSBS IoT**    | Limited    | Full        | Native   |
+
+---
+
+## Scale Factor Recommendations
+
+| Scale Factor   | Dataset Size | Recommended Platforms                       |
+| -------------- | ------------ | ------------------------------------------- |
+| **0.001-0.01** | 1-10MB       | DuckDB, DataFusion, SQLite                  |
+| **0.1-1**      | 100MB-1GB    | DuckDB, DataFusion, ClickHouse, Polars      |
+| **1-10**       | 1-10GB       | DuckDB, ClickHouse, BigQuery, All DataFrame |
+| **10-100**     | 10-100GB     | DuckDB, ClickHouse, All Cloud DW, PySpark   |
+| **100-1000**   | 100GB-1TB    | BigQuery, Snowflake, Databricks, Redshift   |
+| **1000+**      | 1TB+         | BigQuery, Snowflake, Databricks, Spark      |
+
+---
+
+## Cost Comparison (All Categories)
+
+*All cost estimates as of January 2026. Based on SF=10 workload (~10GB data), 100 queries/day.*
+
+### Free/Open Source
+
+| Platform     | Type            | Cost               |
+| ------------ | --------------- | ------------------ |
+| DuckDB       | Local           | Free               |
+| DataFusion   | Local           | Free               |
+| SQLite       | Local           | Free               |
+| Polars       | Local/DataFrame | Free               |
+| ClickHouse   | Local/Server    | Free (self-hosted) |
+| PostgreSQL   | Relational      | Free (self-hosted) |
+| Trino/Presto | Distributed     | Free (self-hosted) |
+| Spark        | Distributed     | Free (self-hosted) |
+
+### Cloud Pay-Per-Use
+
+| Platform | Typical Monthly Cost | Best For                   | Cost Basis    |
+| -------- | -------------------- | -------------------------- | ------------- |
+| BigQuery | $50-5000             | GCP workloads              | $5/TB queried |
+| Athena   | $50-2000             | S3 data lake               | $5/TB scanned |
+| Firebolt | $100-3000            | High-performance analytics | Per-engine    |
+
+### Cloud Provisioned
+
+| Platform   | Typical Monthly Cost | Best For               | Cost Basis     |
+| ---------- | -------------------- | ---------------------- | -------------- |
+| Snowflake  | $100-10000           | Multi-cloud enterprise | Credits/hour   |
+| Databricks | $200-5000            | ML/Lakehouse           | DBU/hour       |
+| Redshift   | $100-5000            | AWS enterprise         | Node-hours     |
+| Synapse    | $200-5000            | Azure enterprise       | DWU-hours      |
+| Fabric     | Capacity-based       | Microsoft ecosystem    | Capacity Units |
+
+---
+
+## Use Case Recommendations
+
+### By Team Size
+
+| Team Profile             | Recommended           | Alternatives       |
+| ------------------------ | --------------------- | ------------------ |
+| **Individual Developer** | DuckDB                | DataFusion, Polars |
+| **Small Team (2-5)**     | DuckDB, ClickHouse    | PostgreSQL         |
+| **Medium Team (5-20)**   | BigQuery, Snowflake   | Databricks         |
+| **Enterprise**           | Snowflake, Databricks | Redshift, Synapse  |
+
+### By Workload
+
+| Workload                  | Recommended           | Alternatives         |
+| ------------------------- | --------------------- | -------------------- |
+| **Ad-hoc Analytics**      | DuckDB, BigQuery      | Athena, Snowflake    |
+| **Production Dashboards** | Snowflake, BigQuery   | Redshift, Databricks |
+| **ML/Data Science**       | Databricks, PySpark   | Snowflake, BigQuery  |
+| **Real-time Analytics**   | ClickHouse            | Firebolt             |
+| **Time-series IoT**       | TimescaleDB, InfluxDB | ClickHouse           |
+| **Data Lake**             | Databricks, Athena    | Trino, Spark         |
+
+### By Cloud Provider
+
+| Cloud           | Data Warehouse        | Spark Service       | Serverless |
+| --------------- | --------------------- | ------------------- | ---------- |
+| **AWS**         | Redshift              | EMR Serverless      | Athena     |
+| **GCP**         | BigQuery              | Dataproc Serverless | BigQuery   |
+| **Azure**       | Synapse, Fabric DW    | Fabric Spark        | Fabric DW  |
+| **Multi-cloud** | Snowflake, Databricks | Databricks          | Snowflake  |
+
+---
+
+## Migration Complexity
+
+| From \ To      | DuckDB | BigQuery | Snowflake | Databricks |
+| -------------- | ------ | -------- | --------- | ---------- |
+| **DuckDB**     | -      | Medium   | Medium    | Hard       |
+| **BigQuery**   | Medium | -        | Easy      | Medium     |
+| **Snowflake**  | Medium | Easy     | -         | Medium     |
+| **Databricks** | Hard   | Medium   | Medium    | -          |
+| **Redshift**   | Medium | Medium   | Easy      | Medium     |
+
+---
+
+## Summary by Category
+
+### Local/Embedded
+- **DuckDB**: Default choice for development, testing, and medium-scale analytics
+- **DataFusion**: Arrow-native, ideal for PyArrow workflows
+- **SQLite**: Lightweight testing and CI/CD
+- **Polars**: High-performance DataFrame library (DataFrame API only, use `polars-df`)
+- **ClickHouse**: High-throughput analytics (local or server mode)
+
+### Cloud Data Warehouses
+- **BigQuery**: GCP serverless, pay-per-query
+- **Snowflake**: Multi-cloud enterprise, elastic scaling
+- **Databricks**: Lakehouse, ML/data science
+- **Redshift**: AWS-native, provisioned or serverless
+- **Synapse**: Azure enterprise, T-SQL compatible
+- **Fabric DW**: Microsoft ecosystem, OneLake integration
+- **Athena**: AWS serverless, S3 data lake
+- **Firebolt**: High-performance vectorized analytics
+
+### Distributed SQL
+- **Trino**: Federated SQL, data lake analytics
+- **PrestoDB**: Meta's fork, similar to Trino
+- **Spark SQL**: Batch processing, Spark ecosystem
+- **ClickHouse**: Real-time OLAP, high concurrency
+
+### Relational & Time-Series
+- **PostgreSQL**: Traditional RDBMS baseline
+- **TimescaleDB**: Time-series on PostgreSQL
+- **InfluxDB**: IoT and metrics workloads
+
+### Managed Spark
+- **AWS**: Glue, EMR Serverless, Athena for Spark
+- **GCP**: Dataproc, Dataproc Serverless
+- **Azure**: Fabric Spark, Synapse Spark
+
+### DataFrame
+- **Expression Family**: Polars (single-node), PySpark (distributed), DataFusion (Arrow-native), Databricks (managed), Snowpark Connect (Snowflake-native)
+- **Pandas Family**: Pandas (reference), Modin (parallel), Dask (distributed), cuDF (GPU-accelerated)
+
+---
+
+## Resources
+
+- **Individual Platform Guides**: See platform-specific docs in this section
+- **Platform Selection Guide**: [platform-selection-guide.md](platform-selection-guide.md)
+- **DataFrame Platforms**: [dataframe.md](dataframe.md)
+- **Getting Started**: [../usage/getting-started.md](../usage/getting-started.md)

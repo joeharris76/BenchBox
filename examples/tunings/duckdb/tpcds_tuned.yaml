@@ -1,0 +1,133 @@
+# DuckDB TPC-DS Tuned Configuration
+# This configuration enables all DuckDB-supported optimizations for TPC-DS benchmark
+# Provides maximum performance with constraints and table-level tunings enabled
+
+primary_keys:
+  enabled: true
+  enforce_uniqueness: true
+  nullable: false
+
+foreign_keys:
+  enabled: true
+  enforce_referential_integrity: true
+  on_delete_action: CASCADE
+  on_update_action: RESTRICT
+
+unique_constraints:
+  enabled: true
+  ignore_nulls: false
+
+check_constraints:
+  enabled: true
+  enforce_on_insert: true
+  enforce_on_update: true
+
+platform_optimizations:
+  z_ordering_enabled: false
+  z_ordering_columns: []
+  auto_optimize_enabled: false
+  auto_compact_enabled: false
+  bloom_filters_enabled: false
+  bloom_filter_columns: []
+  materialized_views_enabled: false
+
+table_tunings:
+  STORE_SALES:
+    table_name: STORE_SALES
+    partitioning:
+    - name: SS_SOLD_DATE_SK
+      type: INTEGER
+      order: 1
+    sorting:
+    - name: SS_ITEM_SK
+      type: INTEGER
+      order: 1
+    - name: SS_CUSTOMER_SK
+      type: INTEGER
+      order: 2
+
+  STORE_RETURNS:
+    table_name: STORE_RETURNS
+    partitioning:
+    - name: SR_RETURNED_DATE_SK
+      type: INTEGER
+      order: 1
+    sorting:
+    - name: SR_ITEM_SK
+      type: INTEGER
+      order: 1
+
+  CATALOG_SALES:
+    table_name: CATALOG_SALES
+    partitioning:
+    - name: CS_SOLD_DATE_SK
+      type: INTEGER
+      order: 1
+    sorting:
+    - name: CS_ITEM_SK
+      type: INTEGER
+      order: 1
+
+  CATALOG_RETURNS:
+    table_name: CATALOG_RETURNS
+    partitioning:
+    - name: CR_RETURNED_DATE_SK
+      type: INTEGER
+      order: 1
+    sorting:
+    - name: CR_ITEM_SK
+      type: INTEGER
+      order: 1
+
+  WEB_SALES:
+    table_name: WEB_SALES
+    partitioning:
+    - name: WS_SOLD_DATE_SK
+      type: INTEGER
+      order: 1
+    sorting:
+    - name: WS_ITEM_SK
+      type: INTEGER
+      order: 1
+
+  WEB_RETURNS:
+    table_name: WEB_RETURNS
+    partitioning:
+    - name: WR_RETURNED_DATE_SK
+      type: INTEGER
+      order: 1
+    sorting:
+    - name: WR_ITEM_SK
+      type: INTEGER
+      order: 1
+
+  DATE_DIM:
+    table_name: DATE_DIM
+    sorting:
+    - name: D_DATE_SK
+      type: INTEGER
+      order: 1
+
+  ITEM:
+    table_name: ITEM
+    sorting:
+    - name: I_ITEM_SK
+      type: INTEGER
+      order: 1
+
+  CUSTOMER:
+    table_name: CUSTOMER
+    sorting:
+    - name: C_CUSTOMER_SK
+      type: INTEGER
+      order: 1
+
+_metadata:
+  version: '2.0'
+  format: unified_tuning
+  database: duckdb
+  benchmark: tpcds
+  configuration_type: tuned
+  description: "DuckDB TPC-DS configuration with all supported optimizations enabled"
+  created: '2025-11-01'
+  generated_by: benchbox-project

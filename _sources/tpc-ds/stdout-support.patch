@@ -1,0 +1,57 @@
+diff --git a/tools/makefile b/tools/makefile
+index 6323a042..b19741e2 100644
+--- a/tools/makefile
++++ b/tools/makefile
+@@ -56,7 +56,7 @@ CC		= $($(OS)_CC)
+ # CFLAGS
+ AIX_CFLAGS		= -q64 -O3 -D_LARGE_FILES
+ HPUX_CFLAGS		= -O3 -Wall
+-LINUX_CFLAGS	= -g -Wall
++LINUX_CFLAGS	= -g -Wall -fcommon
+ MACOS_CFLAGS	= -g -Wall -fcommon
+ NCR_CFLAGS		= -g 
+ SOLARIS_CFLAGS	= -O3 -Wall
+diff --git a/tools/params.h b/tools/params.h
+index 0f6318b5..9c8aa8cd 100644
+--- a/tools/params.h
++++ b/tools/params.h
+@@ -61,7 +61,7 @@ option_t options[] =
+ {"CHILD",		OPT_INT,			17,"generate <n>th chunk of the parallelized data", NULL, "1"}, 
+ {"CHKSEEDS",		OPT_FLG|OPT_HIDE,	18, "validate RNG usage for parallelism", NULL, "N"}, 
+ {"RELEASE",		OPT_FLG,			19, "display the release information", printReleaseInfo, "N"}, 
+-{"_FILTER",		OPT_FLG,			20, "output data to stdout", NULL, "N"}, 
++{"FILTER",		OPT_FLG,			20, "output data to stdout", NULL, "N"}, 
+ {"VALIDATE",	OPT_FLG,			21, "produce rows for data validation", NULL, "N"}, 
+ {"VCOUNT",		OPT_INT|OPT_ADV,	22, "set number of validation rows to be produced", NULL, "50"}, 
+ {"VSUFFIX",		OPT_STR|OPT_ADV,	23, "set file suffix for data validation", NULL, ".vld"}, 
+diff --git a/tools/porting.h b/tools/porting.h
+index 6c3e6bf8..8ae62481 100644
+--- a/tools/porting.h
++++ b/tools/porting.h
+@@ -117,6 +117,10 @@ char *strdup(const char *);
+ #define MAXINT INT_MAX
+ #endif
+ 
++#ifdef LINUX
++#define MAXINT INT_MAX
++#endif
++
+ 
+ #define INTERNAL(m) {\
+ fprintf(stderr, "ERROR: %s\n\tFile: %s\n\tLine: %d\n", \
+diff --git a/tools/print.c b/tools/print.c
+index 5ecb5d78..3408b522 100644
+--- a/tools/print.c
++++ b/tools/print.c
+@@ -480,9 +480,9 @@ print_start (int tbl)
+ 		   pTdef->outfile = fopen (path, "w");
+ #endif
+ 	   }
++      fpOutfile = pTdef->outfile;
+    }
+-   
+-   fpOutfile = pTdef->outfile;
++
+    res = (fpOutfile != NULL);
+ 
+    if (!res)                    /* open failed! */

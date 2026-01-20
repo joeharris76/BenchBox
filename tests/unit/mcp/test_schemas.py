@@ -1,0 +1,373 @@
+"""Tests for BenchBox MCP schemas module.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import pytest
+from pydantic import ValidationError as PydanticValidationError
+
+from benchbox.mcp.schemas import (
+    MAX_QUERY_ID_LENGTH,
+    MAX_QUERY_IDS,
+    CompareResultsInput,
+    DryRunInput,
+    ExportSummaryInput,
+    GetBenchmarkInfoInput,
+    GetResultsInput,
+    ListRecentRunsInput,
+    MCPValidationError,
+    RunBenchmarkInput,
+    ValidateConfigInput,
+    validate_benchmark_name,
+    validate_filename,
+    validate_platform_name,
+    validate_query_id,
+    validate_query_list,
+    validate_scale_factor,
+)
+
+
+class TestValidateQueryId:
+    """Tests for validate_query_id function."""
+
+    def test_valid_query_ids(self):
+        """Test valid query IDs are accepted."""
+        assert validate_query_id("1") == "1"
+        assert validate_query_id("Q1") == "Q1"
+        assert validate_query_id("query-1") == "query-1"
+        assert validate_query_id("query_1") == "query_1"
+        assert validate_query_id("  Q1  ") == "Q1"  # Strips whitespace
+
+    def test_empty_query_id_rejected(self):
+        """Test empty query ID is rejected."""
+        with pytest.raises(MCPValidationError, match="cannot be empty"):
+            validate_query_id("")
+        with pytest.raises(MCPValidationError, match="cannot be empty"):
+            validate_query_id("   ")
+
+    def test_too_long_query_id_rejected(self):
+        """Test query ID exceeding max length is rejected."""
+        long_id = "a" * (MAX_QUERY_ID_LENGTH + 1)
+        with pytest.raises(MCPValidationError, match="too long"):
+            validate_query_id(long_id)
+
+    def test_invalid_characters_rejected(self):
+        """Test query IDs with invalid characters are rejected."""
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_query_id("query@1")
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_query_id("query 1")
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_query_id("../query")
+
+
+class TestValidateQueryList:
+    """Tests for validate_query_list function."""
+
+    def test_valid_query_list(self):
+        """Test valid query lists are accepted."""
+        assert validate_query_list("1,2,3") == ["1", "2", "3"]
+        assert validate_query_list("Q1, Q2, Q3") == ["Q1", "Q2", "Q3"]
+        assert validate_query_list("1") == ["1"]
+
+    def test_none_and_empty(self):
+        """Test None and empty strings return None."""
+        assert validate_query_list(None) is None
+        assert validate_query_list("") is None
+        assert validate_query_list("   ") is None
+
+    def test_too_many_queries_rejected(self):
+        """Test query list exceeding max count is rejected."""
+        query_list = ",".join([str(i) for i in range(MAX_QUERY_IDS + 1)])
+        with pytest.raises(MCPValidationError, match="Too many query IDs"):
+            validate_query_list(query_list)
+
+    def test_invalid_query_in_list_rejected(self):
+        """Test invalid query ID in list is rejected."""
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_query_list("1,2,query@3")
+
+
+class TestValidatePlatformName:
+    """Tests for validate_platform_name function."""
+
+    def test_valid_platform_names(self):
+        """Test valid platform names are accepted."""
+        assert validate_platform_name("duckdb") == "duckdb"
+        assert validate_platform_name("DuckDB") == "duckdb"  # Lowercased
+        assert validate_platform_name("polars-df") == "polars-df"
+        assert validate_platform_name("  snowflake  ") == "snowflake"  # Stripped
+
+    def test_empty_platform_rejected(self):
+        """Test empty platform name is rejected."""
+        with pytest.raises(MCPValidationError, match="cannot be empty"):
+            validate_platform_name("")
+
+    def test_too_long_platform_rejected(self):
+        """Test platform name exceeding max length is rejected."""
+        long_name = "a" * 51
+        with pytest.raises(MCPValidationError, match="too long"):
+            validate_platform_name(long_name)
+
+    def test_invalid_characters_rejected(self):
+        """Test platform names with invalid characters are rejected."""
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_platform_name("platform@test")
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_platform_name("../platform")
+
+
+class TestValidateBenchmarkName:
+    """Tests for validate_benchmark_name function."""
+
+    def test_valid_benchmark_names(self):
+        """Test valid benchmark names are accepted."""
+        assert validate_benchmark_name("tpch") == "tpch"
+        assert validate_benchmark_name("TPCH") == "tpch"  # Lowercased
+        assert validate_benchmark_name("tpc-ds") == "tpc-ds"
+        assert validate_benchmark_name("  tpch  ") == "tpch"  # Stripped
+
+    def test_empty_benchmark_rejected(self):
+        """Test empty benchmark name is rejected."""
+        with pytest.raises(MCPValidationError, match="cannot be empty"):
+            validate_benchmark_name("")
+
+    def test_too_long_benchmark_rejected(self):
+        """Test benchmark name exceeding max length is rejected."""
+        long_name = "a" * 51
+        with pytest.raises(MCPValidationError, match="too long"):
+            validate_benchmark_name(long_name)
+
+
+class TestValidateFilename:
+    """Tests for validate_filename function."""
+
+    def test_valid_filenames(self):
+        """Test valid filenames are accepted."""
+        assert validate_filename("results.json") == "results.json"
+        assert validate_filename("tpch_sf001_duckdb_20231201.json") == "tpch_sf001_duckdb_20231201.json"
+        assert validate_filename("test-file.json") == "test-file.json"
+
+    def test_empty_filename_rejected(self):
+        """Test empty filename is rejected."""
+        with pytest.raises(MCPValidationError, match="cannot be empty"):
+            validate_filename("")
+
+    def test_too_long_filename_rejected(self):
+        """Test filename exceeding max length is rejected."""
+        long_name = "a" * 256
+        with pytest.raises(MCPValidationError, match="too long"):
+            validate_filename(long_name)
+
+    def test_path_traversal_rejected(self):
+        """Test path traversal attempts are rejected."""
+        with pytest.raises(MCPValidationError, match="path components"):
+            validate_filename("../secret.json")
+        with pytest.raises(MCPValidationError, match="path components"):
+            validate_filename("dir/file.json")
+        with pytest.raises(MCPValidationError, match="path components"):
+            validate_filename("..\\file.json")
+
+    def test_invalid_characters_rejected(self):
+        """Test filenames with invalid characters are rejected."""
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_filename("file@name.json")
+        with pytest.raises(MCPValidationError, match="invalid characters"):
+            validate_filename("file name.json")
+
+
+class TestValidateScaleFactor:
+    """Tests for validate_scale_factor function."""
+
+    def test_valid_scale_factors(self):
+        """Test valid scale factors are accepted."""
+        assert validate_scale_factor(0.01) == 0.01
+        assert validate_scale_factor(1.0) == 1.0
+        assert validate_scale_factor(10.0) == 10.0
+        assert validate_scale_factor(100.0) == 100.0
+
+    def test_zero_rejected(self):
+        """Test zero scale factor is rejected."""
+        with pytest.raises(MCPValidationError, match="must be positive"):
+            validate_scale_factor(0)
+
+    def test_negative_rejected(self):
+        """Test negative scale factor is rejected."""
+        with pytest.raises(MCPValidationError, match="must be positive"):
+            validate_scale_factor(-1)
+
+    def test_too_small_rejected(self):
+        """Test scale factor below minimum is rejected."""
+        with pytest.raises(MCPValidationError, match="too small"):
+            validate_scale_factor(0.0001)
+
+    def test_too_large_rejected(self):
+        """Test scale factor above maximum is rejected."""
+        with pytest.raises(MCPValidationError, match="too large"):
+            validate_scale_factor(20000)
+
+
+class TestRunBenchmarkInput:
+    """Tests for RunBenchmarkInput Pydantic model."""
+
+    def test_valid_input(self):
+        """Test valid input is accepted."""
+        inp = RunBenchmarkInput(platform="duckdb", benchmark="tpch")
+        assert inp.platform == "duckdb"
+        assert inp.benchmark == "tpch"
+        assert inp.scale_factor == 0.01  # Default
+        assert inp.queries is None
+        assert inp.phases is None
+
+    def test_valid_input_with_all_fields(self):
+        """Test valid input with all fields."""
+        inp = RunBenchmarkInput(
+            platform="DuckDB",
+            benchmark="TPCH",
+            scale_factor=1.0,
+            queries="1,2,3",
+            phases="load,power",
+        )
+        assert inp.platform == "duckdb"  # Lowercased
+        assert inp.benchmark == "tpch"  # Lowercased
+        assert inp.scale_factor == 1.0
+        assert inp.queries == "1,2,3"
+        assert inp.phases == "load,power"
+
+    def test_invalid_platform_rejected(self):
+        """Test invalid platform is rejected."""
+        with pytest.raises(PydanticValidationError):
+            RunBenchmarkInput(platform="invalid@platform", benchmark="tpch")
+
+    def test_invalid_scale_factor_rejected(self):
+        """Test invalid scale factor is rejected."""
+        with pytest.raises(PydanticValidationError):
+            RunBenchmarkInput(platform="duckdb", benchmark="tpch", scale_factor=-1)
+
+
+class TestDryRunInput:
+    """Tests for DryRunInput Pydantic model."""
+
+    def test_valid_input(self):
+        """Test valid input is accepted."""
+        inp = DryRunInput(platform="duckdb", benchmark="tpch")
+        assert inp.platform == "duckdb"
+        assert inp.benchmark == "tpch"
+
+    def test_with_query_subset(self):
+        """Test input with query subset."""
+        inp = DryRunInput(platform="duckdb", benchmark="tpch", queries="1,6,17")
+        assert inp.queries == "1,6,17"
+
+
+class TestValidateConfigInput:
+    """Tests for ValidateConfigInput Pydantic model."""
+
+    def test_valid_input(self):
+        """Test valid input is accepted."""
+        inp = ValidateConfigInput(platform="duckdb", benchmark="tpch")
+        assert inp.platform == "duckdb"
+        assert inp.benchmark == "tpch"
+        assert inp.scale_factor == 1.0  # Different default
+
+
+class TestGetBenchmarkInfoInput:
+    """Tests for GetBenchmarkInfoInput Pydantic model."""
+
+    def test_valid_input(self):
+        """Test valid input is accepted."""
+        inp = GetBenchmarkInfoInput(benchmark="tpch")
+        assert inp.benchmark == "tpch"
+
+    def test_normalizes_case(self):
+        """Test benchmark name is normalized to lowercase."""
+        inp = GetBenchmarkInfoInput(benchmark="TPCDS")
+        assert inp.benchmark == "tpcds"
+
+
+class TestListRecentRunsInput:
+    """Tests for ListRecentRunsInput Pydantic model."""
+
+    def test_valid_input_with_defaults(self):
+        """Test valid input with defaults."""
+        inp = ListRecentRunsInput()
+        assert inp.limit == 10
+        assert inp.platform is None
+        assert inp.benchmark is None
+
+    def test_valid_input_with_filters(self):
+        """Test valid input with filters."""
+        inp = ListRecentRunsInput(limit=5, platform="duckdb", benchmark="tpch")
+        assert inp.limit == 5
+        assert inp.platform == "duckdb"
+        assert inp.benchmark == "tpch"
+
+    def test_limit_bounds(self):
+        """Test limit is bounded."""
+        with pytest.raises(PydanticValidationError):
+            ListRecentRunsInput(limit=0)
+        with pytest.raises(PydanticValidationError):
+            ListRecentRunsInput(limit=101)
+
+
+class TestGetResultsInput:
+    """Tests for GetResultsInput Pydantic model."""
+
+    def test_valid_input(self):
+        """Test valid input is accepted."""
+        inp = GetResultsInput(result_file="test.json")
+        assert inp.result_file == "test.json"
+        assert inp.include_queries is True  # Default
+
+    def test_path_traversal_rejected(self):
+        """Test path traversal is rejected."""
+        with pytest.raises(PydanticValidationError):
+            GetResultsInput(result_file="../secret.json")
+
+
+class TestCompareResultsInput:
+    """Tests for CompareResultsInput Pydantic model."""
+
+    def test_valid_input(self):
+        """Test valid input is accepted."""
+        inp = CompareResultsInput(file1="run1.json", file2="run2.json")
+        assert inp.file1 == "run1.json"
+        assert inp.file2 == "run2.json"
+        assert inp.threshold_percent == 10.0  # Default
+
+    def test_custom_threshold(self):
+        """Test custom threshold is accepted."""
+        inp = CompareResultsInput(file1="run1.json", file2="run2.json", threshold_percent=5.0)
+        assert inp.threshold_percent == 5.0
+
+    def test_threshold_bounds(self):
+        """Test threshold is bounded."""
+        with pytest.raises(PydanticValidationError):
+            CompareResultsInput(file1="a.json", file2="b.json", threshold_percent=-1)
+        with pytest.raises(PydanticValidationError):
+            CompareResultsInput(file1="a.json", file2="b.json", threshold_percent=101)
+
+
+class TestExportSummaryInput:
+    """Tests for ExportSummaryInput Pydantic model."""
+
+    def test_valid_input(self):
+        """Test valid input is accepted."""
+        inp = ExportSummaryInput(result_file="test.json")
+        assert inp.result_file == "test.json"
+        assert inp.format == "text"  # Default
+
+    def test_valid_formats(self):
+        """Test valid formats are accepted."""
+        inp = ExportSummaryInput(result_file="test.json", format="markdown")
+        assert inp.format == "markdown"
+
+        inp = ExportSummaryInput(result_file="test.json", format="json")
+        assert inp.format == "json"
+
+    def test_invalid_format_rejected(self):
+        """Test invalid format is rejected."""
+        with pytest.raises(PydanticValidationError):
+            ExportSummaryInput(result_file="test.json", format="xml")

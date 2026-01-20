@@ -1,0 +1,637 @@
+"""Tests for system information utilities.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from unittest.mock import MagicMock, mock_open, patch
+
+import pytest
+
+from benchbox.utils.system_info import (
+    SystemInfo,
+    get_cpu_info,
+    get_memory_info,
+    get_system_info,
+)
+
+pytestmark = pytest.mark.medium  # System info tests profile the machine (~2s)
+
+
+class TestSystemInfo:
+    """Test SystemInfo dataclass."""
+
+    def test_system_info_creation(self):
+        """Test creating SystemInfo with all fields."""
+        info = SystemInfo(
+            os_name="Linux",
+            os_version="5.4.0",
+            architecture="x86_64",
+            cpu_model="Intel Core i7-8700K",
+            cpu_cores=8,
+            total_memory_gb=16.0,
+            available_memory_gb=12.5,
+            python_version="3.11.0",
+            hostname="test-machine",
+        )
+
+        assert info.os_name == "Linux"
+        assert info.os_version == "5.4.0"
+        assert info.architecture == "x86_64"
+        assert info.cpu_model == "Intel Core i7-8700K"
+        assert info.cpu_cores == 8
+        assert info.total_memory_gb == 16.0
+        assert info.available_memory_gb == 12.5
+        assert info.python_version == "3.11.0"
+        assert info.hostname == "test-machine"
+
+    def test_system_info_to_dict(self):
+        """Test converting SystemInfo to dictionary."""
+        info = SystemInfo(
+            os_name="Darwin",
+            os_version="21.6.0",
+            architecture="arm64",
+            cpu_model="Apple M1",
+            cpu_cores=8,
+            total_memory_gb=16.0,
+            available_memory_gb=14.2,
+            python_version="3.11.2",
+            hostname="macbook-pro",
+        )
+
+        result = info.to_dict()
+
+        expected = {
+            "os_type": "Darwin",
+            "os_version": "21.6.0",
+            "architecture": "arm64",
+            "cpu_model": "Apple M1",
+            "cpu_cores": 8,
+            "total_memory_gb": 16.0,
+            "available_memory_gb": 14.2,
+            "python_version": "3.11.2",
+            "hostname": "macbook-pro",
+        }
+
+        assert result == expected
+        assert isinstance(result, dict)
+
+    def test_system_info_to_dict_compatibility_mapping(self):
+        """Test that to_dict() maps os_name to os_type for compatibility."""
+        info = SystemInfo(
+            os_name="Windows",
+            os_version="10",
+            architecture="AMD64",
+            cpu_model="AMD Ryzen 7",
+            cpu_cores=16,
+            total_memory_gb=32.0,
+            available_memory_gb=28.0,
+            python_version="3.11.1",
+            hostname="windows-pc",
+        )
+
+        result = info.to_dict()
+
+        # Verify os_name maps to os_type
+        assert result["os_type"] == "Windows"
+        assert "os_name" not in result  # Should be mapped, not duplicated
+
+    def test_system_info_edge_cases(self):
+        """Test SystemInfo with edge case values."""
+        info = SystemInfo(
+            os_name="Unknown",
+            os_version="Unknown",
+            architecture="Unknown",
+            cpu_model="Unknown CPU",
+            cpu_cores=0,
+            total_memory_gb=0.0,
+            available_memory_gb=0.0,
+            python_version="0.0.0",
+            hostname="unknown",
+        )
+
+        assert info.os_name == "Unknown"
+        assert info.cpu_cores == 0
+        assert info.total_memory_gb == 0.0
+
+        # Should still convert to dict properly
+        result = info.to_dict()
+        assert result["os_type"] == "Unknown"
+        assert result["cpu_cores"] == 0
+
+
+class TestGetSystemInfo:
+    """Test get_system_info function."""
+
+    @patch("benchbox.utils.system_info.psutil.virtual_memory")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.system")
+    @patch("benchbox.utils.system_info.platform.release")
+    @patch("benchbox.utils.system_info.platform.machine")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.python_version")
+    @patch("benchbox.utils.system_info.platform.node")
+    def test_get_system_info_basic(
+        self,
+        mock_node,
+        mock_python_version,
+        mock_processor,
+        mock_machine,
+        mock_release,
+        mock_system,
+        mock_cpu_count,
+        mock_virtual_memory,
+    ):
+        """Test basic system info gathering."""
+        # Setup mocks
+        mock_memory = MagicMock()
+        mock_memory.total = 16 * (1024**3)  # 16 GB in bytes
+        mock_memory.available = 12 * (1024**3)  # 12 GB in bytes
+        mock_virtual_memory.return_value = mock_memory
+
+        mock_cpu_count.return_value = 8
+        mock_system.return_value = "Linux"
+        mock_release.return_value = "5.4.0"
+        mock_machine.return_value = "x86_64"
+        mock_processor.return_value = "Intel Core i7-8700K"
+        mock_python_version.return_value = "3.11.0"
+        mock_node.return_value = "test-machine"
+
+        result = get_system_info()
+
+        assert isinstance(result, SystemInfo)
+        assert result.os_name == "Linux"
+        assert result.os_version == "5.4.0"
+        assert result.architecture == "x86_64"
+        assert result.cpu_model == "Intel Core i7-8700K"
+        assert result.cpu_cores == 8
+        assert result.total_memory_gb == 16.0
+        assert result.available_memory_gb == 12.0
+        assert result.python_version == "3.11.0"
+        assert result.hostname == "test-machine"
+
+    @patch("benchbox.utils.system_info.psutil.virtual_memory")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.system")
+    @patch("benchbox.utils.system_info.platform.release")
+    @patch("benchbox.utils.system_info.platform.machine")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.python_version")
+    @patch("benchbox.utils.system_info.platform.node")
+    def test_get_system_info_empty_processor(
+        self,
+        mock_node,
+        mock_python_version,
+        mock_processor,
+        mock_machine,
+        mock_release,
+        mock_system,
+        mock_cpu_count,
+        mock_virtual_memory,
+    ):
+        """Test system info gathering when processor() returns empty string."""
+        # Setup mocks - processor returns empty string
+        mock_memory = MagicMock()
+        mock_memory.total = 8 * (1024**3)
+        mock_memory.available = 6 * (1024**3)
+        mock_virtual_memory.return_value = mock_memory
+
+        mock_cpu_count.return_value = 4
+        mock_system.return_value = "Darwin"
+        mock_release.return_value = "21.6.0"
+        mock_machine.return_value = "arm64"
+        mock_processor.return_value = ""  # Empty processor string
+        mock_python_version.return_value = "3.11.2"
+        mock_node.return_value = "macbook"
+
+        with patch(
+            "builtins.open",
+            mock_open(read_data="model name\t: Apple M1\nother: value\n"),
+        ):
+            result = get_system_info()
+
+        # Empty processor string gets converted to "Unknown" before fallback logic runs
+        assert result.cpu_model == "Unknown"
+        assert result.os_name == "Darwin"
+        assert result.architecture == "arm64"
+
+    @patch("benchbox.utils.system_info.psutil.virtual_memory")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.system")
+    @patch("benchbox.utils.system_info.platform.release")
+    @patch("benchbox.utils.system_info.platform.machine")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.python_version")
+    @patch("benchbox.utils.system_info.platform.node")
+    def test_get_system_info_processor_fallback_to_machine(
+        self,
+        mock_node,
+        mock_python_version,
+        mock_processor,
+        mock_machine,
+        mock_release,
+        mock_system,
+        mock_cpu_count,
+        mock_virtual_memory,
+    ):
+        """Test CPU model fallback when /proc/cpuinfo is not available."""
+        # Setup mocks
+        mock_memory = MagicMock()
+        mock_memory.total = 4 * (1024**3)
+        mock_memory.available = 3 * (1024**3)
+        mock_virtual_memory.return_value = mock_memory
+
+        mock_cpu_count.return_value = 2
+        mock_system.return_value = "Windows"
+        mock_release.return_value = "10"
+        mock_machine.return_value = "AMD64"
+        mock_processor.return_value = None  # None processor
+        mock_python_version.return_value = "3.11.1"
+        mock_node.return_value = "windows-pc"
+
+        # Mock file not found for /proc/cpuinfo
+        with patch("builtins.open", side_effect=FileNotFoundError()):
+            result = get_system_info()
+
+        # None processor gets converted to "Unknown" before fallback logic runs
+        assert result.cpu_model == "Unknown"
+        assert result.os_name == "Windows"
+        assert result.architecture == "AMD64"
+
+    @patch("benchbox.utils.system_info.psutil.virtual_memory")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.system")
+    @patch("benchbox.utils.system_info.platform.release")
+    @patch("benchbox.utils.system_info.platform.machine")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.python_version")
+    @patch("benchbox.utils.system_info.platform.node")
+    def test_get_system_info_exception_handling(
+        self,
+        mock_node,
+        mock_python_version,
+        mock_processor,
+        mock_machine,
+        mock_release,
+        mock_system,
+        mock_cpu_count,
+        mock_virtual_memory,
+    ):
+        """Test system info gathering with exceptions during CPU detection."""
+        # Setup mocks
+        mock_memory = MagicMock()
+        mock_memory.total = 2 * (1024**3)
+        mock_memory.available = 1.5 * (1024**3)
+        mock_virtual_memory.return_value = mock_memory
+
+        mock_cpu_count.return_value = 1
+        mock_system.return_value = "Linux"
+        mock_release.return_value = "4.15.0"
+        mock_machine.return_value = "i686"
+        mock_processor.side_effect = Exception("Processor detection failed")  # Exception
+        mock_python_version.return_value = "3.9.0"
+        mock_node.return_value = "old-system"
+
+        result = get_system_info()
+
+        # Should fallback to machine + " CPU" on exception
+        assert result.cpu_model == "i686 CPU"
+        assert result.os_name == "Linux"
+        assert result.cpu_cores == 1
+        assert result.total_memory_gb == 2.0
+        assert result.available_memory_gb == 1.5
+
+    @patch("benchbox.utils.system_info.psutil.virtual_memory")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.system")
+    @patch("benchbox.utils.system_info.platform.release")
+    @patch("benchbox.utils.system_info.platform.machine")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.python_version")
+    @patch("benchbox.utils.system_info.platform.node")
+    def test_get_system_info_memory_calculation(
+        self,
+        mock_node,
+        mock_python_version,
+        mock_processor,
+        mock_machine,
+        mock_release,
+        mock_system,
+        mock_cpu_count,
+        mock_virtual_memory,
+    ):
+        """Test memory size calculation accuracy."""
+        # Setup memory mock with precise values
+        mock_memory = MagicMock()
+        mock_memory.total = 17179869184  # Exactly 16 * 1024^3 bytes
+        mock_memory.available = 8589934592  # Exactly 8 * 1024^3 bytes
+        mock_virtual_memory.return_value = mock_memory
+
+        # Setup other mocks
+        mock_cpu_count.return_value = 4
+        mock_system.return_value = "Linux"
+        mock_release.return_value = "5.10.0"
+        mock_machine.return_value = "x86_64"
+        mock_processor.return_value = "Test CPU"
+        mock_python_version.return_value = "3.10.0"
+        mock_node.return_value = "test"
+
+        result = get_system_info()
+
+        # Memory should be calculated correctly
+        assert result.total_memory_gb == 16.0
+        assert result.available_memory_gb == 8.0
+
+    def test_get_system_info_real_system(self):
+        """Test get_system_info with real system (integration test)."""
+        # This test runs against the actual system
+        result = get_system_info()
+
+        # Verify structure and types
+        assert isinstance(result, SystemInfo)
+        assert isinstance(result.os_name, str)
+        assert isinstance(result.os_version, str)
+        assert isinstance(result.architecture, str)
+        assert isinstance(result.cpu_model, str)
+        assert isinstance(result.cpu_cores, int)
+        assert isinstance(result.total_memory_gb, float)
+        assert isinstance(result.available_memory_gb, float)
+        assert isinstance(result.python_version, str)
+        assert isinstance(result.hostname, str)
+
+        # Basic sanity checks
+        assert result.cpu_cores > 0
+        assert result.total_memory_gb > 0
+        assert result.available_memory_gb > 0
+        assert result.available_memory_gb <= result.total_memory_gb
+        assert len(result.os_name) > 0
+        assert len(result.hostname) > 0
+
+
+class TestGetMemoryInfo:
+    """Test get_memory_info function."""
+
+    @patch("benchbox.utils.system_info.psutil.virtual_memory")
+    def test_get_memory_info(self, mock_virtual_memory):
+        """Test getting memory information."""
+        # Setup mock
+        mock_memory = MagicMock()
+        mock_memory.total = 16 * (1024**3)  # 16 GB
+        mock_memory.available = 10 * (1024**3)  # 10 GB
+        mock_memory.used = 6 * (1024**3)  # 6 GB
+        mock_memory.percent = 37.5  # 37.5%
+        mock_virtual_memory.return_value = mock_memory
+
+        result = get_memory_info()
+
+        expected = {
+            "total_gb": 16.0,
+            "available_gb": 10.0,
+            "used_gb": 6.0,
+            "percent_used": 37.5,
+        }
+
+        assert result == expected
+        mock_virtual_memory.assert_called_once()
+
+    @patch("benchbox.utils.system_info.psutil.virtual_memory")
+    def test_get_memory_info_precision(self, mock_virtual_memory):
+        """Test memory info calculation precision."""
+        # Setup mock with non-round numbers
+        mock_memory = MagicMock()
+        mock_memory.total = 17179869184  # 16 * 1024^3 exactly
+        mock_memory.available = 5368709120  # 5 * 1024^3 exactly
+        mock_memory.used = 11811160064  # total - available
+        mock_memory.percent = 68.75  # used/total * 100
+        mock_virtual_memory.return_value = mock_memory
+
+        result = get_memory_info()
+
+        assert result["total_gb"] == 16.0
+        assert result["available_gb"] == 5.0
+        assert result["used_gb"] == 11.0
+        assert result["percent_used"] == 68.75
+
+    def test_get_memory_info_real_system(self):
+        """Test get_memory_info with real system (integration test)."""
+        result = get_memory_info()
+
+        # Verify structure
+        assert isinstance(result, dict)
+        assert "total_gb" in result
+        assert "available_gb" in result
+        assert "used_gb" in result
+        assert "percent_used" in result
+
+        # Verify types
+        assert isinstance(result["total_gb"], float)
+        assert isinstance(result["available_gb"], float)
+        assert isinstance(result["used_gb"], float)
+        assert isinstance(result["percent_used"], float)
+
+        # Basic sanity checks
+        assert result["total_gb"] > 0
+        assert result["available_gb"] >= 0
+        assert result["used_gb"] >= 0
+        assert result["available_gb"] <= result["total_gb"]
+        assert 0 <= result["percent_used"] <= 100
+
+
+class TestGetCPUInfo:
+    """Test get_cpu_info function."""
+
+    @patch("benchbox.utils.system_info.psutil.cpu_percent")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.machine")
+    def test_get_cpu_info(self, mock_machine, mock_processor, mock_cpu_count, mock_cpu_percent):
+        """Test getting CPU information."""
+        # Setup mocks
+        mock_cpu_count.side_effect = lambda logical=True: 8 if logical else 4
+        mock_cpu_percent.side_effect = [
+            25.5,
+            [10.0, 15.0, 30.0, 40.0, 20.0, 25.0, 35.0, 45.0],
+        ]
+        mock_processor.return_value = "Intel Core i7-8700K"
+        mock_machine.return_value = "x86_64"
+
+        result = get_cpu_info()
+
+        expected = {
+            "logical_cores": 8,
+            "physical_cores": 4,
+            "current_usage_percent": 25.5,
+            "per_core_usage": [10.0, 15.0, 30.0, 40.0, 20.0, 25.0, 35.0, 45.0],
+            "model": "Intel Core i7-8700K",
+        }
+
+        assert result == expected
+
+        # Verify psutil calls
+        mock_cpu_count.assert_any_call()  # logical cores (default)
+        mock_cpu_count.assert_any_call(logical=False)  # physical cores
+        mock_cpu_percent.assert_any_call(interval=1)  # overall usage
+        mock_cpu_percent.assert_any_call(interval=1, percpu=True)  # per-core usage
+
+    @patch("benchbox.utils.system_info.psutil.cpu_percent")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.machine")
+    def test_get_cpu_info_processor_fallback(self, mock_machine, mock_processor, mock_cpu_count, mock_cpu_percent):
+        """Test CPU info with processor fallback."""
+        # Setup mocks - processor returns empty
+        mock_cpu_count.side_effect = lambda logical=True: 2 if logical else 2
+        mock_cpu_percent.side_effect = [50.0, [45.0, 55.0]]
+        mock_processor.return_value = ""  # Empty processor
+        mock_machine.return_value = "arm64"
+
+        result = get_cpu_info()
+
+        # Should fallback to machine + " CPU"
+        assert result["model"] == "arm64 CPU"
+        assert result["logical_cores"] == 2
+        assert result["physical_cores"] == 2
+        assert result["current_usage_percent"] == 50.0
+        assert result["per_core_usage"] == [45.0, 55.0]
+
+    @patch("benchbox.utils.system_info.psutil.cpu_percent")
+    @patch("benchbox.utils.system_info.psutil.cpu_count")
+    @patch("benchbox.utils.system_info.platform.processor")
+    @patch("benchbox.utils.system_info.platform.machine")
+    def test_get_cpu_info_single_core(self, mock_machine, mock_processor, mock_cpu_count, mock_cpu_percent):
+        """Test CPU info for single core system."""
+        # Setup mocks for single core
+        mock_cpu_count.side_effect = lambda logical=True: 1
+        mock_cpu_percent.side_effect = [75.5, [75.5]]  # Same for overall and per-core
+        mock_processor.return_value = "Single Core CPU"
+        mock_machine.return_value = "i386"
+
+        result = get_cpu_info()
+
+        assert result["logical_cores"] == 1
+        assert result["physical_cores"] == 1
+        assert result["current_usage_percent"] == 75.5
+        assert result["per_core_usage"] == [75.5]
+        assert result["model"] == "Single Core CPU"
+
+    def test_get_cpu_info_real_system(self):
+        """Test get_cpu_info with real system (integration test)."""
+        result = get_cpu_info()
+
+        # Verify structure
+        assert isinstance(result, dict)
+        assert "logical_cores" in result
+        assert "physical_cores" in result
+        assert "current_usage_percent" in result
+        assert "per_core_usage" in result
+        assert "model" in result
+
+        # Verify types
+        assert isinstance(result["logical_cores"], int)
+        assert isinstance(result["physical_cores"], int)
+        assert isinstance(result["current_usage_percent"], float)
+        assert isinstance(result["per_core_usage"], list)
+        assert isinstance(result["model"], str)
+
+        # Basic sanity checks
+        assert result["logical_cores"] > 0
+        assert result["physical_cores"] > 0
+        assert result["logical_cores"] >= result["physical_cores"]
+        assert 0 <= result["current_usage_percent"] <= 100
+        assert len(result["per_core_usage"]) == result["logical_cores"]
+        assert all(0 <= usage <= 100 for usage in result["per_core_usage"])
+        assert len(result["model"]) > 0
+
+
+class TestSystemInfoIntegration:
+    """Test integration scenarios for system information utilities."""
+
+    def test_system_info_consistency(self):
+        """Test consistency between different system info functions."""
+        # Get info from different functions
+        system_info = get_system_info()
+        memory_info = get_memory_info()
+        cpu_info = get_cpu_info()
+
+        # Memory should be consistent
+        assert abs(system_info.total_memory_gb - memory_info["total_gb"]) < 0.1
+        assert abs(system_info.available_memory_gb - memory_info["available_gb"]) < 1.0
+
+        # CPU cores should be consistent
+        assert system_info.cpu_cores == cpu_info["logical_cores"]
+
+    def test_system_info_to_dict_integration(self):
+        """Test SystemInfo to_dict integration with other functions."""
+        system_info = get_system_info()
+        system_dict = system_info.to_dict()
+
+        # Verify dict has expected keys
+        expected_keys = {
+            "os_type",
+            "os_version",
+            "architecture",
+            "cpu_model",
+            "cpu_cores",
+            "total_memory_gb",
+            "available_memory_gb",
+            "python_version",
+            "hostname",
+        }
+        assert set(system_dict.keys()) == expected_keys
+
+        # Verify compatibility mapping
+        assert system_dict["os_type"] == system_info.os_name
+        assert system_dict["cpu_cores"] == system_info.cpu_cores
+
+    def test_multiple_calls_consistency(self):
+        """Test that multiple calls return consistent results."""
+        info1 = get_system_info()
+        info2 = get_system_info()
+
+        # Static info should be identical
+        assert info1.os_name == info2.os_name
+        assert info1.os_version == info2.os_version
+        assert info1.architecture == info2.architecture
+        assert info1.cpu_model == info2.cpu_model
+        assert info1.cpu_cores == info2.cpu_cores
+        assert info1.python_version == info2.python_version
+        assert info1.hostname == info2.hostname
+
+        # Memory info may vary slightly but should be close
+        assert abs(info1.total_memory_gb - info2.total_memory_gb) < 0.1
+        # Available memory can change more between calls
+        assert abs(info1.available_memory_gb - info2.available_memory_gb) < 2.0
+
+    @patch("benchbox.utils.system_info.psutil")
+    @patch("benchbox.utils.system_info.platform")
+    def test_error_resilience(self, mock_platform, mock_psutil):
+        """Test that functions handle errors gracefully."""
+        # Setup platform mocks to work normally
+        mock_platform.system.return_value = "Linux"
+        mock_platform.release.return_value = "5.4.0"
+        mock_platform.machine.return_value = "x86_64"
+        mock_platform.processor.return_value = "Test CPU"
+        mock_platform.python_version.return_value = "3.11.0"
+        mock_platform.node.return_value = "test-host"
+
+        # Setup psutil mocks to raise exceptions
+        mock_psutil.virtual_memory.side_effect = Exception("Memory error")
+        mock_psutil.cpu_count.side_effect = Exception("CPU count error")
+
+        # Functions should handle errors and not crash
+        with pytest.raises(Exception):
+            get_system_info()  # This one will fail due to memory error
+
+        # But individual functions should handle their own errors
+        mock_psutil.virtual_memory.side_effect = None
+        mock_memory = MagicMock()
+        mock_memory.total = 8 * (1024**3)
+        mock_memory.available = 4 * (1024**3)
+        mock_memory.used = 4 * (1024**3)
+        mock_memory.percent = 50.0
+        mock_psutil.virtual_memory.return_value = mock_memory
+
+        # Memory info should work even if CPU info fails
+        memory_info = get_memory_info()
+        assert memory_info["total_gb"] == 8.0

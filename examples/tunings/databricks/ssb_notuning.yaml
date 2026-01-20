@@ -1,0 +1,42 @@
+# Databricks SSB No-Tuning Configuration
+# This configuration disables all optimizations for baseline performance testing
+# Provides unoptimized baseline performance for comparison with tuned configuration
+
+primary_keys:
+  enabled: false
+  enforce_uniqueness: false
+  nullable: false
+
+foreign_keys:
+  enabled: false
+  enforce_referential_integrity: false
+  on_delete_action: RESTRICT
+  on_update_action: RESTRICT
+
+unique_constraints:
+  enabled: false
+  ignore_nulls: false
+
+check_constraints:
+  enabled: false
+  enforce_on_insert: false
+  enforce_on_update: false
+
+platform_optimizations:
+  z_ordering_enabled: false
+  z_ordering_columns: []
+  auto_optimize_enabled: false
+  auto_compact_enabled: false
+  materialized_views_enabled: false
+
+table_tunings: {}
+
+_metadata:
+  version: '2.0'
+  format: unified_tuning
+  database: databricks
+  benchmark: ssb
+  configuration_type: notuning
+  description: "Databricks SSB configuration with all optimizations disabled for baseline testing"
+  created: '2025-11-01'
+  generated_by: benchbox-project

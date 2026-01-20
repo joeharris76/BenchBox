@@ -1,0 +1,12 @@
+type: bigquery
+connection:
+  extra_params:
+    project_id: "your-gcp-project"
+    dataset_id: "benchbox"
+    credentials_path: "${GOOGLE_APPLICATION_CREDENTIALS}"
+    location: "US"
+settings:
+  job_priority: "INTERACTIVE"
+  query_cache: true
+  storage_bucket: "your-bucket-name"  # For efficient data loading
+  maximum_bytes_billed: 1073741824  # 1GB limit

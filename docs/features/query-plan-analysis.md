@@ -1,0 +1,540 @@
+# Query Plan Analysis
+
+```{tags} advanced, guide, performance
+```
+
+BenchBox supports capturing, analyzing, and comparing query execution plans across different database platforms. This feature enables:
+
+- **Cross-platform comparison**: Understand how different databases optimize the same query
+- **Regression detection**: Track plan changes between software versions
+- **Optimization analysis**: Identify query optimization opportunities
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Capturing Query Plans](#capturing-query-plans)
+- [Viewing Plans](#viewing-plans)
+- [Comparing Plans](#comparing-plans)
+- [Understanding Plan Differences](#understanding-plan-differences)
+- [Programmatic Usage](#programmatic-usage)
+- [Troubleshooting](#troubleshooting)
+
+## Quick Start
+
+```bash
+# 1. Run benchmark with plan capture
+benchbox run --platform duckdb --benchmark tpch --scale 1 --capture-plans
+
+# 2. View a specific plan
+benchbox show-plan --run benchmark_runs/latest/results.json --query-id q05
+
+# 3. Compare plans between two runs
+benchbox compare-plans \
+  --run1 run_before.json \
+  --run2 run_after.json \
+  --query-id q05
+```
+
+## Capturing Query Plans
+
+### Basic Capture
+
+Add the `--capture-plans` flag to any benchmark run:
+
+```bash
+benchbox run \
+  --platform duckdb \
+  --benchmark tpch \
+  --scale 1 \
+  --capture-plans
+```
+
+This captures the logical query plan for each query executed during the benchmark.
+
+### Supported Platforms
+
+Currently supported platforms for query plan capture:
+
+| Platform    | Parser Status | EXPLAIN Format | Notes                           |
+|-------------|---------------|----------------|---------------------------------|
+| DuckDB      | ✓ Stable      | Text (box)     | Unicode box-drawing characters  |
+| SQLite      | ✓ Stable      | Text (tree)    | Simple tree format              |
+| PostgreSQL  | ✓ Stable      | JSON           | Requires `EXPLAIN (FORMAT JSON)` |
+| Redshift    | ✓ Beta        | Text           | Supports XN prefixed operators  |
+| DataFusion  | ✓ Beta        | Text (indent)  | Physical plan operators         |
+
+Plans are captured using platform-specific `EXPLAIN` commands and parsed into a unified logical representation.
+
+### Performance Impact
+
+Plan capture has minimal performance impact:
+- Adds ~10-50ms per query
+- Does not affect benchmark timing measurements
+- Failed plan captures are logged but don't halt execution
+
+## Viewing Plans
+
+### Tree View (Default)
+
+Display a plan as an ASCII tree:
+
+```bash
+benchbox show-plan \
+  --run results.json \
+  --query-id q05
+```
+
+Output example:
+```
+Query Plan: q05
+Platform: duckdb
+Cost: 500.25 | Rows: 50
+
+└── Aggregate (aggs=[COUNT(*), SUM(o_totalprice)])
+    └── Join (type=inner)
+        ├── Filter (filter='o_orderdate > '2023-01-01'')
+        │   └── Scan (table=orders)
+        └── Scan (table=customer)
+```
+
+### Summary View
+
+Show statistics without the full tree:
+
+```bash
+benchbox show-plan \
+  --run results.json \
+  --query-id q05 \
+  --format summary
+```
+
+Output example:
+```
+Query: q05 (duckdb)
+Total Operators: 5
+Max Depth: 3
+Estimated Cost: 500.25
+Estimated Rows: 50
+
+Operator Breakdown:
+  Scan: 2
+  Filter: 1
+  Join: 1
+  Aggregate: 1
+```
+
+### JSON Export
+
+Export plan for programmatic analysis:
+
+```bash
+benchbox show-plan \
+  --run results.json \
+  --query-id q05 \
+  --format json > plan_q05.json
+```
+
+### Visualization Options
+
+Control tree display:
+
+```bash
+# Compact view without operator properties
+benchbox show-plan --run results.json --query-id q05 --compact --no-properties
+
+# Limit tree depth for very complex plans
+benchbox show-plan --run results.json --query-id q05 --max-depth 3
+```
+
+## Comparing Plans
+
+### Compare Single Query
+
+Compare the same query between two benchmark runs:
+
+```bash
+benchbox compare-plans \
+  --run1 results_duckdb.json \
+  --run2 results_datafusion.json \
+  --query-id q05
+```
+
+Output example:
+```
+================================================================================
+QUERY PLAN COMPARISON
+================================================================================
+
+Left:  q05 (duckdb)
+Right: q05 (datafusion)
+
+Plans are very similar (85.3% similarity)
+
+Similarity Metrics:
+  Overall:     85.3%
+  Structural:  100.0%
+  Operator:    100.0%
+  Property:     66.7%
+
+Operators: 5 (left) vs 5 (right)
+  Matching:   4
+  Property mismatches: 1
+
+Property Differences (1):
+  • Join type: inner ≠ hash_join
+
+================================================================================
+```
+
+### Compare All Queries
+
+Compare all queries from two runs:
+
+```bash
+benchbox compare-plans \
+  --run1 before_optimization.json \
+  --run2 after_optimization.json
+```
+
+Output example:
+```
+┌───────┬────────────┬──────────┬──────────┬─────────────┬─────────────────────┐
+│ Query │ Similarity │ Type Diff│ Prop Diff│ Struct Diff │ Status              │
+├───────┼────────────┼──────────┼──────────┼─────────────┼─────────────────────┤
+│ q01   │     98.5%  │    -     │    1     │      -      │ ✓ Nearly Identical  │
+│ q02   │    100.0%  │    -     │    -     │      -      │ ✓ Nearly Identical  │
+│ q03   │     87.2%  │    1     │    2     │      -      │ ≈ Very Similar      │
+│ q05   │     45.8%  │    5     │    3     │      2      │ ✗ Different         │
+└───────┴────────────┴──────────┴──────────┴─────────────┴─────────────────────┘
+
+Summary: 4 queries compared
+  Nearly Identical (≥95%): 2
+  Very Similar (75-95%):   1
+  Different (<50%):        1
+```
+
+### Regression Detection
+
+Show only queries with significant plan changes:
+
+```bash
+benchbox compare-plans \
+  --run1 version_1.2.json \
+  --run2 version_1.3.json \
+  --threshold 0.9
+```
+
+This shows only queries with <90% similarity, helping identify potential regressions.
+
+### JSON Export
+
+Export comparison results for further analysis:
+
+```bash
+benchbox compare-plans \
+  --run1 run_a.json \
+  --run2 run_b.json \
+  --output json > comparison_results.json
+```
+
+## Understanding Plan Differences
+
+### Similarity Metrics
+
+The comparison engine provides four similarity scores:
+
+1. **Overall Similarity (0-100%)**
+   - Weighted average of all metrics
+   - Formula: 40% structural + 40% operator + 20% property
+   - Best indicator of plan similarity
+
+2. **Structural Similarity**
+   - Measures tree structure matching
+   - Counts operators at each level
+   - 100% = same number of operators at each level
+
+3. **Operator Similarity**
+   - Measures operator type matching
+   - Compares Scan, Join, Filter, Aggregate, etc.
+   - 100% = all operators have matching types
+
+4. **Property Similarity**
+   - Measures property matching when types match
+   - Compares table names, join types, filters, etc.
+   - 100% = all properties identical
+
+### Difference Types
+
+**Type Mismatches**
+- Different operator types at same position
+- Example: `Scan` vs `IndexScan`
+- Often indicates algorithmic differences
+
+**Property Mismatches**
+- Same operator type, different properties
+- Example: `INNER JOIN` vs `LEFT JOIN`
+- Usually indicates optimizer choices
+
+**Structure Mismatches**
+- Different tree structure
+- Example: Different number of children
+- Indicates major plan reorganization
+
+### Interpretation Guide
+
+| Similarity | Interpretation | Common Causes |
+|------------|----------------|---------------|
+| ≥95% | Nearly Identical | Minor property changes, equivalent optimizations |
+| 75-95% | Very Similar | Different join orders, equivalent algorithms |
+| 50-75% | Somewhat Similar | Different optimization strategies, same query |
+| <50% | Different | Major algorithmic differences, possibly different queries |
+
+## Programmatic Usage
+
+### Python API
+
+Use query plan models and comparison programmatically:
+
+```python
+from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.query_plans.comparison import compare_query_plans
+from benchbox.core.query_plans.visualization import render_plan
+
+# Load results
+with open('results.json') as f:
+    results = BenchmarkResults.from_dict(json.load(f))
+
+# Get a query execution
+query_exec = results.phases['power'].queries[0]
+plan = query_exec.query_plan
+
+# Render plan
+print(render_plan(plan))
+
+# Compare two plans
+comparison = compare_query_plans(plan1, plan2)
+print(f"Similarity: {comparison.similarity.overall_similarity:.1%}")
+print(f"Type mismatches: {comparison.similarity.type_mismatches}")
+```
+
+### Custom Analysis
+
+Traverse plan trees programmatically:
+
+```python
+def count_scans(plan):
+    """Count total scan operations in plan."""
+    def count_in_operator(op):
+        count = 1 if op.operator_type == LogicalOperatorType.SCAN else 0
+        if op.children:
+            for child in op.children:
+                count += count_in_operator(child)
+        return count
+
+    return count_in_operator(plan.logical_root)
+
+# Analyze plans
+num_scans = count_scans(query_exec.query_plan)
+print(f"Total scans: {num_scans}")
+```
+
+### Plan Fingerprints
+
+Use fingerprints for fast plan comparison:
+
+```python
+# Check if plans are identical
+if plan1.plan_fingerprint == plan2.plan_fingerprint:
+    print("Plans are identical")
+else:
+    print("Plans differ")
+
+# Group queries by plan
+plans_by_fingerprint = {}
+for query_exec in all_queries:
+    fp = query_exec.query_plan.plan_fingerprint
+    if fp not in plans_by_fingerprint:
+        plans_by_fingerprint[fp] = []
+    plans_by_fingerprint[fp].append(query_exec.query_id)
+
+# Find queries with same plan
+for fp, query_ids in plans_by_fingerprint.items():
+    if len(query_ids) > 1:
+        print(f"Queries {query_ids} share same plan")
+```
+
+## Troubleshooting
+
+### Plan Not Captured
+
+**Symptom**: Warning message "No query plan captured for query"
+
+**Causes**:
+1. Forgot `--capture-plans` flag during benchmark
+2. Platform doesn't support plan capture
+3. Parser error (check logs for details)
+
+**Solution**:
+```bash
+# Ensure --capture-plans is included
+benchbox run --platform duckdb --benchmark tpch --scale 1 --capture-plans
+
+# Check which platforms support capture
+benchbox platforms
+```
+
+### Parser Errors
+
+**Symptom**: Plan capture succeeds but plan is None
+
+**Causes**:
+1. EXPLAIN output format changed in newer platform version
+2. Complex query with unusual operators
+3. Platform-specific EXPLAIN extensions
+
+**Solution**:
+- Check benchmark logs for detailed error messages
+- File an issue with the EXPLAIN output for investigation
+- Plan capture failures don't halt benchmark execution
+
+### Performance Issues
+
+**Symptom**: Benchmark runs much slower with `--capture-plans`
+
+**Expected Impact**: 10-50ms overhead per query (negligible for most workloads)
+
+**If significantly slower**:
+1. Check if disk I/O is bottleneck (plan serialization)
+2. Verify platform EXPLAIN performance
+3. Consider capturing plans for subset of queries during development
+
+### Memory Usage
+
+**Symptom**: High memory usage with plan capture
+
+**Typical Plan Size**: 1-10 KB per query in memory, 10-100 KB serialized
+
+**For large benchmarks (TPC-DS 99 queries)**:
+- Memory: ~10 MB for all plans
+- Disk: ~10 MB added to results JSON
+
+If memory is constrained, consider running with `--phases power` to capture fewer queries.
+
+### Comparison Shows No Differences
+
+**Symptom**: Plans appear different visually but comparison shows 100% similarity
+
+**Cause**: Comparison ignores non-structural properties like:
+- Operator IDs (internal identifiers)
+- Cost estimates (platform-specific)
+- Row count estimates
+
+**This is intentional** - comparison focuses on logical plan structure, not execution details.
+
+To compare costs/estimates, examine the JSON export directly.
+
+## Best Practices
+
+### Development Workflow
+
+1. **Capture baseline**: Run benchmark with `--capture-plans` and save results
+2. **Make changes**: Modify queries, update database, change configuration
+3. **Capture new run**: Run same benchmark again with `--capture-plans`
+4. **Compare**: Use `benchbox compare-plans` to identify changes
+5. **Investigate**: For significant differences, use `show-plan` to inspect details
+
+### Cross-Platform Analysis
+
+```bash
+# Run same benchmark on different platforms
+benchbox run --platform duckdb --benchmark tpch --scale 1 --capture-plans
+benchbox run --platform datafusion --benchmark tpch --scale 1 --capture-plans
+
+# Compare plans
+benchbox compare-plans \
+  --run1 benchmark_runs/duckdb_*/results.json \
+  --run2 benchmark_runs/datafusion_*/results.json
+
+# Focus on interesting queries
+benchbox compare-plans \
+  --run1 benchmark_runs/duckdb_*/results.json \
+  --run2 benchmark_runs/datafusion_*/results.json \
+  --query-id q05
+```
+
+### Regression Testing
+
+```bash
+# Automated regression check
+benchbox compare-plans \
+  --run1 baseline.json \
+  --run2 current.json \
+  --threshold 0.95 \
+  --output json > regression_report.json
+
+# Check exit code
+if [ $? -ne 0 ]; then
+    echo "Plan regressions detected!"
+    exit 1
+fi
+```
+
+## Advanced Topics
+
+### Plan Fingerprints
+
+Plans are fingerprinted using SHA256 of the logical structure:
+- **Included**: Operator types, table names, join types, filter expressions, aggregations
+- **Excluded**: Operator IDs, costs, row estimates, physical operator details
+
+Identical fingerprints guarantee identical logical plans.
+
+### Comparison Algorithm
+
+The comparison engine uses:
+1. **Fast path**: SHA256 fingerprint comparison (O(1))
+2. **Full comparison**: BFS tree traversal (O(n×m) where n, m = tree sizes)
+3. **Similarity scoring**: Multi-dimensional metrics based on operator matching
+
+### Platform-Specific Notes
+
+**DuckDB**:
+- Uses `EXPLAIN` output (text format with box-drawing characters)
+- Captures logical and physical operators
+- Fast EXPLAIN execution (<1ms typically)
+- Requires UTF-8 terminal for proper display
+
+**SQLite**:
+- Uses `EXPLAIN QUERY PLAN` (text format)
+- Simpler output than DuckDB
+- Limited cost information
+
+**PostgreSQL**:
+- Uses `EXPLAIN (FORMAT JSON)` for machine-readable output
+- Provides detailed cost estimates, row counts, and operator properties
+- Supports all PostgreSQL node types (Seq Scan, Index Scan, Hash Join, etc.)
+- Requires PostgreSQL 12+ for full JSON format support
+
+**Redshift**:
+- Uses text-based `EXPLAIN` output
+- Operators prefixed with "XN" (e.g., XN Seq Scan, XN Hash Join)
+- Includes distribution operators (DS_DIST_INNER, DS_BCAST_INNER, etc.)
+- Cost and row estimates parsed from output
+
+**DataFusion**:
+- Uses indentation-based text format from `EXPLAIN`
+- Prefers physical plan (operators ending in "Exec") over logical plan
+- Supports EXPLAIN ANALYZE metrics (output_rows, elapsed_compute, etc.)
+- Common operators: ProjectionExec, FilterExec, HashJoinExec, AggregateExec
+
+## Further Reading
+
+- [API Documentation](../api/query-plan-models.md) - Programmatic usage
+- [Platform Guide](../platforms/) - Platform-specific details
+- [TPC-H Benchmark Guide](../benchmarks/tpch.md) - Query plan analysis examples
+
+## Support
+
+For issues or questions:
+- [GitHub Issues](https://github.com/joeharris76/benchbox/issues)
+- Check logs in `benchmark_runs/` for detailed error messages

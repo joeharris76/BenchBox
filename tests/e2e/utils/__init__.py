@@ -1,0 +1,49 @@
+"""E2E test utilities for BenchBox CLI testing."""
+
+from tests.e2e.utils.platform_detection import (
+    CLOUD_PLATFORMS,
+    DATAFRAME_PLATFORMS,
+    LOCAL_PLATFORMS,
+    has_cloud_credentials,
+    is_dataframe_available,
+    is_gpu_available,
+    is_platform_available,
+    requires_cloud_credentials,
+    requires_dataframe,
+    requires_gpu,
+    requires_platform,
+)
+from tests.e2e.utils.result_validators import (
+    ResultValidator,
+    ValidationError,
+    assert_benchmark_result_valid,
+    assert_phase_timing_valid,
+    assert_query_execution_valid,
+    load_result_json,
+    validate_execution_phases,
+    validate_result_structure,
+)
+
+__all__ = [
+    # Platform detection
+    "LOCAL_PLATFORMS",
+    "CLOUD_PLATFORMS",
+    "DATAFRAME_PLATFORMS",
+    "is_platform_available",
+    "is_dataframe_available",
+    "is_gpu_available",
+    "has_cloud_credentials",
+    "requires_platform",
+    "requires_dataframe",
+    "requires_gpu",
+    "requires_cloud_credentials",
+    # Result validators
+    "ResultValidator",
+    "ValidationError",
+    "load_result_json",
+    "validate_result_structure",
+    "validate_execution_phases",
+    "assert_benchmark_result_valid",
+    "assert_query_execution_valid",
+    "assert_phase_timing_valid",
+]

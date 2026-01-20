@@ -1,0 +1,58 @@
+"""TPC-Havoc query variant registry."""
+
+from __future__ import annotations
+
+from benchbox.core.tpchavoc.variant_base import StaticSQLVariant, VariantGenerator
+from benchbox.core.tpchavoc.variant_sets import (
+    Q1_VARIANTS,
+    Q2_VARIANTS,
+    Q3_VARIANTS,
+    Q4_VARIANTS,
+    Q5_VARIANTS,
+    Q6_VARIANTS,
+    Q7_VARIANTS,
+    Q8_VARIANTS,
+    Q9_VARIANTS,
+    Q10_VARIANTS,
+    Q11_VARIANTS,
+    Q12_VARIANTS,
+    Q13_VARIANTS,
+    Q14_VARIANTS,
+    Q15_VARIANTS,
+    Q16_VARIANTS,
+    Q17_VARIANTS,
+    Q18_VARIANTS,
+    Q19_VARIANTS,
+    Q20_VARIANTS,
+    Q21_VARIANTS,
+    Q22_VARIANTS,
+    VARIANT_REGISTRY,
+)
+
+__all__ = [
+    "VariantGenerator",
+    "StaticSQLVariant",
+    "Q1_VARIANTS",
+    "Q2_VARIANTS",
+    "Q3_VARIANTS",
+    "Q4_VARIANTS",
+    "Q5_VARIANTS",
+    "Q6_VARIANTS",
+    "Q7_VARIANTS",
+    "Q8_VARIANTS",
+    "Q9_VARIANTS",
+    "Q10_VARIANTS",
+    "Q11_VARIANTS",
+    "Q12_VARIANTS",
+    "Q13_VARIANTS",
+    "Q14_VARIANTS",
+    "Q15_VARIANTS",
+    "Q16_VARIANTS",
+    "Q17_VARIANTS",
+    "Q18_VARIANTS",
+    "Q19_VARIANTS",
+    "Q20_VARIANTS",
+    "Q21_VARIANTS",
+    "Q22_VARIANTS",
+    "VARIANT_REGISTRY",
+]

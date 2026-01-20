@@ -1,0 +1,20 @@
+# Polars DataFrame Tuning - Default Configuration
+# Sensible defaults for general-purpose workloads
+
+execution:
+  streaming_mode: false
+  engine_affinity: in-memory
+  lazy_evaluation: true
+
+memory:
+  rechunk_after_filter: true
+
+data_types:
+  enable_string_cache: false
+
+_metadata:
+  version: "1.0"
+  format: dataframe_tuning
+  platform: polars
+  description: Default Polars configuration for general workloads
+  generated_by: benchbox

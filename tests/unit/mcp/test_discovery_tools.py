@@ -1,0 +1,118 @@
+"""Tests for BenchBox MCP discovery tools.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import sys
+
+import pytest
+
+# Skip all tests if Python < 3.10
+pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+")
+
+
+class TestListPlatformsTool:
+    """Tests for list_platforms tool functionality."""
+
+    def test_returns_platform_list(self):
+        """Test that list_platforms returns a list of platforms."""
+        from benchbox.core.platform_registry import PlatformRegistry
+
+        all_metadata = PlatformRegistry.get_all_platform_metadata()
+
+        assert len(all_metadata) > 0
+        assert "duckdb" in all_metadata
+
+    def test_platform_has_required_fields(self):
+        """Test that platforms have required metadata fields."""
+        from benchbox.core.platform_registry import PlatformRegistry
+
+        all_metadata = PlatformRegistry.get_all_platform_metadata()
+
+        for name, metadata in all_metadata.items():
+            assert "display_name" in metadata or name
+            assert "capabilities" in metadata
+
+
+class TestListBenchmarksTool:
+    """Tests for list_benchmarks tool functionality."""
+
+    def test_returns_benchmark_list(self):
+        """Test that benchmarks are discoverable."""
+        from benchbox.core.benchmark_registry import get_all_benchmarks
+
+        benchmarks = get_all_benchmarks()
+
+        assert len(benchmarks) > 0
+        assert "tpch" in benchmarks
+        assert "tpcds" in benchmarks
+
+    def test_benchmark_has_required_fields(self):
+        """Test that benchmarks have required metadata fields."""
+        from benchbox.core.benchmark_registry import get_all_benchmarks
+
+        benchmarks = get_all_benchmarks()
+
+        for name, meta in benchmarks.items():
+            assert "display_name" in meta
+            assert "description" in meta
+            assert "num_queries" in meta or meta.get("num_queries") == 0
+            assert "category" in meta
+
+
+class TestGetBenchmarkInfoTool:
+    """Tests for get_benchmark_info tool functionality."""
+
+    def test_get_tpch_info(self):
+        """Test getting TPC-H benchmark info."""
+        from benchbox.core.benchmark_registry import get_all_benchmarks
+
+        benchmarks = get_all_benchmarks()
+        assert "tpch" in benchmarks
+
+        meta = benchmarks["tpch"]
+        assert meta["display_name"] == "TPC-H"
+        assert meta["num_queries"] == 22
+
+    def test_get_tpcds_info(self):
+        """Test getting TPC-DS benchmark info."""
+        from benchbox.core.benchmark_registry import get_all_benchmarks
+
+        benchmarks = get_all_benchmarks()
+        assert "tpcds" in benchmarks
+
+        meta = benchmarks["tpcds"]
+        assert meta["display_name"] == "TPC-DS"
+        assert meta["num_queries"] == 99
+
+    def test_unknown_benchmark_error(self):
+        """Test that unknown benchmark returns appropriate error info."""
+        from benchbox.core.benchmark_registry import get_all_benchmarks
+
+        benchmarks = get_all_benchmarks()
+        assert "nonexistent_benchmark" not in benchmarks
+
+
+class TestSystemProfileTool:
+    """Tests for system_profile tool functionality."""
+
+    def test_returns_system_info(self):
+        """Test that system profile returns CPU and memory info."""
+        import psutil
+
+        cpu_count = psutil.cpu_count(logical=True)
+        memory = psutil.virtual_memory()
+
+        assert cpu_count is not None
+        assert cpu_count > 0
+        assert memory.total > 0
+        assert memory.available > 0
+
+    def test_benchbox_version_available(self):
+        """Test that BenchBox version is available."""
+        import benchbox
+
+        version = getattr(benchbox, "__version__", None)
+        assert version is not None

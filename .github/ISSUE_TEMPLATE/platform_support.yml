@@ -1,0 +1,84 @@
+name: Platform Support Request
+description: Request support for a new database platform or cloud service
+title: "[PLATFORM] Add support for "
+labels: ["platform-support", "enhancement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request support for a new database platform or cloud service in BenchBox.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      description: Please confirm you have completed these steps
+      options:
+        - label: I have searched existing issues to ensure this platform hasn't been requested
+          required: true
+        - label: I have verified this platform is not already supported
+          required: true
+
+  - type: input
+    id: platform_name
+    attributes:
+      label: Platform name
+      description: Name of the database platform or cloud service
+      placeholder: e.g., PostgreSQL, Apache Drill, Vertica
+    validations:
+      required: true
+
+  - type: textarea
+    id: platform_details
+    attributes:
+      label: Platform details
+      description: Provide details about the platform
+      placeholder: |
+        - Platform type (OLAP, OLTP, hybrid, etc.)
+        - Primary use cases
+        - Connection methods (JDBC, ODBC, native driver)
+        - SQL dialect compliance
+        - Key features that make it interesting for benchmarking
+    validations:
+      required: true
+
+  - type: textarea
+    id: driver_info
+    attributes:
+      label: Python driver information
+      description: Information about available Python drivers
+      placeholder: |
+        - Driver name and PyPI package
+        - Connection string format
+        - Authentication methods
+        - Any special requirements
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Why do you need BenchBox support for this platform?
+      placeholder: I need this platform because...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this platform support for you?
+      options:
+        - Low - Would be nice to have
+        - Medium - Important for my work
+        - High - Critical for current project
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Any other context about the platform or implementation considerations
+      placeholder: Links to documentation, special considerations, etc.

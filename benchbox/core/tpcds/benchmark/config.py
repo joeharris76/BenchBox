@@ -1,0 +1,33 @@
+"""TPC-DS benchmark configuration dataclasses."""
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+
+@dataclass
+class ThroughputTestConfig:
+    """Configuration for TPC-DS Throughput Test."""
+
+    num_streams: int = 2
+    scale_factor: float = 1.0
+    base_seed: int = 42
+    query_timeout: int = 300  # 5 minutes per query
+    stream_timeout: int = 3600  # 1 hour per stream
+    max_retries: int = 3
+    enable_validation: bool = True
+    output_dir: Optional[Path] = None
+
+
+@dataclass
+class MaintenanceTestConfig:
+    """Configuration for TPC-DS Maintenance Test."""
+
+    scale_factor: float = 1.0
+    concurrent_streams: int = 2
+    maintenance_interval: float = 30.0
+    verbose: bool = False
+    output_dir: Optional[Path] = None
+
+
+__all__ = ["ThroughputTestConfig", "MaintenanceTestConfig"]

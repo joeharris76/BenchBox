@@ -1,0 +1,634 @@
+"""Unit tests for manifest upload validation logic."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from benchbox.core.upload_validation import (
+    ManifestComparisonResult,
+    RemoteManifestValidator,
+    UploadValidationEngine,
+)
+
+pytestmark = pytest.mark.fast
+
+
+class FakeRemoteFS:
+    """In-memory fake RemoteFileSystemAdapter for tests."""
+
+    def __init__(self):
+        self._store: dict[str, bytes] = {}
+
+    def file_exists(self, remote_path: str) -> bool:
+        return remote_path in self._store
+
+    def read_file(self, remote_path: str) -> bytes:
+        if remote_path not in self._store:
+            raise FileNotFoundError(remote_path)
+        return self._store[remote_path]
+
+    def write_file(self, remote_path: str, content: bytes) -> None:
+        self._store[remote_path] = content
+
+    def list_files(self, remote_path: str, pattern: str = "*") -> list[str]:
+        return [k for k in self._store if k.startswith(remote_path)]
+
+
+@pytest.fixture()
+def local_manifest(tmp_path: Path) -> Path:
+    manifest = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {
+            "customer": {
+                "formats": {
+                    "tbl": [
+                        {"path": "customer.tbl", "size_bytes": 10, "row_count": 150000},
+                    ]
+                }
+            },
+            "orders": {
+                "formats": {
+                    "tbl": [
+                        {"path": "orders.tbl.1.zst", "size_bytes": 5, "row_count": 100},
+                        {"path": "orders.tbl.2.zst", "size_bytes": 5, "row_count": 100},
+                    ]
+                }
+            },
+        },
+        "formats": ["tbl"],
+        "format_preference": ["tbl"],
+    }
+    path = tmp_path / "_datagen_manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    # Create dummy local files
+    (tmp_path / "customer.tbl").write_bytes(b"x" * 10)
+    (tmp_path / "orders.tbl.1.zst").write_bytes(b"x" * 5)
+    (tmp_path / "orders.tbl.2.zst").write_bytes(b"x" * 5)
+    return path
+
+
+def test_manifest_comparison_matches():
+    local = {
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": [{}], "b": [{}]},
+    }
+    remote = json.loads(json.dumps(local))  # deep copy
+    comp = RemoteManifestValidator().compare_manifests(local, remote)
+    assert isinstance(comp, ManifestComparisonResult)
+    assert comp.manifests_match is True
+    assert not comp.differences
+
+
+def test_should_upload_false_when_remote_matches(local_manifest: Path, monkeypatch):
+    remote_root = "dbfs:/Volumes/workspace/schema/vol"
+    fs = FakeRemoteFS()
+
+    # Build remote manifest content and files matching the local one
+    manifest = json.loads(local_manifest.read_text(encoding="utf-8"))
+    fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
+    for _table, table_data in (manifest.get("tables") or {}).items():
+        for e in table_data["formats"]["tbl"]:
+            fs.write_file(f"{remote_root}/{e['path']}", b"x" * int(e.get("size_bytes", 0)))
+
+    # Inject fake adapter via engine constructor
+    engine = UploadValidationEngine(fs)
+    should_upload, result = engine.should_upload_data(remote_root, local_manifest)
+    assert should_upload is False
+    assert result.is_valid is True
+
+
+def test_should_upload_true_when_remote_missing_manifest(local_manifest: Path):
+    remote_root = "dbfs:/Volumes/workspace/schema/vol"
+    engine = UploadValidationEngine(FakeRemoteFS())
+    should_upload, result = engine.should_upload_data(remote_root, local_manifest)
+    assert should_upload is True
+    assert result.is_valid is False
+
+
+def test_validate_remote_files_exist_reports_missing(monkeypatch):
+    fs = FakeRemoteFS()
+    v = RemoteManifestValidator(fs)
+    m = {"version": 2, "tables": {"x": {"formats": {"tbl": [{"path": "x.tbl", "size_bytes": 10}]}}}}
+    res = v.validate_remote_files_exist("dbfs:/Volumes/workspace/x", m)
+    assert not res.is_valid
+    assert any("missing" in e for e in res.errors)
+
+
+def test_manifest_comparison_scale_factor_mismatch():
+    """Test that scale factor mismatch is detected."""
+    local = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{}]}}},
+    }
+    remote = json.loads(json.dumps(local))
+    remote["scale_factor"] = 10.0  # Different scale factor
+
+    comp = RemoteManifestValidator().compare_manifests(local, remote)
+    assert comp.manifests_match is False
+    assert comp.scale_factor_match is False
+    assert any("Scale factor mismatch" in d for d in comp.differences)
+
+
+def test_manifest_comparison_benchmark_mismatch():
+    """Test that benchmark type mismatch is detected."""
+    local = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{}]}}},
+    }
+    remote = json.loads(json.dumps(local))
+    remote["benchmark"] = "tpcds"  # Different benchmark
+
+    comp = RemoteManifestValidator().compare_manifests(local, remote)
+    assert comp.manifests_match is False
+    assert comp.benchmark_match is False
+    assert any("Benchmark mismatch" in d for d in comp.differences)
+
+
+def test_manifest_comparison_compression_mismatch():
+    """Test that compression mismatch is detected."""
+    local = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{}]}}},
+    }
+    remote = json.loads(json.dumps(local))
+    remote["compression"] = {"enabled": True, "type": "zstd", "level": 3}  # Different compression
+
+    comp = RemoteManifestValidator().compare_manifests(local, remote)
+    assert comp.manifests_match is False
+    assert comp.compression_match is False
+    assert any("Compression mismatch" in d for d in comp.differences)
+
+
+def test_manifest_comparison_table_count_mismatch():
+    """Test that table count mismatch is detected."""
+    local = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {
+            "a": {"formats": {"tbl": [{}]}},
+            "b": {"formats": {"tbl": [{}]}},
+        },
+    }
+    remote = json.loads(json.dumps(local))
+    remote["tables"] = {"a": {"formats": {"tbl": [{}]}}}  # One less table
+
+    comp = RemoteManifestValidator().compare_manifests(local, remote)
+    assert comp.manifests_match is False
+    assert comp.table_count_match is False
+    assert any("Table count mismatch" in d for d in comp.differences)
+
+
+def test_manifest_comparison_file_count_mismatch():
+    """Test that file count mismatch is detected (sharded tables)."""
+    local = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{}, {}]}}},  # 2 files
+    }
+    remote = json.loads(json.dumps(local))
+    remote["tables"] = {"a": {"formats": {"tbl": [{}]}}}  # Only 1 file
+
+    comp = RemoteManifestValidator().compare_manifests(local, remote)
+    assert comp.manifests_match is False
+    assert comp.file_count_match is False
+    assert any("File count mismatch" in d for d in comp.differences)
+
+
+def test_manifest_comparison_int_float_tolerance():
+    """Test that int and float scale factors are treated as equivalent."""
+    local = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1,  # int
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{}]}}},
+    }
+    remote = json.loads(json.dumps(local))
+    remote["scale_factor"] = 1.0  # float, but same value
+
+    comp = RemoteManifestValidator().compare_manifests(local, remote)
+    assert comp.manifests_match is True
+    assert comp.scale_factor_match is True
+
+
+def test_force_upload_always_uploads():
+    """Test that force_upload=True always triggers upload regardless of validation."""
+    remote_root = "dbfs:/Volumes/workspace/schema/vol"
+    fs = FakeRemoteFS()
+
+    # Create valid remote manifest
+    manifest = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}},
+        "formats": ["tbl"],
+    }
+    fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
+    fs.write_file(f"{remote_root}/a.tbl", b"x" * 10)
+
+    # Create matching local manifest
+    tmp = Path(__file__).parent.parent.parent / "_project"
+    tmp.mkdir(exist_ok=True)
+    local_manifest_path = tmp / "test_manifest_force.json"
+    local_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    try:
+        engine = UploadValidationEngine(fs)
+
+        # Without force: should not upload
+        should_upload_no_force, _ = engine.should_upload_data(remote_root, local_manifest_path, force_upload=False)
+
+        # With force: should upload
+        should_upload_force, result = engine.should_upload_data(remote_root, local_manifest_path, force_upload=True)
+
+        assert should_upload_no_force is False
+        assert should_upload_force is True
+        assert any("Force upload" in w for w in result.warnings)
+    finally:
+        if local_manifest_path.exists():
+            local_manifest_path.unlink()
+
+
+def test_should_upload_when_manifest_corrupted():
+    """Test that corrupted remote manifest triggers upload."""
+    remote_root = "dbfs:/Volumes/workspace/schema/vol"
+    fs = FakeRemoteFS()
+
+    # Write corrupted JSON to remote
+    fs.write_file(f"{remote_root}/_datagen_manifest.json", b"corrupted json {{{")
+
+    # Create valid local manifest
+    manifest = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}},
+        "formats": ["tbl"],
+    }
+    tmp = Path(__file__).parent.parent.parent / "_project"
+    tmp.mkdir(exist_ok=True)
+    local_manifest_path = tmp / "test_manifest_corrupted.json"
+    local_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    try:
+        engine = UploadValidationEngine(fs)
+        should_upload, result = engine.should_upload_data(remote_root, local_manifest_path)
+
+        # Corrupted manifest should trigger upload
+        assert should_upload is True
+        assert result.is_valid is False
+    finally:
+        if local_manifest_path.exists():
+            local_manifest_path.unlink()
+
+
+def test_remote_manifest_attached_to_validation_result():
+    """Test that remote_manifest is properly attached to ValidationResult."""
+    remote_root = "dbfs:/Volumes/workspace/schema/vol"
+    fs = FakeRemoteFS()
+
+    # Create valid remote manifest
+    manifest = {
+        "version": 2,
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}},
+        "formats": ["tbl"],
+    }
+    fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
+    fs.write_file(f"{remote_root}/a.tbl", b"x" * 10)
+
+    # Create matching local manifest
+    tmp = Path(__file__).parent.parent.parent / "_project"
+    tmp.mkdir(exist_ok=True)
+    local_manifest_path = tmp / "test_manifest_attached.json"
+    local_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    try:
+        engine = UploadValidationEngine(fs)
+        should_upload, result = engine.should_upload_data(remote_root, local_manifest_path)
+
+        # Validation should pass
+        assert should_upload is False
+        assert result.is_valid is True
+
+        # remote_manifest should be attached as a proper field (not via setattr)
+        assert result.remote_manifest is not None
+        assert result.remote_manifest["benchmark"] == "tpch"
+        assert result.remote_manifest["scale_factor"] == 1.0
+    finally:
+        if local_manifest_path.exists():
+            local_manifest_path.unlink()
+
+
+def test_print_validation_report_with_valid_manifest(caplog):
+    """Test that validation report prints expected messages."""
+    import logging
+
+    from benchbox.core.validation.engines import ValidationResult
+
+    caplog.set_level(logging.INFO, logger="benchbox.core.upload_validation")
+
+    validation_result = ValidationResult(
+        is_valid=True,
+        errors=[],
+        warnings=[],
+        remote_manifest={
+            "version": 2,
+            "benchmark": "tpch",
+            "scale_factor": 1.0,
+            "tables": {
+                "customer": {"formats": {"tbl": [{}]}},
+                "orders": {"formats": {"tbl": [{}]}},
+            },
+            "formats": ["tbl"],
+            "compression": {"enabled": False, "type": None, "level": None},
+        },
+    )
+
+    engine = UploadValidationEngine()
+    engine.print_validation_report(validation_result, verbose=False)
+
+    # Check that expected messages were logged
+    assert "✅ Valid TPCH data found for scale factor 1.0" in caplog.text
+    assert "✅ Data validation PASSED (2 tables)" in caplog.text
+    # Verbose details should NOT be shown
+    assert "Total files:" not in caplog.text
+
+
+def test_print_validation_report_verbose_mode(caplog):
+    """Test that verbose mode shows detailed information."""
+    import logging
+
+    from benchbox.core.validation.engines import ValidationResult
+
+    caplog.set_level(logging.INFO, logger="benchbox.core.upload_validation")
+
+    validation_result = ValidationResult(
+        is_valid=True,
+        errors=[],
+        warnings=[],
+        remote_manifest={
+            "benchmark": "tpcds",
+            "scale_factor": 10.0,
+            "tables": {
+                "catalog_sales": [{"path": "catalog_sales.dat.1.zst"}, {"path": "catalog_sales.dat.2.zst"}],
+                "store_sales": [{"path": "store_sales.dat.1.zst"}],
+            },
+            "compression": {"enabled": True, "type": "zstd", "level": 3},
+        },
+    )
+
+    engine = UploadValidationEngine()
+    engine.print_validation_report(validation_result, verbose=True)
+
+    # Check basic messages
+    assert "✅ Valid TPCDS data found for scale factor 10.0" in caplog.text
+    assert "✅ Data validation PASSED (2 tables)" in caplog.text
+
+    # Check detailed output
+    assert "Total files: 3" in caplog.text  # 2 + 1 files
+    assert "Compression: zstd (level 3)" in caplog.text
+    assert "catalog_sales" in caplog.text
+    assert "store_sales" in caplog.text
+
+
+def test_print_validation_report_skips_invalid_results():
+    """Test that print_validation_report does nothing for invalid results."""
+
+    from benchbox.core.validation.engines import ValidationResult
+
+    # Create invalid result
+    validation_result = ValidationResult(
+        is_valid=False,
+        errors=["Some error"],
+        warnings=[],
+    )
+
+    engine = UploadValidationEngine()
+
+    # Should not raise any exceptions, just return early
+    engine.print_validation_report(validation_result, verbose=False)
+
+
+def test_print_validation_report_skips_missing_manifest(caplog):
+    """Test that print_validation_report does nothing when remote_manifest is missing."""
+    import logging
+
+    from benchbox.core.validation.engines import ValidationResult
+
+    caplog.set_level(logging.INFO)
+
+    # Create valid result but without remote_manifest
+    validation_result = ValidationResult(
+        is_valid=True,
+        errors=[],
+        warnings=[],
+    )
+
+    engine = UploadValidationEngine()
+    engine.print_validation_report(validation_result, verbose=False)
+
+    # No messages should be logged
+    assert "✅" not in caplog.text
+
+
+def test_should_upload_data_logs_validation_messages(caplog):
+    """Test that should_upload_data triggers validation messages when data is valid."""
+    import logging
+
+    caplog.set_level(logging.INFO, logger="benchbox.core.upload_validation")
+
+    remote_root = "dbfs:/Volumes/workspace/schema/vol"
+    fs = FakeRemoteFS()
+
+    # Create valid remote manifest
+    manifest = {
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"customer": [{"path": "customer.tbl", "size_bytes": 10}]},
+    }
+    fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
+    fs.write_file(f"{remote_root}/customer.tbl", b"x" * 10)
+
+    # Create matching local manifest
+    tmp = Path(__file__).parent.parent.parent / "_project"
+    tmp.mkdir(exist_ok=True)
+    local_manifest_path = tmp / "test_manifest_logging.json"
+    local_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    try:
+        engine = UploadValidationEngine(fs)
+        should_upload, result = engine.should_upload_data(remote_root, local_manifest_path, verbose=False)
+
+        # Validation should pass
+        assert should_upload is False
+        assert result.is_valid is True
+
+        # Check that validation messages were logged
+        assert "✅ Valid TPCH data found for scale factor 1.0" in caplog.text
+        assert "✅ Data validation PASSED (1 tables)" in caplog.text
+        assert "Skipping upload (existing data is valid)" in caplog.text
+    finally:
+        if local_manifest_path.exists():
+            local_manifest_path.unlink()
+
+
+def test_print_validation_report_zero_tables_edge_case(caplog):
+    """Test that zero tables in manifest triggers warning and early return."""
+    import logging
+
+    from benchbox.core.validation.engines import ValidationResult
+
+    caplog.set_level(logging.WARNING, logger="benchbox.core.upload_validation")
+
+    validation_result = ValidationResult(
+        is_valid=True,
+        errors=[],
+        warnings=[],
+        remote_manifest={
+            "benchmark": "tpch",
+            "scale_factor": 1.0,
+            "tables": {},  # Zero tables - edge case
+            "compression": {"enabled": False, "type": None, "level": None},
+        },
+    )
+
+    engine = UploadValidationEngine()
+    engine.print_validation_report(validation_result, verbose=False)
+
+    # Should log warning for zero tables
+    assert "Remote manifest has zero tables" in caplog.text
+    assert "validation passed but data may be incomplete" in caplog.text
+
+
+def test_print_validation_report_missing_scale_factor(caplog):
+    """Test that missing scale_factor is handled gracefully."""
+    import logging
+
+    from benchbox.core.validation.engines import ValidationResult
+
+    caplog.set_level(logging.INFO, logger="benchbox.core.upload_validation")
+
+    validation_result = ValidationResult(
+        is_valid=True,
+        errors=[],
+        warnings=[],
+        remote_manifest={
+            "benchmark": "tpch",
+            # scale_factor missing - should default to "unknown"
+            "tables": {"customer": [{}]},
+            "compression": {"enabled": False, "type": None, "level": None},
+        },
+    )
+
+    engine = UploadValidationEngine()
+    engine.print_validation_report(validation_result, verbose=False)
+
+    # Should use "unknown" for missing scale_factor
+    assert "✅ Valid TPCH data found for scale factor unknown" in caplog.text
+
+
+def test_print_validation_report_malformed_compression(caplog):
+    """Test that malformed compression dict is handled gracefully."""
+    import logging
+
+    from benchbox.core.validation.engines import ValidationResult
+
+    caplog.set_level(logging.INFO, logger="benchbox.core.upload_validation")
+
+    validation_result = ValidationResult(
+        is_valid=True,
+        errors=[],
+        warnings=[],
+        remote_manifest={
+            "benchmark": "tpch",
+            "scale_factor": 1.0,
+            "tables": {"customer": [{}]},
+            "compression": None,  # Malformed - should handle gracefully
+        },
+    )
+
+    engine = UploadValidationEngine()
+    engine.print_validation_report(validation_result, verbose=True)
+
+    # Basic messages should still work
+    assert "✅ Valid TPCH data found for scale factor 1.0" in caplog.text
+    # Compression info should not appear (malformed)
+    assert "Compression:" not in caplog.text
+
+
+def test_databricks_adapter_passes_verbose_flag():
+    """Test that verbose flag propagates from adapter to validation engine.
+
+    This test verifies the integration point between the Databricks adapter
+    and the UploadValidationEngine, ensuring that the very_verbose setting
+    is correctly passed through to enable detailed validation reporting.
+    """
+    remote_root = "dbfs:/Volumes/workspace/schema/vol"
+    fs = FakeRemoteFS()
+
+    # Create valid remote manifest
+    manifest = {
+        "benchmark": "tpch",
+        "scale_factor": 1.0,
+        "compression": {"enabled": False, "type": None, "level": None},
+        "tables": {"customer": [{"path": "customer.tbl", "size_bytes": 10}]},
+    }
+    fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
+    fs.write_file(f"{remote_root}/customer.tbl", b"x" * 10)
+
+    # Create matching local manifest
+    tmp = Path(__file__).parent.parent.parent / "_project"
+    tmp.mkdir(exist_ok=True)
+    local_manifest_path = tmp / "test_manifest_verbose.json"
+    local_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    try:
+        engine = UploadValidationEngine(fs)
+
+        # Test with verbose=False
+        should_upload_no_verbose, result_no_verbose = engine.should_upload_data(
+            remote_root, local_manifest_path, verbose=False
+        )
+        assert should_upload_no_verbose is False
+        assert result_no_verbose.is_valid is True
+
+        # Test with verbose=True (simulates adapter passing very_verbose=True)
+        should_upload_verbose, result_verbose = engine.should_upload_data(
+            remote_root, local_manifest_path, verbose=True
+        )
+        assert should_upload_verbose is False
+        assert result_verbose.is_valid is True
+
+        # Both should return same validation result (only messaging differs)
+        assert result_no_verbose.is_valid == result_verbose.is_valid
+    finally:
+        if local_manifest_path.exists():
+            local_manifest_path.unlink()

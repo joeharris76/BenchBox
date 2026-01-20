@@ -1,0 +1,98 @@
+name: Bug Report
+description: File a bug report to help us improve BenchBox
+title: "[BUG] "
+labels: ["bug"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out this form as completely as possible.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      description: Please confirm you have completed these steps
+      options:
+        - label: I have searched existing issues to ensure this bug hasn't been reported
+          required: true
+        - label: I have checked the documentation for guidance on this issue
+          required: true
+        - label: I am using a supported Python version (3.9-3.13)
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      description: A clear and concise description of what the bug is
+      placeholder: Describe the issue you're experiencing...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Detailed steps to reproduce the behavior
+      placeholder: |
+        1. Install BenchBox with '...'
+        2. Run command '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: A clear description of what you expected to happen
+      placeholder: What should have happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment information
+      description: |
+        Please provide information about your environment.
+        You can run `benchbox --version` and `python --version` to get version info.
+      placeholder: |
+        - BenchBox version:
+        - Python version:
+        - Operating System:
+        - Database platform:
+        - Installation method:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error logs and output
+      description: If applicable, add error messages, stack traces, or relevant output
+      render: shell
+      placeholder: Paste error logs here...
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here
+      placeholder: Any additional information that might be helpful...
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How critical is this bug for your use case?
+      options:
+        - Low - Nice to fix but not blocking
+        - Medium - Affects functionality but has workarounds
+        - High - Blocks major functionality
+        - Critical - Prevents all usage
+    validations:
+      required: true

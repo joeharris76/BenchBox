@@ -1,0 +1,316 @@
+/**
+ * Custom CSS for BenchBox documentation
+ * Enhances Furo theme with Cobalt2-styled code blocks
+ */
+
+/* ============================================================================
+   Code Block Styling (Cobalt2 Theme)
+   ============================================================================ */
+
+/* Main code blocks */
+div.highlight pre,
+div.highlight-python pre,
+div.highlight-bash pre,
+div.highlight-text pre,
+pre.literal-block {
+    background-color: #122738 !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 6px !important;
+    padding: 16px !important;
+    margin: 0 !important;
+    font-family: 'Monaco', 'Consolas', 'Menlo', 'DejaVu Sans Mono', 'Courier New', monospace !important;
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    overflow-x: auto !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Code block container */
+div.highlight {
+    background-color: transparent !important;
+    border-radius: 6px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Inline code */
+code.literal,
+code.docutils.literal {
+    background-color: #1a3548 !important;
+    color: #ffc600 !important;
+    padding: 2px 6px !important;
+    border-radius: 3px !important;
+    font-family: 'Monaco', 'Consolas', 'Menlo', 'DejaVu Sans Mono', 'Courier New', monospace !important;
+    font-size: 0.9em !important;
+    border: 1px solid #2a4558 !important;
+}
+
+/* Code in headings */
+h1 code.literal,
+h2 code.literal,
+h3 code.literal,
+h4 code.literal,
+h5 code.literal,
+h6 code.literal {
+    background-color: #1a3548 !important;
+    color: #ffc600 !important;
+    font-size: 0.85em !important;
+}
+
+/* Line numbers in code blocks */
+.linenos {
+    background-color: #0d1f2d !important;
+    color: #668799 !important;
+    border-right: 1px solid #1a3548 !important;
+    padding-right: 8px !important;
+    margin-right: 8px !important;
+    user-select: none !important;
+}
+
+/* Copy button for code blocks (if enabled) */
+button.copybtn {
+    background-color: #0088ff !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 3px !important;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    opacity: 0.7 !important;
+    transition: opacity 0.2s !important;
+}
+
+button.copybtn:hover {
+    opacity: 1 !important;
+}
+
+/* ============================================================================
+   Admonitions and Callouts
+   ============================================================================ */
+
+/* Enhance Furo's admonitions with Cobalt2 accent colors */
+/* Note admonitions */
+.admonition.note,
+.admonition.seealso {
+    border-left: 4px solid #0088ff;
+}
+
+/* Warning admonitions */
+.admonition.warning,
+.admonition.attention,
+.admonition.caution {
+    border-left: 4px solid #ff9d00;
+}
+
+/* Important/Danger admonitions */
+.admonition.danger,
+.admonition.error {
+    border-left: 4px solid #ff628c;
+}
+
+/* Tip admonitions */
+.admonition.tip,
+.admonition.hint,
+.admonition.important {
+    border-left: 4px solid #3ad900;
+}
+
+/* ============================================================================
+   Code Examples and Documentation
+   ============================================================================ */
+
+/* Example blocks */
+.example {
+    background-color: #f8f9fa !important;
+    border-left: 4px solid #ffc600 !important;
+    padding: 12px !important;
+    margin: 16px 0 !important;
+    border-radius: 4px !important;
+}
+
+/* Method signatures */
+dt.sig {
+    background-color: #f8f9fa !important;
+    border-left: 3px solid #0088ff !important;
+    padding: 8px 12px !important;
+    font-family: 'Monaco', 'Consolas', 'Menlo', 'DejaVu Sans Mono', 'Courier New', monospace !important;
+}
+
+/* ============================================================================
+   Collapsible Sidebar Section Captions
+   ============================================================================ */
+
+/* Make toctree captions collapsible */
+.sidebar-tree .caption {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-left: 20px;
+    font-weight: 600;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Add collapse/expand icon before caption */
+.sidebar-tree .caption::before {
+    content: "▼";
+    position: absolute;
+    left: 0;
+    font-size: 0.7em;
+    transition: transform 0.2s ease;
+}
+
+/* Rotate icon when collapsed */
+.sidebar-tree .caption.collapsed::before {
+    transform: rotate(-90deg);
+}
+
+/* Hide items under collapsed captions */
+.sidebar-tree .caption.collapsed + ul {
+    display: none !important;
+}
+
+/* Smooth transition for collapsing */
+.sidebar-tree .caption + ul {
+    transition: all 0.2s ease;
+}
+
+/* ============================================================================
+   Links and Navigation
+   ============================================================================ */
+
+/* Furo theme compatibility: Use CSS variables where possible */
+/* Primary links with Cobalt2 accent colors - let Furo handle most styling */
+.content a:not(.reference.external):not([class*="headerlink"]) code.literal {
+    color: var(--color-brand-content);
+}
+
+.content a:hover code.literal {
+    color: #ffc600;
+}
+
+/* Preserve Cobalt2 styling for external links */
+a.reference.external {
+    color: var(--color-brand-content);
+}
+
+a.reference.external:hover {
+    color: #ffc600;
+}
+
+/* ============================================================================
+   Tables
+   ============================================================================ */
+
+/* Table styling - Light mode */
+table.docutils {
+    border-collapse: collapse !important;
+    border: 1px solid #e1e4e8 !important;
+}
+
+table.docutils thead {
+    background-color: #f6f8fa !important;
+}
+
+table.docutils th {
+    background-color: #f6f8fa !important;
+    border: 1px solid #e1e4e8 !important;
+    padding: 8px 12px !important;
+    font-weight: 600 !important;
+}
+
+table.docutils td {
+    border: 1px solid #e1e4e8 !important;
+    padding: 8px 12px !important;
+}
+
+table.docutils tr:nth-child(even) {
+    background-color: #f9f9f9 !important;
+}
+
+/* Table styling - Dark mode */
+[data-theme="dark"] table.docutils {
+    border: 1px solid #3d444d !important;
+}
+
+[data-theme="dark"] table.docutils thead {
+    background-color: #1c2128 !important;
+}
+
+[data-theme="dark"] table.docutils th {
+    background-color: #1c2128 !important;
+    border: 1px solid #3d444d !important;
+    color: #c9d1d9 !important;
+}
+
+[data-theme="dark"] table.docutils td {
+    border: 1px solid #3d444d !important;
+    color: #c9d1d9 !important;
+}
+
+[data-theme="dark"] table.docutils tr:nth-child(even) {
+    background-color: #161b22 !important;
+}
+
+[data-theme="dark"] table.docutils tr:nth-child(odd) {
+    background-color: #0d1117 !important;
+}
+
+/* Code in tables */
+table.docutils code.literal {
+    white-space: nowrap !important;
+}
+
+/* ============================================================================
+   Search Highlighting
+   ============================================================================ */
+
+/* Search result highlighting */
+.highlighted {
+    background-color: #ffc600 !important;
+    color: #122738 !important;
+    padding: 2px 4px !important;
+    border-radius: 2px !important;
+}
+
+/* ============================================================================
+   Responsive Design
+   ============================================================================ */
+
+@media screen and (max-width: 768px) {
+    div.highlight pre,
+    div.highlight-python pre,
+    div.highlight-bash pre,
+    pre.literal-block {
+        font-size: 12px !important;
+        padding: 12px !important;
+        margin: 0 !important;
+    }
+
+    code.literal,
+    code.docutils.literal {
+        font-size: 0.85em !important;
+        padding: 1px 4px !important;
+    }
+}
+
+/* ============================================================================
+   Print Styles
+   ============================================================================ */
+
+@media print {
+    div.highlight pre,
+    div.highlight-python pre,
+    div.highlight-bash pre,
+    pre.literal-block {
+        border: 1px solid #000 !important;
+        page-break-inside: avoid !important;
+        margin: 0 !important;
+    }
+
+    code.literal,
+    code.docutils.literal {
+        border: 1px solid #000 !important;
+    }
+}

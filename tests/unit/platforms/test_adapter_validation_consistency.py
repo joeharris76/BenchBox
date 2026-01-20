@@ -1,0 +1,171 @@
+"""Parametrized tests for adapter validation field consistency.
+
+Tests that all platform adapters consistently map validation results to the same
+field names and status values when using the base helper.
+
+This ensures ARCH-1 (adapter validation unification) is properly implemented.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from unittest.mock import Mock
+
+import pytest
+
+from benchbox.core.expected_results.models import ValidationMode, ValidationResult
+
+pytestmark = pytest.mark.fast
+
+
+class TestAdapterValidationConsistency:
+    """Test validation result consistency across all platform adapters."""
+
+    @pytest.fixture
+    def mock_validation_passed(self):
+        """Create a PASSED validation result."""
+        return ValidationResult(
+            is_valid=True,
+            query_id="1",
+            expected_row_count=100,
+            actual_row_count=100,
+            validation_mode=ValidationMode.EXACT,
+        )
+
+    @pytest.fixture
+    def mock_validation_failed(self):
+        """Create a FAILED validation result."""
+        return ValidationResult(
+            is_valid=False,
+            query_id="1",
+            expected_row_count=100,
+            actual_row_count=50,
+            validation_mode=ValidationMode.EXACT,
+            error_message="Query validation FAILED: expected 100 rows, got 50 rows",
+            difference=-50,
+            difference_percent=-50.0,
+        )
+
+    @pytest.fixture
+    def mock_validation_skipped(self):
+        """Create a SKIPPED validation result."""
+        return ValidationResult(
+            is_valid=True,
+            query_id="1",
+            expected_row_count=None,
+            actual_row_count=100,
+            validation_mode=ValidationMode.SKIP,
+            warning_message="No expected row count defined for query '1'. Validation skipped.",
+        )
+
+    def test_base_adapter_validation_passed(self, mock_validation_passed):
+        """Test base adapter helper correctly maps PASSED validation."""
+        from benchbox.platforms.base.adapter import PlatformAdapter
+
+        # Create a concrete mock adapter (PlatformAdapter is abstract)
+        adapter = Mock(spec=PlatformAdapter)
+        adapter._build_query_result_with_validation = PlatformAdapter._build_query_result_with_validation.__get__(
+            adapter, PlatformAdapter
+        )
+        result = adapter._build_query_result_with_validation(
+            query_id="1",
+            execution_time=1.0,
+            actual_row_count=100,
+            validation_result=mock_validation_passed,
+        )
+
+        # Check standard fields
+        assert result["query_id"] == "1"
+        assert result["status"] == "SUCCESS"
+        assert result["execution_time"] == 1.0
+        assert result["rows_returned"] == 100
+
+        # Check validation fields (nested structure)
+        assert "row_count_validation" in result
+        assert result["row_count_validation"]["expected"] == 100
+        assert result["row_count_validation"]["actual"] == 100
+        assert result["row_count_validation"]["status"] == "PASSED"
+        assert "error" not in result["row_count_validation"]
+        assert "warning" not in result["row_count_validation"]
+
+    def test_base_adapter_validation_failed(self, mock_validation_failed):
+        """Test base adapter helper correctly maps FAILED validation."""
+        from benchbox.platforms.base.adapter import PlatformAdapter
+
+        # Create a concrete mock adapter (PlatformAdapter is abstract)
+        adapter = Mock(spec=PlatformAdapter)
+        adapter._build_query_result_with_validation = PlatformAdapter._build_query_result_with_validation.__get__(
+            adapter, PlatformAdapter
+        )
+        result = adapter._build_query_result_with_validation(
+            query_id="1",
+            execution_time=1.0,
+            actual_row_count=50,
+            validation_result=mock_validation_failed,
+        )
+
+        # Check query marked as FAILED
+        assert result["status"] == "FAILED"
+        assert result["error"] == mock_validation_failed.error_message
+
+        # Check validation fields (nested structure)
+        assert "row_count_validation" in result
+        assert result["row_count_validation"]["expected"] == 100
+        assert result["row_count_validation"]["actual"] == 50
+        assert result["row_count_validation"]["status"] == "FAILED"
+        assert result["row_count_validation"]["error"] == mock_validation_failed.error_message
+        assert "warning" not in result["row_count_validation"]
+
+    def test_base_adapter_validation_skipped(self, mock_validation_skipped):
+        """Test base adapter helper correctly maps SKIPPED validation."""
+        from benchbox.platforms.base.adapter import PlatformAdapter
+
+        # Create a concrete mock adapter (PlatformAdapter is abstract)
+        adapter = Mock(spec=PlatformAdapter)
+        adapter._build_query_result_with_validation = PlatformAdapter._build_query_result_with_validation.__get__(
+            adapter, PlatformAdapter
+        )
+        result = adapter._build_query_result_with_validation(
+            query_id="1",
+            execution_time=1.0,
+            actual_row_count=100,
+            validation_result=mock_validation_skipped,
+        )
+
+        # Check query still marked as SUCCESS (not failed due to skip)
+        assert result["status"] == "SUCCESS"
+        assert "error" not in result
+
+        # Check validation fields (nested structure)
+        assert "row_count_validation" in result
+        assert result["row_count_validation"]["expected"] is None
+        assert result["row_count_validation"]["actual"] == 100
+        assert result["row_count_validation"]["status"] == "SKIPPED"
+        assert result["row_count_validation"]["warning"] == mock_validation_skipped.warning_message
+        assert "error" not in result["row_count_validation"]
+
+    def test_base_adapter_no_validation(self):
+        """Test base adapter helper with no validation result."""
+        from benchbox.platforms.base.adapter import PlatformAdapter
+
+        # Create a concrete mock adapter (PlatformAdapter is abstract)
+        adapter = Mock(spec=PlatformAdapter)
+        adapter._build_query_result_with_validation = PlatformAdapter._build_query_result_with_validation.__get__(
+            adapter, PlatformAdapter
+        )
+        result = adapter._build_query_result_with_validation(
+            query_id="1",
+            execution_time=1.0,
+            actual_row_count=100,
+            validation_result=None,
+        )
+
+        # Check standard fields
+        assert result["query_id"] == "1"
+        assert result["status"] == "SUCCESS"
+        assert result["execution_time"] == 1.0
+        assert result["rows_returned"] == 100
+
+        # Check no validation fields present
+        assert "row_count_validation" not in result

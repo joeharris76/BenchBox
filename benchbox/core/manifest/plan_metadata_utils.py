@@ -1,0 +1,142 @@
+"""Utilities for plan metadata management."""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime, timezone
+from typing import Any
+
+from benchbox.core.manifest.models import PlanMetadata
+
+
+def create_plan_metadata_from_results(
+    results: Any,  # BenchmarkResults
+    platform: str | None = None,
+    platform_version: str | None = None,
+) -> PlanMetadata:
+    """
+    Create plan metadata from benchmark results.
+
+    Extracts plan fingerprints from query executions and creates timestamps.
+
+    Args:
+        results: BenchmarkResults instance with query plans
+        platform: Platform name (defaults to results.platform)
+        platform_version: Platform version (defaults to results.platform_version)
+
+    Returns:
+        PlanMetadata with fingerprints and timestamps
+    """
+    metadata = PlanMetadata(
+        platform=platform or getattr(results, "platform", None),
+        platform_version=platform_version or getattr(results, "platform_version", None),
+    )
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Extract fingerprints from all phase results
+    for phase_results in getattr(results, "phases", {}).values():
+        for execution in phase_results.queries:
+            plan = getattr(execution, "query_plan", None)
+            if plan and hasattr(plan, "plan_fingerprint") and plan.plan_fingerprint:
+                query_id = execution.query_id
+                if query_id not in metadata.plan_fingerprints:
+                    metadata.plan_fingerprints[query_id] = plan.plan_fingerprint
+                    metadata.plan_capture_timestamp[query_id] = timestamp
+                    metadata.plan_versions[query_id] = 1  # Default to version 1
+
+    return metadata
+
+
+def update_plan_versions(
+    prev_metadata: PlanMetadata | None,
+    current_metadata: PlanMetadata,
+) -> None:
+    """
+    Update plan versions based on fingerprint changes.
+
+    Increments version number when fingerprint changes from previous run.
+
+    Args:
+        prev_metadata: Previous run's plan metadata (None for first run)
+        current_metadata: Current run's plan metadata to update
+    """
+    if not prev_metadata:
+        # First run: all versions = 1
+        for query_id in current_metadata.plan_fingerprints:
+            current_metadata.plan_versions[query_id] = 1
+        return
+
+    for query_id, current_fp in current_metadata.plan_fingerprints.items():
+        prev_fp = prev_metadata.plan_fingerprints.get(query_id)
+        prev_version = prev_metadata.plan_versions.get(query_id, 0)
+
+        if prev_fp == current_fp:
+            # Unchanged
+            current_metadata.plan_versions[query_id] = prev_version
+        else:
+            # Changed - increment version
+            current_metadata.plan_versions[query_id] = prev_version + 1
+
+
+def validate_plan_metadata(metadata: PlanMetadata) -> list[str]:
+    """
+    Validate plan metadata completeness and correctness.
+
+    Args:
+        metadata: PlanMetadata instance to validate
+
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    errors = []
+
+    # Check fingerprints are valid SHA256
+    sha256_pattern = re.compile(r"^[a-f0-9]{64}$")
+    for query_id, fp in metadata.plan_fingerprints.items():
+        if not sha256_pattern.match(fp):
+            errors.append(f"Invalid fingerprint for {query_id}: {fp[:20]}...")
+
+    # Check versions are positive
+    for query_id, version in metadata.plan_versions.items():
+        if version < 1:
+            errors.append(f"Invalid version for {query_id}: {version}")
+
+    # Check fingerprints and versions are aligned
+    fp_keys = set(metadata.plan_fingerprints.keys())
+    version_keys = set(metadata.plan_versions.keys())
+    if fp_keys != version_keys:
+        missing_versions = fp_keys - version_keys
+        missing_fingerprints = version_keys - fp_keys
+        if missing_versions:
+            errors.append(f"Missing versions for queries: {sorted(missing_versions)}")
+        if missing_fingerprints:
+            errors.append(f"Missing fingerprints for queries: {sorted(missing_fingerprints)}")
+
+    return errors
+
+
+def merge_plan_metadata(
+    base: PlanMetadata,
+    overlay: PlanMetadata,
+) -> PlanMetadata:
+    """
+    Merge two plan metadata objects.
+
+    Overlay values take precedence over base values for same query IDs.
+
+    Args:
+        base: Base plan metadata
+        overlay: Overlay plan metadata (takes precedence)
+
+    Returns:
+        New PlanMetadata with merged values
+    """
+    merged = PlanMetadata(
+        plan_fingerprints={**base.plan_fingerprints, **overlay.plan_fingerprints},
+        plan_versions={**base.plan_versions, **overlay.plan_versions},
+        plan_capture_timestamp={**base.plan_capture_timestamp, **overlay.plan_capture_timestamp},
+        platform=overlay.platform or base.platform,
+        platform_version=overlay.platform_version or base.platform_version,
+    )
+    return merged
