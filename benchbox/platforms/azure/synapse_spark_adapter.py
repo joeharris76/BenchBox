@@ -1,0 +1,829 @@
+"""Azure Synapse Spark platform adapter.
+
+Azure Synapse Analytics is Microsoft's enterprise analytics platform providing
+integrated Spark, SQL, and Data Explorer capabilities. This adapter integrates
+with Synapse Spark pools via the Livy API for benchmark execution.
+
+Key Features:
+- Enterprise: Mature platform with extensive enterprise features
+- ADLS Gen2: Azure Data Lake Storage for data staging
+- Entra ID: Azure Active Directory authentication
+- Livy: Apache Livy REST API for Spark session management
+- Spark Pools: Dedicated Spark pools with configurable sizing
+
+Usage:
+    from benchbox.platforms.azure import SynapseSparkAdapter
+
+    adapter = SynapseSparkAdapter(
+        workspace_name="my-synapse-workspace",
+        spark_pool_name="sparkpool1",
+        storage_account="mystorageaccount",
+        storage_container="benchbox",
+    )
+
+    # Run TPC-H benchmark
+    adapter.create_schema("tpch_sf1")
+    adapter.load_data(["lineitem", "orders", ...], source_dir)
+    result = adapter.execute_query("SELECT * FROM lineitem LIMIT 10")
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from benchbox.core.tuning.interface import (
+        ForeignKeyConfiguration,
+        PlatformOptimizationConfiguration,
+        PrimaryKeyConfiguration,
+        UnifiedTuningConfiguration,
+    )
+
+from benchbox.core.exceptions import ConfigurationError
+from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base.cloud_spark import (
+    CloudSparkStaging,
+    SparkConfigOptimizer,
+    SparkTuningMixin,
+)
+from benchbox.platforms.base.cloud_spark.config import CloudPlatform
+from benchbox.utils.dependencies import (
+    check_platform_dependencies,
+    get_dependency_error_message,
+)
+
+try:
+    from azure.identity import DefaultAzureCredential
+
+    AZURE_IDENTITY_AVAILABLE = True
+except ImportError:
+    DefaultAzureCredential = None
+    AZURE_IDENTITY_AVAILABLE = False
+
+try:
+    import requests
+
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    requests = None
+    REQUESTS_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+
+class SynapseLivySessionState:
+    """Synapse Livy session state constants."""
+
+    NOT_STARTED = "not_started"
+    STARTING = "starting"
+    IDLE = "idle"
+    BUSY = "busy"
+    SHUTTING_DOWN = "shutting_down"
+    ERROR = "error"
+    DEAD = "dead"
+    KILLED = "killed"
+    SUCCESS = "success"
+
+
+class SynapseLivyStatementState:
+    """Synapse Livy statement state constants."""
+
+    WAITING = "waiting"
+    RUNNING = "running"
+    AVAILABLE = "available"
+    ERROR = "error"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
+
+
+class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
+    """Azure Synapse Spark platform adapter.
+
+    Synapse Spark provides enterprise Spark execution within the Azure Synapse
+    Analytics workspace. This adapter uses the Livy REST API for session and
+    statement management, with ADLS Gen2 for data staging.
+
+    Execution Model:
+    - Create Livy session in Synapse Spark pool
+    - Execute Spark SQL statements via Livy
+    - Results returned via Livy statement output
+    - ADLS Gen2 for data staging
+
+    Key Features:
+    - Enterprise: Mature platform with enterprise features
+    - ADLS Gen2: Azure Data Lake Storage integration
+    - Spark Pools: Dedicated pools with configurable sizing
+    - Entra ID: Azure AD authentication
+
+    Billing:
+    - vCore-hours for Spark pools
+    - Storage charged separately (ADLS Gen2)
+    - Pool idle timeout billing
+    """
+
+    def __init__(
+        self,
+        workspace_name: str | None = None,
+        spark_pool_name: str | None = None,
+        storage_account: str | None = None,
+        storage_container: str | None = None,
+        storage_path: str | None = None,
+        tenant_id: str | None = None,
+        livy_endpoint: str | None = None,
+        timeout_minutes: int = 60,
+        spark_config: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the Synapse Spark adapter.
+
+        Args:
+            workspace_name: Synapse workspace name (required).
+            spark_pool_name: Spark pool name (required).
+            storage_account: ADLS Gen2 storage account name (required).
+            storage_container: ADLS Gen2 container name (required).
+            storage_path: Path within container for data staging (default: benchbox).
+            tenant_id: Azure tenant ID for authentication.
+            livy_endpoint: Custom Livy endpoint URL (auto-derived if not provided).
+            timeout_minutes: Statement timeout in minutes (default: 60).
+            spark_config: Additional Spark configuration.
+            **kwargs: Additional platform options.
+        """
+        if not AZURE_IDENTITY_AVAILABLE:
+            deps_satisfied, missing = check_platform_dependencies("synapse-spark")
+            if not deps_satisfied:
+                raise ConfigurationError(get_dependency_error_message("synapse-spark", missing))
+
+        if not workspace_name:
+            raise ConfigurationError("workspace_name is required (Synapse workspace name)")
+
+        if not spark_pool_name:
+            raise ConfigurationError("spark_pool_name is required (Synapse Spark pool name)")
+
+        if not storage_account:
+            raise ConfigurationError("storage_account is required (ADLS Gen2 storage account name)")
+
+        if not storage_container:
+            raise ConfigurationError("storage_container is required (ADLS Gen2 container name)")
+
+        self.workspace_name = workspace_name
+        self.spark_pool_name = spark_pool_name
+        self.storage_account = storage_account
+        self.storage_container = storage_container
+        self.storage_path = storage_path or "benchbox"
+        self.tenant_id = tenant_id
+        self.timeout_minutes = timeout_minutes
+        self.user_spark_config = spark_config or {}
+
+        # Derive Livy endpoint if not provided
+        self.livy_endpoint = livy_endpoint or self._derive_livy_endpoint()
+
+        # Build ADLS Gen2 URI for staging
+        self.adls_uri = (
+            f"abfss://{self.storage_container}@{self.storage_account}.dfs.core.windows.net/{self.storage_path}"
+        )
+
+        # Initialize staging using cloud-spark shared infrastructure
+        self._staging: CloudSparkStaging | None = None
+        try:
+            self._staging = CloudSparkStaging.from_uri(self.adls_uri)
+        except Exception as e:
+            logger.warning(f"Failed to initialize ADLS staging: {e}")
+
+        # Credential (lazy initialization)
+        self._credential: Any = None
+        self._access_token: str | None = None
+        self._token_expires_at: float = 0
+
+        # Session management
+        self._session_id: int | None = None
+        self._session_created_by_us = False
+
+        # Metrics tracking
+        self._query_count = 0
+        self._total_statement_time_seconds = 0.0
+
+        # Benchmark configuration (set via configure_for_benchmark)
+        self._benchmark_type: str | None = None
+        self._scale_factor: float = 1.0
+        self._spark_config: dict[str, str] = {}
+
+        super().__init__(**kwargs)
+
+    def _derive_livy_endpoint(self) -> str:
+        """Derive the Livy endpoint from workspace and pool names."""
+        # Synapse Livy endpoint format
+        return f"https://{self.workspace_name}.dev.azuresynapse.net/livyApi/versions/2019-11-01-preview/sparkPools/{self.spark_pool_name}/sessions"
+
+    def _get_credential(self) -> Any:
+        """Get or create Azure credential."""
+        if self._credential is None:
+            kwargs: dict[str, Any] = {}
+            if self.tenant_id:
+                kwargs["additionally_allowed_tenants"] = ["*"]
+            self._credential = DefaultAzureCredential(**kwargs)
+        return self._credential
+
+    def _get_access_token(self) -> str:
+        """Get a valid access token, refreshing if needed."""
+        current_time = time.time()
+
+        # Refresh token if expired or about to expire (5 minute buffer)
+        if self._access_token is None or current_time >= self._token_expires_at - 300:
+            credential = self._get_credential()
+            # Synapse API scope
+            token = credential.get_token("https://dev.azuresynapse.net/.default")
+            self._access_token = token.token
+            self._token_expires_at = token.expires_on
+
+        return self._access_token
+
+    def _get_headers(self) -> dict[str, str]:
+        """Get HTTP headers with authentication."""
+        return {
+            "Authorization": f"Bearer {self._get_access_token()}",
+            "Content-Type": "application/json",
+        }
+
+    def get_platform_info(self, connection: Any = None) -> dict[str, Any]:
+        """Return platform metadata.
+
+        Args:
+            connection: Not used (Synapse Spark manages sessions internally).
+
+        Returns:
+            Dict with platform information including name, version, and capabilities.
+        """
+        return {
+            "platform": "synapse-spark",
+            "display_name": "Azure Synapse Spark",
+            "vendor": "Microsoft",
+            "type": "managed_spark",
+            "workspace_name": self.workspace_name,
+            "spark_pool": self.spark_pool_name,
+            "storage_account": self.storage_account,
+            "supports_sql": True,
+            "supports_dataframe": True,
+            "billing_model": "vCore-hours",
+            "storage": "ADLS Gen2",
+        }
+
+    def _create_session(self) -> int:
+        """Create a new Livy session.
+
+        Returns:
+            The session ID.
+        """
+        if not REQUESTS_AVAILABLE:
+            raise ConfigurationError("requests package is required for Synapse Spark")
+
+        # Build session configuration
+        session_config: dict[str, Any] = {
+            "kind": "spark",
+            "name": f"benchbox-{self.spark_pool_name}",
+            "conf": {
+                # Default Spark configuration for benchmarks
+                "spark.sql.adaptive.enabled": "true",
+                "spark.sql.adaptive.coalescePartitions.enabled": "true",
+            },
+        }
+
+        # Add user-provided Spark config
+        session_config["conf"].update(self.user_spark_config)
+
+        # Add benchmark-specific configuration
+        if self._spark_config:
+            session_config["conf"].update(self._spark_config)
+
+        logger.info(f"Creating Livy session in Synapse workspace {self.workspace_name}")
+
+        response = requests.post(
+            self.livy_endpoint,
+            headers=self._get_headers(),
+            json=session_config,
+            timeout=60,
+        )
+
+        if response.status_code not in (200, 201):
+            raise ConfigurationError(f"Failed to create Livy session: {response.status_code} - {response.text}")
+
+        session = response.json()
+        session_id = session["id"]
+
+        # Wait for session to be ready
+        self._wait_for_session_state(session_id, [SynapseLivySessionState.IDLE])
+        self._session_created_by_us = True
+
+        logger.info(f"Livy session created: {session_id}")
+        return session_id
+
+    def _wait_for_session_state(
+        self,
+        session_id: int,
+        target_states: list[str],
+        timeout_seconds: int = 600,
+    ) -> str:
+        """Wait for session to reach a target state.
+
+        Args:
+            session_id: Session ID to wait for.
+            target_states: List of acceptable target states.
+            timeout_seconds: Maximum wait time.
+
+        Returns:
+            The final session state.
+        """
+        start_time = time.time()
+        session_url = f"{self.livy_endpoint}/{session_id}"
+
+        while time.time() - start_time < timeout_seconds:
+            response = requests.get(
+                session_url,
+                headers=self._get_headers(),
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                raise ConfigurationError(f"Failed to get session status: {response.status_code}")
+
+            session = response.json()
+            state = session["state"]
+
+            if state in target_states:
+                return state
+            if state in [SynapseLivySessionState.ERROR, SynapseLivySessionState.DEAD, SynapseLivySessionState.KILLED]:
+                raise ConfigurationError(f"Session is in {state} state")
+
+            time.sleep(5)
+
+        raise ConfigurationError(f"Timeout waiting for session {session_id}")
+
+    def _ensure_session(self) -> int:
+        """Ensure a Livy session exists and is ready.
+
+        Returns:
+            The session ID.
+        """
+        if self._session_id is not None:
+            # Verify session is still valid
+            session_url = f"{self.livy_endpoint}/{self._session_id}"
+            try:
+                response = requests.get(
+                    session_url,
+                    headers=self._get_headers(),
+                    timeout=30,
+                )
+                if response.status_code == 200:
+                    session = response.json()
+                    if session["state"] == SynapseLivySessionState.IDLE:
+                        return self._session_id
+                    if session["state"] == SynapseLivySessionState.BUSY:
+                        # Wait for it to become idle
+                        self._wait_for_session_state(self._session_id, [SynapseLivySessionState.IDLE])
+                        return self._session_id
+            except Exception as e:
+                logger.warning(f"Session {self._session_id} is invalid: {e}")
+                self._session_id = None
+
+        # Create new session
+        self._session_id = self._create_session()
+        return self._session_id
+
+    def _execute_statement(
+        self,
+        code: str,
+        kind: str = "sql",
+    ) -> dict[str, Any]:
+        """Execute a statement in the Livy session.
+
+        Args:
+            code: The code to execute.
+            kind: Statement kind ('sql', 'spark', 'pyspark').
+
+        Returns:
+            The statement result.
+        """
+        session_id = self._ensure_session()
+        statements_url = f"{self.livy_endpoint}/{session_id}/statements"
+
+        statement_data = {
+            "code": code,
+            "kind": kind,
+        }
+
+        start_time = time.time()
+
+        response = requests.post(
+            statements_url,
+            headers=self._get_headers(),
+            json=statement_data,
+            timeout=60,
+        )
+
+        if response.status_code not in (200, 201):
+            raise ConfigurationError(f"Failed to submit statement: {response.status_code} - {response.text}")
+
+        statement = response.json()
+        statement_id = statement["id"]
+
+        # Wait for statement to complete
+        result = self._wait_for_statement(session_id, statement_id)
+
+        execution_time = time.time() - start_time
+        self._total_statement_time_seconds += execution_time
+        self._query_count += 1
+
+        return result
+
+    def _wait_for_statement(
+        self,
+        session_id: int,
+        statement_id: int,
+    ) -> dict[str, Any]:
+        """Wait for statement to complete and return result.
+
+        Args:
+            session_id: Session ID.
+            statement_id: Statement ID.
+
+        Returns:
+            The statement result.
+        """
+        timeout_seconds = self.timeout_minutes * 60
+        start_time = time.time()
+        statement_url = f"{self.livy_endpoint}/{session_id}/statements/{statement_id}"
+
+        while time.time() - start_time < timeout_seconds:
+            response = requests.get(
+                statement_url,
+                headers=self._get_headers(),
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                raise ConfigurationError(f"Failed to get statement status: {response.status_code}")
+
+            statement = response.json()
+            state = statement["state"]
+
+            if state == SynapseLivyStatementState.AVAILABLE:
+                output = statement.get("output", {})
+                if output.get("status") == "error":
+                    error_value = output.get("evalue", "Unknown error")
+                    raise ConfigurationError(f"Statement failed: {error_value}")
+                return output
+            if state in [SynapseLivyStatementState.ERROR, SynapseLivyStatementState.CANCELLED]:
+                raise ConfigurationError(f"Statement is in {state} state")
+
+            time.sleep(2)
+
+        raise ConfigurationError(f"Timeout waiting for statement {statement_id} after {timeout_seconds}s")
+
+    def create_connection(self, **kwargs: Any) -> Any:
+        """Verify Azure connectivity and workspace access.
+
+        Returns:
+            Dict with connection status and workspace info.
+
+        Raises:
+            ConfigurationError: If Azure connection fails.
+        """
+        try:
+            # Test credential by getting a token
+            self._get_access_token()
+
+            # Test Spark pool access via Synapse API
+            pool_url = f"https://{self.workspace_name}.dev.azuresynapse.net/sparkPools/{self.spark_pool_name}"
+            response = requests.get(
+                pool_url,
+                headers=self._get_headers(),
+                timeout=30,
+            )
+
+            if response.status_code == 200:
+                pool_info = response.json()
+                logger.info(f"Connected to Synapse workspace: {self.workspace_name}")
+                return {
+                    "status": "connected",
+                    "workspace_name": self.workspace_name,
+                    "spark_pool": self.spark_pool_name,
+                    "spark_version": pool_info.get("sparkVersion"),
+                    "node_size": pool_info.get("nodeSize"),
+                    "node_count": pool_info.get("nodeCount"),
+                }
+            elif response.status_code == 401:
+                raise ConfigurationError(
+                    "Authentication failed. Ensure Azure credentials are configured "
+                    "(az login, service principal, or managed identity)"
+                )
+            elif response.status_code == 403:
+                raise ConfigurationError(
+                    f"Access denied to Synapse workspace {self.workspace_name}. Check workspace permissions."
+                )
+            elif response.status_code == 404:
+                raise ConfigurationError(
+                    f"Spark pool {self.spark_pool_name} not found in workspace {self.workspace_name}. "
+                    "Verify the pool name is correct."
+                )
+            else:
+                raise ConfigurationError(f"Failed to access Synapse: {response.status_code} - {response.text}")
+        except requests.exceptions.RequestException as e:
+            raise ConfigurationError(f"Failed to connect to Synapse: {e}") from e
+
+    def create_schema(self, schema_name: str | None = None) -> None:
+        """Create schema/database for benchmark tables.
+
+        Synapse Spark uses the Spark catalog for database management.
+
+        Args:
+            schema_name: Database/schema name.
+        """
+        database = schema_name or "default"
+
+        logger.info(f"Using Synapse Spark schema: {database}")
+
+        if database != "default":
+            self._execute_statement(
+                f"CREATE DATABASE IF NOT EXISTS {database}",
+                kind="sql",
+            )
+
+    def load_data(
+        self,
+        tables: list[str],
+        source_dir: Path | str,
+        file_format: str = "parquet",
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        """Upload benchmark data to ADLS Gen2 and create tables.
+
+        Args:
+            tables: List of table names to load.
+            source_dir: Local directory containing table data files.
+            file_format: Data file format (default: parquet).
+            **kwargs: Additional options.
+
+        Returns:
+            Dict mapping table names to ADLS URIs.
+        """
+        source_path = Path(source_dir)
+        if not source_path.exists():
+            raise ConfigurationError(f"Source directory not found: {source_dir}")
+
+        # Upload data to ADLS using staging infrastructure
+        if self._staging:
+            # Check if tables already exist
+            if self._staging.tables_exist(tables):
+                logger.info("Tables already exist in ADLS, skipping upload")
+            else:
+                logger.info(f"Uploading {len(tables)} tables to ADLS Gen2")
+                self._staging.upload_tables(
+                    tables=tables,
+                    source_dir=source_path,
+                    file_format=file_format,
+                )
+
+        # Create external tables from uploaded data
+        table_uris = {}
+        for table in tables:
+            table_uri = f"{self.adls_uri}/tables/{table}"
+            table_uris[table] = table_uri
+
+            # Create table from Parquet files
+            create_sql = f"""
+                CREATE TABLE IF NOT EXISTS {table}
+                USING PARQUET
+                LOCATION '{table_uri}'
+            """
+            try:
+                self._execute_statement(create_sql, kind="sql")
+                logger.debug(f"Created table: {table}")
+            except Exception as e:
+                logger.warning(f"Failed to create table {table}: {e}")
+
+        return table_uris
+
+    def execute_query(
+        self,
+        query: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Execute a SQL query via Livy.
+
+        Args:
+            query: SQL query to execute.
+            **kwargs: Additional options.
+
+        Returns:
+            Dict with query results.
+        """
+        start_time = time.time()
+
+        result = self._execute_statement(query, kind="sql")
+
+        execution_time = time.time() - start_time
+
+        # Parse result data
+        data = result.get("data", {})
+        schema = data.get("schema", {})
+
+        return {
+            "success": True,
+            "execution_time": execution_time,
+            "row_count": len(data.get("values", [])),
+            "columns": [f.get("name") for f in schema.get("fields", [])],
+            "data": data.get("values", []),
+        }
+
+    def close(self) -> None:
+        """Clean up resources and close Livy session."""
+        if self._session_id is not None and self._session_created_by_us:
+            try:
+                session_url = f"{self.livy_endpoint}/{self._session_id}"
+                requests.delete(
+                    session_url,
+                    headers=self._get_headers(),
+                    timeout=30,
+                )
+                logger.info(f"Closed Livy session: {self._session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to close session: {e}")
+            finally:
+                self._session_id = None
+
+    def get_target_dialect(self) -> str:
+        """Return the target SQL dialect for Synapse Spark.
+
+        Synapse Spark uses Spark SQL dialect.
+
+        Returns:
+            The dialect string "spark".
+        """
+        return "spark"
+
+    # --- Configuration Methods ---
+
+    def configure_for_benchmark(
+        self,
+        benchmark: str,
+        scale_factor: float | None = None,
+        **options: Any,
+    ) -> None:
+        """Configure adapter for specific benchmark.
+
+        Args:
+            benchmark: Benchmark name (tpch, tpcds, ssb).
+            scale_factor: Data scale factor.
+            **options: Additional benchmark options.
+        """
+        self._benchmark_type = benchmark.lower()
+        self._scale_factor = scale_factor or 1.0
+
+        # Get optimized Spark configuration
+        if self._benchmark_type == "tpch":
+            config = SparkConfigOptimizer.for_tpch(
+                scale_factor=self._scale_factor,
+                platform=CloudPlatform.SYNAPSE,
+            )
+        elif self._benchmark_type == "tpcds":
+            config = SparkConfigOptimizer.for_tpcds(
+                scale_factor=self._scale_factor,
+                platform=CloudPlatform.SYNAPSE,
+            )
+        elif self._benchmark_type == "ssb":
+            config = SparkConfigOptimizer.for_ssb(
+                scale_factor=self._scale_factor,
+                platform=CloudPlatform.SYNAPSE,
+            )
+        else:
+            # Default to TPC-H config for unknown benchmarks
+            config = SparkConfigOptimizer.for_tpch(
+                scale_factor=self._scale_factor,
+                platform=CloudPlatform.SYNAPSE,
+            )
+
+        # Convert SparkConfig to dict
+        self._spark_config = config.to_dict()
+        logger.info(f"Configured for {benchmark} at SF={self._scale_factor}")
+
+    def apply_platform_tuning(
+        self,
+        config: PlatformOptimizationConfiguration,
+    ) -> None:
+        """Apply platform-specific tuning configuration.
+
+        Args:
+            config: Platform optimization configuration.
+        """
+        if hasattr(config, "spark_config") and config.spark_config:
+            self._spark_config.update(config.spark_config)
+
+    def apply_constraint_configuration(
+        self,
+        primary_keys: list[PrimaryKeyConfiguration] | None = None,
+        foreign_keys: list[ForeignKeyConfiguration] | None = None,
+    ) -> None:
+        """Apply constraint configuration (no-op for Spark).
+
+        Spark does not enforce primary/foreign key constraints.
+
+        Args:
+            primary_keys: Primary key configurations (ignored).
+            foreign_keys: Foreign key configurations (ignored).
+        """
+        if primary_keys:
+            logger.debug(f"Ignoring {len(primary_keys)} primary key constraints (Spark no-op)")
+        if foreign_keys:
+            logger.debug(f"Ignoring {len(foreign_keys)} foreign key constraints (Spark no-op)")
+
+    def apply_unified_tuning(
+        self,
+        config: UnifiedTuningConfiguration,
+    ) -> None:
+        """Apply unified tuning configuration.
+
+        Args:
+            config: Unified tuning configuration.
+        """
+        if hasattr(config, "platform_optimization"):
+            self.apply_platform_tuning(config.platform_optimization)
+
+    # apply_primary_keys, apply_foreign_keys, apply_platform_optimizations,
+    # and apply_constraint_configuration are inherited from SparkTuningMixin
+
+    # --- CLI Methods ---
+
+    @classmethod
+    def add_cli_arguments(cls, parser: Any) -> None:
+        """Add Synapse Spark CLI arguments.
+
+        Args:
+            parser: Argument parser to add arguments to.
+        """
+        parser.add_argument(
+            "--workspace-name",
+            help="Synapse workspace name",
+            dest="workspace_name",
+        )
+        parser.add_argument(
+            "--spark-pool",
+            help="Spark pool name",
+            dest="spark_pool_name",
+            required=True,
+        )
+        parser.add_argument(
+            "--storage-account",
+            help="ADLS Gen2 storage account name",
+            dest="storage_account",
+        )
+        parser.add_argument(
+            "--storage-container",
+            help="ADLS Gen2 container name",
+            dest="storage_container",
+        )
+        parser.add_argument(
+            "--storage-path",
+            help="Path within container for staging (default: benchbox)",
+            dest="storage_path",
+            default="benchbox",
+        )
+        parser.add_argument(
+            "--tenant-id",
+            help="Azure tenant ID",
+            dest="tenant_id",
+        )
+        parser.add_argument(
+            "--timeout",
+            type=int,
+            default=60,
+            help="Statement timeout in minutes (default: 60)",
+            dest="timeout_minutes",
+        )
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> SynapseSparkAdapter:
+        """Create adapter from configuration dictionary.
+
+        Args:
+            config: Configuration dictionary.
+
+        Returns:
+            SynapseSparkAdapter instance.
+        """
+        return cls(
+            workspace_name=config.get("workspace_name"),
+            spark_pool_name=config.get("spark_pool_name"),
+            storage_account=config.get("storage_account"),
+            storage_container=config.get("storage_container"),
+            storage_path=config.get("storage_path"),
+            tenant_id=config.get("tenant_id"),
+            livy_endpoint=config.get("livy_endpoint"),
+            timeout_minutes=config.get("timeout_minutes", 60),
+            spark_config=config.get("spark_config"),
+        )

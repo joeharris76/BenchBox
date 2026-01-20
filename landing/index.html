@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BenchBox - Run Your Own Benchmarks</title>
+    <meta name="description"
+        content="Run your own benchmarks and compare database performance. 18 benchmarks (TPC-H/DS/DI, ClickBench, SSB, more). 26 platforms (DuckDB, Snowflake, Databricks, Polars, more). CLI, Python library, or MCP for AI assistants.">
+
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+
+    <link rel="stylesheet" href="style.css?v=3">
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <div class="nav-logo">BenchBox</div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#benchmarks">Benchmarks</a>
+                <a href="#platforms">Platforms</a>
+                <a href="#mcp">MCP</a>
+                <a href="#install">Install</a>
+                <a href="https://benchbox.dev/docs/">Documentation</a>
+                <a href="https://github.com/joeharris76/benchbox" target="_blank">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <h1 class="hero-title">Run Your Own Benchmarks</h1>
+            <p class="hero-subtitle">Everyone says you should. BenchBox makes it easy to do. Use as CLI, Python
+                library, or MCP for AI assistants. No Docker. No compilers. Just pip install.</p>
+            <div class="hero-layout">
+                <div class="hero-right">
+                    <div class="hero-demo">
+                        <div class="code-block">
+                            <div class="code-header">
+                                <span>CLI, Library, or MCP</span>
+                                <button class="copy-btn" data-target="hero-code">Copy</button>
+                            </div>
+                            <pre><code id="hero-code" class="language-bash"># CLI - Quick benchmarking
+benchbox run --platform duckdb --benchmark tpch
+
+# MCP - AI assistant integration
+"Run TPC-H on DuckDB" # Claude executes via MCP
+
+# Library - Deep Python integration
+from benchbox import TPCH</code></pre>
+                        </div>
+                    </div>
+
+                    <div class="hero-badges">
+                        <a href="https://github.com/joeharris76/benchbox" target="_blank" class="badge">
+                            Star on GitHub ⭐
+                        </a>
+                        <span class="badge badge-info">Python 3.10+</span>
+                        <span class="badge badge-info">No Docker Required</span>
+                    </div>
+                </div>
+                <div class="hero-left">
+                    <img src="hero.png" alt="BenchBox - Database Benchmarking Toolkit" class="hero-image">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2>What Makes It Simple</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🚀</div>
+                    <h3>Python-Only Core</h3>
+                    <p>Minimal requirements. Python-only core with optional extras for cloud
+                        platforms. `pip install` and go.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>18 Benchmarks</h3>
+                    <p>TPC standards, academic (SSB, Join Order), industry (ClickBench, NYC Taxi), SQL primitives,
+                        and experimental workloads.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔄</div>
+                    <h3>SQL & DataFrame</h3>
+                    <p>SQL databases (DuckDB, ClickHouse, cloud platforms) and DataFrame libraries (Polars, Pandas).</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>One Benchmark, Run Anywhere</h3>
+                    <p>Automatic SQL translation. Same benchmark queries run on local and cloud databases.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📈</div>
+                    <h3>Generate Data at Any Scale</h3>
+                    <p>10MB to 100TB! No need to download pre-generated files.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>AI-Powered with MCP</h3>
+                    <p>MCP server for Claude Code and AI assistants. Run benchmarks with natural language.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Benchmarks Section -->
+    <section id="benchmarks" class="benchmarks">
+        <div class="container">
+            <h2>Benchmarks by Category</h2>
+
+            <h3 class="section-heading">TPC Standards</h3>
+            <p class="section-subheading">Official industry standards for comparing databases</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/tpc-h.html" class="benchmark-card">
+                        <h3>TPC-H</h3>
+                        <p>Standard data warehouse benchmark with 22 business intelligence queries.</p>
+                        <div class="benchmark-meta">8 tables • 22 queries</div>
+                        <div class="benchmark-link">BenchBox TPC-H Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="http://www.tpc.org/tpch/" target="_blank"
+                            rel="noopener">TPC.org Standard ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/tpc-ds.html" class="benchmark-card">
+                        <h3>TPC-DS</h3>
+                        <p>Complex decision support benchmark modeling multi-dimensional analysis.</p>
+                        <div class="benchmark-meta">25 tables • 99 queries</div>
+                        <div class="benchmark-link">BenchBox TPC-DS Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="http://www.tpc.org/tpcds/" target="_blank"
+                            rel="noopener">TPC.org Standard ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/tpc-di.html" class="benchmark-card">
+                        <h3>TPC-DI</h3>
+                        <p>Data integration benchmark testing ETL operations and data quality.</p>
+                        <div class="benchmark-meta">15 tables • ETL workflow</div>
+                        <div class="benchmark-link">BenchBox TPC-DI Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="http://www.tpc.org/tpcdi/" target="_blank"
+                            rel="noopener">TPC.org Standard ↗</a></div>
+                </div>
+            </div>
+
+            <h3 class="section-heading">Academic Benchmarks</h3>
+            <p class="section-subheading">Research benchmarks from academia</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/ssb.html" class="benchmark-card">
+                        <h3>Star Schema Benchmark</h3>
+                        <p>Simplified data warehouse testing basic OLAP functionality.</p>
+                        <div class="benchmark-meta">4 tables • 13 queries</div>
+                        <div class="benchmark-link">BenchBox SSB Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="https://www.cs.umb.edu/~poneil/StarSchemaB.PDF"
+                            target="_blank" rel="noopener">Original Paper ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/amplab.html" class="benchmark-card">
+                        <h3>AMPLab</h3>
+                        <p>Big data benchmark focusing on machine learning and analytics workloads.</p>
+                        <div class="benchmark-meta">3 tables • 4 queries</div>
+                        <div class="benchmark-link">BenchBox AMPLab Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="https://amplab.cs.berkeley.edu/benchmark/" target="_blank"
+                            rel="noopener">Original Site ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/join-order.html" class="benchmark-card">
+                        <h3>Join Order Benchmark</h3>
+                        <p>Query optimizer testing with complex multi-table joins from IMDB data.</p>
+                        <div class="benchmark-meta">21 tables • 113 queries</div>
+                        <div class="benchmark-link">BenchBox Join Order Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="https://www.vldb.org/pvldb/vol9/p204-leis.pdf"
+                            target="_blank" rel="noopener">Original Paper ↗</a></div>
+                </div>
+            </div>
+
+            <h3 class="section-heading">Industry Benchmarks</h3>
+            <p class="section-subheading">Real-world benchmarks from practitioners</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/clickbench.html" class="benchmark-card">
+                        <h3>ClickBench</h3>
+                        <p>Analytics benchmark with real-world web analytics queries.</p>
+                        <div class="benchmark-meta">1 table • 43 queries</div>
+                        <div class="benchmark-link">BenchBox ClickBench Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="https://benchmark.clickhouse.com/" target="_blank"
+                            rel="noopener">Official Site ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/h2odb.html" class="benchmark-card">
+                        <h3>H2ODB</h3>
+                        <p>Data science benchmark testing aggregation and join performance.</p>
+                        <div class="benchmark-meta">2 tables • 5 query groups</div>
+                        <div class="benchmark-link">BenchBox H2ODB Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="https://duckdblabs.github.io/db-benchmark/" target="_blank"
+                            rel="noopener">Official Site ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/nyctaxi.html" class="benchmark-card">
+                        <h3>NYC Taxi</h3>
+                        <p>Real-world transportation analytics with geospatial and temporal queries.</p>
+                        <div class="benchmark-meta">2 tables • 25 queries</div>
+                        <div class="benchmark-link">BenchBox NYC Taxi Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page"
+                            target="_blank" rel="noopener">NYC TLC Data ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/tsbs-devops.html" class="benchmark-card">
+                        <h3>TSBS DevOps</h3>
+                        <p>Time-series benchmark for infrastructure monitoring and observability.</p>
+                        <div class="benchmark-meta">Time-series • 18 queries</div>
+                        <div class="benchmark-link">BenchBox TSBS Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a href="https://github.com/timescale/tsbs" target="_blank"
+                            rel="noopener">Original Repo ↗</a></div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/coffeeshop.html" class="benchmark-card">
+                        <h3>CoffeeShop</h3>
+                        <p>Small analytical benchmark modeling a coffee shop with sales and inventory.</p>
+                        <div class="benchmark-meta">3 tables • 10 queries</div>
+                        <div class="benchmark-link">BenchBox CoffeeShop Documentation →</div>
+                    </a>
+                    <div class="benchmark-origin"><a
+                            href="https://josuebogran.substack.com/p/databricks-vs-snowflake-vs-fabric" target="_blank"
+                            rel="noopener">Original Post ↗</a></div>
+                </div>
+            </div>
+
+            <h3 class="section-heading">BenchBox Primitives</h3>
+            <p class="section-subheading">Fundamental database operation testing</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/read-primitives.html" class="benchmark-card">
+                        <h3>Read Primitives</h3>
+                        <p>Read operation testing across 26 categories.</p>
+                        <div class="benchmark-meta">TPC-H schema • 109 queries</div>
+                        <div class="benchmark-link">BenchBox Primitives Documentation →</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/write-primitives.html" class="benchmark-card">
+                        <h3>Write Primitives</h3>
+                        <p>Comprehensive write operation testing including bulk loads and merges.</p>
+                        <div class="benchmark-meta">TPC-H schema • 113 operations</div>
+                        <div class="benchmark-link">BenchBox Write Primitives Documentation →</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/transaction-primitives.html" class="benchmark-card">
+                        <h3>Transaction Primitives</h3>
+                        <p>ACID transaction testing with isolation levels, commits, and rollbacks.</p>
+                        <div class="benchmark-meta">TPC-H schema • 8 operations</div>
+                        <div class="benchmark-link">BenchBox Transaction Primitives Documentation →</div>
+                    </a>
+                </div>
+            </div>
+
+            <h3 class="section-heading">BenchBox Experimental</h3>
+            <p class="section-subheading">Experimental benchmarks for specialized testing</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/tpc-havoc.html" class="benchmark-card">
+                        <h3>TPC-Havoc</h3>
+                        <p>Query optimizer stress testing with 220 syntax variants of TPC-H queries.</p>
+                        <div class="benchmark-meta">TPC-H schema • 220 variants</div>
+                        <div class="benchmark-link">BenchBox TPC-Havoc Documentation →</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/tpch-skew.html" class="benchmark-card">
+                        <h3>TPC-H Skew</h3>
+                        <p>Test optimizer behavior on non-uniform data distributions (Zipfian, exponential).</p>
+                        <div class="benchmark-meta">TPC-H schema • Skewed data</div>
+                        <div class="benchmark-link">BenchBox TPC-H Skew Documentation →</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/index.html" class="benchmark-card">
+                        <h3>TPC-DS-OBT</h3>
+                        <p>TPC-DS queries on a single denormalized "One Big Table" schema.</p>
+                        <div class="benchmark-meta">1 wide table • 99 queries</div>
+                        <div class="benchmark-link">BenchBox TPC-DS-OBT Documentation →</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/benchmarks/datavault.html" class="benchmark-card">
+                        <h3>Data Vault</h3>
+                        <p>TPC-H adapted for Data Vault 2.0 modeling (Hub-Link-Satellite pattern).</p>
+                        <div class="benchmark-meta">21 tables • 22 queries</div>
+                        <div class="benchmark-link">BenchBox Data Vault Documentation →</div>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Platforms Section -->
+    <section id="platforms" class="platforms">
+        <div class="container">
+            <h2>Supported Platforms</h2>
+
+            <h3 class="section-heading">Single-Node Analytics Engines</h3>
+            <p class="section-subheading">In-process and local columnar databases</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/duckdb.html" class="benchmark-card">
+                        <h3>DuckDB</h3>
+                        <p>In-process analytical database. Built-in, no setup required.</p>
+                        <div class="benchmark-meta">Built-in • OLAP</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/clickhouse-local-mode.html" class="benchmark-card">
+                        <h3>ClickHouse</h3>
+                        <p>Column-oriented OLAP database for real-time analytics.</p>
+                        <div class="benchmark-meta">Local/Cloud • OLAP</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/datafusion.html" class="benchmark-card">
+                        <h3>DataFusion</h3>
+                        <p>Apache Arrow-native query engine for in-memory analytics.</p>
+                        <div class="benchmark-meta">In-process • Arrow</div>
+                    </a>
+                </div>
+            </div>
+
+            <h3 class="section-heading">Row-Based Databases</h3>
+            <p class="section-subheading">Traditional relational databases</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/postgresql.html" class="benchmark-card">
+                        <h3>PostgreSQL</h3>
+                        <p>The world's most advanced open source relational database.</p>
+                        <div class="benchmark-meta">OLTP/OLAP • Relational</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/sqlite.html" class="benchmark-card">
+                        <h3>SQLite</h3>
+                        <p>Embedded transactional database for testing and CI/CD.</p>
+                        <div class="benchmark-meta">Built-in • OLTP</div>
+                    </a>
+                </div>
+            </div>
+
+            <h3 class="section-heading">Cloud Data Platforms</h3>
+            <p class="section-subheading">Enterprise cloud data warehouses and lakehouses</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/snowflake.html" class="benchmark-card">
+                        <h3>Snowflake</h3>
+                        <p>Multi-cloud data warehouse with elastic compute.</p>
+                        <div class="benchmark-meta">Cloud • Warehouse</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/databricks.html" class="benchmark-card">
+                        <h3>Databricks</h3>
+                        <p>Data Intelligence Platform with lakehouse architecture.</p>
+                        <div class="benchmark-meta">Cloud • Lakehouse</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/bigquery.html" class="benchmark-card">
+                        <h3>BigQuery</h3>
+                        <p>Google Cloud serverless data warehouse.</p>
+                        <div class="benchmark-meta">GCP • Serverless</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/redshift.html" class="benchmark-card">
+                        <h3>Redshift</h3>
+                        <p>AWS cloud data warehouse (serverless or provisioned).</p>
+                        <div class="benchmark-meta">AWS • Warehouse</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/athena.html" class="benchmark-card">
+                        <h3>Athena</h3>
+                        <p>AWS serverless query service for S3 data lakes.</p>
+                        <div class="benchmark-meta">AWS • Serverless</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/azure-platforms.html" class="benchmark-card">
+                        <h3>Azure Synapse</h3>
+                        <p>Microsoft Azure analytics service.</p>
+                        <div class="benchmark-meta">Azure • Analytics</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/microsoft-fabric.html" class="benchmark-card">
+                        <h3>Microsoft Fabric</h3>
+                        <p>Unified analytics platform with OneLake.</p>
+                        <div class="benchmark-meta">Azure • Unified</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/firebolt.html" class="benchmark-card">
+                        <h3>Firebolt</h3>
+                        <p>Cloud data warehouse optimized for analytics.</p>
+                        <div class="benchmark-meta">Cloud • OLAP</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/motherduck.html" class="benchmark-card">
+                        <h3>MotherDuck</h3>
+                        <p>Serverless cloud DuckDB with hybrid local/cloud execution.</p>
+                        <div class="benchmark-meta">Cloud • DuckDB</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/starburst.html" class="benchmark-card">
+                        <h3>Starburst</h3>
+                        <p>Enterprise Trino with managed cloud offering.</p>
+                        <div class="benchmark-meta">Cloud • Federation</div>
+                    </a>
+                </div>
+            </div>
+
+            <h3 class="section-heading">Open Source Platforms</h3>
+            <p class="section-subheading">Distributed query engines for federated data</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/trino.html" class="benchmark-card">
+                        <h3>Trino</h3>
+                        <p>Distributed SQL query engine for federated data.</p>
+                        <div class="benchmark-meta">Distributed • Federation</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/presto.html" class="benchmark-card">
+                        <h3>PrestoDB</h3>
+                        <p>Distributed SQL query engine (Meta's fork).</p>
+                        <div class="benchmark-meta">Distributed • Federation</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/spark.html" class="benchmark-card">
+                        <h3>Apache Spark SQL</h3>
+                        <p>Distributed SQL engine for large-scale data processing.</p>
+                        <div class="benchmark-meta">Distributed • Spark</div>
+                    </a>
+                </div>
+            </div>
+
+            <h3 class="section-heading">Time Series Databases</h3>
+            <p class="section-subheading">Optimized for time-stamped data</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/timescaledb.html" class="benchmark-card">
+                        <h3>TimescaleDB</h3>
+                        <p>Time-series database built on PostgreSQL.</p>
+                        <div class="benchmark-meta">Time-series • PostgreSQL</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/influxdb.html" class="benchmark-card">
+                        <h3>InfluxDB</h3>
+                        <p>Time-series database for metrics and events.</p>
+                        <div class="benchmark-meta">Time-series • IoT</div>
+                    </a>
+                </div>
+            </div>
+
+            <h3 class="section-heading">DataFrame Platforms</h3>
+            <p class="section-subheading">Native DataFrame APIs instead of SQL</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/polars.html" class="benchmark-card">
+                        <h3>Polars</h3>
+                        <p>Fast Rust-based DataFrame library with lazy evaluation.</p>
+                        <div class="benchmark-meta">polars-df • Expression API</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/pandas-dataframe.html" class="benchmark-card">
+                        <h3>Pandas</h3>
+                        <p>Reference Python DataFrame implementation.</p>
+                        <div class="benchmark-meta">pandas-df • Pandas API</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/pyspark-dataframe.html" class="benchmark-card">
+                        <h3>PySpark DataFrame</h3>
+                        <p>Apache Spark DataFrame API for distributed computing.</p>
+                        <div class="benchmark-meta">pyspark-df • Distributed</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/datafusion-dataframe.html" class="benchmark-card">
+                        <h3>DataFusion DataFrame</h3>
+                        <p>Arrow-native DataFrame with lazy evaluation.</p>
+                        <div class="benchmark-meta">datafusion-df • Arrow</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/modin-dataframe.html" class="benchmark-card">
+                        <h3>Modin</h3>
+                        <p>Distributed Pandas replacement (Ray/Dask backend).</p>
+                        <div class="benchmark-meta">modin-df • Pandas API</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/dask-dataframe.html" class="benchmark-card">
+                        <h3>Dask</h3>
+                        <p>Parallel computing library with DataFrame API.</p>
+                        <div class="benchmark-meta">dask-df • Distributed</div>
+                    </a>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <a href="https://benchbox.dev/docs/platforms/cudf.html" class="benchmark-card">
+                        <h3>cuDF (RAPIDS)</h3>
+                        <p>GPU-accelerated DataFrame library from NVIDIA.</p>
+                        <div class="benchmark-meta">cudf-df • GPU</div>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- MCP Section -->
+    <section id="mcp" class="mcp">
+        <div class="container">
+            <h2>AI Assistant Integration</h2>
+            <p class="mcp-intro">BenchBox includes an MCP (Model Context Protocol) server for Claude Code and other AI assistants.
+                Run benchmarks with natural language instead of memorizing CLI flags.</p>
+
+            <div class="mcp-setup">
+                <h3 class="section-heading">Quick Setup</h3>
+                <div class="code-block">
+                    <div class="code-header">
+                        <span>Add to Claude Code</span>
+                        <button class="copy-btn" data-target="mcp-setup-code">Copy</button>
+                    </div>
+                    <pre><code id="mcp-setup-code" class="language-bash">claude mcp add benchbox -- uv run python -m benchbox.mcp</code></pre>
+                </div>
+            </div>
+
+            <h3 class="section-heading">What You Can Do</h3>
+            <p class="section-subheading">Natural language commands for benchmarking workflows</p>
+            <div class="benchmarks-grid">
+                <div class="benchmark-card-wrapper">
+                    <div class="benchmark-card mcp-card">
+                        <h3>Discover</h3>
+                        <p class="mcp-example">"What benchmarks are available?"</p>
+                        <p class="mcp-example">"Which platforms support TPC-DS?"</p>
+                        <p>Explore 18 benchmarks and 26 platforms without reading documentation.</p>
+                    </div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <div class="benchmark-card mcp-card">
+                        <h3>Execute</h3>
+                        <p class="mcp-example">"Run TPC-H on DuckDB at scale 0.1"</p>
+                        <p class="mcp-example">"Compare Polars and Pandas on SSB"</p>
+                        <p>Run benchmarks without memorizing CLI syntax or options.</p>
+                    </div>
+                </div>
+                <div class="benchmark-card-wrapper">
+                    <div class="benchmark-card mcp-card">
+                        <h3>Analyze</h3>
+                        <p class="mcp-example">"Which queries were slowest?"</p>
+                        <p class="mcp-example">"Compare results from my last two runs"</p>
+                        <p>Get AI-powered analysis of performance patterns and regressions.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mcp-docs-link">
+                <a href="https://benchbox.dev/docs/guides/mcp-integration.html" target="_blank" class="badge">
+                    Full MCP Documentation →
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Installation Section -->
+    <section id="install" class="install">
+        <div class="container">
+            <h2>Get Started</h2>
+            <div class="install-content">
+                <div class="install-step">
+                    <h3>1. Install</h3>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <button class="copy-btn" data-target="install-code">Copy</button>
+                        </div>
+                        <pre><code id="install-code" class="language-bash">uv add benchbox</code></pre>
+                    </div>
+                </div>
+
+                <div class="install-step">
+                    <h3>2. Run as CLI</h3>
+                    <div class="code-block">
+                        <pre><code class="language-bash"># Quick TPC-H benchmark on DuckDB
+benchbox run --platform duckdb --benchmark tpch --scale 0.1
+
+# Preview on cloud before spending credits
+benchbox run --platform databricks --benchmark tpch --dry-run ./preview</code></pre>
+                    </div>
+                </div>
+
+                <div class="install-step">
+                    <h3>3. Or Use as Library</h3>
+                    <div class="code-block">
+                        <pre><code class="language-python">from benchbox import TPCH
+
+# Initialize and generate benchmark data
+tpch = TPCH(scale_factor=0.1)
+data_files = tpch.generate_data()
+
+# Get schema and queries
+create_sql = tpch.get_create_tables_sql()
+query = tpch.get_query(1)  # Q1: Pricing Summary Report</code></pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="requirements">
+                <h3>Requirements</h3>
+                <ul>
+                    <li>Python 3.10 or higher</li>
+                    <li>No external dependencies for data generation</li>
+                    <li>Optional: database drivers (duckdb, sqlite3, etc.)</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>BenchBox</h4>
+                    <p>Database benchmarking made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://benchbox.dev/docs/">Documentation</a></li>
+                        <li><a href="https://github.com/joeharris76/benchbox">GitHub Repository</a></li>
+                        <li><a href="https://github.com/joeharris76/benchbox/issues">Issue Tracker</a></li>
+                        <li><a href="https://pypi.org/project/benchbox/">PyPI Package</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/joeharris76/benchbox/discussions">Discussions</a></li>
+                        <li><a href="https://github.com/joeharris76/benchbox/blob/main/CONTRIBUTING.md">Contributing</a>
+                        </li>
+                        <li><a href="https://github.com/joeharris76/benchbox/blob/main/LICENSE">MIT License</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 BenchBox. Open source under MIT License.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>

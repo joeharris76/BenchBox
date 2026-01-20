@@ -1,0 +1,146 @@
+"""Tests for BenchBox MCP resources.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import json
+import sys
+
+import pytest
+
+# Skip all tests if Python < 3.10
+pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+")
+
+
+class TestBenchmarkResources:
+    """Tests for benchmark resources."""
+
+    def test_list_benchmarks_resource_format(self):
+        """Test that benchmark list resource returns valid JSON."""
+        from benchbox.core.benchmark_registry import get_all_benchmarks
+
+        all_benchmarks = get_all_benchmarks()
+        benchmarks = []
+        for name, meta in all_benchmarks.items():
+            benchmarks.append(
+                {
+                    "name": name,
+                    "display_name": meta.get("display_name", name),
+                    "description": meta.get("description", ""),
+                    "category": meta.get("category", "unknown"),
+                    "query_count": meta.get("num_queries", 0),
+                }
+            )
+
+        result = {"benchmarks": benchmarks, "count": len(benchmarks)}
+        json_str = json.dumps(result)
+
+        # Verify it's valid JSON
+        parsed = json.loads(json_str)
+        assert "benchmarks" in parsed
+        assert "count" in parsed
+        assert parsed["count"] > 0
+
+    def test_get_benchmark_resource_tpch(self):
+        """Test getting TPC-H benchmark resource."""
+        from benchbox.core.benchmark_registry import get_all_benchmarks
+
+        all_benchmarks = get_all_benchmarks()
+        meta = all_benchmarks["tpch"]
+
+        result = {
+            "name": "tpch",
+            "display_name": meta.get("display_name"),
+            "description": meta.get("description"),
+            "query_count": meta.get("num_queries"),
+        }
+
+        assert result["name"] == "tpch"
+        assert result["display_name"] == "TPC-H"
+        assert result["query_count"] == 22
+
+
+class TestPlatformResources:
+    """Tests for platform resources."""
+
+    def test_list_platforms_resource_format(self):
+        """Test that platform list resource returns valid JSON."""
+        from benchbox.core.platform_registry import PlatformRegistry
+
+        platforms = []
+        all_metadata = PlatformRegistry.get_all_platform_metadata()
+
+        for name, metadata in all_metadata.items():
+            capabilities = metadata.get("capabilities", {})
+            info = PlatformRegistry.get_platform_info(name)
+
+            platforms.append(
+                {
+                    "name": name,
+                    "display_name": metadata.get("display_name", name),
+                    "category": metadata.get("category", "unknown"),
+                    "available": info.available if info else False,
+                    "supports_sql": capabilities.get("supports_sql", False),
+                    "supports_dataframe": capabilities.get("supports_dataframe", False),
+                }
+            )
+
+        result = {"platforms": platforms, "count": len(platforms)}
+        json_str = json.dumps(result)
+
+        parsed = json.loads(json_str)
+        assert "platforms" in parsed
+        assert "count" in parsed
+        assert parsed["count"] > 0
+
+    def test_get_platform_resource_duckdb(self):
+        """Test getting DuckDB platform resource."""
+        from benchbox.core.platform_registry import PlatformRegistry
+
+        all_metadata = PlatformRegistry.get_all_platform_metadata()
+        metadata = all_metadata["duckdb"]
+        info = PlatformRegistry.get_platform_info("duckdb")
+
+        assert metadata is not None
+        assert info is not None
+        assert info.available
+
+
+class TestSystemResources:
+    """Tests for system resources."""
+
+    def test_system_profile_resource_format(self):
+        """Test that system profile resource returns valid JSON."""
+        import platform
+
+        import psutil
+
+        import benchbox
+
+        memory = psutil.virtual_memory()
+
+        result = {
+            "cpu": {
+                "cores": psutil.cpu_count(logical=False) or 1,
+                "threads": psutil.cpu_count(logical=True) or 1,
+                "architecture": platform.machine(),
+            },
+            "memory": {
+                "total_gb": round(memory.total / (1024**3), 2),
+                "available_gb": round(memory.available / (1024**3), 2),
+            },
+            "python": {
+                "version": platform.python_version(),
+            },
+            "benchbox_version": getattr(benchbox, "__version__", "unknown"),
+        }
+
+        json_str = json.dumps(result)
+        parsed = json.loads(json_str)
+
+        assert "cpu" in parsed
+        assert "memory" in parsed
+        assert parsed["cpu"]["threads"] > 0
+        assert parsed["memory"]["total_gb"] > 0

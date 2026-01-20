@@ -1,0 +1,441 @@
+"""Regression tests for TPC-DS stdout data generation (FILTER flag fix).
+
+These tests validate that the TPC-DS dsdgen binary correctly supports stdout output
+via the -FILTER Y flag. This functionality was broken due to two bugs in the original
+TPC-DS source that were fixed:
+
+1. Parameter name mismatch: _FILTER -> FILTER in params.h
+2. fpOutfile overwrite bug: moved assignment inside else block in print.c
+
+See: _project/DONE/tpcds-stdout-fix/patch-tpcds-source-stdout.yaml for details.
+"""
+
+from __future__ import annotations
+
+import os
+import platform
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+import pytest
+
+# Mark all tests as tpcds and unit tests
+pytestmark_list = [
+    pytest.mark.tpcds,
+    pytest.mark.unit,
+]
+
+
+def get_dsdgen_path() -> Path | None:
+    """Get path to dsdgen binary for current platform."""
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    # Map platform to binary directory
+    platform_map = {
+        ("darwin", "arm64"): "darwin-arm64",
+        ("darwin", "x86_64"): "darwin-x86_64",
+        ("linux", "x86_64"): "linux-x86_64",
+        ("linux", "aarch64"): "linux-arm64",
+    }
+
+    platform_dir = platform_map.get((system, machine))
+    if not platform_dir:
+        return None
+
+    # Find BenchBox root
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "benchbox").is_dir():
+            dsdgen = parent / "_binaries" / "tpc-ds" / platform_dir / "dsdgen"
+            if dsdgen.exists():
+                return dsdgen
+    return None
+
+
+def get_tpcds_tools_dir() -> Path | None:
+    """Get path to TPC-DS tools directory (for tpcds.dst)."""
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "benchbox").is_dir():
+            tools_dir = parent / "_sources" / "tpc-ds" / "tools"
+            if tools_dir.exists():
+                return tools_dir
+    return None
+
+
+# Skip all tests if dsdgen not available
+pytestmark = pytest.mark.skipif(
+    get_dsdgen_path() is None,
+    reason="dsdgen binary not available for this platform",
+)
+
+
+class TestDsdgenFilterFlag:
+    """Test that dsdgen accepts and uses the FILTER flag correctly."""
+
+    @pytest.fixture
+    def dsdgen_path(self) -> Path:
+        """Get dsdgen path, skip if not available."""
+        path = get_dsdgen_path()
+        if path is None:
+            pytest.skip("dsdgen not available")
+        assert path is not None  # Type narrowing after skip
+        return path
+
+    @pytest.fixture
+    def tools_dir(self) -> Path:
+        """Get TPC-DS tools directory."""
+        path = get_tpcds_tools_dir()
+        if path is None:
+            pytest.skip("TPC-DS tools directory not available")
+        assert path is not None  # Type narrowing after skip
+        return path
+
+    def test_filter_flag_shows_without_underscore(self, dsdgen_path: Path) -> None:
+        """Test: dsdgen -help shows FILTER (not _FILTER).
+
+        This validates that the params.h patch was applied correctly.
+        The old broken version showed _FILTER, the fixed version shows FILTER.
+        """
+        result = subprocess.run(
+            [str(dsdgen_path), "-help"],
+            capture_output=True,
+            text=True,
+        )
+
+        # Check help output contains FILTER without underscore prefix
+        help_text = result.stdout + result.stderr
+        assert "FILTER" in help_text, "FILTER flag not found in help output"
+        assert "_FILTER" not in help_text, "Old _FILTER flag still present (params.h not patched)"
+
+    def test_filter_flag_accepted(self, dsdgen_path: Path, tools_dir: Path) -> None:
+        """Test: dsdgen -FILTER Y is accepted without error.
+
+        The old broken version rejected -FILTER Y with "option unknown" error.
+        """
+        result = subprocess.run(
+            [
+                str(dsdgen_path),
+                "-TABLE",
+                "ship_mode",
+                "-SCALE",
+                "1",
+                "-FILTER",
+                "Y",
+                "-RNGSEED",
+                "1",
+            ],
+            cwd=tools_dir,  # Run from tools dir so dsdgen finds tpcds.dst
+            capture_output=True,
+            text=True,
+        )
+
+        # Should not have "option unknown" error
+        combined_output = result.stdout + result.stderr
+        assert "option" not in combined_output.lower() or "unknown" not in combined_output.lower(), (
+            f"FILTER flag rejected: {combined_output}"
+        )
+
+    def test_filter_outputs_to_stdout(self, dsdgen_path: Path, tools_dir: Path) -> None:
+        """Test: dsdgen -FILTER Y produces output on stdout.
+
+        This validates that the print.c patch was applied correctly.
+        The old broken version set fpOutfile=stdout then overwrote it with NULL.
+        """
+        result = subprocess.run(
+            [
+                str(dsdgen_path),
+                "-TABLE",
+                "ship_mode",  # Small table (20 rows at SF1)
+                "-SCALE",
+                "1",
+                "-FILTER",
+                "Y",
+                "-RNGSEED",
+                "1",
+                "-TERMINATE",
+                "N",  # No trailing delimiter
+            ],
+            cwd=tools_dir,
+            capture_output=True,
+            text=True,
+        )
+
+        # Should have data on stdout (ship_mode has 20 rows)
+        stdout_lines = [line for line in result.stdout.strip().split("\n") if line and "|" in line]
+        assert len(stdout_lines) == 20, f"Expected 20 rows, got {len(stdout_lines)}: {result.stdout[:200]}"
+
+        # Verify data format (pipe-delimited)
+        first_row = stdout_lines[0]
+        assert "|" in first_row, f"Data not pipe-delimited: {first_row}"
+
+    def test_filter_does_not_create_file(self, dsdgen_path: Path, tools_dir: Path) -> None:
+        """Test: dsdgen -FILTER Y does not create .dat file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Copy required distribution files to temp directory
+            for dist_file in ["tpcds.dst", "tpcds.idx"]:
+                src = tools_dir / dist_file
+                if src.exists():
+                    shutil.copy(src, tmpdir)
+
+            subprocess.run(
+                [
+                    str(dsdgen_path),
+                    "-TABLE",
+                    "ship_mode",
+                    "-SCALE",
+                    "1",
+                    "-FILTER",
+                    "Y",
+                    "-RNGSEED",
+                    "1",
+                    "-DIR",
+                    tmpdir,
+                ],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+            )
+
+            # Check no .dat file was created
+            dat_files = list(Path(tmpdir).glob("*.dat"))
+            assert len(dat_files) == 0, f"Unexpected .dat files created: {dat_files}"
+
+    def test_without_filter_creates_file(self, dsdgen_path: Path, tools_dir: Path) -> None:
+        """Test: dsdgen without FILTER still creates .dat file (backward compat)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Copy required distribution files to temp directory
+            for dist_file in ["tpcds.dst", "tpcds.idx"]:
+                src = tools_dir / dist_file
+                if src.exists():
+                    shutil.copy(src, tmpdir)
+
+            result = subprocess.run(
+                [
+                    str(dsdgen_path),
+                    "-TABLE",
+                    "ship_mode",
+                    "-SCALE",
+                    "1",
+                    "-RNGSEED",
+                    "1",
+                    "-DIR",
+                    tmpdir,
+                    "-FORCE",
+                ],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+            )
+
+            # Check .dat file was created
+            dat_file = Path(tmpdir) / "ship_mode.dat"
+            assert dat_file.exists(), f"Expected ship_mode.dat to be created. stderr: {result.stderr}"
+
+            # Verify file has content
+            content = dat_file.read_text()
+            lines = [line for line in content.strip().split("\n") if line]
+            assert len(lines) == 20, f"Expected 20 rows in file, got {len(lines)}"
+
+
+class TestStdoutDataEquivalence:
+    """Test that stdout output matches file output."""
+
+    @pytest.fixture
+    def dsdgen_path(self) -> Path:
+        """Get dsdgen path, skip if not available."""
+        path = get_dsdgen_path()
+        if path is None:
+            pytest.skip("dsdgen not available")
+        assert path is not None  # Type narrowing after skip
+        return path
+
+    @pytest.fixture
+    def tools_dir(self) -> Path:
+        """Get TPC-DS tools directory."""
+        path = get_tpcds_tools_dir()
+        if path is None:
+            pytest.skip("TPC-DS tools directory not available")
+        assert path is not None  # Type narrowing after skip
+        return path
+
+    def test_stdout_matches_file_output(self, dsdgen_path: Path, tools_dir: Path) -> None:
+        """Test: stdout output exactly matches file output for same seed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Copy required distribution files
+            for dist_file in ["tpcds.dst", "tpcds.idx"]:
+                src = tools_dir / dist_file
+                if src.exists():
+                    shutil.copy(src, tmpdir)
+
+            # Generate via stdout
+            stdout_result = subprocess.run(
+                [
+                    str(dsdgen_path),
+                    "-TABLE",
+                    "ship_mode",
+                    "-SCALE",
+                    "1",
+                    "-FILTER",
+                    "Y",
+                    "-RNGSEED",
+                    "12345",
+                    "-TERMINATE",
+                    "N",
+                ],
+                cwd=tools_dir,
+                capture_output=True,
+                text=True,
+            )
+
+            # Generate via file
+            subprocess.run(
+                [
+                    str(dsdgen_path),
+                    "-TABLE",
+                    "ship_mode",
+                    "-SCALE",
+                    "1",
+                    "-RNGSEED",
+                    "12345",
+                    "-DIR",
+                    tmpdir,
+                    "-FORCE",
+                    "-TERMINATE",
+                    "N",
+                ],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+            )
+
+            # Compare outputs
+            stdout_lines = [line for line in stdout_result.stdout.strip().split("\n") if line and "|" in line]
+            file_content = (Path(tmpdir) / "ship_mode.dat").read_text()
+            file_lines = [line for line in file_content.strip().split("\n") if line]
+
+            assert len(stdout_lines) == len(file_lines), (
+                f"Row count mismatch: stdout={len(stdout_lines)}, file={len(file_lines)}"
+            )
+
+            # Compare row by row
+            for i, (stdout_line, file_line) in enumerate(zip(stdout_lines, file_lines)):
+                assert stdout_line == file_line, f"Row {i} mismatch:\n  stdout: {stdout_line}\n  file: {file_line}"
+
+
+class TestStreamingCompression:
+    """Test stdout streaming to compression."""
+
+    @pytest.fixture
+    def dsdgen_path(self) -> Path:
+        """Get dsdgen path, skip if not available."""
+        path = get_dsdgen_path()
+        if path is None:
+            pytest.skip("dsdgen not available")
+        assert path is not None  # Type narrowing after skip
+        return path
+
+    @pytest.fixture
+    def tools_dir(self) -> Path:
+        """Get TPC-DS tools directory."""
+        path = get_tpcds_tools_dir()
+        if path is None:
+            pytest.skip("TPC-DS tools directory not available")
+        assert path is not None  # Type narrowing after skip
+        return path
+
+    def test_stdout_pipes_to_gzip(self, dsdgen_path: Path, tools_dir: Path) -> None:
+        """Test: stdout output can be piped to gzip."""
+        import gzip
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = Path(tmpdir) / "ship_mode.dat.gz"
+
+            # Generate and pipe to gzip
+            dsdgen_proc = subprocess.Popen(
+                [
+                    str(dsdgen_path),
+                    "-TABLE",
+                    "ship_mode",
+                    "-SCALE",
+                    "1",
+                    "-FILTER",
+                    "Y",
+                    "-RNGSEED",
+                    "1",
+                    "-TERMINATE",
+                    "N",
+                ],
+                cwd=tools_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Write to gzip file
+            with gzip.open(output_file, "wt") as f:
+                assert dsdgen_proc.stdout is not None, "Expected stdout from dsdgen"
+                for line in dsdgen_proc.stdout:
+                    f.write(line.decode("utf-8"))
+
+            dsdgen_proc.wait()
+
+            # Verify gzip file
+            assert output_file.exists(), "Gzip file not created"
+            with gzip.open(output_file, "rt") as f:
+                lines = [line for line in f.read().strip().split("\n") if line]
+            assert len(lines) == 20, f"Expected 20 rows in gzip, got {len(lines)}"
+
+    @pytest.mark.skipif(
+        not any((Path(p) / "zstd").exists() for p in os.environ.get("PATH", "").split(os.pathsep)),
+        reason="zstd not available",
+    )
+    def test_stdout_pipes_to_zstd(self, dsdgen_path: Path, tools_dir: Path) -> None:
+        """Test: stdout output can be piped to zstd."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = Path(tmpdir) / "ship_mode.dat.zst"
+
+            # Generate and pipe to zstd
+            dsdgen_proc = subprocess.Popen(
+                [
+                    str(dsdgen_path),
+                    "-TABLE",
+                    "ship_mode",
+                    "-SCALE",
+                    "1",
+                    "-FILTER",
+                    "Y",
+                    "-RNGSEED",
+                    "1",
+                    "-TERMINATE",
+                    "N",
+                ],
+                cwd=tools_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+
+            zstd_proc = subprocess.Popen(
+                ["zstd", "-o", str(output_file)],
+                stdin=dsdgen_proc.stdout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            dsdgen_proc.stdout.close()
+            zstd_proc.wait()
+            dsdgen_proc.wait()
+
+            # Verify zstd file
+            assert output_file.exists(), "Zstd file not created"
+
+            # Decompress and verify
+            result = subprocess.run(
+                ["zstd", "-d", "-c", str(output_file)],
+                capture_output=True,
+                text=True,
+            )
+            lines = [line for line in result.stdout.strip().split("\n") if line]
+            assert len(lines) == 20, f"Expected 20 rows in zstd, got {len(lines)}"

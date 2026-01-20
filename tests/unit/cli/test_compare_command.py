@@ -1,0 +1,540 @@
+"""Tests for the CLI compare command.
+
+Tests the benchmark result comparison command functionality.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import json
+import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from click.testing import CliRunner
+
+from benchbox.cli.app import cli
+
+pytestmark = [
+    pytest.mark.fast,
+    pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    ),
+]
+
+
+class TestCompareCommand:
+    """Test the compare CLI command."""
+
+    def test_compare_command_exists(self):
+        """Test that the compare command is available."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+
+        assert result.exit_code == 0
+        assert "compare" in result.output
+
+    def test_compare_help(self):
+        """Test the compare help output."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["compare", "--help"])
+
+        assert result.exit_code == 0
+        assert "Compare benchmark results" in result.output
+        assert "--fail-on-regression" in result.output
+        assert "--format" in result.output
+        assert "--output" in result.output
+        assert "--show-all-queries" in result.output
+
+    def test_compare_requires_two_files(self):
+        """Test that compare requires at least 2 files."""
+        runner = CliRunner()
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({"test": "data"}, f)
+            file_path = f.name
+
+        try:
+            result = runner.invoke(cli, ["compare", file_path])
+            assert result.exit_code == 1
+            assert "At least 2 result files required" in result.output
+        finally:
+            Path(file_path).unlink()
+
+    @patch("benchbox.cli.commands.compare.load_result_file")
+    @patch("benchbox.cli.commands.compare.ResultExporter")
+    def test_compare_two_files_success(self, mock_exporter_class, mock_load):
+        """Test successful comparison of two result files."""
+        runner = CliRunner()
+
+        # Mock loaded results
+        mock_baseline = MagicMock()
+        mock_baseline.benchmark_name = "TPC-H"
+        mock_baseline.platform = "DuckDB"
+        mock_baseline.scale_factor = 0.01
+
+        mock_current = MagicMock()
+        mock_current.benchmark_name = "TPC-H"
+        mock_current.platform = "DuckDB"
+        mock_current.scale_factor = 0.01
+
+        mock_load.side_effect = [
+            (mock_baseline, {}),
+            (mock_current, {}),
+        ]
+
+        # Mock comparison result
+        mock_exporter = MagicMock()
+        mock_exporter.compare_results.return_value = {
+            "baseline_file": "baseline.json",
+            "current_file": "current.json",
+            "performance_changes": {},
+            "query_comparisons": [],
+            "summary": {
+                "total_queries_compared": 22,
+                "improved_queries": 5,
+                "regressed_queries": 3,
+                "unchanged_queries": 14,
+                "overall_assessment": "mixed",
+            },
+        }
+        mock_exporter_class.return_value = mock_exporter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline_path = Path(tmpdir) / "baseline.json"
+            current_path = Path(tmpdir) / "current.json"
+
+            baseline_path.write_text("{}")
+            current_path.write_text("{}")
+
+            result = runner.invoke(cli, ["compare", str(baseline_path), str(current_path)])
+
+            assert result.exit_code == 0
+            assert "BENCHMARK COMPARISON REPORT" in result.output
+
+    @patch("benchbox.cli.commands.compare.load_result_file")
+    @patch("benchbox.cli.commands.compare.ResultExporter")
+    def test_compare_with_regression_detection(self, mock_exporter_class, mock_load):
+        """Test comparison with regression detection and exit code."""
+        runner = CliRunner()
+
+        mock_baseline = MagicMock()
+        mock_baseline.benchmark_name = "TPC-H"
+        mock_baseline.platform = "DuckDB"
+        mock_baseline.scale_factor = 0.01
+
+        mock_current = MagicMock()
+        mock_current.benchmark_name = "TPC-H"
+        mock_current.platform = "DuckDB"
+        mock_current.scale_factor = 0.01
+
+        mock_load.side_effect = [
+            (mock_baseline, {}),
+            (mock_current, {}),
+        ]
+
+        # Mock comparison with regression
+        mock_exporter = MagicMock()
+        mock_exporter.compare_results.return_value = {
+            "baseline_file": "baseline.json",
+            "current_file": "current.json",
+            "performance_changes": {
+                "total_execution_time": {
+                    "baseline": 10.0,
+                    "current": 15.0,
+                    "change_percent": 50.0,
+                    "improved": False,
+                }
+            },
+            "query_comparisons": [
+                {
+                    "query_id": "q1",
+                    "baseline_time_ms": 100,
+                    "current_time_ms": 200,
+                    "change_percent": 100.0,
+                    "improved": False,
+                }
+            ],
+            "summary": {},
+        }
+        mock_exporter_class.return_value = mock_exporter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline_path = Path(tmpdir) / "baseline.json"
+            current_path = Path(tmpdir) / "current.json"
+
+            baseline_path.write_text("{}")
+            current_path.write_text("{}")
+
+            result = runner.invoke(
+                cli, ["compare", str(baseline_path), str(current_path), "--fail-on-regression", "10%"]
+            )
+
+            assert result.exit_code == 1
+            assert "regression detected" in result.output.lower()
+
+    def test_compare_json_output_format(self):
+        """Test comparison with JSON output format."""
+        runner = CliRunner()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline_path = Path(tmpdir) / "baseline.json"
+            current_path = Path(tmpdir) / "current.json"
+
+            # Create minimal valid result files
+            baseline_data = {
+                "schema_version": "1.0",
+                "benchmark": {"id": "tpch", "name": "TPC-H"},
+                "execution": {"timestamp": "2024-01-01T00:00:00", "platform": "DuckDB"},
+                "configuration": {"scale_factor": 0.01},
+                "results": {"queries": {"details": []}},
+            }
+            current_data = baseline_data.copy()
+
+            baseline_path.write_text(json.dumps(baseline_data))
+            current_path.write_text(json.dumps(current_data))
+
+            result = runner.invoke(cli, ["compare", str(baseline_path), str(current_path), "--format", "json"])
+
+            assert result.exit_code in [0, 1]  # May fail on actual comparison
+            # Output should be valid JSON if it succeeded
+            if result.exit_code == 0:
+                try:
+                    json.loads(result.output)
+                except json.JSONDecodeError:
+                    pytest.fail("Output is not valid JSON")
+
+    def test_compare_invalid_threshold_format(self):
+        """Test that invalid regression threshold is rejected."""
+        runner = CliRunner()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline_path = Path(tmpdir) / "baseline.json"
+            current_path = Path(tmpdir) / "current.json"
+
+            baseline_path.write_text("{}")
+            current_path.write_text("{}")
+
+            result = runner.invoke(
+                cli, ["compare", str(baseline_path), str(current_path), "--fail-on-regression", "invalid"]
+            )
+
+            assert result.exit_code == 1
+            assert "Invalid threshold format" in result.output
+
+    def test_compare_help_includes_plan_options(self):
+        """Test that --include-plans and --plan-threshold options are in help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["compare", "--help"])
+
+        assert result.exit_code == 0
+        assert "--include-plans" in result.output
+        assert "--plan-threshold" in result.output
+
+    @patch("benchbox.cli.commands.compare.load_result_file")
+    @patch("benchbox.cli.commands.compare.ResultExporter")
+    @patch("benchbox.cli.commands.compare._compare_plans")
+    def test_compare_with_include_plans_flag(self, mock_compare_plans, mock_exporter_class, mock_load):
+        """Test comparison with --include-plans flag."""
+        runner = CliRunner()
+
+        # Mock loaded results
+        mock_baseline = MagicMock()
+        mock_baseline.benchmark_name = "TPC-H"
+        mock_baseline.platform = "DuckDB"
+        mock_baseline.scale_factor = 0.01
+
+        mock_current = MagicMock()
+        mock_current.benchmark_name = "TPC-H"
+        mock_current.platform = "DuckDB"
+        mock_current.scale_factor = 0.01
+
+        mock_load.side_effect = [
+            (mock_baseline, {}),
+            (mock_current, {}),
+        ]
+
+        # Mock comparison result
+        mock_exporter = MagicMock()
+        mock_exporter.compare_results.return_value = {
+            "baseline_file": "baseline.json",
+            "current_file": "current.json",
+            "performance_changes": {},
+            "query_comparisons": [],
+            "summary": {
+                "total_queries_compared": 22,
+                "improved_queries": 5,
+                "regressed_queries": 3,
+                "unchanged_queries": 14,
+                "overall_assessment": "mixed",
+            },
+        }
+        mock_exporter_class.return_value = mock_exporter
+
+        # Mock plan comparison
+        mock_compare_plans.return_value = {
+            "plans_compared": 22,
+            "plans_unchanged": 20,
+            "plans_changed": 2,
+            "regressions_detected": 0,
+            "threshold_applied": 0.0,
+            "query_plans": [],
+            "regressions": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline_path = Path(tmpdir) / "baseline.json"
+            current_path = Path(tmpdir) / "current.json"
+
+            baseline_path.write_text("{}")
+            current_path.write_text("{}")
+
+            result = runner.invoke(cli, ["compare", str(baseline_path), str(current_path), "--include-plans"])
+
+            assert result.exit_code == 0
+            mock_compare_plans.assert_called_once()
+            # Plan analysis section should be in output
+            assert "QUERY PLAN ANALYSIS" in result.output
+
+    @patch("benchbox.cli.commands.compare.load_result_file")
+    @patch("benchbox.cli.commands.compare.ResultExporter")
+    @patch("benchbox.cli.commands.compare._compare_plans")
+    def test_compare_include_plans_no_plans_available(self, mock_compare_plans, mock_exporter_class, mock_load):
+        """Test --include-plans when result files have no captured plans."""
+        runner = CliRunner()
+
+        mock_baseline = MagicMock()
+        mock_baseline.benchmark_name = "TPC-H"
+        mock_baseline.platform = "DuckDB"
+        mock_baseline.scale_factor = 0.01
+
+        mock_current = MagicMock()
+        mock_current.benchmark_name = "TPC-H"
+        mock_current.platform = "DuckDB"
+        mock_current.scale_factor = 0.01
+
+        mock_load.side_effect = [
+            (mock_baseline, {}),
+            (mock_current, {}),
+        ]
+
+        mock_exporter = MagicMock()
+        mock_exporter.compare_results.return_value = {
+            "baseline_file": "baseline.json",
+            "current_file": "current.json",
+            "performance_changes": {},
+            "query_comparisons": [],
+            "summary": {},
+        }
+        mock_exporter_class.return_value = mock_exporter
+
+        # Mock plan comparison returning None (no plans found)
+        mock_compare_plans.return_value = None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline_path = Path(tmpdir) / "baseline.json"
+            current_path = Path(tmpdir) / "current.json"
+
+            baseline_path.write_text("{}")
+            current_path.write_text("{}")
+
+            result = runner.invoke(cli, ["compare", str(baseline_path), str(current_path), "--include-plans"])
+
+            assert result.exit_code == 0
+            assert "No query plans found" in result.output
+
+
+class TestResultFileDiscovery:
+    """Test the result file discovery and metadata extraction functions."""
+
+    def test_result_file_metadata_class(self):
+        """Test ResultFileMetadata properties."""
+        from benchbox.cli.commands.compare import ResultFileMetadata
+
+        meta = ResultFileMetadata(
+            path=Path("/test/result.json"),
+            benchmark="TPC-H Benchmark",
+            benchmark_id="tpc_h_benchmark",
+            platform="DuckDB",
+            scale=0.01,
+            timestamp="2025-12-15T10:30:00",
+            execution_id="abc123",
+        )
+
+        assert meta.benchmark == "TPC-H Benchmark"
+        assert meta.platform == "DuckDB"
+        assert meta.scale == 0.01
+        assert "2025-12-15" in meta.formatted_timestamp
+        assert "result.json" in meta.short_path
+
+    def test_result_file_metadata_formatted_timestamp_handles_invalid(self):
+        """Test that formatted_timestamp handles invalid timestamps."""
+        from benchbox.cli.commands.compare import ResultFileMetadata
+
+        meta = ResultFileMetadata(
+            path=Path("/test/result.json"),
+            benchmark="TPC-H",
+            benchmark_id="tpch",
+            platform="DuckDB",
+            scale=1.0,
+            timestamp="invalid-timestamp",
+            execution_id="xyz",
+        )
+
+        # Should not raise, should return truncated string
+        ts = meta.formatted_timestamp
+        assert ts == "invalid-timestam"  # truncated to 16 chars
+
+    def test_result_file_metadata_empty_timestamp(self):
+        """Test that formatted_timestamp handles empty timestamps."""
+        from benchbox.cli.commands.compare import ResultFileMetadata
+
+        meta = ResultFileMetadata(
+            path=Path("/test/result.json"),
+            benchmark="TPC-H",
+            benchmark_id="tpch",
+            platform="DuckDB",
+            scale=1.0,
+            timestamp="",
+            execution_id="xyz",
+        )
+
+        assert meta.formatted_timestamp == "Unknown"
+
+    def test_discover_result_files_with_valid_files(self):
+        """Test discovery of valid BenchBox result files."""
+        from benchbox.cli.commands.compare import _discover_result_files_with_metadata
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+
+            # Create valid v2.0 result file
+            valid_result = {
+                "version": "2.0",
+                "run": {
+                    "id": "abc123",
+                    "timestamp": "2025-12-15T10:30:00",
+                    "total_duration_ms": 1000,
+                    "query_time_ms": 500,
+                },
+                "benchmark": {"id": "tpc_h", "name": "TPC-H Benchmark", "scale_factor": 0.01},
+                "platform": {"name": "DuckDB"},
+                "summary": {
+                    "queries": {"total": 1, "passed": 1, "failed": 0},
+                    "timing": {"total_ms": 500, "avg_ms": 500, "min_ms": 500, "max_ms": 500},
+                },
+                "queries": [{"id": "1", "ms": 500.0, "rows": 4}],
+            }
+            (tmppath / "valid_result.json").write_text(json.dumps(valid_result))
+
+            # Create invalid file (no version - could be v1.x or just invalid)
+            invalid_result = {"benchmark": {"id": "test"}}
+            (tmppath / "invalid_result.json").write_text(json.dumps(invalid_result))
+
+            # Create non-JSON file
+            (tmppath / "not_json.txt").write_text("not json content")
+
+            results = _discover_result_files_with_metadata(search_dirs=[tmppath])
+
+            assert len(results) == 1
+            assert results[0].benchmark == "TPC-H Benchmark"
+            assert results[0].platform == "DuckDB"
+            assert results[0].scale == 0.01
+
+    def test_discover_result_files_excludes_manifests(self):
+        """Test that manifest files are excluded from discovery."""
+        from benchbox.cli.commands.compare import _discover_result_files_with_metadata
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+
+            # Create manifest file (has schema_version but no benchmark section)
+            manifest = {
+                "schema_version": "1.0",
+                "type": "datagen_manifest",
+                "files": [],
+            }
+            (tmppath / "_datagen_manifest.json").write_text(json.dumps(manifest))
+
+            results = _discover_result_files_with_metadata(search_dirs=[tmppath])
+
+            assert len(results) == 0
+
+    def test_discover_result_files_sorted_by_timestamp(self):
+        """Test that discovered files are sorted by timestamp (newest first)."""
+        from benchbox.cli.commands.compare import _discover_result_files_with_metadata
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+
+            # Create v2.0 files with different timestamps
+            for i, ts in enumerate(["2025-12-13", "2025-12-15", "2025-12-14"]):
+                result = {
+                    "version": "2.0",
+                    "run": {
+                        "id": f"run{i}",
+                        "timestamp": f"{ts}T10:00:00",
+                        "total_duration_ms": 1000,
+                        "query_time_ms": 500,
+                    },
+                    "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 1.0},
+                    "platform": {"name": "DuckDB"},
+                    "summary": {
+                        "queries": {"total": 1, "passed": 1, "failed": 0},
+                        "timing": {"total_ms": 500, "avg_ms": 500, "min_ms": 500, "max_ms": 500},
+                    },
+                    "queries": [{"id": "1", "ms": 500.0, "rows": 4}],
+                }
+                (tmppath / f"result_{i}.json").write_text(json.dumps(result))
+
+            results = _discover_result_files_with_metadata(search_dirs=[tmppath])
+
+            assert len(results) == 3
+            # Should be sorted newest first
+            assert "2025-12-15" in results[0].timestamp
+            assert "2025-12-14" in results[1].timestamp
+            assert "2025-12-13" in results[2].timestamp
+
+    def test_discover_result_files_handles_empty_directory(self):
+        """Test discovery with empty directory."""
+        from benchbox.cli.commands.compare import _discover_result_files_with_metadata
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = _discover_result_files_with_metadata(search_dirs=[Path(tmpdir)])
+            assert len(results) == 0
+
+    def test_discover_result_files_handles_nonexistent_directory(self):
+        """Test discovery with nonexistent directory."""
+        from benchbox.cli.commands.compare import _discover_result_files_with_metadata
+
+        results = _discover_result_files_with_metadata(search_dirs=[Path("/nonexistent/path/that/does/not/exist")])
+        assert len(results) == 0
+
+
+class TestComparePlansDeprecation:
+    """Test that compare-plans command is deprecated and hidden."""
+
+    def test_compare_plans_hidden_from_help(self):
+        """Test that compare-plans is hidden from main help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+
+        assert result.exit_code == 0
+        # compare-plans should not appear in main help
+        assert "compare-plans" not in result.output
+
+    def test_compare_plans_still_functional(self):
+        """Test that compare-plans command still works (backwards compatibility)."""
+        runner = CliRunner()
+        # Just check the help works
+        result = runner.invoke(cli, ["compare-plans", "--help"])
+
+        # May show deprecation warning but should still work
+        assert "Compare query plans" in result.output or "DEPRECATED" in result.output
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

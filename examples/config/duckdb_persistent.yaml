@@ -1,0 +1,8 @@
+type: duckdb
+connection:
+  database: "./benchbox.duckdb"
+  pool_size: 1
+settings:
+  memory_limit: "8GB"
+  thread_limit: 8
+  enable_progress_bar: true

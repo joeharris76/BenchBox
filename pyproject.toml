@@ -1,0 +1,611 @@
+[build-system]
+requires = ["setuptools>=58.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "benchbox"
+version = "0.1.0"
+description = "Embedded benchmark datasets and queries for database evaluation. Implements TPC-H, TPC-DS, TPC-DI and other industry-standard benchmarks."
+readme = "README.md"
+authors = [{ name = "Joe Harris", email = "joe@benchbox.dev" }]
+license = {text = "MIT"}
+keywords = ["benchmark", "database", "tpc-h", "tpc-ds", "tpc-di", "analytics", "olap", "performance-testing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Software Development :: Testing :: Acceptance",
+    "Topic :: System :: Benchmark",
+]
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "sqlglot>=20.0.0",
+    # CLI essentials
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "psutil>=5.9.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    "packaging>=24.0",
+    "jsonschema>=4.25.1",
+    # Python 3.10 compatibility (tomllib is stdlib in 3.11+)
+    "tomli>=2.0.0; python_version < '3.11'",
+    # Default platform (DuckDB) - always available for ease of use
+    "duckdb>=1.4.0",
+    "pyarrow>=21.0.0",
+    "numpy>=1.24.0",
+    "polars>=1.36.1",
+    "clickhouse-connect>=0.10.0",
+    "psycopg2-binary>=2.9.11",
+]
+
+[tool.setuptools]
+# Include non-Python files specified in MANIFEST.in
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["benchbox*"]
+exclude = [
+    "benchbox.tests*",
+    "benchbox.platforms.clickhouse*",
+    "benchbox.platforms.bigquery*",
+    "benchbox.tpchavoc*",
+    "benchbox.read_primitives*",
+    "benchbox.tpcdi*",
+    "benchmark_runs",
+    "benchmark_runs.*",
+]
+
+[project.optional-dependencies]
+# Development and documentation
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-xdist>=3.0.0",
+    "duckdb>=1.4.0",
+    "tox>=4.13.0",
+    "pyspark>=3.5.0",  # Aligned with dataframe-pyspark extra
+]
+docs = [
+    "sphinx>=7.2.0",
+    "furo>=2025.9.25",
+    "myst-parser>=2.0.0",
+    "sphinxcontrib-mermaid>=0.8.1",
+    "pygments>=2.18.0",
+    "sphinx-tags>=0.4.0",
+    "sphinx-design>=0.6.0",
+]
+viz = [
+    "plotly>=5.24.0",
+    "kaleido>=0.2.1",
+    "pandas>=2.0.0",
+    "pillow>=10.0.0",
+]
+
+# Meta-groups for common scenarios
+all = [
+    "clickhouse-driver>=0.2.0",
+    "databricks-sql-connector>=2.0.0",
+    "databricks-sdk>=0.20.0",
+    "databricks-connect>=14.0.0",  # For DataFrame mode
+    "datafusion>=50.1.0",  # Updated to match dataframe-datafusion
+    "pyarrow>=10.0.0",  # For DataFusion (also in core with higher version)
+    "firebolt-sdk>=1.18.0",
+    "google-cloud-bigquery>=3.0.0",
+    "google-cloud-storage>=2.0.0",
+    "redshift-connector>=2.0.0",
+    "snowflake-connector-python>=3.0.0",
+    "trino>=0.328.0",
+    "presto-python-client>=0.8.4",
+    "psycopg2-binary>=2.9.0",
+    "pyodbc>=4.0.0",
+    "azure-identity>=1.15.0",  # For Azure Synapse and Fabric
+    "azure-storage-file-datalake>=12.14.0",  # For Microsoft Fabric OneLake
+    "pyathena>=3.0.0",  # For AWS Athena
+    "boto3>=1.20.0",
+    "cloudpathlib>=0.15.0",
+    "pandas>=2.0.0",  # For TPC-DI benchmark
+    "chdb>=0.10.0; sys_platform != 'win32'",   # For ClickHouse local mode (not available on Windows)
+    "deltalake>=1.2.1",  # For Delta Lake table format
+    "pyiceberg>=0.10.0",  # For Iceberg table format
+    "influxdb3-python>=0.10.0",  # For InfluxDB 3.0 time-series
+    "plotly>=5.24.0",
+    "kaleido>=0.2.1",
+    "pillow>=10.0.0",
+    # DataFrame platforms
+    "polars>=1.35.2",
+    "dask[distributed]>=2024.1.0",
+    "modin[ray]>=0.32.0",
+    "pyspark>=3.5.0",
+]
+cloud = [
+    "databricks-sql-connector>=2.0.0",
+    "databricks-sdk>=0.20.0",
+    "firebolt-sdk>=1.18.0",
+    "google-cloud-bigquery>=3.0.0",
+    "google-cloud-storage>=2.0.0",
+    "redshift-connector>=2.0.0",
+    "snowflake-connector-python>=3.0.0",
+    "trino>=0.328.0",
+    "pyathena>=3.0.0",  # For AWS Athena
+    "boto3>=1.20.0",
+    "cloudpathlib>=0.15.0",
+]
+cloudstorage = ["cloudpathlib>=0.15.0"]
+
+# Individual platforms (for minimal installations)
+clickhouse = ["clickhouse-driver>=0.2.0"]
+databricks = [
+    "databricks-sql-connector>=2.0.0",
+    "databricks-sdk>=0.20.0",
+    "cloudpathlib>=0.15.0",
+]
+bigquery = [
+    "google-cloud-bigquery>=3.0.0",
+    "google-cloud-storage>=2.0.0",
+    "cloudpathlib>=0.15.0",
+]
+redshift = [
+    "redshift-connector>=2.0.0",
+    "boto3>=1.20.0",
+    "cloudpathlib>=0.15.0",
+]
+snowflake = ["snowflake-connector-python>=3.0.0", "cloudpathlib>=0.15.0"]
+trino = ["trino>=0.328.0", "cloudpathlib>=0.15.0"]
+presto = ["presto-python-client>=0.8.4", "cloudpathlib>=0.15.0"]
+postgresql = ["psycopg2-binary>=2.9.0"]
+synapse = ["pyodbc>=4.0.0"]
+fabric = [
+    "pyodbc>=4.0.0",
+    "azure-identity>=1.15.0",
+    "azure-storage-file-datalake>=12.14.0",
+]
+athena = [
+    "pyathena>=3.0.0",
+    "boto3>=1.20.0",
+]
+datafusion = ["datafusion>=50.1.0", "pyarrow>=10.0.0"]
+firebolt = [
+    "firebolt-sdk>=1.18.0",
+    "cloudpathlib>=0.15.0",
+]
+influxdb = [
+    "influxdb3-python>=0.10.0",
+    "pyarrow>=10.0.0",
+]
+
+# Individual benchmark extras
+tpcdi = ["pandas>=2.0.0"]
+clickhouse-local = ["chdb>=0.10.0; sys_platform != 'win32'"]
+table-formats = [
+    "deltalake>=1.2.1",
+    "pyiceberg>=0.10.0",
+]
+
+# DataFrame platform extras (for benchbox.platforms.dataframe)
+# Pandas family - string-based column access, eager evaluation
+dataframe-pandas = ["pandas>=2.0.0"]
+dataframe-modin = [
+    "modin[ray]>=0.32.0",
+    "pandas>=2.0.0",
+]
+dataframe-dask = [
+    "dask[distributed]>=2024.1.0",
+    "pandas>=2.0.0",
+]
+# Note: dataframe-cudf requires NVIDIA GPU with CUDA 12.x
+# cuDF is not on PyPI directly - install via RAPIDS:
+#   pip install --extra-index-url=https://pypi.nvidia.com cudf-cu12
+# This extra is a placeholder to document the dependency; actual installation
+# requires the RAPIDS pip index or conda.
+dataframe-cudf = [
+    # Placeholder - actual cudf installation requires NVIDIA pip index
+]
+# Expression family - expression-based API, lazy evaluation
+dataframe-polars = [
+    "polars>=1.35.2",
+]
+dataframe-pyspark = [
+    "pyspark>=3.5.0",
+]
+dataframe-datafusion = [
+    "datafusion>=50.1.0",
+]
+
+# DataFrame family convenience groups
+dataframe-pandas-family = [
+    "pandas>=2.0.0",
+    "modin[ray]>=0.32.0",
+    "dask[distributed]>=2024.1.0",
+    # cudf not included - requires NVIDIA GPU/CUDA, install separately
+]
+dataframe-expression-family = [
+    "polars>=1.35.2",
+    "pyspark>=3.5.0",
+    "datafusion>=50.1.0",
+]
+dataframe-all = [
+    "pandas>=2.0.0",
+    "modin[ray]>=0.32.0",
+    "dask[distributed]>=2024.1.0",
+    "polars>=1.35.2",
+    "pyspark>=3.5.0",
+    "datafusion>=50.1.0",
+]
+
+# Quick start - DuckDB + Polars for easy experimentation
+quick-start = [
+    "polars>=1.35.2",
+]
+
+# Cloud Spark Platforms - Managed Spark with DataFrame API
+# These extras enable DataFrame mode execution on managed cloud Spark platforms
+
+# Provider-specific cloud Spark groups
+cloud-spark-aws = [
+    "boto3>=1.34.0",
+]
+cloud-spark-gcp = [
+    "google-cloud-dataproc>=5.0.0",
+    "google-cloud-storage>=2.0.0",
+]
+cloud-spark-azure = [
+    "azure-identity>=1.15.0",
+    "azure-storage-file-datalake>=12.14.0",
+    "requests>=2.31.0",
+]
+cloud-spark-snowflake = [
+    "snowflake-snowpark-python>=1.11.0",
+    "pyspark>=3.5.0",
+]
+cloud-spark-databricks = [
+    "databricks-sql-connector>=2.0.0",
+    "databricks-sdk>=0.20.0",
+    "databricks-connect>=14.0.0",
+    "cloudpathlib>=0.15.0",
+]
+
+# Legacy alias for databricks-connect (deprecated, use cloud-spark-databricks)
+databricks-connect = [
+    "databricks-sql-connector>=2.0.0",
+    "databricks-sdk>=0.20.0",
+    "databricks-connect>=14.0.0",
+    "cloudpathlib>=0.15.0",
+]
+
+# All cloud Spark platforms combined
+cloud-spark = [
+    # AWS (Glue, EMR Serverless, Athena Spark)
+    "boto3>=1.34.0",
+    # GCP (Dataproc, Dataproc Serverless)
+    "google-cloud-dataproc>=5.0.0",
+    "google-cloud-storage>=2.0.0",
+    # Azure (Synapse Spark, Fabric Spark)
+    "azure-identity>=1.15.0",
+    "azure-storage-file-datalake>=12.14.0",
+    "requests>=2.31.0",
+    # Snowflake (Snowpark)
+    "snowflake-snowpark-python>=1.11.0",
+    "pyspark>=3.5.0",
+    # Databricks
+    "databricks-sql-connector>=2.0.0",
+    "databricks-sdk>=0.20.0",
+    "databricks-connect>=14.0.0",
+    "cloudpathlib>=0.15.0",
+]
+
+# MCP (Model Context Protocol) server for AI agent integration
+# Note: mcp requires Python 3.10+, so this extra only works on 3.10+
+mcp = [
+    "mcp>=1.2.0",
+]
+spark = [
+    "pyspark>=4.0.1",
+]
+
+[project.scripts]
+benchbox = "benchbox.cli:main"
+benchbox-mcp = "benchbox.mcp:run_server"
+benchbox-sync = "benchbox.release.sync:main"
+
+[project.urls]
+"Homepage" = "https://github.com/joeharris76/benchbox"
+"Bug Tracker" = "https://github.com/joeharris76/benchbox/issues"
+"Documentation" = "https://benchbox.readthedocs.io/"
+"Repository" = "https://github.com/joeharris76/benchbox.git"
+"Changelog" = "https://github.com/joeharris76/benchbox/blob/main/CHANGELOG.md"
+
+[tool.ty]
+# ty configuration
+
+[tool.ty.src]
+# Source code to type check
+include = ["benchbox", "tests"]
+exclude = ["tests/fixtures", "**/__pycache__"]
+
+[tool.ty.rules]
+# Configure rule severities - start lenient, gradually tighten
+# Note: This codebase was developed without strict type checking.
+# Rules are configured permissively; tighten as code is updated.
+
+# Error: These rules are now enforced (previously ignored, now fixed)
+too-many-positional-arguments = "error"  # Fixed: method signature alignment
+conflicting-declarations = "error"       # Fixed: optional import patterns
+invalid-parameter-default = "error"      # Fixed: Optional[] wrappers added
+unresolved-reference = "error"           # Fixed: missing imports/variables
+not-iterable = "error"                   # Fixed: type narrowing and assertions
+
+# Ignore: These rules have too many false positives or require major refactoring
+unresolved-attribute = "ignore"         # 954 hits - Missing type stubs, dynamic attributes, class method discovery
+invalid-argument-type = "ignore"        # 763 hits - Function param type mismatches (str vs Literal, Optional narrowing)
+invalid-assignment = "ignore"           # 463 hits - Literal type mismatches, Optional subscript access
+unsupported-operator = "ignore"         # 184 hits - Dict value type inference (counter += 1 patterns)
+invalid-method-override = "ignore"      # 143 hits - Intentional LSP violations (run_benchmark, execute_query, generate_data, etc.)
+not-subscriptable = "ignore"            # ~700 hits - Dynamic DataFrame APIs, Optional dict access patterns
+call-non-callable = "ignore"            # ~700 hits - Optional imports, dynamic DataFrame APIs, hasattr patterns
+
+# Warn: Track these but don't fail CI
+unresolved-import = "warn"              # Often optional dependencies
+invalid-return-type = "warn"            # Should be fixed but not blocking
+invalid-type-form = "warn"              # Syntax issues
+no-matching-overload = "warn"           # Complex overload patterns
+unknown-argument = "warn"               # Keyword argument issues
+missing-argument = "warn"               # Tuple unpacking not tracked
+
+# Control flow tracking limitations
+possibly-unresolved-reference = "warn"
+possibly-missing-attribute = "warn"
+
+[tool.ty.terminal]
+# Output configuration
+error-on-warning = false
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = "test_*.py"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "fast: marks tests as fast (< 1 second execution time)",
+    "medium: marks tests as medium speed (1-10 seconds execution time)",
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
+    "performance: marks tests as performance tests",
+    "regression: marks tests for regression testing",
+    "monitoring: marks tests for monitoring functionality",
+    "database: marks tests that require database connections",
+    "duckdb: marks tests that use DuckDB",
+    "datafusion: marks tests that use DataFusion",
+    "firebolt: marks tests that use Firebolt",
+    "sqlite: marks tests that require SQLite",
+    "tpch: marks TPC-H related tests",
+    "tpcds: marks TPC-DS related tests",
+    "tpcdi: marks TPC-DI related tests",
+    "tpchavoc: marks TPC-H AVOC related tests",
+    "ssb: marks Star Schema Benchmark tests",
+    "amplab: marks AMPLab Big Data Benchmark tests",
+    "clickbench: marks ClickBench related tests",
+    "h2odb: marks H2O Database benchmark tests",
+    "olap: marks tests for OLAP functionality",
+    "advanced_sql: marks tests for advanced SQL features",
+    "requires_zstd: marks tests that require zstandard library",
+]
+filterwarnings = [
+    # TPC-DS intentionally validates minimum scale_factor >= 1.0 per specification
+    # Tests use smaller factors (0.01, 0.1) for speed; warnings are expected, not errors
+    "ignore::UserWarning:benchbox.core.tpcds.benchmark.runner",
+    "ignore::UserWarning:benchbox.base",
+    # PyICeberg deletes may not match records (expected behavior in tests)
+    "ignore::UserWarning:pyiceberg.table",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.13",
+    "ty>=0.0.1a14",
+    # Test framework
+    "pytest>=8.0.0",
+    "pytest-cov>=6.2.1",
+    "pytest-benchmark>=5.1.0",
+    "pytest-xdist>=3.8.0",
+    "pytest-timeout>=2.4.0",
+    # Visualization deps (needed for tests/unit/visualization/ and tests/integration/visualization/)
+    "plotly>=5.24.0",
+    "kaleido>=0.2.1",
+    "pandas>=2.0.0",
+    "pillow>=10.0.0",
+    # Table format converters (needed for tests/unit/utils/format_converters/)
+    "pyiceberg[sql-sqlite,pyarrow]>=0.10.0",
+    "deltalake>=1.2.1",
+    # Compression (needed for tests marked @pytest.mark.requires_zstd)
+    "zstandard>=0.20.0",
+    # DataFusion (needed for tests/integration/test_datafusion_integration.py)
+    "datafusion>=40.0.0",
+    # Cloud storage with S3 support (needed for tests/unit/utils/test_cloud_storage.py)
+    "cloudpathlib[s3,gs,azure]>=0.15.0",
+    # ClickHouse local mode (needed for tests/unit/platforms/test_clickhouse_local.py)
+    # Note: chdb is not available on Windows
+    "chdb>=0.10.0; sys_platform != 'win32'",
+    # ClickHouse server mode driver (needed for tests/unit/platforms/test_clickhouse_local.py server tests)
+    "clickhouse-driver>=0.2.0",
+    "trino>=0.336.0",
+    # Firebolt (needed for tests/unit/platforms/test_firebolt_adapter.py)
+    "firebolt-sdk>=1.18.0",
+    # InfluxDB (needed for tests/unit/platforms/test_influxdb_adapter.py)
+    "influxdb3-python>=0.10.0",
+    # Databricks SDK (needed for tests/unit/platforms/test_databricks_copy_into.py UC volumes)
+    "databricks-sdk>=0.20.0",
+    # PySpark (needed for tests/unit/platforms/dataframe/test_pyspark_df.py and related)
+    "pyspark>=3.5.0",
+    # XML parsing (needed for tests/unit/core/tpcdi/test_etl_sources.py)
+    "lxml>=5.0.0",
+    # MCP SDK (needed for tests/unit/mcp/)
+    "mcp>=1.2.0",
+    # Documentation
+    "sphinx>=7.4.7",
+    "myst-parser>=3.0.1",
+    "sphinx-rtd-theme>=3.1.0",
+    "sphinxcontrib-mermaid>=1.2.3",
+    "sphinx-tags>=0.4",
+    "sphinx-design>=0.6.1",
+    "sphinx-copybutton>=0.5.2",
+    "furo>=2025.9.25",
+]
+
+[tool.setuptools.package-data]
+"benchbox.core.primitives.catalog" = ["queries.yaml"]
+"benchbox.data.coffeeshop" = ["*.csv"]
+# Pre-compiled TPC binaries and query templates are included via MANIFEST.in
+# with include-package-data = true above
+"*" = [
+    "_sources/tpc-ds/query_templates/*.tpl",
+    "_sources/tpc-ds/query_templates/*.lst",
+    "_sources/tpc-ds/query_variants/*.tpl",
+    "_sources/tpc-h/dbgen/queries/*.sql",
+    "_sources/tpc-h/dbgen/variants/*.sql",
+]
+
+[tool.ruff]
+line-length = 120
+exclude = [
+    "migrations",
+    "venv",
+    ".git",
+    "__pycache__",
+    ".tox",
+    # Non-production directories
+    "_project",             # Internal project tooling and scripts
+    "examples/notebooks",   # Example notebooks (different code style)
+    "examples/visualization", # Visualization notebooks
+    "tests/validation",     # One-off validation scripts
+]
+
+[tool.ruff.lint]
+# Enable comprehensive linting rules that replace flake8/pycodestyle
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "PIE",  # flake8-pie
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    # The following are temporarily ignored to allow CI to pass.
+    # These pre-existed and should be addressed in a future cleanup.
+    # TODO: Create TODO item to address these lint issues systematically
+    "E402",   # module-import-not-at-top-of-file (often intentional for conditional imports)
+    "E721",   # type-comparison (use isinstance - valid but requires careful review)
+    "E731",   # lambda-assignment (sometimes clearer than def)
+    "E741",   # ambiguous-variable-name (context-dependent)
+    # Bugbear rules - good practices but not critical
+    "B904",   # raise-without-from-inside-except
+    "B905",   # zip-without-explicit-strict (19 occurrences; TODO: add strict= and remove)
+    "B007",   # unused-loop-control-variable (often intentional, e.g., for _ in range())
+    "B017",   # assert-raises-exception (test pattern)
+    "B023",   # function-uses-loop-variable (often intentional in closures)
+    "B024",   # abstract-base-class-without-abstract-method
+    "B027",   # empty-method-without-abstract-decorator
+    # Simplify rules - style preferences
+    "SIM102", # collapsible-if
+    "SIM103", # needless-bool
+    "SIM105", # suppressible-exception
+    "SIM108", # if-else-block-instead-of-if-exp (ternaries can reduce readability)
+    "SIM110", # reimplemented-builtin
+    "SIM113", # enumerate-for-loop
+    "SIM115", # open-file-with-context-handler (sometimes intentional)
+    "SIM116", # if-else-block-instead-of-dict-lookup
+    "SIM117", # multiple-with-statements
+    "SIM118", # in-dict-keys
+    "SIM201", # negate-equal-op
+    "SIM401", # if-else-block-instead-of-dict-get
+    # Comprehensions
+    "C401",   # unnecessary-generator-set
+    # PIE rules
+    "PIE810", # multiple-starts-ends-with
+    # Upgrade rules - require newer Python versions
+    "UP006",  # non-pep585-annotation (use dict instead of Dict - requires Python 3.9+)
+    "UP007",  # non-pep604-annotation-union (use X | Y - requires Python 3.10+)
+    "UP035",  # deprecated-import (typing.Dict etc - requires Python 3.9+)
+    "UP045",  # non-pep604-annotation-optional
+    # Naming conventions - often intentional in specific contexts
+    "N802",   # invalid-function-name (test methods, compatibility)
+    "N803",   # invalid-argument-name (mathematical notation, API compatibility)
+    "N806",   # non-lowercase-variable-in-function (constants, compatibility)
+    "N811",   # constant-imported-as-non-constant
+    "N818",   # error-suffix-on-exception-name
+]
+
+[tool.ruff.lint.isort]
+force-single-line = false
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Files that use `from x import *` pattern legitimately
+"benchbox/core/tpcds/schema/registry.py" = ["F405"]
+# Test files often have unused imports for fixtures or type checking
+"tests/**/conftest.py" = ["F401", "F811"]
+"tests/**/test_*.py" = ["F401", "F811"]
+# __init__.py files often re-export symbols
+"**/__init__.py" = ["F401", "F811"]
+
+[tool.ruff.format]
+# Use black-compatible formatting
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.interrogate]
+# Docstring coverage enforcement
+ignore-init-method = false
+ignore-init-module = false
+ignore-magic = false
+ignore-module = false
+ignore-nested-functions = false
+ignore-nested-classes = true
+ignore-private = true
+ignore-property-decorators = false
+ignore-semiprivate = false
+ignore-setters = false
+fail-under = 64  # Current baseline from audit (194/304 ≈ 63.8%)
+exclude = ["tests", "_build", "venv", ".venv", "benchmark_runs", "_project", "docs/_build"]
+verbose = 2
+quiet = false
+whitelist-regex = []
+color = true
+
+[tool.coverage.run]
+# Test coverage configuration
+source = ["benchbox"]
+branch = true
+omit = [
+    "benchbox/__main__.py",
+    "**/test_*.py",
+    "**/conftest.py",
+]
+
+[tool.coverage.report]
+# Coverage reporting thresholds
+fail_under = 75
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]

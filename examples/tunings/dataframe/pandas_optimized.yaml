@@ -1,0 +1,19 @@
+# Pandas DataFrame Tuning - Performance Optimized
+# Maximum performance with PyArrow backend
+
+data_types:
+  dtype_backend: pyarrow
+  enable_string_cache: true
+  auto_categorize_strings: true
+  categorical_threshold: 0.3
+
+io:
+  memory_map: true
+  pre_buffer: true
+
+_metadata:
+  version: "1.0"
+  format: dataframe_tuning
+  platform: pandas
+  description: Performance-optimized Pandas with PyArrow backend
+  generated_by: benchbox

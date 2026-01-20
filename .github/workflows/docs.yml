@@ -1,0 +1,185 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'landing/**'
+      - '.github/workflows/docs.yml'
+      - 'README.md'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'landing/**'
+      - '.github/workflows/docs.yml'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  # Build HTML documentation with warnings as errors
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+
+    - name: Install dependencies
+      run: uv sync --group dev
+
+    - name: Cache Sphinx build artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          docs/_build
+        key: ${{ runner.os }}-sphinx-${{ hashFiles('docs/**', 'docs/conf.py', 'pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-sphinx-
+
+    - name: Build documentation
+      run: |
+        cd docs
+        uv run sphinx-build -b html --keep-going . _build/html
+
+    - name: Assemble landing page + docs site
+      run: |
+        rm -rf site
+        mkdir -p site/docs
+        # Copy landing page if it exists, otherwise docs become the root
+        if [ -d "landing" ]; then
+          cp -R landing/* site/
+          cp -R docs/_build/html/* site/docs/
+        else
+          cp -R docs/_build/html/* site/
+        fi
+        # Copy CNAME if it exists
+        [ -f docs/CNAME ] && cp docs/CNAME site/CNAME || true
+        touch site/.nojekyll
+
+    - name: Upload HTML artifacts
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: site
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/deploy-pages@v4
+
+  # Validate example files and documentation references
+  # Non-blocking: failures are warnings, not errors
+  example-validation:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+
+    - name: Install dependencies
+      run: uv sync --group dev
+
+    - name: Validate example file references
+      run: uv run python scripts/validate_example_references.py
+
+    - name: Check example file syntax
+      run: uv run python scripts/check_example_syntax.py
+
+  # Check for broken links
+  # Non-blocking: external links can be flaky
+  linkcheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+
+    - name: Install dependencies
+      run: uv sync --group dev
+
+    - name: Check documentation links
+      run: |
+        cd docs
+        uv run sphinx-build -b linkcheck . _build/linkcheck
+
+    - name: Upload linkcheck report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: linkcheck-report
+        path: docs/_build/linkcheck
+
+  # Spell checking
+  # Non-blocking: may have false positives
+  spellcheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run codespell
+      uses: codespell-project/actions-codespell@master
+      with:
+        ignore_words_file: .codespell-ignore.txt
+        skip: "*.pyc,_build,*.json,*.lock,*.svg,*.min.js,*.min.css,_binaries,*.tpl,*.dst,*.tbl,_sources,benchmark_runs,*.dat,*.pdf,_project,_blog,htmlcov,.venv"
+
+  # Docstring coverage check
+  # Non-blocking: coverage threshold may need adjustment
+  docstring-coverage:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install interrogate
+
+    - name: Check docstring coverage
+      run: |
+        interrogate -c pyproject.toml --fail-under 64 benchbox/
+
+    - name: Generate docstring coverage badge
+      run: |
+        mkdir -p docs/_static
+        interrogate -c pyproject.toml --generate-badge docs/_static/ benchbox/

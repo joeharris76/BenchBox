@@ -1,0 +1,14 @@
+type: clickhouse
+connection:
+  host: localhost
+  port: 9000
+  database: default
+  username: default
+  password: ""
+  secure: false
+  compression: true
+  pool_size: 5
+settings:
+  max_memory_usage: "8GB"
+  max_execution_time: 300
+  max_threads: 8

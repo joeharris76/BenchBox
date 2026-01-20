@@ -1,0 +1,34 @@
+include README.md
+include CHANGELOG.md
+include LICENSE
+include pyproject.toml
+include MANIFEST.in
+
+recursive-include benchbox *.py *.sql *.yaml *.json *.jinja2 *.md *.csv
+prune benchbox/platforms/clickhouse
+prune benchbox/platforms/bigquery
+prune benchbox/tpchavoc
+prune benchbox/primitives
+prune benchbox/tpcdi
+
+# Include TPC-DS query templates (required for query generation)
+recursive-include _sources/tpc-ds/query_templates *.tpl *.lst
+recursive-include _sources/tpc-ds/query_variants *.tpl
+
+# Include TPC-H query templates (required for query generation)
+recursive-include _sources/tpc-h/dbgen/queries *.sql
+recursive-include _sources/tpc-h/dbgen/variants *.sql
+
+# Include pre-compiled TPC binaries (required for data generation)
+# These are platform-specific executables for TPC-H and TPC-DS benchmarks
+# Binaries are included inside the benchbox package for proper installation
+recursive-include benchbox/_binaries/tpc-h *
+recursive-include benchbox/_binaries/tpc-ds *
+# Exclude macOS metadata files
+global-exclude .DS_Store
+
+prune tests
+prune docs
+prune examples
+
+global-exclude *.py[cod] __pycache__ *.so *.dylib *.dll *.log

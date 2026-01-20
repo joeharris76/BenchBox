@@ -1,0 +1,376 @@
+"""Tests for TimescaleDB platform adapter.
+
+Tests the TimescaleDBAdapter for TimescaleDB database support.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from unittest.mock import Mock, patch
+
+import pytest
+
+import benchbox.platforms.postgresql as postgresql_module
+import benchbox.platforms.timescaledb as timescaledb_module
+from benchbox.platforms.postgresql import POSTGRES_DIALECT
+from benchbox.platforms.timescaledb import TimescaleDBAdapter
+
+pytestmark = pytest.mark.fast
+
+
+@pytest.fixture()
+def timescale_stubs(monkeypatch):
+    """Patch psycopg2 objects so tests don't require the real driver.
+
+    Must patch both timescaledb and postgresql modules since TimescaleDBAdapter
+    inherits from PostgreSQLAdapter which checks for psycopg2 in its __init__.
+    """
+    mock_psycopg2 = Mock()
+    mock_psycopg2.__version__ = "2.9.9"
+    mock_psycopg2.extras = Mock()
+
+    # Patch both modules - parent checks in postgresql module
+    monkeypatch.setattr(timescaledb_module, "psycopg2", mock_psycopg2)
+    monkeypatch.setattr(postgresql_module, "psycopg2", mock_psycopg2)
+
+    return mock_psycopg2
+
+
+class TestTimescaleDBAdapter:
+    """Unit tests for TimescaleDB adapter wiring and SQL handling."""
+
+    def test_initialization_defaults(self, timescale_stubs):
+        """Adapter should initialize with TimescaleDB defaults when stubs are present."""
+        adapter = TimescaleDBAdapter()
+
+        assert adapter.platform_name == "TimescaleDB"
+        assert adapter.get_target_dialect() == POSTGRES_DIALECT
+        assert adapter.host == "localhost"
+        assert adapter.port == 5432
+        assert adapter.database == "benchbox"
+        assert adapter.username == "postgres"
+        assert adapter.schema == "public"
+        # TimescaleDB-specific defaults
+        assert adapter.chunk_interval == "1 day"
+        assert adapter.compression_enabled is False
+        assert adapter.compression_after == "7 days"
+        # Inherited from PostgreSQL - enable_timescale should be True
+        assert adapter.enable_timescale is True
+
+    def test_initialization_with_config(self, timescale_stubs):
+        """Adapter should accept custom TimescaleDB configuration."""
+        adapter = TimescaleDBAdapter(
+            host="timescale.example.com",
+            port=5433,
+            database="metrics_db",
+            username="custom_user",
+            password="secret",
+            schema="metrics",
+            chunk_interval="1 week",
+            compression_enabled=True,
+            compression_after="30 days",
+        )
+
+        assert adapter.host == "timescale.example.com"
+        assert adapter.port == 5433
+        assert adapter.database == "metrics_db"
+        assert adapter.username == "custom_user"
+        assert adapter.password == "secret"
+        assert adapter.schema == "metrics"
+        assert adapter.chunk_interval == "1 week"
+        assert adapter.compression_enabled is True
+        assert adapter.compression_after == "30 days"
+
+    def test_dialect_is_postgres(self, timescale_stubs):
+        """TimescaleDB should use PostgreSQL dialect (compatible)."""
+        adapter = TimescaleDBAdapter()
+
+        assert adapter.get_target_dialect() == POSTGRES_DIALECT
+        assert adapter.get_target_dialect() == "postgres"
+
+    def test_from_config_basic(self, timescale_stubs):
+        """from_config should create adapter with correct settings."""
+        config = {
+            "host": "timescale.local",
+            "port": 5433,
+            "database": "test_metrics",
+            "chunk_interval": "6 hours",
+            "compression_enabled": True,
+        }
+
+        adapter = TimescaleDBAdapter.from_config(config)
+
+        assert adapter.host == "timescale.local"
+        assert adapter.port == 5433
+        assert adapter.database == "test_metrics"
+        assert adapter.chunk_interval == "6 hours"
+        assert adapter.compression_enabled is True
+
+    def test_from_config_generates_database_name(self, timescale_stubs):
+        """from_config should generate database name from benchmark config."""
+        config = {
+            "benchmark": "tsbs_devops",
+            "scale_factor": 1.0,
+        }
+
+        adapter = TimescaleDBAdapter.from_config(config)
+
+        assert "benchbox" in adapter.database
+        assert "tsbs" in adapter.database.lower() or adapter.database == "benchbox"
+
+    def test_from_config_uses_provided_database(self, timescale_stubs):
+        """from_config should prefer explicit database name over generated one."""
+        config = {
+            "database": "explicit_db",
+            "benchmark": "tsbs_devops",
+            "scale_factor": 1.0,
+        }
+
+        adapter = TimescaleDBAdapter.from_config(config)
+
+        assert adapter.database == "explicit_db"
+
+    def test_inherits_postgresql_connection_params(self, timescale_stubs):
+        """TimescaleDB adapter should inherit PostgreSQL connection parameter handling."""
+        adapter = TimescaleDBAdapter(
+            host="timescale.example.com",
+            port=5433,
+            database="testdb",
+            username="testuser",
+            password="testpass",
+            sslmode="require",
+            connect_timeout=15,
+        )
+
+        params = adapter._get_connection_params()
+
+        assert params["host"] == "timescale.example.com"
+        assert params["port"] == 5433
+        assert params["dbname"] == "testdb"
+        assert params["user"] == "testuser"
+        assert params["password"] == "testpass"
+        assert params["sslmode"] == "require"
+        assert params["connect_timeout"] == 15
+
+    def test_supports_tuning_type(self, timescale_stubs):
+        """TimescaleDB should support auto_compact (compression) unlike base PostgreSQL."""
+        adapter = TimescaleDBAdapter()
+
+        from benchbox.core.tuning.interface import TuningType
+
+        # TimescaleDB supports auto_compact (compression)
+        assert adapter.supports_tuning_type(TuningType.AUTO_COMPACT) is True
+        assert adapter.supports_tuning_type(TuningType.PARTITIONING) is True
+        assert adapter.supports_tuning_type(TuningType.CLUSTERING) is True
+        assert adapter.supports_tuning_type(TuningType.PRIMARY_KEYS) is True
+        assert adapter.supports_tuning_type(TuningType.FOREIGN_KEYS) is True
+        # Still doesn't support distribution/sorting
+        assert adapter.supports_tuning_type(TuningType.DISTRIBUTION) is False
+        assert adapter.supports_tuning_type(TuningType.SORTING) is False
+
+    def test_get_platform_info_basic(self, timescale_stubs):
+        """Platform info should show TimescaleDB details."""
+        adapter = TimescaleDBAdapter(
+            chunk_interval="1 week",
+            compression_enabled=True,
+            compression_after="14 days",
+        )
+
+        info = adapter.get_platform_info(connection=None)
+
+        assert info["platform_type"] == "timescaledb"
+        assert info["platform_name"] == "TimescaleDB"
+        assert info["configuration"]["chunk_interval"] == "1 week"
+        assert info["configuration"]["compression_enabled"] is True
+        assert info["configuration"]["compression_after"] == "14 days"
+
+    def test_create_connection_verifies_extension(self, timescale_stubs):
+        """create_connection should verify TimescaleDB extension is available."""
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        # Extension exists
+        mock_cursor.fetchone.side_effect = [
+            None,  # check_server_database_exists
+            None,  # check again in _create_database
+            ("2.13.0",),  # extension version check
+            (1,),  # verify connection
+        ]
+
+        timescale_stubs.connect.return_value = mock_conn
+
+        adapter = TimescaleDBAdapter()
+
+        with (
+            patch.object(adapter, "check_server_database_exists", return_value=True),
+            patch.object(adapter, "handle_existing_database"),
+        ):
+            adapter.create_connection()
+
+        # Should have checked for extension
+        calls = [str(call) for call in mock_cursor.execute.call_args_list]
+        extension_check = any("timescaledb" in call.lower() for call in calls)
+        assert extension_check
+
+    def test_hypertable_tracking(self, timescale_stubs):
+        """Adapter should track which tables are hypertables."""
+        adapter = TimescaleDBAdapter()
+
+        # Initially empty
+        assert len(adapter._hypertables) == 0
+
+        # Add a hypertable
+        adapter._hypertables.add("cpu")
+        assert "cpu" in adapter._hypertables
+
+
+class TestTimescaleDBRegistration:
+    """Tests for TimescaleDB platform registration."""
+
+    def test_timescaledb_in_platform_registry(self, timescale_stubs):
+        """TimescaleDB should be registered in platform registry."""
+        from benchbox.core.platform_registry import PlatformRegistry, auto_register_platforms
+
+        auto_register_platforms()
+
+        assert "timescaledb" in PlatformRegistry._adapters
+        assert PlatformRegistry._adapters["timescaledb"] == TimescaleDBAdapter
+
+    def test_timescaledb_metadata(self, timescale_stubs):
+        """TimescaleDB should have correct metadata in registry."""
+        from benchbox.core.platform_registry import PlatformRegistry
+
+        # Access metadata through build method
+        metadata = PlatformRegistry._build_platform_metadata()
+
+        assert "timescaledb" in metadata
+        assert metadata["timescaledb"]["display_name"] == "TimescaleDB"
+        assert metadata["timescaledb"]["category"] == "timeseries"
+        assert "timeseries" in metadata["timescaledb"]["supports"]
+        assert "compression" in metadata["timescaledb"]["supports"]
+
+
+class TestTimescaleDBConfigBuilder:
+    """Tests for TimescaleDB configuration builder function."""
+
+    def test_config_builder_basic(self, timescale_stubs):
+        """Config builder should produce correct configuration."""
+        from benchbox.platforms.timescaledb import _build_timescaledb_config
+
+        benchmark_config = {"scale_factor": 1.0}
+        platform_options = {
+            "host": "localhost",
+            "port": 5432,
+            "chunk_interval": "12 hours",
+            "compression_enabled": True,
+        }
+
+        config = _build_timescaledb_config(benchmark_config, platform_options)
+
+        assert config["host"] == "localhost"
+        assert config["port"] == 5432
+        assert config["chunk_interval"] == "12 hours"
+        assert config["compression_enabled"] is True
+        assert config["scale_factor"] == 1.0
+
+    def test_config_builder_defaults(self, timescale_stubs):
+        """Config builder should apply defaults for missing options."""
+        from benchbox.platforms.timescaledb import _build_timescaledb_config
+
+        config = _build_timescaledb_config({}, {})
+
+        assert config["host"] == "localhost"
+        assert config["port"] == 5432
+        assert config["username"] == "postgres"
+        assert config["chunk_interval"] == "1 day"
+        assert config["compression_enabled"] is False
+        assert config["compression_after"] == "7 days"
+
+
+class TestTimescaleDBIntervalValidation:
+    """Tests for interval parameter validation (security hardening)."""
+
+    def test_valid_interval_formats(self, timescale_stubs):
+        """Valid PostgreSQL interval formats should be accepted."""
+        valid_intervals = [
+            "1 day",
+            "7 days",
+            "1 week",
+            "2 weeks",
+            "1 hour",
+            "12 hours",
+            "30 minutes",
+            "1 month",
+            "3 months",
+            "1 year",
+            "2 years",
+            "100 seconds",
+            "500 milliseconds",
+            "1000 microseconds",
+        ]
+
+        for interval in valid_intervals:
+            # Should not raise
+            adapter = TimescaleDBAdapter(chunk_interval=interval)
+            assert adapter.chunk_interval == interval
+
+    def test_invalid_interval_format_raises(self, timescale_stubs):
+        """Invalid interval formats should raise ValueError."""
+        invalid_intervals = [
+            "day",  # missing number
+            "1",  # missing unit
+            "1day",  # missing space
+            "one day",  # non-numeric
+            "1.5 days",  # decimal not supported in simple format
+            "1 invalid",  # invalid unit
+            "",  # empty
+            "   ",  # whitespace only
+        ]
+
+        for interval in invalid_intervals:
+            with pytest.raises(ValueError, match="Invalid chunk_interval format"):
+                TimescaleDBAdapter(chunk_interval=interval)
+
+    def test_sql_injection_in_chunk_interval_rejected(self, timescale_stubs):
+        """SQL injection attempts in chunk_interval should be rejected."""
+        injection_payloads = [
+            "1 day'; DROP TABLE users; --",
+            "1 day' OR '1'='1",
+            "1 day; SELECT * FROM pg_shadow",
+            '1 day"; DELETE FROM hypertables; --',
+        ]
+
+        for payload in injection_payloads:
+            with pytest.raises(ValueError, match="Invalid chunk_interval format"):
+                TimescaleDBAdapter(chunk_interval=payload)
+
+    def test_sql_injection_in_compression_after_rejected(self, timescale_stubs):
+        """SQL injection attempts in compression_after should be rejected."""
+        injection_payloads = [
+            "7 days'; DROP TABLE chunks; --",
+            "7 days' UNION SELECT * FROM secrets",
+        ]
+
+        for payload in injection_payloads:
+            with pytest.raises(ValueError, match="Invalid compression_after format"):
+                TimescaleDBAdapter(chunk_interval="1 day", compression_after=payload)
+
+    def test_non_string_interval_raises(self, timescale_stubs):
+        """Non-string interval values should raise TypeError."""
+        with pytest.raises(ValueError, match="must be a string"):
+            TimescaleDBAdapter(chunk_interval=123)
+
+        with pytest.raises(ValueError, match="must be a string"):
+            TimescaleDBAdapter(chunk_interval=["1", "day"])
+
+    def test_interval_validation_static_method(self, timescale_stubs):
+        """_validate_interval static method should work correctly."""
+        # Valid
+        result = TimescaleDBAdapter._validate_interval("  1 day  ", "test_param")
+        assert result == "1 day"  # Should be stripped
+
+        # Invalid
+        with pytest.raises(ValueError, match="Invalid test_param format"):
+            TimescaleDBAdapter._validate_interval("invalid", "test_param")
