@@ -4,6 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Alpha Software](https://img.shields.io/badge/Status-Alpha-orange.svg)](https://github.com/joeharris76/benchbox/issues)
+[![codecov](https://codecov.io/github/joeharris76/BenchBox/graph/badge.svg?token=3NY6DK7MDO)](https://codecov.io/github/joeharris76/BenchBox)
 [![PyPI Release](https://img.shields.io/pypi/v/benchbox)](https://pypi.org/project/benchbox/)
 [![PyPI Downloads](https://img.shields.io/pepy/dt/benchbox.svg?label=PyPI%20Downloads)](https://pypi.org/project/benchbox/)
 
