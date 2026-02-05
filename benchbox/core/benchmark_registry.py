@@ -1,0 +1,454 @@
+"""Benchmark registry - single source of truth for benchmark metadata.
+
+This module provides centralized metadata for all benchmarks in BenchBox.
+Both CLI and MCP modules should import from here rather than maintaining
+their own copies of benchmark metadata.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+# Category ordering for display (most popular first)
+CATEGORY_ORDER = ["TPC", "Primitives", "Industry", "Academic", "Time Series", "Real World", "Experimental"]
+
+# Benchmark ordering within categories (most popular first)
+BENCHMARK_ORDER = {
+    "TPC": ["tpch", "tpcds", "tpcdi"],
+    "Primitives": ["read_primitives", "write_primitives", "transaction_primitives", "metadata_primitives"],
+    "Industry": ["clickbench", "h2odb", "coffeeshop"],
+    "Academic": ["ssb", "joinorder", "amplab"],
+    "Time Series": ["tsbs_devops"],
+    "Real World": ["nyctaxi"],
+    "Experimental": ["tpch_skew", "tpchavoc", "tpcds_obt", "datavault"],
+}
+
+# Mapping of benchmark IDs to their class names in the benchbox module
+# Used for lazy loading via getattr(benchbox, class_name)
+BENCHMARK_CLASS_NAMES: dict[str, str] = {
+    "tpch": "TPCH",
+    "tpcds": "TPCDS",
+    "tpcdi": "TPCDI",
+    "ssb": "SSB",
+    "clickbench": "ClickBench",
+    "h2odb": "H2ODB",
+    "amplab": "AMPLab",
+    "read_primitives": "ReadPrimitives",
+    "write_primitives": "WritePrimitives",
+    "metadata_primitives": "MetadataPrimitives",
+    "transaction_primitives": "TransactionPrimitives",
+    "joinorder": "JoinOrder",
+    "coffeeshop": "CoffeeShop",
+    "tpchavoc": "TPCHavoc",
+    "tpch_skew": "TPCHSkew",
+    "tsbs_devops": "TSBSDevOps",
+    "nyctaxi": "NYCTaxi",
+    "datavault": "DataVault",
+    "tpcds_obt": "TPCDSOBT",
+}
+
+
+# Complete benchmark metadata - the single source of truth
+# All metadata fields are documented here for consistency
+BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
+    "tpch": {
+        "display_name": "TPC-H",
+        "description": "Decision Support Benchmark",
+        "category": "TPC",
+        "num_queries": 22,
+        "query_description": "22 analytical queries",
+        "supports_streams": True,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0, 10.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (2, 10),  # minutes
+        "supports_dataframe": True,
+    },
+    "tpcds": {
+        "display_name": "TPC-DS",
+        "description": "Decision Support Benchmark",
+        "category": "TPC",
+        "num_queries": 99,
+        "query_description": "99 analytical queries",
+        "supports_streams": True,
+        "default_scale": 1.0,
+        "scale_options": [1.0, 10.0, 100.0],
+        "min_scale": 1.0,  # TPC-DS dsdgen binary requires SF >= 1.0 to avoid segfaults
+        "complexity": "High",
+        "estimated_time_range": (10, 60),
+        "supports_dataframe": True,
+    },
+    "tpcds_obt": {
+        "display_name": "TPC-DS-OBT",
+        "description": "Single-table TPC-DS (One Big Table) benchmark",
+        "category": "Experimental",
+        "num_queries": 17,
+        "query_description": "OBT-adapted analytical queries",
+        "supports_streams": False,
+        "default_scale": 1.0,
+        "scale_options": [1.0],
+        "min_scale": 1.0,
+        "complexity": "Medium",
+        "estimated_time_range": (5, 20),
+        "supports_dataframe": False,
+    },
+    "tpcdi": {
+        "display_name": "TPC-DI",
+        "description": "Data Integration Benchmark",
+        "category": "TPC",
+        "num_queries": 38,  # ETL operations
+        "query_description": "ETL Pipeline",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0, 10.0],
+        "min_scale": 0.01,
+        "complexity": "High",
+        "estimated_time_range": (5, 30),
+        "supports_dataframe": False,
+    },
+    "ssb": {
+        "display_name": "SSB",
+        "description": "Star Schema Benchmark",
+        "category": "Academic",
+        "num_queries": 13,
+        "query_description": "13 queries",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0, 10.0],
+        "min_scale": 0.01,
+        "complexity": "Low",
+        "estimated_time_range": (1, 5),
+        "supports_dataframe": False,
+    },
+    "clickbench": {
+        "display_name": "ClickBench",
+        "description": "Analytics benchmark",
+        "category": "Industry",
+        "num_queries": 43,
+        "query_description": "43 queries",
+        "supports_streams": False,
+        "default_scale": 1.0,
+        "scale_options": [1.0],
+        "min_scale": 1.0,
+        "complexity": "Medium",
+        "estimated_time_range": (5, 15),
+        "supports_dataframe": False,
+    },
+    "h2odb": {
+        "display_name": "H2ODB",
+        "description": "Data science benchmark",
+        "category": "Industry",
+        "num_queries": 10,
+        "query_description": "Multiple ML workloads",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (3, 15),
+        "supports_dataframe": False,
+    },
+    "amplab": {
+        "display_name": "AMPLab",
+        "description": "Big data benchmark suite",
+        "category": "Academic",
+        "num_queries": 8,
+        "query_description": "Multiple workloads",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (3, 15),
+        "supports_dataframe": False,
+    },
+    "read_primitives": {
+        "display_name": "Read Primitives",
+        "description": "Read operation benchmarks testing SELECT queries",
+        "category": "Primitives",
+        "num_queries": 136,
+        "query_description": "Multiple read test queries",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1],
+        "min_scale": 0.01,
+        "complexity": "Low",
+        "estimated_time_range": (1, 3),
+        "supports_dataframe": False,
+    },
+    "write_primitives": {
+        "display_name": "Write Primitives",
+        "description": "Database write operations benchmark",
+        "category": "Primitives",
+        "num_queries": 12,
+        "query_description": "12 write operations (INSERT, UPDATE, DELETE, DDL, TRANSACTION)",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (2, 5),
+        "supports_dataframe": False,
+    },
+    "metadata_primitives": {
+        "display_name": "Metadata",
+        "description": "Database catalog introspection benchmark",
+        "category": "Primitives",
+        "num_queries": 28,
+        "query_description": "28 metadata introspection queries (INFORMATION_SCHEMA, SHOW, DESCRIBE)",
+        "supports_streams": False,
+        "default_scale": 1.0,
+        "scale_options": [1.0],
+        "min_scale": 1.0,
+        "complexity": "Low",
+        "estimated_time_range": (1, 2),
+        "supports_dataframe": False,
+    },
+    "transaction_primitives": {
+        "display_name": "Transactions",
+        "description": "ACID transaction testing benchmark",
+        "category": "Primitives",
+        "num_queries": 8,
+        "query_description": "8 transaction operations",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (2, 5),
+        "supports_dataframe": False,
+    },
+    "joinorder": {
+        "display_name": "JoinOrder",
+        "description": "Query optimizer testing",
+        "category": "Academic",
+        "num_queries": 113,
+        "query_description": "113 queries",
+        "supports_streams": False,
+        "default_scale": 1.0,
+        "scale_options": [1.0],
+        "min_scale": 1.0,
+        "complexity": "High",
+        "estimated_time_range": (10, 30),
+        "supports_dataframe": False,
+    },
+    "coffeeshop": {
+        "display_name": "CoffeeShop",
+        "description": "Order line benchmark with regional weighting",
+        "category": "Industry",
+        "num_queries": 11,
+        "query_description": "11 analytics queries",
+        "supports_streams": False,
+        "default_scale": 0.001,
+        "scale_options": [0.001, 0.01, 0.1, 1.0],
+        "min_scale": 0.001,
+        "complexity": "Medium",
+        "estimated_time_range": (3, 12),
+        "supports_dataframe": False,
+    },
+    "tpchavoc": {
+        "display_name": "TPC-Havoc",
+        "description": "TPC-H syntax variants for optimizer testing",
+        "category": "Experimental",
+        "num_queries": 220,
+        "query_description": "220 query variants (22 queries x 10 variants)",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0, 10.0],
+        "min_scale": 0.01,
+        "complexity": "High",
+        "estimated_time_range": (15, 60),
+        "supports_dataframe": False,
+    },
+    "tpch_skew": {
+        "display_name": "TPC-H Skew",
+        "description": "TPC-H with configurable data skew distributions",
+        "category": "Experimental",
+        "num_queries": 22,
+        "query_description": "22 TPC-H queries on skewed data (Zipfian, normal, exponential)",
+        "supports_streams": True,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0, 10.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (2, 15),
+        "supports_dataframe": False,
+    },
+    "tsbs_devops": {
+        "display_name": "TSBS DevOps",
+        "description": "Time Series Benchmark Suite for DevOps monitoring",
+        "category": "Time Series",
+        "num_queries": 18,
+        "query_description": "18 time-series queries (CPU, memory, disk, network)",
+        "supports_streams": False,
+        "default_scale": 1.0,
+        "scale_options": [0.01, 0.1, 1.0, 10.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (2, 10),
+        "supports_dataframe": False,
+    },
+    "nyctaxi": {
+        "display_name": "NYC Taxi",
+        "description": "NYC TLC trip data for OLAP analytics",
+        "category": "Real World",
+        "num_queries": 25,
+        "query_description": "25 OLAP queries (temporal, geographic, financial)",
+        "supports_streams": False,
+        "default_scale": 1.0,
+        "scale_options": [0.01, 0.1, 1.0, 10.0, 100.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (5, 30),
+        "supports_dataframe": False,
+    },
+    "datavault": {
+        "display_name": "TPC-H Data Vault",
+        "description": "TPC-H adapted for Data Vault 2.0 modeling",
+        "category": "Experimental",
+        "num_queries": 22,
+        "query_description": "22 analytical queries (TPC-H adapted for Hub-Link-Satellite model)",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0, 10.0],
+        "min_scale": 0.01,
+        "complexity": "High",
+        "estimated_time_range": (5, 30),
+        "supports_dataframe": False,
+    },
+}
+
+
+def get_all_benchmarks() -> dict[str, dict[str, Any]]:
+    """Get metadata for all available benchmarks.
+
+    Returns:
+        Dictionary mapping benchmark IDs to their metadata.
+    """
+    return BENCHMARK_METADATA.copy()
+
+
+def get_benchmark_metadata(benchmark_id: str) -> dict[str, Any] | None:
+    """Get metadata for a specific benchmark.
+
+    Args:
+        benchmark_id: Benchmark identifier (e.g., 'tpch', 'tpcds')
+
+    Returns:
+        Benchmark metadata dict, or None if not found.
+    """
+    return BENCHMARK_METADATA.get(benchmark_id.lower())
+
+
+def get_benchmark_class_name(benchmark_id: str) -> str | None:
+    """Get the class name for a benchmark in the benchbox module.
+
+    Args:
+        benchmark_id: Benchmark identifier (e.g., 'tpch', 'tpcds')
+
+    Returns:
+        Class name (e.g., 'TPCH', 'TPCDS'), or None if not found.
+    """
+    return BENCHMARK_CLASS_NAMES.get(benchmark_id.lower())
+
+
+def get_benchmark_class(benchmark_id: str):
+    """Get the benchmark class from the benchbox module.
+
+    Uses benchbox module's lazy loading mechanism.
+
+    Args:
+        benchmark_id: Benchmark identifier (e.g., 'tpch', 'tpcds')
+
+    Returns:
+        Benchmark class, or None if not available.
+    """
+    import benchbox
+
+    class_name = get_benchmark_class_name(benchmark_id)
+    if class_name is None:
+        return None
+
+    try:
+        return getattr(benchbox, class_name)
+    except (AttributeError, ImportError):
+        return None
+
+
+def is_benchmark_available(benchmark_id: str) -> bool:
+    """Check if a benchmark is available (can be imported).
+
+    Args:
+        benchmark_id: Benchmark identifier
+
+    Returns:
+        True if benchmark class can be imported.
+    """
+    return get_benchmark_class(benchmark_id) is not None
+
+
+def list_benchmark_ids() -> list[str]:
+    """Get list of all benchmark IDs.
+
+    Returns:
+        List of benchmark identifiers.
+    """
+    return list(BENCHMARK_METADATA.keys())
+
+
+def get_benchmarks_by_category(category: str) -> dict[str, dict[str, Any]]:
+    """Get benchmarks filtered by category.
+
+    Args:
+        category: Category name (e.g., 'TPC', 'Academic')
+
+    Returns:
+        Dictionary of benchmarks in that category.
+    """
+    return {bid: meta for bid, meta in BENCHMARK_METADATA.items() if meta.get("category") == category}
+
+
+def get_categories() -> list[str]:
+    """Get list of all categories in display order.
+
+    Returns:
+        List of category names.
+    """
+    # Return categories that actually have benchmarks
+    categories_with_benchmarks = set()
+    for meta in BENCHMARK_METADATA.values():
+        categories_with_benchmarks.add(meta.get("category", "Unknown"))
+
+    # Return in preferred order, adding any extras at the end
+    result = [c for c in CATEGORY_ORDER if c in categories_with_benchmarks]
+    for c in categories_with_benchmarks:
+        if c not in result:
+            result.append(c)
+    return result
+
+
+def validate_scale_factor(benchmark_id: str, scale_factor: float) -> None:
+    """Validate scale factor against benchmark requirements.
+
+    Args:
+        benchmark_id: The benchmark identifier (e.g., 'tpcds', 'tpch')
+        scale_factor: The requested scale factor
+
+    Raises:
+        ValueError: If scale factor violates benchmark constraints.
+    """
+    meta = get_benchmark_metadata(benchmark_id)
+    if meta is None:
+        return  # Unknown benchmark, skip validation
+
+    min_scale = meta.get("min_scale")
+    if min_scale is not None and scale_factor < min_scale:
+        raise ValueError(
+            f"{benchmark_id.upper()} requires scale_factor >= {min_scale} (got {scale_factor}). "
+            f"The native data generator crashes with fractional scale factors."
+        )

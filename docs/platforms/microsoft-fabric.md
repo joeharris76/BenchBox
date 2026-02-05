@@ -1,0 +1,347 @@
+<!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
+
+# Microsoft Fabric
+
+```{tags} intermediate, guide, fabric, cloud-platform
+```
+
+BenchBox supports Microsoft Fabric Warehouse for SQL-based analytical benchmarking with Entra ID authentication and OneLake integration.
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| **Platform Name** | `fabric` |
+| **SQL Dialect** | T-SQL (SQL Server subset) |
+| **Authentication** | Entra ID only (service principal, default credential, interactive) |
+| **Data Loading** | COPY INTO via OneLake staging |
+| **Status** | Production-ready for Warehouse items |
+
+### Important Limitations
+
+This adapter **ONLY supports Fabric Warehouse items**:
+
+| Fabric Item | Support Status | Reason |
+|-------------|----------------|--------|
+| **Warehouse** | Supported | Full T-SQL DDL/DML support |
+| **Lakehouse** | Not Supported | SQL Analytics Endpoint is READ-ONLY |
+| **KQL Database** | Not Supported | Kusto Query Language, not T-SQL |
+| **Mirrored Database** | Not Supported | Different architecture |
+
+For Lakehouse benchmarking, you would need Spark integration via Livy API, which is not currently implemented.
+
+## Installation
+
+```bash
+# Install BenchBox with Fabric dependencies
+uv add benchbox --extra fabric
+
+# Or with pip
+pip install "benchbox[fabric]"
+```
+
+### Required Dependencies
+
+- `pyodbc` - ODBC driver connectivity
+- `azure-identity` - Entra ID authentication
+- `azure-storage-file-datalake` - OneLake staging
+- **ODBC Driver 18 for SQL Server** - System driver (required)
+
+### System Requirements
+
+**macOS:**
+```bash
+brew install unixodbc msodbcsql18
+```
+
+**Ubuntu/Debian:**
+```bash
+curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+sudo apt-get update
+sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+```
+
+**Windows:**
+Download from [Microsoft Download Center](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server).
+
+## Quick Start
+
+### CLI Usage
+
+```bash
+# Run TPC-H on Fabric Warehouse
+benchbox run --platform fabric --benchmark tpch --scale 0.1 \
+  --platform-option workspace=your-workspace-guid \
+  --platform-option warehouse=your_warehouse_name
+
+# With service principal authentication
+benchbox run --platform fabric --benchmark tpch --scale 1 \
+  --platform-option workspace=your-workspace-guid \
+  --platform-option warehouse=your_warehouse_name \
+  --platform-option auth_method=service_principal \
+  --platform-option tenant_id=your-tenant-id \
+  --platform-option client_id=your-client-id \
+  --platform-option client_secret=your-secret
+```
+
+### Programmatic Usage
+
+```python
+from benchbox.platforms.fabric_warehouse import FabricWarehouseAdapter
+from benchbox import TPCH
+
+# Initialize adapter
+adapter = FabricWarehouseAdapter(
+    workspace="your-workspace-guid",
+    warehouse="your_warehouse_name",
+    auth_method="default_credential"  # Uses Azure CLI or managed identity
+)
+
+# Initialize benchmark
+benchmark = TPCH(scale_factor=0.1)
+
+# Generate data
+benchmark.generate_data()
+
+# Load data into Fabric
+adapter.load_benchmark_data(benchmark)
+
+# Run queries
+results = adapter.run_benchmark(benchmark)
+```
+
+## Authentication Methods
+
+### Default Credential (Recommended)
+
+Uses Azure CLI, managed identity, or environment variables:
+
+```python
+adapter = FabricWarehouseAdapter(
+    workspace="your-workspace-guid",
+    warehouse="your_warehouse_name",
+    auth_method="default_credential"
+)
+```
+
+**Prerequisites:**
+- Azure CLI logged in: `az login`
+- Or running on Azure with managed identity
+- Or set environment variables:
+  - `AZURE_CLIENT_ID`
+  - `AZURE_CLIENT_SECRET`
+  - `AZURE_TENANT_ID`
+
+### Service Principal
+
+For automated/CI environments:
+
+```python
+adapter = FabricWarehouseAdapter(
+    workspace="your-workspace-guid",
+    warehouse="your_warehouse_name",
+    auth_method="service_principal",
+    tenant_id="your-tenant-id",
+    client_id="your-client-id",
+    client_secret="your-client-secret"
+)
+```
+
+**Required Permissions:**
+- Fabric workspace member (Contributor or Admin)
+- OneLake data access for staging
+
+### Interactive Browser
+
+For development/testing:
+
+```python
+adapter = FabricWarehouseAdapter(
+    workspace="your-workspace-guid",
+    warehouse="your_warehouse_name",
+    auth_method="interactive"
+)
+```
+
+Opens browser for Entra ID login.
+
+## Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `workspace` | str | Required | Fabric workspace GUID |
+| `warehouse` | str | Required | Warehouse item name |
+| `auth_method` | str | `default_credential` | Authentication method |
+| `tenant_id` | str | - | Azure tenant ID (for service principal) |
+| `client_id` | str | - | Service principal client ID |
+| `client_secret` | str | - | Service principal client secret |
+| `staging_path` | str | `benchbox-staging` | OneLake staging path |
+| `schema` | str | `dbo` | Default schema |
+| `connect_timeout` | int | 30 | Connection timeout (seconds) |
+| `query_timeout` | int | 0 | Query timeout (0 = no limit) |
+| `disable_result_cache` | bool | True | Disable result caching |
+| `driver` | str | `ODBC Driver 18 for SQL Server` | ODBC driver name |
+
+## OneLake Data Staging
+
+Fabric Warehouse uses OneLake for data staging during bulk loads:
+
+```
+https://onelake.dfs.fabric.microsoft.com/{workspace}/{warehouse}.Warehouse/Files/benchbox-staging/
+```
+
+### How Data Loading Works
+
+1. **Upload to OneLake**: Data files uploaded to staging path
+2. **COPY INTO**: SQL command loads from OneLake path
+3. **Cleanup**: Staging files removed after load
+
+```sql
+-- Example COPY INTO (generated by adapter)
+COPY INTO dbo.lineitem
+FROM 'https://onelake.dfs.fabric.microsoft.com/{workspace}/{warehouse}.Warehouse/Files/benchbox-staging/lineitem.csv'
+WITH (
+    FILE_TYPE = 'CSV',
+    FIELDTERMINATOR = '|',
+    FIRSTROW = 2
+);
+```
+
+## SQL Dialect Notes
+
+Fabric uses T-SQL with some limitations compared to SQL Server:
+
+### Supported
+
+- Standard T-SQL queries
+- CTEs (Common Table Expressions)
+- Window functions
+- Aggregate functions
+- Joins (including hash, merge, nested loop)
+
+### Not Supported
+
+- **Clustered indexes** - Fabric uses automatic indexing
+- **Distribution keys** - Automatic distribution management
+- **Partitioning** - Fabric handles internally
+- **V-Order optimization** - Spark-only feature (Lakehouse)
+- **Some T-SQL features** - Cursor types, certain stored procedures
+
+### Query Translation
+
+BenchBox automatically translates queries for Fabric:
+
+```python
+from benchbox import TPCH
+
+# TPC-H queries translated from DuckDB dialect
+benchmark = TPCH(scale_factor=1.0)
+query = benchmark.get_query(1)  # Returns T-SQL compatible query
+```
+
+## Performance Considerations
+
+### Result Cache
+
+By default, BenchBox disables Fabric's result cache for accurate benchmarking:
+
+```python
+adapter = FabricWarehouseAdapter(
+    workspace="...",
+    warehouse="...",
+    disable_result_cache=True  # Default
+)
+```
+
+To enable (for production-like testing):
+
+```python
+adapter = FabricWarehouseAdapter(
+    workspace="...",
+    warehouse="...",
+    disable_result_cache=False
+)
+```
+
+### Capacity Considerations
+
+Fabric uses Capacity Units (CUs) for billing:
+
+- **F2**: 2 CUs - Development/testing
+- **F4-F64**: 4-64 CUs - Production workloads
+- **F128+**: Large-scale analytics
+
+**Recommendations:**
+- Use F4+ for TPC-H scale factor > 1
+- Use F16+ for TPC-DS
+- Consider pausing capacity between benchmark runs
+
+### Cost Optimization
+
+```bash
+# Pause Fabric capacity between runs (via Azure CLI)
+az fabric capacity suspend --capacity-name my-capacity
+
+# Resume when ready to benchmark
+az fabric capacity resume --capacity-name my-capacity
+```
+
+## Troubleshooting
+
+### Connection Errors
+
+**"Login timeout expired"**
+```
+# Check ODBC driver installation
+odbcinst -q -d
+
+# Verify workspace/warehouse names
+az fabric workspace list
+```
+
+**"Cannot open server"**
+- Verify workspace GUID is correct
+- Check network connectivity to `*.datawarehouse.fabric.microsoft.com`
+- Ensure same-region deployment (cross-region not supported)
+
+### Authentication Errors
+
+**"AADSTS700016: Application not found"**
+- Verify service principal exists in correct tenant
+- Check client ID is correct
+
+**"AADSTS7000215: Invalid client secret"**
+- Regenerate client secret
+- Check for expired credentials
+
+### Data Loading Errors
+
+**"Access to OneLake denied"**
+- Verify service principal has OneLake access
+- Check workspace permissions include data access
+
+**"COPY INTO failed"**
+- Verify staging path exists
+- Check file format matches data
+- Ensure column count matches table schema
+
+## Differences from Azure Synapse
+
+| Feature | Fabric Warehouse | Azure Synapse |
+|---------|------------------|---------------|
+| Authentication | Entra ID only | SQL + Entra ID |
+| Storage | OneLake | Azure Blob/ADLS |
+| Distribution | Automatic | User-specified |
+| Indexing | Automatic | Manual |
+| File Format | Delta Lake | Multiple |
+| Cross-region | Not supported | Supported |
+| Pricing | Capacity Units | DWU/cDWU |
+
+## Related Documentation
+
+- [Azure Platforms Overview](azure-platforms.md)
+- [Platform Selection Guide](platform-selection-guide.md)
+- [TPC-H Benchmark](../benchmarks/tpc-h.md)
+- [TPC-DS Benchmark](../benchmarks/tpc-ds.md)
+- [Microsoft Fabric Documentation](https://learn.microsoft.com/en-us/fabric/)

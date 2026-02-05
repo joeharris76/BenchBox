@@ -1,0 +1,21 @@
+# Dask DataFrame Tuning - Memory Constrained
+# For low-memory environments processing large datasets
+
+parallelism:
+  worker_count: 2
+  threads_per_worker: 1
+
+memory:
+  memory_limit: "2GB"
+  chunk_size: 100000
+  spill_to_disk: true
+
+data_types:
+  dtype_backend: pyarrow
+
+_metadata:
+  version: "1.0"
+  format: dataframe_tuning
+  platform: dask
+  description: Dask configuration for memory-constrained environments
+  generated_by: benchbox

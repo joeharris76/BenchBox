@@ -1,0 +1,15 @@
+type: redshift
+connection:
+  host: "your-cluster.redshift.amazonaws.com"
+  port: 5439
+  database: "benchbox"
+  username: "${REDSHIFT_USER}"
+  password: "${REDSHIFT_PASSWORD}"
+  ssl_enabled: true
+settings:
+  s3_bucket: "your-s3-bucket"
+  s3_prefix: "benchbox-data"
+  iam_role: "arn:aws:iam::123456789012:role/RedshiftS3AccessRole"
+  compression_encoding: "AUTO"
+  auto_vacuum: true
+  auto_analyze: true

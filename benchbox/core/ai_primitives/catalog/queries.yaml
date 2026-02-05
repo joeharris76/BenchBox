@@ -1,0 +1,835 @@
+version: 1
+
+# AI/ML Primitives Benchmark Query Catalog
+#
+# This catalog defines SQL queries for testing AI/ML functions across platforms.
+# All queries use TPC-H data for consistency.
+#
+# Categories:
+#   - generative: Text completion, question answering, SQL generation
+#   - nlp: Sentiment analysis, classification, entity extraction
+#   - transform: Summarization, translation, grammar correction
+#   - embedding: Vector embedding generation
+#
+# Platform Support:
+#   - snowflake: Cortex functions (COMPLETE, SUMMARIZE, SENTIMENT, etc.)
+#   - bigquery: ML functions (ML.GENERATE_TEXT, ML.UNDERSTAND_TEXT, etc.)
+#   - databricks: AI functions (ai_query, ai_summarize, etc.)
+#   - duckdb, clickhouse, sqlite, postgresql: Not supported (skip_on)
+
+queries:
+  # ============================================================================
+  # GENERATIVE AI QUERIES
+  # ============================================================================
+
+  - id: generative_complete_simple
+    category: generative
+    description: Basic text completion with a short prompt
+    model: llama3-8b
+    estimated_tokens: 50
+    batch_size: 5
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            SNOWFLAKE.CORTEX.COMPLETE(
+                'llama3-8b',
+                'Complete this sentence: The best database for analytics is'
+            ) as completion
+      bigquery: |2
+        SELECT
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT 'Complete this sentence: The best database for analytics is' AS prompt),
+                STRUCT(100 AS max_output_tokens)
+            ).ml_generate_text_result as completion
+      databricks: |2
+        SELECT
+            ai_query(
+                'databricks-meta-llama-3-1-70b-instruct',
+                'Complete this sentence: The best database for analytics is'
+            ) as completion
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: generative_complete_customer_profile
+    category: generative
+    description: Generate customer profile summary from TPC-H comments
+    model: llama3-8b
+    estimated_tokens: 200
+    batch_size: 10
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            c_name,
+            SNOWFLAKE.CORTEX.COMPLETE(
+                'llama3-8b',
+                'Summarize this customer profile in one sentence: ' || c_comment
+            ) as profile_summary
+        FROM customer
+        WHERE c_nationkey = 1
+        LIMIT 10
+      bigquery: |2
+        SELECT
+            c_custkey,
+            c_name,
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT CONCAT('Summarize this customer profile in one sentence: ', c_comment) AS prompt),
+                STRUCT(100 AS max_output_tokens)
+            ).ml_generate_text_result as profile_summary
+        FROM `project.dataset.customer`
+        WHERE c_nationkey = 1
+        LIMIT 10
+      databricks: |2
+        SELECT
+            c_custkey,
+            c_name,
+            ai_query(
+                'databricks-meta-llama-3-1-70b-instruct',
+                CONCAT('Summarize this customer profile in one sentence: ', c_comment)
+            ) as profile_summary
+        FROM customer
+        WHERE c_nationkey = 1
+        LIMIT 10
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: generative_question_answer
+    category: generative
+    description: Answer a question about customer data
+    model: llama3-8b
+    estimated_tokens: 150
+    batch_size: 5
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            SNOWFLAKE.CORTEX.EXTRACT_ANSWER(
+                c_comment,
+                'What is the customer requesting or complaining about?'
+            ) as extracted_answer
+        FROM customer
+        WHERE LENGTH(c_comment) > 50
+        LIMIT 10
+      bigquery: |2
+        SELECT
+            c_custkey,
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT CONCAT(
+                    'Based on this text: "', c_comment,
+                    '" Answer: What is the customer requesting or complaining about?'
+                ) AS prompt),
+                STRUCT(100 AS max_output_tokens)
+            ).ml_generate_text_result as extracted_answer
+        FROM `project.dataset.customer`
+        WHERE LENGTH(c_comment) > 50
+        LIMIT 10
+      databricks: |2
+        SELECT
+            c_custkey,
+            ai_extract(
+                c_comment,
+                ARRAY('complaint', 'request', 'issue')
+            ) as extracted_answer
+        FROM customer
+        WHERE LENGTH(c_comment) > 50
+        LIMIT 10
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: generative_sql_generation
+    category: generative
+    description: Generate SQL from natural language description
+    model: llama3-70b
+    estimated_tokens: 300
+    batch_size: 3
+    cost_per_1k_tokens: 0.001
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            SNOWFLAKE.CORTEX.COMPLETE(
+                'llama3-70b',
+                'Generate a SQL query to find the top 5 customers by total order amount. Tables: customer (c_custkey, c_name), orders (o_custkey, o_totalprice). Return only SQL.'
+            ) as generated_sql
+      bigquery: |2
+        SELECT
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT 'Generate a SQL query to find the top 5 customers by total order amount. Tables: customer (c_custkey, c_name), orders (o_custkey, o_totalprice). Return only SQL.' AS prompt),
+                STRUCT(200 AS max_output_tokens)
+            ).ml_generate_text_result as generated_sql
+      databricks: |2
+        SELECT
+            ai_query(
+                'databricks-meta-llama-3-1-70b-instruct',
+                'Generate a SQL query to find the top 5 customers by total order amount. Tables: customer (c_custkey, c_name), orders (o_custkey, o_totalprice). Return only SQL.'
+            ) as generated_sql
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  # ============================================================================
+  # NLP ANALYSIS QUERIES
+  # ============================================================================
+
+  - id: nlp_sentiment_single
+    category: nlp
+    description: Analyze sentiment of a single customer comment
+    model: sentiment
+    estimated_tokens: 100
+    batch_size: 20
+    cost_per_1k_tokens: 0.0001
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            c_comment,
+            SNOWFLAKE.CORTEX.SENTIMENT(c_comment) as sentiment_score
+        FROM customer
+        WHERE c_custkey = 1
+      bigquery: |2
+        SELECT
+            c_custkey,
+            c_comment,
+            ML.UNDERSTAND_TEXT(
+                MODEL `project.dataset.nlp_model`,
+                (SELECT c_comment AS text_content),
+                STRUCT(['sentiment'] AS analysis_types)
+            ).sentiment_score as sentiment_score
+        FROM `project.dataset.customer`
+        WHERE c_custkey = 1
+      databricks: |2
+        SELECT
+            c_custkey,
+            c_comment,
+            ai_analyze_sentiment(c_comment) as sentiment_score
+        FROM customer
+        WHERE c_custkey = 1
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: nlp_sentiment_batch
+    category: nlp
+    description: Batch sentiment analysis on customer comments
+    model: sentiment
+    estimated_tokens: 100
+    batch_size: 100
+    cost_per_1k_tokens: 0.0001
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            c_mktsegment,
+            SNOWFLAKE.CORTEX.SENTIMENT(c_comment) as sentiment_score
+        FROM customer
+        WHERE c_mktsegment = 'BUILDING'
+        LIMIT 100
+      bigquery: |2
+        SELECT
+            c_custkey,
+            c_mktsegment,
+            ML.UNDERSTAND_TEXT(
+                MODEL `project.dataset.nlp_model`,
+                (SELECT c_comment AS text_content),
+                STRUCT(['sentiment'] AS analysis_types)
+            ).sentiment_score as sentiment_score
+        FROM `project.dataset.customer`
+        WHERE c_mktsegment = 'BUILDING'
+        LIMIT 100
+      databricks: |2
+        SELECT
+            c_custkey,
+            c_mktsegment,
+            ai_analyze_sentiment(c_comment) as sentiment_score
+        FROM customer
+        WHERE c_mktsegment = 'BUILDING'
+        LIMIT 100
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: nlp_classify_priority
+    category: nlp
+    description: Classify order priority based on customer comments
+    model: llama3-8b
+    estimated_tokens: 150
+    batch_size: 10
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            SNOWFLAKE.CORTEX.CLASSIFY_TEXT(
+                c_comment,
+                ['urgent', 'normal', 'low priority']
+            ) as priority_class
+        FROM customer
+        WHERE LENGTH(c_comment) > 30
+        LIMIT 20
+      bigquery: |2
+        SELECT
+            c_custkey,
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT CONCAT(
+                    'Classify this text into one of: urgent, normal, low priority. Text: "',
+                    c_comment, '". Classification:'
+                ) AS prompt),
+                STRUCT(10 AS max_output_tokens)
+            ).ml_generate_text_result as priority_class
+        FROM `project.dataset.customer`
+        WHERE LENGTH(c_comment) > 30
+        LIMIT 20
+      databricks: |2
+        SELECT
+            c_custkey,
+            ai_classify(
+                c_comment,
+                ARRAY('urgent', 'normal', 'low priority')
+            ) as priority_class
+        FROM customer
+        WHERE LENGTH(c_comment) > 30
+        LIMIT 20
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: nlp_classify_segment
+    category: nlp
+    description: Classify customer into market segment from comment
+    model: llama3-8b
+    estimated_tokens: 150
+    batch_size: 10
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            c_mktsegment as actual_segment,
+            SNOWFLAKE.CORTEX.CLASSIFY_TEXT(
+                c_comment,
+                ['AUTOMOBILE', 'BUILDING', 'FURNITURE', 'HOUSEHOLD', 'MACHINERY']
+            ) as predicted_segment
+        FROM customer
+        LIMIT 20
+      bigquery: |2
+        SELECT
+            c_custkey,
+            c_mktsegment as actual_segment,
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT CONCAT(
+                    'Classify this customer into one segment: AUTOMOBILE, BUILDING, FURNITURE, HOUSEHOLD, MACHINERY. Text: "',
+                    c_comment, '". Segment:'
+                ) AS prompt),
+                STRUCT(15 AS max_output_tokens)
+            ).ml_generate_text_result as predicted_segment
+        FROM `project.dataset.customer`
+        LIMIT 20
+      databricks: |2
+        SELECT
+            c_custkey,
+            c_mktsegment as actual_segment,
+            ai_classify(
+                c_comment,
+                ARRAY('AUTOMOBILE', 'BUILDING', 'FURNITURE', 'HOUSEHOLD', 'MACHINERY')
+            ) as predicted_segment
+        FROM customer
+        LIMIT 20
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: nlp_entity_extraction
+    category: nlp
+    description: Extract entities from part descriptions
+    model: llama3-8b
+    estimated_tokens: 200
+    batch_size: 10
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            p_partkey,
+            p_name,
+            SNOWFLAKE.CORTEX.EXTRACT_ANSWER(
+                p_comment,
+                'What are the key product features mentioned?'
+            ) as extracted_features
+        FROM part
+        WHERE LENGTH(p_comment) > 20
+        LIMIT 20
+      bigquery: |2
+        SELECT
+            p_partkey,
+            p_name,
+            ML.UNDERSTAND_TEXT(
+                MODEL `project.dataset.nlp_model`,
+                (SELECT p_comment AS text_content),
+                STRUCT(['entities'] AS analysis_types)
+            ).entities as extracted_features
+        FROM `project.dataset.part`
+        WHERE LENGTH(p_comment) > 20
+        LIMIT 20
+      databricks: |2
+        SELECT
+            p_partkey,
+            p_name,
+            ai_extract(
+                p_comment,
+                ARRAY('feature', 'material', 'color', 'size')
+            ) as extracted_features
+        FROM part
+        WHERE LENGTH(p_comment) > 20
+        LIMIT 20
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  # ============================================================================
+  # TEXT TRANSFORMATION QUERIES
+  # ============================================================================
+
+  - id: transform_summarize_short
+    category: transform
+    description: Summarize short customer comments
+    model: llama3-8b
+    estimated_tokens: 100
+    batch_size: 20
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            c_comment,
+            SNOWFLAKE.CORTEX.SUMMARIZE(c_comment) as summary
+        FROM customer
+        WHERE LENGTH(c_comment) BETWEEN 50 AND 100
+        LIMIT 20
+      bigquery: |2
+        SELECT
+            c_custkey,
+            c_comment,
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT CONCAT('Summarize in one sentence: ', c_comment) AS prompt),
+                STRUCT(50 AS max_output_tokens)
+            ).ml_generate_text_result as summary
+        FROM `project.dataset.customer`
+        WHERE LENGTH(c_comment) BETWEEN 50 AND 100
+        LIMIT 20
+      databricks: |2
+        SELECT
+            c_custkey,
+            c_comment,
+            ai_summarize(c_comment) as summary
+        FROM customer
+        WHERE LENGTH(c_comment) BETWEEN 50 AND 100
+        LIMIT 20
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: transform_summarize_long
+    category: transform
+    description: Summarize longer part descriptions
+    model: llama3-8b
+    estimated_tokens: 200
+    batch_size: 10
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            p_partkey,
+            p_comment,
+            SNOWFLAKE.CORTEX.SUMMARIZE(p_comment) as summary
+        FROM part
+        WHERE LENGTH(p_comment) > 100
+        LIMIT 50
+      bigquery: |2
+        SELECT
+            p_partkey,
+            p_comment,
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT CONCAT('Summarize this product description: ', p_comment) AS prompt),
+                STRUCT(100 AS max_output_tokens)
+            ).ml_generate_text_result as summary
+        FROM `project.dataset.part`
+        WHERE LENGTH(p_comment) > 100
+        LIMIT 50
+      databricks: |2
+        SELECT
+            p_partkey,
+            p_comment,
+            ai_summarize(p_comment) as summary
+        FROM part
+        WHERE LENGTH(p_comment) > 100
+        LIMIT 50
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: transform_translate_comment
+    category: transform
+    description: Translate customer comment to Spanish
+    model: translation
+    estimated_tokens: 150
+    batch_size: 10
+    cost_per_1k_tokens: 0.0002
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            c_comment as original,
+            SNOWFLAKE.CORTEX.TRANSLATE(c_comment, 'en', 'es') as spanish_translation
+        FROM customer
+        WHERE c_nationkey = 24
+        LIMIT 10
+      bigquery: |2
+        SELECT
+            c_custkey,
+            c_comment as original,
+            ML.TRANSLATE(
+                MODEL `project.dataset.translate_model`,
+                (SELECT c_comment AS text),
+                STRUCT('es' AS target_language)
+            ).translated_text as spanish_translation
+        FROM `project.dataset.customer`
+        WHERE c_nationkey = 24
+        LIMIT 10
+      databricks: |2
+        SELECT
+            c_custkey,
+            c_comment as original,
+            ai_translate(c_comment, 'es') as spanish_translation
+        FROM customer
+        WHERE c_nationkey = 24
+        LIMIT 10
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: transform_grammar_fix
+    category: transform
+    description: Fix grammar in customer comments (Databricks-specific)
+    model: llama3-8b
+    estimated_tokens: 150
+    batch_size: 10
+    cost_per_1k_tokens: 0.0003
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            c_comment as original,
+            SNOWFLAKE.CORTEX.COMPLETE(
+                'llama3-8b',
+                'Fix any grammar issues in this text and return the corrected version: ' || c_comment
+            ) as corrected
+        FROM customer
+        LIMIT 10
+      bigquery: |2
+        SELECT
+            c_custkey,
+            c_comment as original,
+            ML.GENERATE_TEXT(
+                MODEL `project.dataset.llm_model`,
+                (SELECT CONCAT('Fix any grammar issues in this text: ', c_comment) AS prompt),
+                STRUCT(200 AS max_output_tokens)
+            ).ml_generate_text_result as corrected
+        FROM `project.dataset.customer`
+        LIMIT 10
+      databricks: |2
+        SELECT
+            c_custkey,
+            c_comment as original,
+            ai_fix_grammar(c_comment) as corrected
+        FROM customer
+        LIMIT 10
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  # ============================================================================
+  # EMBEDDING GENERATION QUERIES
+  # ============================================================================
+
+  - id: embedding_single
+    category: embedding
+    description: Generate embedding for a single customer comment
+    model: embed-text-768
+    estimated_tokens: 100
+    batch_size: 1
+    cost_per_1k_tokens: 0.0001
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            SNOWFLAKE.CORTEX.EMBED_TEXT_768('e5-base-v2', c_comment) as embedding
+        FROM customer
+        WHERE c_custkey = 1
+      bigquery: |2
+        SELECT
+            c_custkey,
+            ML.GENERATE_EMBEDDING(
+                MODEL `project.dataset.embedding_model`,
+                STRUCT(c_comment AS content)
+            ).ml_generate_embedding_result as embedding
+        FROM `project.dataset.customer`
+        WHERE c_custkey = 1
+      databricks: |2
+        SELECT
+            c_custkey,
+            ai_query(
+                'databricks-bge-large-en',
+                c_comment
+            ) as embedding
+        FROM customer
+        WHERE c_custkey = 1
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: embedding_batch
+    category: embedding
+    description: Batch embedding generation for customer comments
+    model: embed-text-768
+    estimated_tokens: 100
+    batch_size: 50
+    cost_per_1k_tokens: 0.0001
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            SNOWFLAKE.CORTEX.EMBED_TEXT_768('e5-base-v2', c_comment) as embedding
+        FROM customer
+        WHERE c_nationkey = 1
+        LIMIT 50
+      bigquery: |2
+        SELECT
+            c_custkey,
+            ML.GENERATE_EMBEDDING(
+                MODEL `project.dataset.embedding_model`,
+                STRUCT(c_comment AS content)
+            ).ml_generate_embedding_result as embedding
+        FROM `project.dataset.customer`
+        WHERE c_nationkey = 1
+        LIMIT 50
+      databricks: |2
+        SELECT
+            c_custkey,
+            ai_query(
+                'databricks-bge-large-en',
+                c_comment
+            ) as embedding
+        FROM customer
+        WHERE c_nationkey = 1
+        LIMIT 50
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric
+
+  - id: embedding_large_dimension
+    category: embedding
+    description: Generate 1024-dimension embedding
+    model: embed-text-1024
+    estimated_tokens: 100
+    batch_size: 20
+    cost_per_1k_tokens: 0.00015
+    sql: |2
+      SELECT 'placeholder - use platform variant' as result
+    variants:
+      snowflake: |2
+        SELECT
+            c_custkey,
+            SNOWFLAKE.CORTEX.EMBED_TEXT_1024('voyage-multilingual-2', c_comment) as embedding_1024
+        FROM customer
+        LIMIT 20
+      bigquery: |2
+        SELECT
+            c_custkey,
+            ML.GENERATE_EMBEDDING(
+                MODEL `project.dataset.embedding_large_model`,
+                STRUCT(c_comment AS content)
+            ).ml_generate_embedding_result as embedding_1024
+        FROM `project.dataset.customer`
+        LIMIT 20
+      databricks: |2
+        SELECT
+            c_custkey,
+            ai_query(
+                'databricks-gte-large-en',
+                c_comment
+            ) as embedding_1024
+        FROM customer
+        LIMIT 20
+    skip_on:
+      - duckdb
+      - clickhouse
+      - sqlite
+      - postgresql
+      - datafusion
+      - trino
+      - presto
+      - redshift
+      - synapse
+      - fabric

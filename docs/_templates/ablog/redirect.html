@@ -1,0 +1,16 @@
+{#-
+  ABlog redirect template modified for Furo compatibility.
+-#}
+{%- extends "page.html" %}
+{%- block extrahead %}
+{{ super() }}
+<meta
+  http-equiv="refresh"
+  content="{{ ablog.post_redirect_refresh }}; url={{ pathto(redirect) }}"
+/>
+{% endblock extrahead %}
+{% block content %}
+You are being redirected to
+<a href="{{ pathto(redirect) }}">{{ post.title }}</a> in {{
+ablog.post_redirect_refresh }} seconds;
+{% endblock content %}

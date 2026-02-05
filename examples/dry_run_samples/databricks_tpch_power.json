@@ -1,0 +1,32 @@
+{
+  "benchmark": {
+    "name": "tpch",
+    "display_name": "TPC-H",
+    "scale_factor": 0.01,
+    "test_execution_type": "power"
+  },
+  "platform": {
+    "type": "databricks",
+    "configuration": {
+      "catalog": "workspace",
+      "schema": "benchbox",
+      "staging_root": "dbfs:/benchbox/tmp"
+    },
+    "credentials": "Provided via environment variables (DATABRICKS_HOST/HTTP_PATH/TOKEN)"
+  },
+  "query_preview": {
+    "query_count": 22,
+    "execution_context": "TPC-H PowerTest stream permutation"
+  },
+  "resource_estimates": {
+    "estimated_data_size_mb": 1200,
+    "estimated_memory_usage_mb": 2048,
+    "estimated_runtime_minutes": 35
+  },
+  "warnings": [
+    "Platform adapter initialization skipped in sample output; actual dry run will report missing dependencies if the Databricks connector is not installed."
+  ],
+  "metadata": {
+    "generated_with": "examples/getting_started/cloud/databricks_tpch_power.py"
+  }
+}

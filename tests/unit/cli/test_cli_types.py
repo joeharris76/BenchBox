@@ -1,0 +1,347 @@
+from tests.conftest import make_benchmark_results
+
+"""Unit tests for CLI types and data structures.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+import importlib
+from datetime import datetime
+
+import pytest
+
+from benchbox.core.config import BenchmarkConfig, QueryResult
+from benchbox.core.results.models import BenchmarkResults
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+class TestQueryResult:
+    """Test QueryResult data structure."""
+
+    def test_query_result_creation(self):
+        """Test basic QueryResult creation."""
+        result = QueryResult(
+            query_id="q1",
+            query_name="Simple Select",
+            sql_text="SELECT 1",
+            execution_time_ms=10.5,
+            rows_returned=1,
+            status="SUCCESS",
+        )
+
+        assert result.query_id == "q1"
+        assert result.query_name == "Simple Select"
+        assert result.sql_text == "SELECT 1"
+        assert result.execution_time_ms == 10.5
+        assert result.rows_returned == 1
+        assert result.status == "SUCCESS"
+        assert result.error_message is None
+        assert result.resource_usage is None
+
+    def test_query_result_with_error(self):
+        """Test QueryResult creation with error information."""
+        result = QueryResult(
+            query_id="q2",
+            query_name="Failed Query",
+            sql_text="SELECT * FROM non_existent_table",
+            execution_time_ms=0.0,
+            rows_returned=0,
+            status="ERROR",
+            error_message="Table not found",
+        )
+
+        assert result.status == "ERROR"
+        assert result.error_message == "Table not found"
+        assert result.execution_time_ms == 0.0
+
+    def test_query_result_with_resource_usage(self):
+        """Test QueryResult with resource usage information."""
+        resource_usage = {
+            "memory_peak_mb": 256.0,
+            "cpu_time_ms": 50.0,
+            "disk_io_mb": 10.5,
+        }
+
+        result = QueryResult(
+            query_id="q3",
+            query_name="Resource Heavy Query",
+            sql_text="SELECT * FROM large_table",
+            execution_time_ms=1500.0,
+            rows_returned=100000,
+            status="SUCCESS",
+            resource_usage=resource_usage,
+        )
+
+        assert result.resource_usage == resource_usage
+        assert result.resource_usage["memory_peak_mb"] == 256.0
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+class TestBenchmarkResults:
+    """Test BenchmarkResults helper construction and extension fields."""
+
+    def test_benchmark_results_creation(self):
+        """Test basic BenchmarkResults creation via helper."""
+        result = make_benchmark_results(benchmark_id="tpch_001", benchmark_name="TPC-H", scale_factor=1.0)
+
+        assert isinstance(result, BenchmarkResults)
+        assert result.benchmark_id == "tpch_001"
+        assert result.benchmark_name == "TPC-H"
+        assert result.execution_id == "test-exec"
+        assert isinstance(result.timestamp, datetime)
+        assert result.duration_seconds == 0.0
+        assert result.scale_factor == 1.0
+        assert result.total_queries == 0
+        assert result.query_results == []
+        assert result.validation_status == "UNKNOWN"
+        assert result.validation_details == {}
+        assert hasattr(result, "platform") and result.platform == "cli"
+        assert result.benchmark_version is None
+
+    def test_benchmark_results_with_custom_values(self):
+        """Test BenchmarkResults with custom extras and overrides."""
+        query_results = [
+            QueryResult(
+                query_id="q1",
+                query_name="Query 1",
+                sql_text="SELECT 1",
+                execution_time_ms=10.0,
+                rows_returned=1,
+                status="SUCCESS",
+            ),
+            QueryResult(
+                query_id="q2",
+                query_name="Query 2",
+                sql_text="SELECT 2",
+                execution_time_ms=15.0,
+                rows_returned=1,
+                status="SUCCESS",
+            ),
+        ]
+
+        summary_metrics = {"total_time": 25.0, "avg_time": 12.5, "throughput": 2.0}
+
+        result = make_benchmark_results(
+            benchmark_id="tpch_002",
+            benchmark_name="TPC-H",
+            benchmark_version="1.0.0",
+            execution_id="exec_001",
+            duration_seconds=30.0,
+            scale_factor=1.0,
+            query_subset=["q1", "q2"],
+            concurrency_level=4,
+            query_results=query_results,
+            summary_metrics=summary_metrics,
+            validation_status="PASSED",
+            total_queries=len(query_results),
+            successful_queries=2,
+        )
+
+        assert isinstance(result, BenchmarkResults)
+        assert result.benchmark_version == "1.0.0"
+        assert result.execution_id == "exec_001"
+        assert result.duration_seconds == 30.0
+        assert result.scale_factor == 1.0
+        assert result.query_subset == ["q1", "q2"]
+        assert result.concurrency_level == 4
+        assert len(result.query_results) == 2
+        assert result.summary_metrics["total_time"] == 25.0
+        assert result.validation_status == "PASSED"
+        assert result.total_queries == 2
+        assert result.successful_queries == 2
+
+    def test_benchmark_results_add_query_result(self):
+        """Test adding query results to BenchmarkResults."""
+        result = make_benchmark_results(benchmark_id="test_001", benchmark_name="Test Benchmark")
+
+        # Include a query result
+        query_result = QueryResult(
+            query_id="q1",
+            query_name="Test Query",
+            sql_text="SELECT 1",
+            execution_time_ms=10.0,
+            rows_returned=1,
+            status="SUCCESS",
+        )
+
+        result.query_results.append(query_result)
+
+        assert isinstance(result, BenchmarkResults)
+        assert len(result.query_results) == 1
+        stored = result.query_results[0]
+        assert getattr(stored, "query_id", None) == "q1"
+
+
+def test_cli_types_does_not_expose_legacy_benchmark_result() -> None:
+    """Ensure the legacy BenchmarkResult symbol is no longer exported."""
+
+    module = importlib.import_module("benchbox.cli.types")
+    assert not hasattr(module, "BenchmarkResult")
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+class TestBenchmarkConfig:
+    """Test BenchmarkConfig data structure."""
+
+    def test_benchmark_config_creation(self):
+        """Test basic BenchmarkConfig creation."""
+        config = BenchmarkConfig(name="tpch", display_name="TPC-H")
+
+        assert config.name == "tpch"
+        assert config.display_name == "TPC-H"
+        assert config.scale_factor == 0.01
+        assert config.queries is None
+        assert config.concurrency == 1
+        assert config.options == {}
+
+    def test_benchmark_config_with_custom_values(self):
+        """Test BenchmarkConfig with custom values."""
+        config = BenchmarkConfig(
+            name="tpcds",
+            display_name="TPC-DS",
+            scale_factor=10.0,
+            queries=["q1", "q2", "q3"],
+            concurrency=8,
+            options={"database_type": "postgres", "output_dir": "/tmp/results"},
+        )
+
+        assert config.name == "tpcds"
+        assert config.display_name == "TPC-DS"
+        assert config.scale_factor == 10.0
+        assert config.queries == ["q1", "q2", "q3"]
+        assert config.concurrency == 8
+        assert config.options == {
+            "database_type": "postgres",
+            "output_dir": "/tmp/results",
+        }
+
+    def test_benchmark_config_validation(self):
+        """Test BenchmarkConfig parameter validation."""
+        # Test that we can create configs with different valid parameters
+        configs = [
+            BenchmarkConfig(name="tpch", display_name="TPC-H", scale_factor=0.001),
+            BenchmarkConfig(name="tpcds", display_name="TPC-DS", scale_factor=100.0),
+            BenchmarkConfig(name="ssb", display_name="SSB", concurrency=16),
+        ]
+
+        for config in configs:
+            assert isinstance(config.name, str)
+            assert isinstance(config.display_name, str)
+            assert isinstance(config.scale_factor, (int, float))
+            assert config.scale_factor > 0
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+class TestDataStructureInteractions:
+    """Test interactions between different data structures."""
+
+    def test_complete_benchmark_workflow(self):
+        """Test complete workflow using all data structures."""
+        # config
+        config = BenchmarkConfig(
+            name="tpch",
+            display_name="TPC-H",
+            scale_factor=0.1,
+            concurrency=2,
+            options={"database_type": "duckdb"},
+        )
+
+        # benchmark result
+        result = make_benchmark_results(benchmark_id="test_workflow", benchmark_name=config.display_name)
+
+        # Include query results
+        for i in range(3):
+            query_result = QueryResult(
+                query_id=f"q{i + 1}",
+                query_name=f"Query {i + 1}",
+                sql_text=f"SELECT {i + 1}",
+                execution_time_ms=10.0 * (i + 1),
+                rows_returned=1,
+                status="SUCCESS",
+            )
+            result.query_results.append(query_result)
+
+        # Set summary metrics
+        total_time = sum(qr.execution_time_ms for qr in result.query_results)
+        result.summary_metrics = {
+            "total_time_ms": total_time,
+            "avg_time_ms": total_time / len(result.query_results),
+            "query_count": len(result.query_results),
+        }
+
+        result.validation_status = "PASSED"
+
+        # Verify the complete workflow
+        assert result.benchmark_name == config.display_name
+        assert len(result.query_results) == 3
+        assert result.summary_metrics["total_time_ms"] == 60.0  # 10 + 20 + 30
+        assert result.summary_metrics["avg_time_ms"] == 20.0
+        assert result.summary_metrics["query_count"] == 3
+        assert result.validation_status == "PASSED"
+
+    def test_error_handling_workflow(self):
+        """Test workflow with errors and mixed results."""
+        result = make_benchmark_results(benchmark_id="error_test", benchmark_name="Error Test Benchmark")
+
+        # Include successful query
+        success_query = QueryResult(
+            query_id="q1",
+            query_name="Success Query",
+            sql_text="SELECT 1",
+            execution_time_ms=10.0,
+            rows_returned=1,
+            status="SUCCESS",
+        )
+
+        # Include failed query
+        error_query = QueryResult(
+            query_id="q2",
+            query_name="Error Query",
+            sql_text="SELECT * FROM invalid_table",
+            execution_time_ms=0.0,
+            rows_returned=0,
+            status="ERROR",
+            error_message="Table 'invalid_table' doesn't exist",
+        )
+
+        # Include timeout query
+        timeout_query = QueryResult(
+            query_id="q3",
+            query_name="Timeout Query",
+            sql_text="SELECT COUNT(*) FROM huge_table",
+            execution_time_ms=30000.0,
+            rows_returned=0,
+            status="TIMEOUT",
+        )
+
+        result.query_results.extend([success_query, error_query, timeout_query])
+
+        # Calculate metrics
+        successful_queries = [qr for qr in result.query_results if qr.status == "SUCCESS"]
+        failed_queries = [qr for qr in result.query_results if qr.status == "ERROR"]
+        timeout_queries = [qr for qr in result.query_results if qr.status == "TIMEOUT"]
+
+        result.summary_metrics = {
+            "total_queries": len(result.query_results),
+            "successful_queries": len(successful_queries),
+            "failed_queries": len(failed_queries),
+            "timeout_queries": len(timeout_queries),
+            "success_rate": len(successful_queries) / len(result.query_results),
+        }
+
+        result.validation_status = "PARTIAL"
+
+        # Verify error handling
+        assert result.summary_metrics["total_queries"] == 3
+        assert result.summary_metrics["successful_queries"] == 1
+        assert result.summary_metrics["failed_queries"] == 1
+        assert result.summary_metrics["timeout_queries"] == 1
+        assert result.summary_metrics["success_rate"] == 1 / 3
+        assert result.validation_status == "PARTIAL"
+        assert error_query.error_message == "Table 'invalid_table' doesn't exist"

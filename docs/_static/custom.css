@@ -1,0 +1,722 @@
+/**
+ * Custom CSS for BenchBox documentation
+ * Enhances Furo theme with Cobalt2-styled code blocks
+ */
+
+/* ============================================================================
+   Site-Wide Navigation Bar
+   ============================================================================ */
+
+.benchbox-site-nav {
+    position: sticky;
+    top: 0;
+    background-color: rgba(13, 17, 23, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #30363d;
+    z-index: 100;
+    padding: 0.75rem 0;
+}
+
+.benchbox-site-nav-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.benchbox-site-nav-logo {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #58a6ff !important;
+    text-decoration: none !important;
+}
+
+.benchbox-site-nav-links {
+    display: flex;
+    gap: 2rem;
+}
+
+.benchbox-site-nav-links a {
+    color: #8b949e !important;
+    text-decoration: none !important;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.benchbox-site-nav-links a:hover {
+    color: #f0f6fc !important;
+}
+
+/* Always dark theme regardless of Furo light/dark mode */
+[data-theme="light"] .benchbox-site-nav {
+    background-color: rgba(13, 17, 23, 0.95);
+}
+
+[data-theme="light"] .benchbox-site-nav-logo {
+    color: #58a6ff !important;
+}
+
+[data-theme="light"] .benchbox-site-nav-links a {
+    color: #8b949e !important;
+}
+
+[data-theme="light"] .benchbox-site-nav-links a:hover {
+    color: #f0f6fc !important;
+}
+
+/* Responsive: hide nav links on mobile */
+@media screen and (max-width: 768px) {
+    .benchbox-site-nav-links {
+        display: none;
+    }
+}
+
+/* ============================================================================
+   Code Block Styling (Cobalt2 Theme)
+   ============================================================================ */
+
+/* Main code blocks */
+div.highlight pre,
+div.highlight-python pre,
+div.highlight-bash pre,
+div.highlight-text pre,
+pre.literal-block {
+    background-color: #122738 !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 6px !important;
+    padding: 16px !important;
+    margin: 0 !important;
+    font-family: 'Monaco', 'Consolas', 'Menlo', 'DejaVu Sans Mono', 'Courier New', monospace !important;
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    overflow-x: auto !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Code block container */
+div.highlight {
+    background-color: transparent !important;
+    border-radius: 6px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Inline code */
+code.literal,
+code.docutils.literal {
+    background-color: #1a3548 !important;
+    color: #ffc600 !important;
+    padding: 2px 6px !important;
+    border-radius: 3px !important;
+    font-family: 'Monaco', 'Consolas', 'Menlo', 'DejaVu Sans Mono', 'Courier New', monospace !important;
+    font-size: 0.9em !important;
+    border: 1px solid #2a4558 !important;
+}
+
+/* Code in headings */
+h1 code.literal,
+h2 code.literal,
+h3 code.literal,
+h4 code.literal,
+h5 code.literal,
+h6 code.literal {
+    background-color: #1a3548 !important;
+    color: #ffc600 !important;
+    font-size: 0.85em !important;
+}
+
+/* Line numbers in code blocks */
+.linenos {
+    background-color: #0d1f2d !important;
+    color: #668799 !important;
+    border-right: 1px solid #1a3548 !important;
+    padding-right: 8px !important;
+    margin-right: 8px !important;
+    user-select: none !important;
+}
+
+/* Copy button for code blocks (if enabled) */
+button.copybtn {
+    background-color: #0088ff !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 3px !important;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    opacity: 0.7 !important;
+    transition: opacity 0.2s !important;
+}
+
+button.copybtn:hover {
+    opacity: 1 !important;
+}
+
+/* ============================================================================
+   Admonitions and Callouts
+   ============================================================================ */
+
+/* Enhance Furo's admonitions with Cobalt2 accent colors */
+/* Note admonitions */
+.admonition.note,
+.admonition.seealso {
+    border-left: 4px solid #0088ff;
+}
+
+/* Warning admonitions */
+.admonition.warning,
+.admonition.attention,
+.admonition.caution {
+    border-left: 4px solid #ff9d00;
+}
+
+/* Important/Danger admonitions */
+.admonition.danger,
+.admonition.error {
+    border-left: 4px solid #ff628c;
+}
+
+/* Tip admonitions */
+.admonition.tip,
+.admonition.hint,
+.admonition.important {
+    border-left: 4px solid #3ad900;
+}
+
+/* ============================================================================
+   Code Examples and Documentation
+   ============================================================================ */
+
+/* Example blocks */
+.example {
+    background-color: #f8f9fa !important;
+    border-left: 4px solid #ffc600 !important;
+    padding: 12px !important;
+    margin: 16px 0 !important;
+    border-radius: 4px !important;
+}
+
+/* Method signatures */
+dt.sig {
+    background-color: #f8f9fa !important;
+    border-left: 3px solid #0088ff !important;
+    padding: 8px 12px !important;
+    font-family: 'Monaco', 'Consolas', 'Menlo', 'DejaVu Sans Mono', 'Courier New', monospace !important;
+}
+
+/* ============================================================================
+   Collapsible Sidebar Section Captions
+   ============================================================================ */
+
+/* Make toctree captions collapsible */
+.sidebar-tree .caption {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-left: 20px;
+    font-weight: 600;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Add collapse/expand icon before caption */
+.sidebar-tree .caption::before {
+    content: "▼";
+    position: absolute;
+    left: 0;
+    font-size: 0.7em;
+    transition: transform 0.2s ease;
+}
+
+/* Rotate icon when collapsed */
+.sidebar-tree .caption.collapsed::before {
+    transform: rotate(-90deg);
+}
+
+/* Hide items under collapsed captions */
+.sidebar-tree .caption.collapsed + ul {
+    display: none !important;
+}
+
+/* Smooth transition for collapsing */
+.sidebar-tree .caption + ul {
+    transition: all 0.2s ease;
+}
+
+/* ============================================================================
+   Links and Navigation
+   ============================================================================ */
+
+/* Furo theme compatibility: Use CSS variables where possible */
+/* Primary links with Cobalt2 accent colors - let Furo handle most styling */
+.content a:not(.reference.external):not([class*="headerlink"]) code.literal {
+    color: var(--color-brand-content);
+}
+
+.content a:hover code.literal {
+    color: #ffc600;
+}
+
+/* Preserve Cobalt2 styling for external links */
+a.reference.external {
+    color: var(--color-brand-content);
+}
+
+a.reference.external:hover {
+    color: #ffc600;
+}
+
+/* ============================================================================
+   Tables
+   ============================================================================ */
+
+/* Table styling - Light mode */
+table.docutils {
+    border-collapse: collapse !important;
+    border: 1px solid #e1e4e8 !important;
+}
+
+table.docutils thead {
+    background-color: #f6f8fa !important;
+}
+
+table.docutils th {
+    background-color: #f6f8fa !important;
+    border: 1px solid #e1e4e8 !important;
+    padding: 8px 12px !important;
+    font-weight: 600 !important;
+}
+
+table.docutils td {
+    border: 1px solid #e1e4e8 !important;
+    padding: 8px 12px !important;
+}
+
+table.docutils tr:nth-child(even) {
+    background-color: #f9f9f9 !important;
+}
+
+/* Table styling - Dark mode (explicit) */
+[data-theme="dark"] table.docutils {
+    border: 1px solid #3d444d !important;
+}
+
+[data-theme="dark"] table.docutils thead {
+    background-color: #1c2128 !important;
+}
+
+[data-theme="dark"] table.docutils th {
+    background-color: #1c2128 !important;
+    border: 1px solid #3d444d !important;
+    color: #c9d1d9 !important;
+}
+
+[data-theme="dark"] table.docutils td {
+    border: 1px solid #3d444d !important;
+    color: #c9d1d9 !important;
+}
+
+/* Alternating row colors - Dark Mode: apply to both tr and td for full coverage */
+[data-theme="dark"] table.docutils tbody tr:nth-child(even),
+[data-theme="dark"] table.docutils tbody tr:nth-child(even) td {
+    background-color: #161b22 !important;
+}
+
+[data-theme="dark"] table.docutils tbody tr:nth-child(odd),
+[data-theme="dark"] table.docutils tbody tr:nth-child(odd) td {
+    background-color: #0d1117 !important;
+}
+
+/* Table styling - Dark mode (auto via prefers-color-scheme) */
+@media (prefers-color-scheme: dark) {
+    body:not([data-theme="light"]) table.docutils {
+        border: 1px solid #3d444d !important;
+    }
+
+    body:not([data-theme="light"]) table.docutils thead {
+        background-color: #1c2128 !important;
+    }
+
+    body:not([data-theme="light"]) table.docutils th {
+        background-color: #1c2128 !important;
+        border: 1px solid #3d444d !important;
+        color: #c9d1d9 !important;
+    }
+
+    body:not([data-theme="light"]) table.docutils td {
+        border: 1px solid #3d444d !important;
+        color: #c9d1d9 !important;
+    }
+
+    body:not([data-theme="light"]) table.docutils tbody tr:nth-child(even),
+    body:not([data-theme="light"]) table.docutils tbody tr:nth-child(even) td {
+        background-color: #161b22 !important;
+    }
+
+    body:not([data-theme="light"]) table.docutils tbody tr:nth-child(odd),
+    body:not([data-theme="light"]) table.docutils tbody tr:nth-child(odd) td {
+        background-color: #0d1117 !important;
+    }
+}
+
+/* Code in tables */
+table.docutils code.literal {
+    white-space: nowrap !important;
+}
+
+/* ============================================================================
+   Search Highlighting
+   ============================================================================ */
+
+/* Search result highlighting */
+.highlighted {
+    background-color: #ffc600 !important;
+    color: #122738 !important;
+    padding: 2px 4px !important;
+    border-radius: 2px !important;
+}
+
+/* ============================================================================
+   Responsive Design
+   ============================================================================ */
+
+@media screen and (max-width: 768px) {
+    div.highlight pre,
+    div.highlight-python pre,
+    div.highlight-bash pre,
+    pre.literal-block {
+        font-size: 12px !important;
+        padding: 12px !important;
+        margin: 0 !important;
+    }
+
+    code.literal,
+    code.docutils.literal {
+        font-size: 0.85em !important;
+        padding: 1px 4px !important;
+    }
+}
+
+/* ============================================================================
+   Print Styles
+   ============================================================================ */
+
+@media print {
+    div.highlight pre,
+    div.highlight-python pre,
+    div.highlight-bash pre,
+    pre.literal-block {
+        border: 1px solid #000 !important;
+        page-break-inside: avoid !important;
+        margin: 0 !important;
+    }
+
+    code.literal,
+    code.docutils.literal {
+        border: 1px solid #000 !important;
+    }
+}
+
+/* ============================================================================
+   ABlog / Blog Styles
+   ============================================================================ */
+
+/* Blog post navigation */
+.ablog-postnavy {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-background-border);
+}
+
+.ablog-prev,
+.ablog-next {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ablog-next {
+    margin-left: auto;
+}
+
+/* Blog post metadata (legacy class) */
+.ablog-post-meta {
+    color: var(--color-foreground-muted);
+    font-size: 0.9em;
+    margin-bottom: 1rem;
+}
+
+/* Blog post metadata - below title */
+.post-meta {
+    color: var(--color-foreground-muted);
+    font-size: 0.9rem;
+    margin: 0 0 1.5rem 0;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-background-border);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.post-meta-separator {
+    color: var(--color-foreground-muted);
+    opacity: 0.5;
+    margin: 0 0.25rem;
+}
+
+.post-meta-date {
+    color: var(--color-foreground-secondary);
+}
+
+.post-meta-author a {
+    color: var(--color-foreground-secondary);
+    text-decoration: none;
+}
+
+.post-meta-author a:hover {
+    color: var(--color-brand-content);
+}
+
+.post-meta-tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.post-tag {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    background-color: var(--color-background-secondary);
+    color: var(--color-foreground-secondary);
+    border-radius: 3px;
+    font-size: 0.85em;
+    text-decoration: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.post-tag:hover {
+    background-color: var(--color-brand-primary);
+    color: white;
+}
+
+/* Dark mode adjustments for post metadata */
+[data-theme="dark"] .post-tag {
+    background-color: var(--color-background-secondary);
+}
+
+[data-theme="dark"] .post-tag:hover {
+    background-color: var(--color-brand-primary);
+}
+
+/* Blog collection/archive pages */
+.ablog__collection h1 {
+    margin-bottom: 1.5rem;
+}
+
+.ablog__collection_meta p {
+    margin: 0.5rem 0;
+}
+
+.ablog-post {
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--color-background-border);
+}
+
+.ablog-post:last-child {
+    border-bottom: none;
+}
+
+.ablog-post-title {
+    margin-bottom: 0.5rem;
+}
+
+.ablog-post-expand {
+    margin-top: 1rem;
+}
+
+.ablog-archive {
+    list-style: none;
+    padding-left: 0;
+    margin: 0.5rem 0;
+    color: var(--color-foreground-muted);
+    font-size: 0.9em;
+}
+
+.ablog-archive li {
+    display: inline-block;
+    margin-right: 1rem;
+}
+
+/* ============================================================================
+   ABlog Sidebar Styling (Match Furo Navigation)
+   ============================================================================ */
+
+/* Container for all ABlog sidebar widgets */
+.ablog-sidebar-item {
+    margin-bottom: 1.5rem;
+    font-size: var(--sidebar-item-font-size);
+}
+
+/* Sidebar headings - match Furo's caption style */
+.ablog-sidebar-item h2,
+.ablog-sidebar-item h3 {
+    font-size: var(--sidebar-caption-font-size, 0.75rem);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-sidebar-caption-text);
+    margin: 0 0 0.5rem 0;
+    padding: 0;
+}
+
+/* Remove default link styling from headings */
+.ablog-sidebar-item h2 a,
+.ablog-sidebar-item h3 a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.ablog-sidebar-item h2 a:hover,
+.ablog-sidebar-item h3 a:hover {
+    color: var(--color-sidebar-link-text--top-level);
+}
+
+/* Lists in sidebar - match Furo navigation style */
+.ablog-sidebar-item ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.ablog-sidebar-item li {
+    margin: 0;
+    padding: 0.25rem 0;
+    line-height: 1.3;
+}
+
+/* Links in sidebar - match Furo navigation links */
+.ablog-sidebar-item a {
+    color: var(--color-sidebar-link-text);
+    text-decoration: none;
+    font-size: var(--sidebar-item-font-size, 0.875rem);
+    display: block;
+    padding: 0.25rem 0;
+    transition: color 0.15s ease;
+}
+
+.ablog-sidebar-item a:hover {
+    color: var(--color-sidebar-link-text--top-level);
+}
+
+/* Post card specific styling */
+.ablog__postcard {
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-sidebar-background-border);
+    margin-bottom: 1rem;
+}
+
+.ablog__postcard h2 {
+    font-size: var(--sidebar-item-font-size, 0.875rem);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--color-sidebar-link-text);
+    margin-bottom: 0.5rem;
+}
+
+.ablog__postcard ul {
+    font-size: calc(var(--sidebar-item-font-size, 0.875rem) * 0.9);
+}
+
+.ablog__postcard2 {
+    padding: 0;
+}
+
+.ablog__postcard2 li {
+    color: var(--color-foreground-muted);
+    font-size: calc(var(--sidebar-item-font-size, 0.875rem) * 0.9);
+}
+
+.ablog__postcard2 span {
+    color: var(--color-foreground-muted);
+}
+
+/* Tag cloud styling - make it cleaner */
+.ablog__tagcloud ul.ablog-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+}
+
+.ablog__tagcloud li.ablog-cloud {
+    padding: 0;
+}
+
+/* Normalize tag cloud sizes to be more subtle */
+.ablog-cloud-1 a { font-size: 0.8rem; }
+.ablog-cloud-2 a { font-size: 0.85rem; }
+.ablog-cloud-3 a { font-size: 0.9rem; }
+.ablog-cloud-4 a { font-size: 0.95rem; }
+.ablog-cloud-5 a { font-size: 1rem; }
+
+/* Hide the tagcloud CSS link since we're providing custom styles */
+.ablog__tagcloud link {
+    display: none;
+}
+
+/* Archives styling */
+.ablog__archives ul {
+    padding-left: 0;
+}
+
+.ablog__archives li {
+    padding: 0.25rem 0;
+}
+
+/* Recent posts styling */
+.ablog__recentposts li {
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--color-sidebar-background-border);
+}
+
+.ablog__recentposts li:last-child {
+    border-bottom: none;
+}
+
+/* Blog sidebar brand header */
+.blog-sidebar-brand {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 1rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--color-sidebar-background-border);
+}
+
+.blog-sidebar-brand-text {
+    overflow-wrap: break-word;
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: var(--color-sidebar-brand-text);
+}
+
+/* Dark mode adjustments for ABlog sidebar */
+[data-theme="dark"] .ablog-sidebar-item h2,
+[data-theme="dark"] .ablog-sidebar-item h3 {
+    color: var(--color-sidebar-caption-text);
+}
+
+[data-theme="dark"] .ablog-sidebar-item a {
+    color: var(--color-sidebar-link-text);
+}
+
+[data-theme="dark"] .ablog-sidebar-item a:hover {
+    color: var(--color-sidebar-link-text--top-level);
+}

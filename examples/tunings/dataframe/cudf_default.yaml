@@ -1,0 +1,15 @@
+# cuDF DataFrame Tuning - Default Configuration
+# GPU-accelerated processing with host memory fallback
+
+gpu:
+  enabled: true
+  device_id: 0
+  spill_to_host: true
+  pool_type: default
+
+_metadata:
+  version: "1.0"
+  format: dataframe_tuning
+  platform: cudf
+  description: Default cuDF GPU configuration with host memory spillover
+  generated_by: benchbox

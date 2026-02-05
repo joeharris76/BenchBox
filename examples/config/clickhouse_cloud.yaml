@@ -1,0 +1,12 @@
+type: clickhouse
+connection:
+  host: "your-instance.clickhouse.cloud"
+  port: 8443
+  database: default
+  username: default
+  password: "${CLICKHOUSE_PASSWORD}"
+  secure: true
+  compression: true
+settings:
+  max_memory_usage: "16GB"
+  max_execution_time: 600

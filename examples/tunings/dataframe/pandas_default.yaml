@@ -1,0 +1,18 @@
+# Pandas DataFrame Tuning - Default Configuration
+# Sensible defaults for general-purpose workloads
+
+data_types:
+  dtype_backend: numpy_nullable
+  enable_string_cache: false
+  auto_categorize_strings: false
+
+io:
+  memory_map: false
+  pre_buffer: true
+
+_metadata:
+  version: "1.0"
+  format: dataframe_tuning
+  platform: pandas
+  description: Default Pandas configuration for general workloads
+  generated_by: benchbox
