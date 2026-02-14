@@ -1,0 +1,90 @@
+"""Coverage tests for cli/commands/show_plan.py."""
+
+from __future__ import annotations
+
+import importlib
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from click.testing import CliRunner
+
+mod = importlib.import_module("benchbox.cli.commands.show_plan")
+
+pytestmark = [pytest.mark.fast, pytest.mark.unit]
+
+
+class _Exec:
+    def __init__(self, qid: str, plan=None):
+        self.query_id = qid
+        self.query_plan = plan
+
+
+class _Phase:
+    def __init__(self, queries):
+        self.queries = queries
+
+
+class _Results:
+    def __init__(self, query_id="q1", has_plan=True):
+        plan = SimpleNamespace(to_dict=lambda: {"node": "scan"}) if has_plan else None
+        self.phases = {"power": _Phase([_Exec(query_id, plan)])}
+
+
+class _BR:
+    result = _Results()
+
+    @staticmethod
+    def from_dict(_d):
+        return _BR.result
+
+
+def _write(path: Path, payload: str = "{}") -> None:
+    path.write_text(payload, encoding="utf-8")
+
+
+def test_show_plan_tree_summary_and_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    p = tmp_path / "r.json"
+    _write(p)
+    monkeypatch.setattr(mod, "BenchmarkResults", _BR)
+    monkeypatch.setattr(mod, "render_plan", lambda *_a, **_k: "TREE")
+    monkeypatch.setattr(mod, "render_summary", lambda *_a, **_k: "SUMMARY")
+
+    r1 = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1", "--format", "tree"])
+    assert r1.exit_code == 0
+    r2 = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1", "--format", "summary"])
+    assert r2.exit_code == 0
+    r3 = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1", "--format", "json"])
+    assert r3.exit_code == 0
+    assert '"node": "scan"' in r3.output
+
+
+def test_show_plan_missing_query_and_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    p = tmp_path / "r.json"
+    _write(p)
+    monkeypatch.setattr(mod, "BenchmarkResults", _BR)
+
+    _BR.result = _Results(query_id="q2", has_plan=True)
+    miss_q = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1"])
+    assert miss_q.exit_code == 1
+
+    _BR.result = _Results(query_id="q1", has_plan=False)
+    miss_p = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1"])
+    assert miss_p.exit_code == 1
+
+
+def test_show_plan_json_error_and_verbose_exception(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    bad = tmp_path / "bad.json"
+    _write(bad, "{bad")
+    out = CliRunner().invoke(mod.show_plan, ["--run", str(bad), "--query-id", "q1"])
+    assert out.exit_code == 1
+
+    p = tmp_path / "ok.json"
+    _write(p)
+    monkeypatch.setattr(mod, "BenchmarkResults", _BR)
+    _BR.result = _Results(query_id="q1", has_plan=True)
+    monkeypatch.setattr(mod, "render_plan", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
+    res = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1"], obj={"verbose": True})
+    assert res.exit_code == 1
+    assert isinstance(res.exception, RuntimeError)

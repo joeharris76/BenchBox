@@ -891,14 +891,16 @@ def _extract_query_times(result: BenchmarkResults) -> dict[str, float]:
     # From query_results
     for qr in result.query_results or []:
         query_id = str(qr.get("query_id", ""))
-        time_ms = qr.get("execution_time_ms") or qr.get("execution_time", 0)
+        time_ms = qr.get("execution_time_ms") or qr.get("execution_time_seconds", qr.get("execution_time", 0))
         if query_id and time_ms > 0:
             times[query_id] = float(time_ms)
 
     # From per_query_timings (may have multiple runs)
     for timing in result.per_query_timings or []:
         query_id = str(timing.get("query_id", ""))
-        time_ms = timing.get("execution_time_ms") or timing.get("execution_time", 0)
+        time_ms = timing.get("execution_time_ms") or timing.get(
+            "execution_time_seconds", timing.get("execution_time", 0)
+        )
         if query_id and time_ms > 0:
             # Average if we already have a time
             if query_id in times:
@@ -929,14 +931,16 @@ def _get_query_times_for_query(
     # From query_results
     for qr in result.query_results or []:
         if str(qr.get("query_id", "")) == query_id:
-            time_ms = qr.get("execution_time_ms") or qr.get("execution_time", 0)
+            time_ms = qr.get("execution_time_ms") or qr.get("execution_time_seconds", qr.get("execution_time", 0))
             if time_ms > 0:
                 times.append(float(time_ms))
 
     # From per_query_timings
     for timing in result.per_query_timings or []:
         if str(timing.get("query_id", "")) == query_id:
-            time_ms = timing.get("execution_time_ms") or timing.get("execution_time", 0)
+            time_ms = timing.get("execution_time_ms") or timing.get(
+                "execution_time_seconds", timing.get("execution_time", 0)
+            )
             if time_ms > 0:
                 times.append(float(time_ms))
 

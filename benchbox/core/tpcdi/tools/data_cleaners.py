@@ -563,7 +563,7 @@ def quick_quality_check(data: pd.DataFrame, table_name: str = "generic") -> dict
     return basic_data_quality_check(data, table_name)
 
 
-# Aliases for backward compatibility with tests
+# Backward-compatible class alias.
 DataCleaner = BasicDataCleaner
 
 

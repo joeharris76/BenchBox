@@ -96,7 +96,7 @@ For complete conversion examples, see [Format Conversion Reference: Quick Start]
 
 Detailed guides for each format:
 
-- **[Parquet Deep Dive](parquet-deep-dive.md)**: Row groups, compression options, statistics, and when to tune settings
+- **[Parquet Deep Dive](parquet-deep-dive.md)**: Row groups, compression options, statistics, and when to tune settings <!-- content-ok: cliche -->
 - **[Delta Lake Guide](delta-lake-guide.md)**: Transaction overhead, OPTIMIZE, Z-ORDER, Databricks-specific features
 - **[Apache Iceberg Guide](iceberg-guide.md)**: Multi-engine support, partition evolution, catalog configuration
 - **[Vortex Guide](vortex-guide.md)**: Composable encodings, DuckDB integration, current status

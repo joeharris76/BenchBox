@@ -83,8 +83,12 @@ def normalize_benchmark_id(name: str) -> str:
     lowered = short_name.lower()
 
     # Canonical ID mappings for known benchmarks
-    # Each tuple contains variant spellings that map to the canonical ID
+    # Each tuple contains variant spellings that map to the canonical ID.
+    # IMPORTANT: Derived benchmarks (tpcds_obt, tpch_skew) MUST appear before
+    # their parent patterns to prevent false substring matches.
     benchmark_mappings: list[tuple[str, tuple[str, ...]]] = [
+        ("tpcds_obt", ("tpcds_obt", "tpcds-obt", "tpc-ds obt", "tpc-ds one big table")),
+        ("tpch_skew", ("tpch_skew", "tpch-skew", "tpc-h skew")),
         ("tpch", ("tpch", "tpc-h", "tpc_h")),
         ("tpcds", ("tpcds", "tpc-ds", "tpc_ds")),
         ("ssb", ("ssb",)),
@@ -542,12 +546,21 @@ class ResultBuilder:
         return total_query_time + (self._loading_time_ms / 1000.0)
 
     def _calculate_tpc_metrics(self) -> dict[str, float | None]:
-        """Calculate TPC benchmark metrics."""
+        """Calculate TPC benchmark metrics.
+
+        Power@Size, Throughput@Size, and QphH/QphDS are only defined for
+        TPC benchmarks (TPC-H, TPC-DS). Non-TPC benchmarks return all None.
+        """
         metrics: dict[str, float | None] = {
             "power_at_size": None,
             "throughput_at_size": None,
             "qph_at_size": None,
         }
+
+        # Power@Size is only defined for TPC benchmarks
+        benchmark_id = normalize_benchmark_id(self._benchmark.name)
+        if benchmark_id not in ("tpch", "tpcds"):
+            return metrics
 
         scale_factor = self._benchmark.scale_factor
         test_type = self._benchmark.test_type
@@ -779,6 +792,7 @@ class ResultBuilder:
         for result in self._query_results:
             result_dict: dict[str, Any] = {
                 "query_id": format_query_id(result.query_id),
+                "execution_time_seconds": result.execution_time_seconds,
                 "execution_time": result.execution_time_seconds,
                 "execution_time_ms": int(result.execution_time_seconds * 1000),
                 "status": result.status,
@@ -795,6 +809,8 @@ class ResultBuilder:
                 result_dict["run_type"] = result.run_type
             if result.row_count_validation:
                 result_dict["row_count_validation"] = result.row_count_validation
+            if result.dataframe_skip_summary:
+                result_dict["dataframe_skip_summary"] = result.dataframe_skip_summary
 
             results.append(result_dict)
 

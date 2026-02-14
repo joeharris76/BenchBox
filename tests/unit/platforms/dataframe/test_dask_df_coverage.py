@@ -1,0 +1,253 @@
+"""Coverage tests for Dask DataFrame adapter."""
+
+from __future__ import annotations
+
+import importlib
+import sys
+from types import SimpleNamespace
+
+import pandas as pd
+import pytest
+
+from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN
+
+mod = importlib.import_module("benchbox.platforms.dataframe.dask_df")
+
+pytestmark = [pytest.mark.fast, pytest.mark.unit]
+
+
+class _FakeDaskDF:
+    def __init__(self, columns=None, rows=None, npartitions=2):
+        self.columns = list(columns or [])
+        self._rows = list(rows or [])
+        self.npartitions = npartitions
+
+    def drop(self, columns):
+        cols = set(columns)
+        return _FakeDaskDF([c for c in self.columns if c not in cols], self._rows, self.npartitions)
+
+    def head(self, n):
+        return _FakePandasFrame(self._rows[:n])
+
+    def compute(self):
+        return ("computed", len(self._rows))
+
+    def persist(self):
+        return self
+
+    def groupby(self, by):
+        return _FakeDaskGroupBy(by)
+
+    def merge(self, other, on=None):
+        return ("merged", on, other)
+
+    def reset_index(self):
+        return self
+
+    def rename(self, columns):
+        renamed = list(self.columns)
+        for old, new in columns.items():
+            if old in renamed:
+                renamed[renamed.index(old)] = new
+        return _FakeDaskDF(renamed, self._rows, self.npartitions)
+
+    def repartition(self, npartitions):
+        return _FakeDaskDF(self.columns, self._rows, npartitions=npartitions)
+
+    def __len__(self):
+        return len(self._rows)
+
+    def __getitem__(self, key):
+        if isinstance(key, list):
+            return _FakeDaskDF(columns=key, rows=self._rows, npartitions=self.npartitions)
+        return _FakeDaskSeries(key, self)
+
+
+class _FakeDaskSeries:
+    def __init__(self, name, df):
+        self.name = name
+        self.df = df
+
+    def nunique(self):
+        return _FakeDaskDF(columns=[self.name], rows=[(1,)])
+
+
+class _FakeDaskGroupBy:
+    def __init__(self, by):
+        self.by = by
+
+    def agg(self, *args, **kwargs):
+        if kwargs:
+            cols = list(kwargs.keys())
+        else:
+            cols = list(args[0].keys()) if args else []
+        return _FakeDaskDF(columns=list(self.by) + cols, rows=[(1,)])
+
+    def size(self):
+        return _FakeDaskDF(columns=list(self.by) + ["size"], rows=[(1,)])
+
+    def __getitem__(self, key):
+        return _FakeDaskSeries(key, _FakeDaskDF(columns=[key], rows=[(1,)]))
+
+
+class _FakePandasFrame:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def __len__(self):
+        return len(self._rows)
+
+    @property
+    def iloc(self):
+        class _ILoc:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def __getitem__(self, idx):
+                return self.rows[idx]
+
+        return _ILoc(self._rows)
+
+
+def _make_adapter():
+    adapter = object.__new__(mod.DaskDataFrameAdapter)
+    adapter._log_verbose = lambda *_a, **_k: None
+    adapter._tuning_config = SimpleNamespace(
+        parallelism=SimpleNamespace(worker_count=3, threads_per_worker=2),
+        memory=SimpleNamespace(memory_limit="2GB", spill_to_disk=True),
+    )
+    adapter.n_workers = None
+    adapter.threads_per_worker = 1
+    adapter.use_distributed = False
+    adapter.scheduler_address = None
+    adapter._client = None
+    adapter._cluster = None
+    adapter.verbose = False
+    adapter.working_dir = "."
+    adapter._memory_limit = None
+    return adapter
+
+
+def test_init_raises_without_dask(monkeypatch):
+    monkeypatch.setattr(mod, "DASK_AVAILABLE", False)
+    with pytest.raises(ImportError, match="Dask not installed"):
+        mod.DaskDataFrameAdapter()
+
+
+def test_apply_tuning_and_setup_distributed_paths(monkeypatch):
+    adapter = _make_adapter()
+    fake_config_calls = []
+    monkeypatch.setitem(
+        sys.modules, "dask", SimpleNamespace(config=SimpleNamespace(set=lambda v: fake_config_calls.append(v)))
+    )
+    adapter._apply_tuning()
+    assert adapter.n_workers == 3
+    assert adapter.threads_per_worker == 2
+    assert adapter._memory_limit == "2GB"
+    assert len(fake_config_calls) >= 2
+
+    adapter.scheduler_address = "tcp://x"
+    mod.Client = lambda addr: SimpleNamespace(
+        scheduler=SimpleNamespace(address=addr), scheduler_info=lambda: {"workers": {"w1": {}}}, close=lambda: None
+    )
+    adapter._setup_distributed()
+    assert adapter._client is not None
+
+    adapter.scheduler_address = None
+    mod.LocalCluster = lambda **kwargs: SimpleNamespace(
+        scheduler=SimpleNamespace(address="local"), workers={"w": {}}, close=lambda: None, dashboard_link="x"
+    )
+    mod.Client = lambda cluster: SimpleNamespace(
+        scheduler=SimpleNamespace(address="local"),
+        scheduler_info=lambda: {"workers": {"w1": {}, "w2": {}}},
+        close=lambda: None,
+    )
+    adapter._setup_distributed()
+    assert adapter._cluster is not None
+
+
+def test_close_and_del_cleanup():
+    adapter = _make_adapter()
+    adapter._client = SimpleNamespace(close=lambda: None)
+    adapter._cluster = SimpleNamespace(close=lambda: None)
+    adapter.close()
+    assert adapter._client is None and adapter._cluster is None
+    adapter.__del__()
+
+
+def test_read_csv_parquet_datetime_timedelta_concat_and_counts(monkeypatch, tmp_path):
+    adapter = _make_adapter()
+
+    def _read_csv(_path, **_kwargs):
+        return _FakeDaskDF(columns=["a", "b", TRAILING_DUMMY_COLUMN], rows=[(1, 2, None)])
+
+    monkeypatch.setattr(
+        mod,
+        "dd",
+        SimpleNamespace(
+            read_csv=_read_csv,
+            read_parquet=lambda p: ("pq", p),
+            concat=lambda dfs, ignore_index: ("concat", len(dfs), ignore_index),
+        ),
+    )
+    monkeypatch.setattr(mod, "is_tpc_format", lambda _p: True)
+    monkeypatch.setattr(mod, "has_trailing_delimiter", lambda _p, _d, _n: True)
+    monkeypatch.setattr(mod, "pd", pd)
+
+    out = adapter.read_csv(tmp_path / "x.tbl", delimiter="|", header=None, names=["a", "b"])
+    assert TRAILING_DUMMY_COLUMN not in out.columns
+    assert adapter.read_parquet(tmp_path / "x.parquet")[0] == "pq"
+    assert str(adapter.to_datetime(pd.Series(["2020-01-01"])).iloc[0]).startswith("2020-01-01")
+    assert adapter.timedelta_days(3).days == 3
+
+    one = _FakeDaskDF(columns=["a"], rows=[(1,)])
+    two = _FakeDaskDF(columns=["a"], rows=[(2,)])
+    assert adapter.concat([one]) is one
+    assert adapter.concat([one, two]) == ("concat", 2, True)
+    assert adapter.get_row_count(one) == 1
+    assert adapter._get_first_row(_FakeDaskDF(rows=[])) is None
+    assert adapter._get_first_row(one) == (1,)
+
+
+def test_dask_specific_methods(monkeypatch):
+    adapter = _make_adapter()
+    df = _FakeDaskDF(columns=["k", "x"], rows=[(1, 2)])
+
+    monkeypatch.setattr(mod, "dd", SimpleNamespace(merge=lambda *a, **k: ("merge", a, k)))
+    assert adapter.compute(df)[0] == "computed"
+    assert adapter.persist(df) is df
+    assert adapter.merge("l", "r", on="id")[0] == "merge"
+
+    named = adapter.groupby_agg(df, by="k", agg_spec={"sum_x": ("x", "sum")}, as_index=False)
+    direct = adapter.groupby_agg(df, by=["k"], agg_spec={"x": "sum"}, as_index=False)
+    with_nunique = adapter.groupby_agg(df, by=["k"], agg_spec={"n_x": ("x", "nunique")}, as_index=False)
+    assert "sum_x" in named.columns
+    assert "x" in direct.columns
+    assert with_nunique[0] == "merged"
+
+    size_df = adapter.groupby_size(df, by=["k"], name="cnt")
+    assert "cnt" in size_df.columns
+    reparted = adapter.repartition(df, 5)
+    assert reparted.npartitions == 5
+    assert adapter.get_npartitions(reparted) == 5
+
+
+def test_get_platform_info_and_error_tolerance():
+    adapter = _make_adapter()
+    adapter.n_workers = 2
+    adapter.threads_per_worker = 1
+    adapter.use_distributed = True
+    adapter._client = SimpleNamespace(
+        scheduler=SimpleNamespace(address="tcp://localhost"),
+        scheduler_info=lambda: {"workers": {"w1": {}, "w2": {}}},
+    )
+    info = adapter.get_platform_info()
+    assert info["platform"] == "Dask"
+    assert info["n_active_workers"] == 2
+
+    adapter._client = SimpleNamespace(
+        scheduler=SimpleNamespace(address="bad"),
+        scheduler_info=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    info2 = adapter.get_platform_info()
+    assert info2["platform"] == "Dask"

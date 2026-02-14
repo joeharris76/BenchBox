@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -395,7 +396,7 @@ class AzureSynapseAdapter(PlatformAdapter):
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using Azure Synapse-optimized table definitions."""
         self.log_operation_start("Azure Synapse schema creation")
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -448,7 +449,7 @@ class AzureSynapseAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        elapsed_time = time.time() - start_time
+        elapsed_time = elapsed_seconds(start_time)
         self.log_operation_complete("Azure Synapse schema creation", details=f"Completed in {elapsed_time:.2f}s")
         return elapsed_time
 
@@ -457,7 +458,7 @@ class AzureSynapseAdapter(PlatformAdapter):
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
         """Load data using Azure Synapse COPY INTO command with blob storage."""
         self.log_operation_start("Azure Synapse data loading")
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         cursor = connection.cursor()
@@ -500,7 +501,7 @@ class AzureSynapseAdapter(PlatformAdapter):
                 self.logger.warning("No Azure storage configured, using BULK INSERT")
                 table_stats = self._load_data_direct(cursor, data_files, data_dir)
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.logger.info(f"Loaded {total_rows:,} total rows in {total_time:.2f}s")
             self.log_operation_complete(
@@ -513,7 +514,7 @@ class AzureSynapseAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        return table_stats, time.time() - start_time, None
+        return table_stats, elapsed_seconds(start_time), None
 
     def _load_data_via_blob(self, cursor: Any, data_files: dict[str, Any], data_dir: Path) -> dict[str, int]:
         """Load data via Azure Blob Storage using COPY INTO."""
@@ -535,7 +536,7 @@ class AzureSynapseAdapter(PlatformAdapter):
                 continue
 
             try:
-                load_start = time.time()
+                load_start = mono_time()
 
                 # Upload files to blob storage
                 blob_paths = self._upload_to_blob(table_name, valid_files)
@@ -575,7 +576,7 @@ class AzureSynapseAdapter(PlatformAdapter):
                 row_count = cursor.fetchone()[0]
                 table_stats[table_name] = row_count
 
-                load_time = time.time() - load_start
+                load_time = elapsed_seconds(load_start)
                 self.logger.info(f"Loaded {row_count:,} rows into {table_name} in {load_time:.2f}s")
 
             except Exception as e:
@@ -600,7 +601,7 @@ class AzureSynapseAdapter(PlatformAdapter):
                 continue
 
             try:
-                load_start = time.time()
+                load_start = mono_time()
                 total_rows = 0
 
                 qualified_table = f"[{self.schema}].[{table_name}]"
@@ -634,7 +635,7 @@ class AzureSynapseAdapter(PlatformAdapter):
 
                 table_stats[table_name] = total_rows
 
-                load_time = time.time() - load_start
+                load_time = elapsed_seconds(load_start)
                 self.logger.info(f"Loaded {total_rows:,} rows into {table_name} in {load_time:.2f}s")
 
             except Exception as e:
@@ -741,7 +742,7 @@ class AzureSynapseAdapter(PlatformAdapter):
     ) -> dict[str, Any]:
         """Execute query with detailed timing and performance tracking."""
         self.log_operation_start("Azure Synapse query execution", query_id)
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -749,7 +750,7 @@ class AzureSynapseAdapter(PlatformAdapter):
             cursor.execute(query)
             result = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Validate row count if enabled
@@ -781,13 +782,13 @@ class AzureSynapseAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             self.log_verbose(f"Query {query_id} failed after {execution_time:.3f}s: {e}")
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

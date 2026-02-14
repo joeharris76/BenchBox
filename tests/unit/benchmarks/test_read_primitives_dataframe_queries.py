@@ -15,9 +15,10 @@ from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 from benchbox.core.read_primitives.dataframe_queries import (
     REGISTRY,
     SKIP_FOR_DATAFRAME,
+    SKIP_FOR_EXPRESSION_FAMILY,
     get_dataframe_queries,
-    get_expression_family_only,
     get_skip_for_dataframe,
+    get_skip_for_expression_family,
 )
 
 
@@ -74,27 +75,51 @@ class TestSkipLists:
             f"Expected: {expected}, got: {set(SKIP_FOR_DATAFRAME)}"
         )
 
-    def test_expression_family_only_is_empty(self):
-        """get_expression_family_only should return empty list (deprecated)."""
-        # EXPRESSION_FAMILY_ONLY has been removed - all queries support both families
-        result = get_expression_family_only()
-        assert result == [], (
-            "get_expression_family_only should return empty list - all queries now support both families"
-        )
-
     def test_get_skip_for_dataframe_returns_copy(self):
         """get_skip_for_dataframe should return a copy, not the original list."""
         result = get_skip_for_dataframe()
         assert result == SKIP_FOR_DATAFRAME
         assert result is not SKIP_FOR_DATAFRAME
 
-    def test_get_expression_family_only_returns_empty_list(self):
-        """get_expression_family_only should return empty list (all queries support both families)."""
-        result = get_expression_family_only()
-        assert result == []
-        # Verify it's a new list instance each call (for safety)
-        result2 = get_expression_family_only()
-        assert result is not result2 or result == []
+    def test_skip_for_expression_family_contains_only_map_queries(self):
+        """SKIP_FOR_EXPRESSION_FAMILY should only contain map queries (Polars has no Map dtype)."""
+        assert isinstance(SKIP_FOR_EXPRESSION_FAMILY, list)
+        assert len(SKIP_FOR_EXPRESSION_FAMILY) == 3, (
+            f"Should have exactly 3 map queries, got {len(SKIP_FOR_EXPRESSION_FAMILY)}"
+        )
+        expected = {"map_construction", "map_access", "map_keys_values"}
+        assert set(SKIP_FOR_EXPRESSION_FAMILY) == expected, (
+            f"Expected only map queries: {expected}, got: {set(SKIP_FOR_EXPRESSION_FAMILY)}"
+        )
+
+    def test_skip_for_expression_family_all_in_registry(self):
+        """All queries in SKIP_FOR_EXPRESSION_FAMILY must exist in the registry."""
+        registry_ids = {q.query_id for q in REGISTRY.get_all_queries()}
+        for query_id in SKIP_FOR_EXPRESSION_FAMILY:
+            assert query_id in registry_ids, (
+                f"Skip list entry '{query_id}' not found in registry. Was it renamed or removed?"
+            )
+
+    def test_skip_for_expression_family_no_overlap_with_dataframe(self):
+        """SKIP_FOR_EXPRESSION_FAMILY should not overlap with SKIP_FOR_DATAFRAME."""
+        overlap = set(SKIP_FOR_EXPRESSION_FAMILY) & set(SKIP_FOR_DATAFRAME)
+        assert not overlap, (
+            f"Queries in both skip lists (redundant): {overlap}. "
+            f"Move to SKIP_FOR_DATAFRAME if they should be skipped for all platforms."
+        )
+
+    def test_get_skip_for_expression_family_returns_copy(self):
+        """get_skip_for_expression_family should return a copy, not the original list."""
+        result = get_skip_for_expression_family()
+        assert result == SKIP_FOR_EXPRESSION_FAMILY
+        assert result is not SKIP_FOR_EXPRESSION_FAMILY
+
+    def test_skip_lists_have_no_duplicates(self):
+        """Neither skip list should contain duplicate entries."""
+        assert len(SKIP_FOR_DATAFRAME) == len(set(SKIP_FOR_DATAFRAME)), "SKIP_FOR_DATAFRAME has duplicates"
+        assert len(SKIP_FOR_EXPRESSION_FAMILY) == len(set(SKIP_FOR_EXPRESSION_FAMILY)), (
+            "SKIP_FOR_EXPRESSION_FAMILY has duplicates"
+        )
 
 
 class TestBenchmarkIntegration:
@@ -125,10 +150,23 @@ class TestBenchmarkIntegration:
         # Only 3 queries skipped: correlated subquery queries with no DataFrame equivalent
         assert len(skip_list) == 3
 
-    def test_benchmark_has_get_expression_family_only_queries_method(self):
-        """ReadPrimitivesBenchmark should have get_expression_family_only_queries method."""
+    def test_benchmark_has_get_expression_family_skip_queries_method(self):
+        """ReadPrimitivesBenchmark should have get_expression_family_skip_queries method."""
         benchmark = ReadPrimitivesBenchmark(scale_factor=0.01)
-        assert hasattr(benchmark, "get_expression_family_only_queries")
+        assert hasattr(benchmark, "get_expression_family_skip_queries")
+
+    def test_benchmark_get_expression_family_skip_queries_returns_list(self):
+        """Benchmark.get_expression_family_skip_queries should return map-only skip list."""
+        benchmark = ReadPrimitivesBenchmark(scale_factor=0.01)
+        skip_list = benchmark.get_expression_family_skip_queries()
+        assert isinstance(skip_list, list)
+        assert len(skip_list) == 3  # Only map queries
+
+    def test_benchmark_get_expression_family_skip_queries_matches_constant(self):
+        """Benchmark method should return same queries as the module constant."""
+        benchmark = ReadPrimitivesBenchmark(scale_factor=0.01)
+        skip_list = benchmark.get_expression_family_skip_queries()
+        assert set(skip_list) == set(SKIP_FOR_EXPRESSION_FAMILY)
 
 
 class TestQueryCategories:
@@ -202,6 +240,43 @@ class TestQueryMetadata:
         """All query IDs should be unique."""
         query_ids = REGISTRY.get_query_ids()
         assert len(query_ids) == len(set(query_ids)), "Query IDs should be unique"
+
+
+@pytest.mark.fast
+class TestSqlDataframeParity:
+    """Test that SQL catalog and DataFrame registry stay in sync."""
+
+    def test_all_dataframe_queries_have_sql_counterpart(self):
+        """Every DataFrame query (minus SKIP_FOR_DATAFRAME) should have a SQL catalog entry."""
+        from benchbox.core.read_primitives.queries import ReadPrimitivesQueryManager
+
+        sql_ids = set(ReadPrimitivesQueryManager().get_all_queries().keys())
+        df_ids = {q.query_id for q in REGISTRY.get_all_queries()}
+        skip_ids = set(SKIP_FOR_DATAFRAME)
+
+        # DataFrame queries that should have SQL counterparts
+        df_expected_in_sql = df_ids - skip_ids
+        missing_sql = df_expected_in_sql - sql_ids
+        assert not missing_sql, (
+            f"DataFrame queries without SQL catalog counterpart: {sorted(missing_sql)}. "
+            f"Add SQL entries to catalog/queries.yaml to maintain parity."
+        )
+
+    def test_all_sql_queries_have_dataframe_counterpart(self):
+        """Every SQL query (minus optimizer/SQL-only) should have a DataFrame registry entry."""
+        from benchbox.core.read_primitives.queries import ReadPrimitivesQueryManager
+
+        sql_ids = set(ReadPrimitivesQueryManager().get_all_queries().keys())
+        df_ids = {q.query_id for q in REGISTRY.get_all_queries()}
+        skip_ids = set(SKIP_FOR_DATAFRAME)
+
+        # SQL queries that should have DataFrame counterparts (excluding skipped)
+        sql_expected_in_df = sql_ids - skip_ids
+        missing_df = sql_expected_in_df - df_ids
+        assert not missing_df, (
+            f"SQL queries without DataFrame registry counterpart: {sorted(missing_df)}. "
+            f"Add DataFrame implementations to dataframe_queries.py or add to SKIP_FOR_DATAFRAME."
+        )
 
 
 @pytest.mark.fast

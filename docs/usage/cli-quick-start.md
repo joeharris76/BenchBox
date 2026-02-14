@@ -143,8 +143,31 @@ uv run benchbox export --last --format html --output-dir ./reports/
 
 **Common Use Cases:**
 - **CSV** for spreadsheet analysis (Excel, Google Sheets)
-- **HTML** for shareable reports and documentation
+- **HTML** for standalone reports with formatted tables
 - **JSON** for programmatic analysis and archival
+
+## Visualizing Results
+
+Generate ASCII charts from benchmark results directly in the terminal:
+
+```bash
+# Auto-detect latest result and render all applicable charts
+uv run benchbox visualize
+
+# Visualize a specific result file
+uv run benchbox visualize benchmark_runs/results/tpch_duckdb_sf0.01_*.json
+
+# Compare multiple result files
+uv run benchbox visualize duckdb.json sqlite.json --template head_to_head
+
+# Specific chart type
+uv run benchbox visualize --last --chart-type performance_bar
+
+# Save plain-text output to file (strip ANSI colors)
+uv run benchbox visualize --last --no-color > charts.txt
+```
+
+See the [Visualization Guide](../visualization/overview.md) for chart types, templates, and customization options.
 
 ## Platform Management
 

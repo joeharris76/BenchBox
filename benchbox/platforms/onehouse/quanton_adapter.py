@@ -31,10 +31,11 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
@@ -442,7 +443,7 @@ class QuantonAdapter(
         Returns:
             Query results as list of dicts.
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         # Generate unique result location
         result_id = f"results-{uuid.uuid4().hex[:12]}"
@@ -459,7 +460,7 @@ class QuantonAdapter(
 
         # Wait for completion
         result = self._client.wait_for_job(job_id, timeout_minutes=self.timeout_minutes)
-        elapsed = time.time() - start_time
+        elapsed = elapsed_seconds(start_time)
 
         # Track metrics
         self._query_count += 1

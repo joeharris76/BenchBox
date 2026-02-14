@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional, Union
 
+from benchbox.utils.clock import elapsed_seconds, mono_time, utc_now
+
 logger = logging.getLogger(__name__)
 
 
@@ -159,10 +161,11 @@ class DataQualityRuleEngine:
                 severity=rule.severity,
             )
 
-        start_time = datetime.now()
+        start_time_utc = utc_now()
+        start_time_mono = mono_time()
         result = QualityCheckResult(
             rule_id=rule_id,
-            check_timestamp=start_time,
+            check_timestamp=start_time_utc,
             table_name=rule.table_name,
             column_name=rule.column_name,
             batch_id=batch_id,
@@ -186,8 +189,7 @@ class DataQualityRuleEngine:
             else:
                 raise ValueError(f"Unsupported rule type: {rule.rule_type}")
 
-            end_time = datetime.now()
-            result.execution_time_ms = (end_time - start_time).total_seconds() * 1000
+            result.execution_time_ms = elapsed_seconds(start_time_mono) * 1000
 
             logger.debug(f"Executed rule {rule_id}: {'PASSED' if result.passed else 'FAILED'}")
             return result
@@ -195,7 +197,7 @@ class DataQualityRuleEngine:
         except Exception as e:
             result.passed = False
             result.error_message = str(e)
-            result.execution_time_ms = (datetime.now() - start_time).total_seconds() * 1000
+            result.execution_time_ms = elapsed_seconds(start_time_mono) * 1000
             logger.error(f"Rule execution failed for {rule_id}: {str(e)}")
             return result
 
@@ -600,7 +602,8 @@ class DataQualityMonitor:
         """
 
         logger.info(f"Running data quality check batch for batch {batch_id}")
-        batch_start = datetime.now()
+        batch_start_utc = utc_now()
+        batch_start_mono = mono_time()
 
         # Filter rules to execute
         rules_to_execute = []
@@ -627,7 +630,7 @@ class DataQualityMonitor:
         # Calculate batch summary
         batch_summary = {
             "batch_id": batch_id,
-            "execution_timestamp": batch_start,
+            "execution_timestamp": batch_start_utc,
             "rules_executed": len(batch_results),
             "rules_passed": len([r for r in batch_results if r.passed]),
             "rules_failed": len([r for r in batch_results if not r.passed]),
@@ -635,7 +638,7 @@ class DataQualityMonitor:
             "high_failures": len([r for r in batch_results if not r.passed and r.severity == "HIGH"]),
             "medium_failures": len([r for r in batch_results if not r.passed and r.severity == "MEDIUM"]),
             "low_failures": len([r for r in batch_results if not r.passed and r.severity == "LOW"]),
-            "total_execution_time_ms": (datetime.now() - batch_start).total_seconds() * 1000,
+            "total_execution_time_ms": elapsed_seconds(batch_start_mono) * 1000,
             "overall_pass_rate": (len([r for r in batch_results if r.passed]) / max(len(batch_results), 1)) * 100.0,
         }
 

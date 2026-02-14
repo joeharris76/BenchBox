@@ -189,7 +189,6 @@ class TestCLIDocumentation:
                 assert result.exit_code == 0, f"Help failed for command: {command}"
                 assert "Usage:" in result.output, f"No usage info for command: {command}"
 
-    @pytest.mark.skip(reason="CLI_REFERENCE.md not yet implemented")
     def test_cli_reference_documentation_exists(self):
         """Test that CLI reference documentation file exists."""
         from pathlib import Path

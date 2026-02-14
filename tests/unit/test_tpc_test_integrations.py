@@ -215,7 +215,7 @@ class TestPlatformAdapterConnection:
         cursor = adapter_conn.execute("SELECT * FROM test_table")
 
         assert isinstance(cursor, PlatformAdapterCursor)
-        assert len(cursor.rows) > 0  # Should have mock rows
+        assert len(cursor.rows) > 0
 
     def test_cursor_methods(self):
         """Test cursor methods."""
@@ -230,11 +230,11 @@ class TestPlatformAdapterConnection:
         # Test fetchall
         rows = cursor.fetchall()
         assert len(rows) == 5
-        assert all(row == ("mock_row",) for row in rows)
+        assert all(row == (None,) for row in rows)
 
         # Test fetchone
         first_row = cursor.fetchone()
-        assert first_row == ("mock_row",)
+        assert first_row == (None,)
 
 
 class TestTPCHPowerTestIntegration:

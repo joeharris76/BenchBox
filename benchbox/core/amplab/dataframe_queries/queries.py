@@ -1,0 +1,521 @@
+"""AMPLab DataFrame query implementations.
+
+All 8 AMPLab benchmark queries implemented for both Expression and Pandas families.
+
+Tables: rankings, uservisits, documents
+Patterns: scans, joins, text analytics, GROUP BY with HAVING
+
+Queries:
+- Q1: Scan with pageRank filter
+- Q1a: Aggregation with pageRank filter
+- Q2: Join uservisits+rankings with date range
+- Q2a: Join with pageRank filter and limit
+- Q3: Text search with HAVING
+- Q3a: Document text analysis with CASE WHEN
+- Q4: Country/language analytics with HAVING
+- Q5: Cross-table analytics with join and HAVING
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from benchbox.core.dataframe.context import DataFrameContext
+from benchbox.core.dataframe.query import DataFrameQuery, QueryCategory
+
+from .parameters import get_parameters
+from .registry import register_query
+
+# =============================================================================
+# Q1: Scan Query — filter rankings by pageRank
+# =============================================================================
+
+
+def q1_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q1: Filter rankings by pageRank threshold."""
+    params = get_parameters("Q1")
+    threshold = params.get("pagerank_threshold", 1000)
+
+    rankings = ctx.get_table("rankings")
+    col = ctx.col
+    lit = ctx.lit
+
+    return rankings.filter(col("pageRank") > lit(threshold)).select("pageURL", "pageRank")
+
+
+def q1_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q1: Filter rankings by pageRank threshold."""
+    params = get_parameters("Q1")
+    threshold = params.get("pagerank_threshold", 1000)
+
+    rankings = ctx.get_table("rankings")
+    return rankings[rankings["pageRank"] > threshold][["pageURL", "pageRank"]]
+
+
+# =============================================================================
+# Q1a: Aggregation with pageRank filter
+# =============================================================================
+
+
+def q1a_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q1a: COUNT, AVG, MAX of pageRank above threshold."""
+    params = get_parameters("Q1a")
+    threshold = params.get("pagerank_threshold", 1000)
+
+    rankings = ctx.get_table("rankings")
+    col = ctx.col
+    lit = ctx.lit
+
+    return rankings.filter(col("pageRank") > lit(threshold)).select(
+        col("pageRank").count().alias("total_pages"),
+        col("pageRank").mean().alias("avg_pagerank"),
+        col("pageRank").max().alias("max_pagerank"),
+    )
+
+
+def q1a_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q1a: COUNT, AVG, MAX of pageRank above threshold."""
+    import pandas as pd
+
+    params = get_parameters("Q1a")
+    threshold = params.get("pagerank_threshold", 1000)
+
+    rankings = ctx.get_table("rankings")
+    filtered = rankings[rankings["pageRank"] > threshold]
+    return pd.DataFrame(
+        {
+            "total_pages": [len(filtered)],
+            "avg_pagerank": [filtered["pageRank"].mean()],
+            "max_pagerank": [filtered["pageRank"].max()],
+        }
+    )
+
+
+# =============================================================================
+# Q2: Join uservisits+rankings with date range
+# =============================================================================
+
+
+def q2_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q2: Join uservisits to rankings, GROUP BY sourceIP, ORDER BY revenue."""
+    params = get_parameters("Q2")
+    start_date = params.get("start_date", "2000-01-01")
+    end_date = params.get("end_date", "2000-01-03")
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    rankings = ctx.get_table("rankings")
+    col = ctx.col
+    lit = ctx.lit
+
+    return (
+        uservisits.filter((col("visitDate") >= lit(start_date)) & (col("visitDate") <= lit(end_date)))
+        .join(rankings, left_on="destURL", right_on="pageURL")
+        .group_by("sourceIP")
+        .agg(
+            col("adRevenue").sum().alias("totalRevenue"),
+            col("pageRank").mean().alias("avgPageRank"),
+        )
+        .sort("totalRevenue", descending=True)
+        .limit(limit_rows)
+    )
+
+
+def q2_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q2: Join uservisits to rankings, GROUP BY sourceIP, ORDER BY revenue."""
+    params = get_parameters("Q2")
+    start_date = params.get("start_date", "2000-01-01")
+    end_date = params.get("end_date", "2000-01-03")
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    rankings = ctx.get_table("rankings")
+    filtered = uservisits[(uservisits["visitDate"] >= start_date) & (uservisits["visitDate"] <= end_date)]
+    merged = filtered.merge(rankings, left_on="destURL", right_on="pageURL")
+    return (
+        merged.groupby(["sourceIP"], as_index=False)
+        .agg(totalRevenue=("adRevenue", "sum"), avgPageRank=("pageRank", "mean"))
+        .sort_values("totalRevenue", ascending=False)
+        .head(limit_rows)
+    )
+
+
+# =============================================================================
+# Q2a: Join with pageRank filter and limit
+# =============================================================================
+
+
+def q2a_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q2a: Join uservisits to rankings, filter by pageRank, ORDER BY pageRank."""
+    params = get_parameters("Q2a")
+    threshold = params.get("pagerank_threshold", 1000)
+    start_date = params.get("start_date", "2000-01-01")
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    rankings = ctx.get_table("rankings")
+    col = ctx.col
+    lit = ctx.lit
+
+    return (
+        uservisits.filter(col("visitDate") >= lit(start_date))
+        .join(rankings, left_on="destURL", right_on="pageURL")
+        .filter(col("pageRank") > lit(threshold))
+        .select("destURL", "visitDate", "adRevenue", "pageRank", "avgDuration")
+        .sort("pageRank", descending=True)
+        .limit(limit_rows)
+    )
+
+
+def q2a_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q2a: Join uservisits to rankings, filter by pageRank, ORDER BY pageRank."""
+    params = get_parameters("Q2a")
+    threshold = params.get("pagerank_threshold", 1000)
+    start_date = params.get("start_date", "2000-01-01")
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    rankings = ctx.get_table("rankings")
+    filtered = uservisits[uservisits["visitDate"] >= start_date]
+    merged = filtered.merge(rankings, left_on="destURL", right_on="pageURL")
+    merged = merged[merged["pageRank"] > threshold]
+    return (
+        merged[["destURL", "visitDate", "adRevenue", "pageRank", "avgDuration"]]
+        .sort_values("pageRank", ascending=False)
+        .head(limit_rows)
+    )
+
+
+# =============================================================================
+# Q3: Text search with HAVING
+# =============================================================================
+
+
+def q3_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q3: Text search on uservisits with HAVING on visit_count."""
+    params = get_parameters("Q3")
+    start_date = params.get("start_date", "2000-01-01")
+    end_date = params.get("end_date", "2000-01-03")
+    search_term = params.get("search_term", "database")
+    min_visits = params.get("min_visits", 10)
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    col = ctx.col
+    lit = ctx.lit
+
+    return (
+        uservisits.filter(
+            (col("visitDate") >= lit(start_date))
+            & (col("visitDate") <= lit(end_date))
+            & (col("searchWord").str.contains(search_term))
+        )
+        .group_by("sourceIP")
+        .agg(
+            col("sourceIP").count().alias("visit_count"),
+            col("adRevenue").sum().alias("total_revenue"),
+            col("duration").mean().alias("avg_duration"),
+        )
+        .filter(col("visit_count") > lit(min_visits))
+        .sort("total_revenue", descending=True)
+        .limit(limit_rows)
+    )
+
+
+def q3_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q3: Text search on uservisits with HAVING on visit_count."""
+    params = get_parameters("Q3")
+    start_date = params.get("start_date", "2000-01-01")
+    end_date = params.get("end_date", "2000-01-03")
+    search_term = params.get("search_term", "database")
+    min_visits = params.get("min_visits", 10)
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    filtered = uservisits[
+        (uservisits["visitDate"] >= start_date)
+        & (uservisits["visitDate"] <= end_date)
+        & (uservisits["searchWord"].str.contains(search_term, na=False))
+    ]
+    grouped = filtered.groupby(["sourceIP"], as_index=False).agg(
+        visit_count=("sourceIP", "count"), total_revenue=("adRevenue", "sum"), avg_duration=("duration", "mean")
+    )
+    result = grouped[grouped["visit_count"] > min_visits]
+    return result.sort_values("total_revenue", ascending=False).head(limit_rows)
+
+
+# =============================================================================
+# Q3a: Document text analysis with CASE WHEN
+# =============================================================================
+
+
+def q3a_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q3a: Text analysis on documents with keyword matching."""
+    params = get_parameters("Q3a")
+    keyword1 = params.get("keyword1", "web")
+    keyword2 = params.get("keyword2", "data")
+    min_content_length = params.get("min_content_length", 1000)
+    limit_rows = params.get("limit_rows", 100)
+
+    documents = ctx.get_table("documents")
+    col = ctx.col
+    lit = ctx.lit
+
+    return (
+        documents.with_columns(col("contents").str.len_chars().alias("content_length"))
+        .filter(col("content_length") > lit(min_content_length))
+        .with_columns(
+            ctx.when(col("contents").str.contains(keyword1)).then(lit(1)).otherwise(lit(0)).alias("has_keyword1"),
+            ctx.when(col("contents").str.contains(keyword2)).then(lit(1)).otherwise(lit(0)).alias("has_keyword2"),
+        )
+        .select("url", "content_length", "has_keyword1", "has_keyword2")
+        .sort("content_length", descending=True)
+        .limit(limit_rows)
+    )
+
+
+def q3a_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q3a: Text analysis on documents with keyword matching."""
+    import numpy as np
+
+    params = get_parameters("Q3a")
+    keyword1 = params.get("keyword1", "web")
+    keyword2 = params.get("keyword2", "data")
+    min_content_length = params.get("min_content_length", 1000)
+    limit_rows = params.get("limit_rows", 100)
+
+    documents = ctx.get_table("documents")
+    df = documents.copy()
+    df["content_length"] = df["contents"].str.len()
+    df = df[df["content_length"] > min_content_length]
+    df["has_keyword1"] = np.where(df["contents"].str.contains(keyword1, na=False), 1, 0)
+    df["has_keyword2"] = np.where(df["contents"].str.contains(keyword2, na=False), 1, 0)
+    return (
+        df[["url", "content_length", "has_keyword1", "has_keyword2"]]
+        .sort_values("content_length", ascending=False)
+        .head(limit_rows)
+    )
+
+
+# =============================================================================
+# Q4: Country/language analytics with HAVING
+# =============================================================================
+
+
+def q4_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q4: Country/language analytics with HAVING."""
+    params = get_parameters("Q4")
+    start_date = params.get("start_date", "2000-01-01")
+    min_revenue = params.get("min_revenue", 1.0)
+    min_visits = params.get("min_visits", 10)
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    col = ctx.col
+    lit = ctx.lit
+
+    return (
+        uservisits.filter((col("visitDate") >= lit(start_date)) & (col("adRevenue") > lit(min_revenue)))
+        .group_by("countryCode", "languageCode")
+        .agg(
+            col("countryCode").count().alias("visit_count"),
+            col("adRevenue").sum().alias("total_revenue"),
+            col("duration").mean().alias("avg_duration"),
+            col("sourceIP").n_unique().alias("unique_visitors"),
+        )
+        .filter(col("visit_count") > lit(min_visits))
+        .sort("total_revenue", descending=True)
+        .limit(limit_rows)
+    )
+
+
+def q4_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q4: Country/language analytics with HAVING."""
+    params = get_parameters("Q4")
+    start_date = params.get("start_date", "2000-01-01")
+    min_revenue = params.get("min_revenue", 1.0)
+    min_visits = params.get("min_visits", 10)
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    filtered = uservisits[(uservisits["visitDate"] >= start_date) & (uservisits["adRevenue"] > min_revenue)]
+    grouped = filtered.groupby(["countryCode", "languageCode"], as_index=False).agg(
+        visit_count=("countryCode", "count"),
+        total_revenue=("adRevenue", "sum"),
+        avg_duration=("duration", "mean"),
+        unique_visitors=("sourceIP", "nunique"),
+    )
+    result = grouped[grouped["visit_count"] > min_visits]
+    return result.sort_values("total_revenue", ascending=False).head(limit_rows)
+
+
+# =============================================================================
+# Q5: Cross-table analytics with join and HAVING
+# =============================================================================
+
+
+def q5_expression_impl(ctx: DataFrameContext) -> Any:
+    """Q5: Join uservisits+rankings, GROUP BY countryCode with HAVING."""
+    params = get_parameters("Q5")
+    start_date = params.get("start_date", "2000-01-01")
+    threshold = params.get("pagerank_threshold", 1000)
+    min_visits = params.get("min_visits", 10)
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    rankings = ctx.get_table("rankings")
+    col = ctx.col
+    lit = ctx.lit
+
+    return (
+        uservisits.filter(col("visitDate") >= lit(start_date))
+        .join(rankings, left_on="destURL", right_on="pageURL")
+        .filter(col("pageRank") > lit(threshold))
+        .group_by("countryCode")
+        .agg(
+            col("destURL").n_unique().alias("unique_pages"),
+            col("countryCode").count().alias("total_visits"),
+            col("adRevenue").sum().alias("total_revenue"),
+            col("pageRank").mean().alias("avg_pagerank"),
+            col("duration").mean().alias("avg_duration"),
+        )
+        .filter(col("total_visits") > lit(min_visits))
+        .sort("total_revenue", descending=True)
+        .limit(limit_rows)
+    )
+
+
+def q5_pandas_impl(ctx: DataFrameContext) -> Any:
+    """Q5: Join uservisits+rankings, GROUP BY countryCode with HAVING."""
+    params = get_parameters("Q5")
+    start_date = params.get("start_date", "2000-01-01")
+    threshold = params.get("pagerank_threshold", 1000)
+    min_visits = params.get("min_visits", 10)
+    limit_rows = params.get("limit_rows", 100)
+
+    uservisits = ctx.get_table("uservisits")
+    rankings = ctx.get_table("rankings")
+    filtered = uservisits[uservisits["visitDate"] >= start_date]
+    merged = filtered.merge(rankings, left_on="destURL", right_on="pageURL")
+    merged = merged[merged["pageRank"] > threshold]
+    grouped = merged.groupby(["countryCode"], as_index=False).agg(
+        unique_pages=("destURL", "nunique"),
+        total_visits=("countryCode", "count"),
+        total_revenue=("adRevenue", "sum"),
+        avg_pagerank=("pageRank", "mean"),
+        avg_duration=("duration", "mean"),
+    )
+    result = grouped[grouped["total_visits"] > min_visits]
+    return result.sort_values("total_revenue", ascending=False).head(limit_rows)
+
+
+# =============================================================================
+# Query Registration
+# =============================================================================
+
+
+def _register_all_queries() -> None:
+    """Register all 8 AMPLab DataFrame queries."""
+    register_query(
+        DataFrameQuery(
+            query_id="Q1",
+            query_name="Scan Query",
+            description="Filter rankings by pageRank threshold",
+            categories=[QueryCategory.SCAN, QueryCategory.FILTER],
+            expression_impl=q1_expression_impl,
+            pandas_impl=q1_pandas_impl,
+        )
+    )
+    register_query(
+        DataFrameQuery(
+            query_id="Q1a",
+            query_name="Scan Aggregation",
+            description="COUNT, AVG, MAX of pageRank with threshold filter",
+            categories=[QueryCategory.FILTER, QueryCategory.AGGREGATE],
+            expression_impl=q1a_expression_impl,
+            pandas_impl=q1a_pandas_impl,
+        )
+    )
+    register_query(
+        DataFrameQuery(
+            query_id="Q2",
+            query_name="Join Query",
+            description="Join uservisits to rankings with date range, GROUP BY sourceIP",
+            categories=[QueryCategory.FILTER, QueryCategory.JOIN, QueryCategory.GROUP_BY, QueryCategory.SORT],
+            expression_impl=q2_expression_impl,
+            pandas_impl=q2_pandas_impl,
+        )
+    )
+    register_query(
+        DataFrameQuery(
+            query_id="Q2a",
+            query_name="Join with Filter",
+            description="Join uservisits to rankings with pageRank filter",
+            categories=[QueryCategory.FILTER, QueryCategory.JOIN, QueryCategory.SORT],
+            expression_impl=q2a_expression_impl,
+            pandas_impl=q2a_pandas_impl,
+        )
+    )
+    register_query(
+        DataFrameQuery(
+            query_id="Q3",
+            query_name="Text Search",
+            description="Text search on searchWord with HAVING on visit_count",
+            categories=[
+                QueryCategory.FILTER,
+                QueryCategory.GROUP_BY,
+                QueryCategory.AGGREGATE,
+                QueryCategory.ANALYTICAL,
+            ],
+            expression_impl=q3_expression_impl,
+            pandas_impl=q3_pandas_impl,
+        )
+    )
+    register_query(
+        DataFrameQuery(
+            query_id="Q3a",
+            query_name="Document Analysis",
+            description="Text analysis on documents with keyword matching via CASE WHEN",
+            categories=[QueryCategory.FILTER, QueryCategory.PROJECTION, QueryCategory.ANALYTICAL],
+            expression_impl=q3a_expression_impl,
+            pandas_impl=q3a_pandas_impl,
+        )
+    )
+    register_query(
+        DataFrameQuery(
+            query_id="Q4",
+            query_name="Country/Language Analytics",
+            description="Country and language analytics with HAVING and COUNT DISTINCT",
+            categories=[
+                QueryCategory.FILTER,
+                QueryCategory.GROUP_BY,
+                QueryCategory.AGGREGATE,
+                QueryCategory.ANALYTICAL,
+            ],
+            expression_impl=q4_expression_impl,
+            pandas_impl=q4_pandas_impl,
+        )
+    )
+    register_query(
+        DataFrameQuery(
+            query_id="Q5",
+            query_name="Cross-Table Analytics",
+            description="Join uservisits+rankings, GROUP BY country with HAVING and COUNT DISTINCT",
+            categories=[
+                QueryCategory.FILTER,
+                QueryCategory.JOIN,
+                QueryCategory.GROUP_BY,
+                QueryCategory.AGGREGATE,
+                QueryCategory.ANALYTICAL,
+            ],
+            expression_impl=q5_expression_impl,
+            pandas_impl=q5_pandas_impl,
+        )
+    )
+
+
+_register_all_queries()

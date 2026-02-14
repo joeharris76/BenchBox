@@ -18,18 +18,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from benchbox.core.tpcds.benchmark import (
-    MaintenanceTestConfig,
-    MaintenanceTestResult,
-    TPCDSBenchmark,
-)
+from benchbox.core.tpcds.benchmark import MaintenanceTestConfig, MaintenanceTestResult, TPCDSBenchmark
 from benchbox.core.tpcds.maintenance_operations import (
     MaintenanceOperations,
     MaintenanceOperationType,
 )
-from benchbox.core.tpcds.maintenance_test import (
-    TPCDSMaintenanceTest as MaintenanceTest,
-)
+from benchbox.core.tpcds.maintenance_test import TPCDSMaintenanceTest
 
 
 class TestTPCDSMaintenanceTestIntegration:
@@ -56,7 +50,7 @@ class TestTPCDSMaintenanceTestIntegration:
         def connection_factory():
             return Mock()
 
-        maintenance_test = MaintenanceTest(
+        maintenance_test = TPCDSMaintenanceTest(
             benchmark=benchmark,
             connection_factory=connection_factory,
             scale_factor=1.0,
@@ -181,7 +175,7 @@ class TestTPCDSMaintenanceTestIntegration:
         def connection_factory():
             return Mock()
 
-        maintenance_test = MaintenanceTest(benchmark, connection_factory)
+        maintenance_test = TPCDSMaintenanceTest(benchmark, connection_factory)
 
         # Test that maintenance test can be instantiated with the correct parameters
         assert maintenance_test.benchmark == benchmark
@@ -274,7 +268,7 @@ class TestTPCDSMaintenanceTestIntegration:
         def connection_factory():
             return Mock()
 
-        maintenance_test = MaintenanceTest(benchmark, connection_factory)
+        maintenance_test = TPCDSMaintenanceTest(benchmark, connection_factory)
 
         # Test with invalid connection
         # The run method is the actual method on TPCDSMaintenanceTest
@@ -292,7 +286,7 @@ class TestTPCDSMaintenanceTestIntegration:
         def connection_factory():
             return Mock()
 
-        MaintenanceTest(benchmark, connection_factory)
+        TPCDSMaintenanceTest(benchmark, connection_factory)
 
         # mock result
         result = MaintenanceTestResult(test_duration=10.0, total_operations=1, successful_operations=1)
@@ -341,7 +335,7 @@ class TestTPCDSMaintenanceTestPerformance:
         def connection_factory():
             return Mock()
 
-        maintenance_test = MaintenanceTest(benchmark, connection_factory)
+        maintenance_test = TPCDSMaintenanceTest(benchmark, connection_factory)
 
         # Test that the maintenance test can be created and has the expected methods
         assert hasattr(maintenance_test, "run")

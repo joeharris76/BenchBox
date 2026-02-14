@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from benchbox.core.tpch.queries import TPCHQueries, TPCHQueryManager
+from benchbox.core.tpch.queries import TPCHQueries
 
 # Mark all tests in this file as unit tests
 pytestmark = [pytest.mark.unit, pytest.mark.fast]
@@ -148,16 +148,9 @@ class TestTPCHQueries:
         all_queries_both = queries.get_all_queries(seed=888, scale_factor=2.0)
         assert len(all_queries_both) == 22
 
-    def test_tpchquerymanager_alias(self):
-        """Test backward compatibility alias."""
-        # TPCHQueryManager should be an alias for TPCHQueries
-        assert TPCHQueryManager is TPCHQueries
-
-        # Should be able to instantiate with alias
-        manager = TPCHQueryManager()
-        assert isinstance(manager, TPCHQueries)
-
-        # Should have same functionality
+    def test_tpchqueries_instantiation(self):
+        """Test TPCHQueries can be instantiated and used directly."""
+        manager = TPCHQueries()
         sql = manager.get_query(1)
         assert isinstance(sql, str)
         assert len(sql) > 50

@@ -66,8 +66,13 @@ class TestDuckDBVersionCompatibility:
         parser = DuckDBQueryPlanParser()
         plan = parser.parse_explain_output(f"q_{fixture_name}", fixture_value)
 
+        # Text JOIN fixtures are intentionally rejected by parser (cannot represent branching safely).
+        if format == "text" and fixture_name == "join":
+            assert plan is None
+            return
+
         if plan is None:
-            pytest.skip(f"Parse failed for {version} {format} {fixture_name}")
+            pytest.fail(f"Parse failed for {version} {format} {fixture_name}")
 
         # Collect all operators in the tree
         operators = self._collect_operators(plan.logical_root)

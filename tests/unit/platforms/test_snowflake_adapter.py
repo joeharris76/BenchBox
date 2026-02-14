@@ -565,7 +565,7 @@ MIIEpAIBAAKCAQEA0123456789...
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["first_row"] == (1, "test")
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
         assert result["query_statistics"] == {"snowflake_query_id": "test_query_id"}
 
         mock_cursor.execute.assert_any_call("ALTER SESSION SET QUERY_TAG = 'BenchBox_q1'")
@@ -598,7 +598,7 @@ MIIEpAIBAAKCAQEA0123456789...
         assert result["rows_returned"] == 0
         assert result["error"] == "Query failed"
         assert result["error_type"] == "Exception"
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
         mock_cursor.close.assert_called_once()
 

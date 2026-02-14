@@ -8,7 +8,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -30,6 +29,7 @@ from benchbox.core.multiregion.transfer import (
     TransferSummary,
     TransferTracker,
 )
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +204,7 @@ class MultiRegionBenchmark:
         Returns:
             Multi-region results
         """
-        start_time = time.time()
+        start_time = mono_time()
         region_results: dict[str, RegionBenchmarkResult] = {}
         latency_profiles: dict[tuple[str, str], LatencyProfile] = {}
 
@@ -220,7 +220,7 @@ class MultiRegionBenchmark:
         else:
             region_results = self._run_sequential()
 
-        end_time = time.time()
+        end_time = mono_time()
 
         # Get transfer summary
         transfer_summary = self._transfer_tracker.get_summary()
@@ -236,7 +236,7 @@ class MultiRegionBenchmark:
             config=self._config,
             start_time=start_time,
             end_time=end_time,
-            total_duration_seconds=end_time - start_time,
+            total_duration_seconds=elapsed_seconds(start_time, end_time),
             region_results=region_results,
             latency_profiles=latency_profiles,
             transfer_summary=transfer_summary,
@@ -282,8 +282,8 @@ class MultiRegionBenchmark:
                     logger.error(f"Error in region {region_config.region.code}: {e}")
                     results[region_config.region.code] = RegionBenchmarkResult(
                         region=region_config.region,
-                        start_time=time.time(),
-                        end_time=time.time(),
+                        start_time=mono_time(),
+                        end_time=mono_time(),
                         duration_seconds=0,
                         queries_executed=0,
                         queries_succeeded=0,
@@ -299,7 +299,7 @@ class MultiRegionBenchmark:
 
     def _run_in_region(self, region_config: RegionConfig) -> RegionBenchmarkResult:
         """Run benchmark in a single region."""
-        start_time = time.time()
+        start_time = mono_time()
         queries_executed = 0
         queries_succeeded = 0
         queries_failed = 0
@@ -336,8 +336,8 @@ class MultiRegionBenchmark:
             errors.append(str(e))
             logger.error(f"Benchmark error in {region_config.region.code}: {e}")
 
-        end_time = time.time()
-        duration = end_time - start_time
+        end_time = mono_time()
+        duration = elapsed_seconds(start_time, end_time)
 
         # Track data transfer
         if total_bytes > 0:

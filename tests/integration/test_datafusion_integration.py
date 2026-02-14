@@ -139,7 +139,7 @@ class TestDataFusionIntegration:
         assert result["query_id"] == "test_query_1"
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 1
-        assert result["execution_time"] >= 0
+        assert result["execution_time_seconds"] >= 0
 
     def test_query_execution_with_filter(
         self, datafusion_adapter, datafusion_connection, sample_csv_data, temp_working_dir
@@ -164,7 +164,7 @@ class TestDataFusionIntegration:
         assert result["query_id"] == "test_query_2"
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2  # Should return customers with id 1 and 2
-        assert result["execution_time"] >= 0
+        assert result["execution_time_seconds"] >= 0
 
     def test_query_execution_join(self, datafusion_adapter, datafusion_connection, sample_csv_data, temp_working_dir):
         """Test query execution with JOIN."""
@@ -197,7 +197,7 @@ class TestDataFusionIntegration:
 
         assert result["query_id"] == "test_query_3"
         assert result["status"] == "FAILED"
-        assert result["execution_time"] >= 0
+        assert result["execution_time_seconds"] >= 0
 
     def test_query_execution_aggregation(
         self, datafusion_adapter, datafusion_connection, sample_csv_data, temp_working_dir
@@ -229,7 +229,7 @@ class TestDataFusionIntegration:
 
         assert result["query_id"] == "test_query_4"
         assert result["status"] == "FAILED"
-        assert result["execution_time"] >= 0
+        assert result["execution_time_seconds"] >= 0
 
     def test_query_execution_failure(self, datafusion_adapter, datafusion_connection):
         """Test query execution with invalid SQL."""
@@ -354,7 +354,7 @@ class TestDataFusionSmoke:
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = DataFusionAdapter(working_dir=tmpdir)
             assert adapter.platform_name == "DataFusion"
-            assert adapter.get_target_dialect() == "postgres"
+            assert adapter.get_target_dialect() == "datafusion"
 
     def test_basic_query_execution(self):
         """Test basic query execution."""

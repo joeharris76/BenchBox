@@ -58,7 +58,7 @@ from benchbox.core.dataframe.tuning import DataFrameTuningConfiguration
 from benchbox.platforms.dataframe.pandas_family import (
     PandasFamilyAdapter,
 )
-from benchbox.utils.file_format import is_tpc_format
+from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN, has_trailing_delimiter, is_tpc_format
 
 logger = logging.getLogger(__name__)
 
@@ -235,16 +235,15 @@ class CuDFDataFrameAdapter(PandasFamilyAdapter[CuDFDF]):
             read_kwargs["names"] = names
 
         # Handle TPC format files (.tbl, .dat) with trailing delimiter
-        if is_tpc_format(path) and names:
-            # TPC files have trailing delimiter
-            extended_names = names + ["_trailing_"]
+        if is_tpc_format(path) and names and has_trailing_delimiter(path, delimiter, names):
+            extended_names = names + [TRAILING_DUMMY_COLUMN]
             read_kwargs["names"] = extended_names
 
         df = cudf.read_csv(path, **read_kwargs)
 
         # Drop trailing column if present
-        if "_trailing_" in df.columns:
-            df = df.drop(columns=["_trailing_"])
+        if TRAILING_DUMMY_COLUMN in df.columns:
+            df = df.drop(columns=[TRAILING_DUMMY_COLUMN])
 
         return df
 

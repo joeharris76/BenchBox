@@ -24,9 +24,10 @@ from __future__ import annotations
 import logging
 import os
 import re
-import time
 from pathlib import Path
 from typing import Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 from .postgresql import POSTGRES_DIALECT, PostgreSQLAdapter
 
@@ -363,7 +364,7 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema with automatic hypertable conversion for time-series tables."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
 
         # Get schema SQL and translate to PostgreSQL dialect
@@ -399,7 +400,7 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
 
         cursor.close()
 
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         self.log_operation_complete(
             "Schema creation",
             duration,

@@ -458,6 +458,13 @@ queries:
         COUNT(*) as orders_by_month
     FROM orders
     WHERE o_orderdate = TO_DATE('1995-03-15', 'yyyy-MM-dd');
+  variants:
+    datafusion: |2
+
+      SELECT
+          COUNT(*) as orders_by_month
+      FROM orders
+      WHERE o_orderdate = TO_DATE('1995-03-15');
 - id: limit
   category: limit
   sql: |2
@@ -487,7 +494,7 @@ queries:
       AND o.o_totalprice > 100000
       AND c.c_nationkey IN (1, 2, 3, 4, 5);
 - id: min_max_runtime_filter
-  category: min
+  category: filter
   sql: |2
 
     -- Bloom filter and runtime filter effectiveness for join optimization
@@ -862,7 +869,7 @@ queries:
     FROM orders
     WHERE JSON_EXTRACT(o_comment, '$.priority') IS NOT NULL
     LIMIT 1000;
-  skip_on: [duckdb]
+  skip_on: [duckdb, datafusion]
   description: "TPC-H o_comment contains plain text, not valid JSON"
 - id: json_extract_nested
   category: json
@@ -877,6 +884,7 @@ queries:
     FROM customer
     WHERE JSON_VALID(c_comment)
     LIMIT 500;
+  skip_on: [datafusion]
 - id: json_aggregates
   category: json
   sql: |2
@@ -902,6 +910,7 @@ queries:
       WHERE p_type LIKE '%STEEL%'
       GROUP BY p_brand
       LIMIT 100;
+  skip_on: [datafusion]
 - id: fulltext_simple_search
   category: fulltext
   sql: |2
@@ -919,6 +928,17 @@ queries:
     duckdb: |2
 
       -- DuckDB doesn't support MATCH...AGAINST, use LIKE instead
+      SELECT
+          p_partkey,
+          p_name,
+          p_mfgr,
+          p_comment
+      FROM part
+      WHERE p_name LIKE '%STEEL%' OR p_name LIKE '%COPPER%'
+         OR p_comment LIKE '%STEEL%' OR p_comment LIKE '%COPPER%'
+      LIMIT 100;
+    datafusion: |2
+
       SELECT
           p_partkey,
           p_name,
@@ -954,6 +974,16 @@ queries:
       WHERE c_comment LIKE '%BUILDING%'
         AND c_comment NOT LIKE '%FURNITURE%'
       LIMIT 50;
+    datafusion: |2
+
+      SELECT
+          c_custkey,
+          c_name,
+          c_comment
+      FROM customer
+      WHERE c_comment LIKE '%BUILDING%'
+        AND c_comment NOT LIKE '%FURNITURE%'
+      LIMIT 50;
 - id: fulltext_phrase_search
   category: fulltext
   sql: |2
@@ -971,6 +1001,15 @@ queries:
     duckdb: |2
 
       -- DuckDB doesn't support MATCH...AGAINST, use LIKE with exact phrase
+      SELECT
+          s_suppkey,
+          s_name,
+          s_comment
+      FROM supplier
+      WHERE s_comment LIKE '%Customer Complaints%'
+      ORDER BY s_suppkey;
+    datafusion: |2
+
       SELECT
           s_suppkey,
           s_name,
@@ -1123,6 +1162,40 @@ queries:
         (monthly_revenue - prev_month_revenue) / NULLIF(prev_month_revenue, 0) * 100 as mom_growth_pct
       FROM monthly_with_lag
       ORDER BY order_month;
+    datafusion: |2
+
+      WITH monthly_totals AS (
+        SELECT
+          DATE_TRUNC('month', o_orderdate) as order_month,
+          COUNT(*) as order_count,
+          SUM(o_totalprice) as monthly_revenue,
+          AVG(o_totalprice) as avg_order_value,
+          EXTRACT(EPOCH FROM DATE_TRUNC('month', o_orderdate)) as month_epoch
+        FROM orders
+        WHERE o_orderdate >= DATE '1995-01-01'
+          AND o_orderdate < DATE '1997-01-01'
+        GROUP BY DATE_TRUNC('month', o_orderdate)
+      ),
+      monthly_with_lag AS (
+        SELECT
+          order_month,
+          order_count,
+          monthly_revenue,
+          avg_order_value,
+          month_epoch,
+          LAG(monthly_revenue, 1) OVER (ORDER BY order_month) as prev_month_revenue
+        FROM monthly_totals
+      )
+      SELECT
+        order_month,
+        order_count,
+        monthly_revenue,
+        avg_order_value,
+        REGR_SLOPE(monthly_revenue, month_epoch) OVER () as revenue_trend_slope,
+        prev_month_revenue,
+        (monthly_revenue - prev_month_revenue) / NULLIF(prev_month_revenue, 0) * 100 as mom_growth_pct
+      FROM monthly_with_lag
+      ORDER BY order_month;
 - id: max_by_simple
   category: max
   sql: |2
@@ -1136,6 +1209,25 @@ queries:
     JOIN nation n ON c.c_nationkey = n.n_nationkey
     GROUP BY n_name
     ORDER BY max_balance DESC;
+  variants:
+    datafusion: |2
+
+      WITH ranked AS (
+        SELECT
+          n.n_name,
+          c.c_name,
+          c.c_acctbal,
+          ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY c.c_acctbal DESC, c.c_name) as rn
+        FROM customer c
+        JOIN nation n ON c.c_nationkey = n.n_nationkey
+      )
+      SELECT
+        n_name,
+        c_name as richest_customer,
+        c_acctbal as max_balance
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY max_balance DESC;
 - id: min_by_simple
   category: min
   sql: |2
@@ -1149,6 +1241,25 @@ queries:
     JOIN nation n ON c.c_nationkey = n.n_nationkey
     GROUP BY n_name
     ORDER BY min_balance ASC;
+  variants:
+    datafusion: |2
+
+      WITH ranked AS (
+        SELECT
+          n.n_name,
+          c.c_name,
+          c.c_acctbal,
+          ROW_NUMBER() OVER (PARTITION BY n.n_name ORDER BY c.c_acctbal ASC, c.c_name) as rn
+        FROM customer c
+        JOIN nation n ON c.c_nationkey = n.n_nationkey
+      )
+      SELECT
+        n_name,
+        c_name as poorest_customer,
+        c_acctbal as min_balance
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY min_balance ASC;
 - id: max_by_complex
   category: max
   sql: |2
@@ -1163,6 +1274,30 @@ queries:
     JOIN customer c ON o.o_custkey = c.c_custkey
     GROUP BY c_mktsegment
     ORDER BY max_order_value DESC;
+  variants:
+    datafusion: |2
+
+      WITH ranked AS (
+        SELECT
+          c.c_mktsegment,
+          o.o_orderkey,
+          o.o_orderdate,
+          o.o_totalprice,
+          ROW_NUMBER() OVER (
+            PARTITION BY c.c_mktsegment
+            ORDER BY o.o_totalprice DESC, o.o_orderkey
+          ) as rn
+        FROM orders o
+        JOIN customer c ON o.o_custkey = c.c_custkey
+      )
+      SELECT
+        c_mktsegment,
+        o_orderkey as most_expensive_order_id,
+        o_orderdate as most_expensive_order_date,
+        o_totalprice as max_order_value
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY max_order_value DESC;
 - id: min_by_complex
   category: min
   sql: |2
@@ -1176,6 +1311,29 @@ queries:
     FROM part
     GROUP BY p_brand
     ORDER BY min_price ASC;
+  variants:
+    datafusion: |2
+
+      WITH ranked AS (
+        SELECT
+          p_brand,
+          p_name,
+          p_type,
+          p_retailprice,
+          ROW_NUMBER() OVER (
+            PARTITION BY p_brand
+            ORDER BY p_retailprice ASC, p_name
+          ) as rn
+        FROM part
+      )
+      SELECT
+        p_brand,
+        p_name as cheapest_part_name,
+        p_type as cheapest_part_type,
+        p_retailprice as min_price
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY min_price ASC;
 - id: max_by_with_ties
   category: max
   sql: |2
@@ -1192,6 +1350,32 @@ queries:
     GROUP BY p_partkey, p_name
     ORDER BY max_supply_cost DESC
     LIMIT 100;
+  variants:
+    datafusion: |2
+
+      WITH ranked AS (
+        SELECT
+          p.p_partkey,
+          p.p_name,
+          s.s_name,
+          ps.ps_supplycost,
+          ROW_NUMBER() OVER (
+            PARTITION BY p.p_partkey, p.p_name
+            ORDER BY ps.ps_supplycost DESC, s.s_name
+          ) as rn
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+      )
+      SELECT
+        p_partkey,
+        p_name,
+        s_name as supplier_name,
+        ps_supplycost as max_supply_cost
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY max_supply_cost DESC
+      LIMIT 100;
 - id: min_by_with_ties
   category: min
   sql: |2
@@ -1208,6 +1392,32 @@ queries:
     GROUP BY p_partkey, p_name
     ORDER BY min_supply_cost ASC
     LIMIT 100;
+  variants:
+    datafusion: |2
+
+      WITH ranked AS (
+        SELECT
+          p.p_partkey,
+          p.p_name,
+          s.s_name,
+          ps.ps_supplycost,
+          ROW_NUMBER() OVER (
+            PARTITION BY p.p_partkey, p.p_name
+            ORDER BY ps.ps_supplycost ASC, s.s_name
+          ) as rn
+        FROM partsupp ps
+        JOIN part p ON ps.ps_partkey = p.p_partkey
+        JOIN supplier s ON ps.ps_suppkey = s.s_suppkey
+      )
+      SELECT
+        p_partkey,
+        p_name,
+        s_name as supplier_name,
+        ps_supplycost as min_supply_cost
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY min_supply_cost ASC
+      LIMIT 100;
 - id: qualify_row_number
   category: qualify
   sql: |2
@@ -1423,6 +1633,30 @@ queries:
     \    (SELECT COUNT(o.o_orderkey)\n     FROM orders o \n     WHERE o.o_custkey = c.c_custkey \n       AND o.o_orderdate\
     \ >= DATE '1995-01-01') as order_count\nFROM customer c\nWHERE c.c_nationkey = 15\n  AND c.c_acctbal > 5000\nORDER BY\
     \ avg_order_value DESC\nLIMIT 100;\n"
+  variants:
+    datafusion: |2
+
+      WITH order_stats AS (
+          SELECT
+              o.o_custkey,
+              AVG(o.o_totalprice) as avg_order_value,
+              COUNT(o.o_orderkey) as order_count
+          FROM orders o
+          WHERE o.o_orderdate >= DATE '1995-01-01'
+          GROUP BY o.o_custkey
+      )
+      SELECT
+          c.c_name,
+          c.c_mktsegment,
+          c.c_acctbal,
+          os.avg_order_value,
+          os.order_count
+      FROM customer c
+      LEFT JOIN order_stats os ON os.o_custkey = c.c_custkey
+      WHERE c.c_nationkey = 15
+        AND c.c_acctbal > 5000
+      ORDER BY os.avg_order_value DESC
+      LIMIT 100;
 - id: optimizer_constant_folding
   category: optimizer
   sql: |2
@@ -1556,6 +1790,14 @@ queries:
           COUNT(*) as customer_count
       FROM customer
       GROUP BY c_mktsegment;
+    datafusion: |2
+
+      SELECT
+          c_mktsegment,
+          MIN(c_name) as sample_customer,
+          COUNT(*) as customer_count
+      FROM customer
+      GROUP BY c_mktsegment;
 - id: any_value_with_filter
   category: aggregation
   sql: |2
@@ -1575,6 +1817,15 @@ queries:
           n_regionkey,
           any(n_name) as sample_nation,
           any(n_comment) as sample_comment,
+          COUNT(*) as nation_count
+      FROM nation
+      GROUP BY n_regionkey;
+    datafusion: |2
+
+      SELECT
+          n_regionkey,
+          MIN(n_name) as sample_nation,
+          MIN(n_comment) as sample_comment,
           COUNT(*) as nation_count
       FROM nation
       GROUP BY n_regionkey;
@@ -1606,6 +1857,18 @@ queries:
     WHERE o_orderdate >= DATE '1995-01-01'
     GROUP BY ALL
     ORDER BY order_month, o_orderpriority;
+  variants:
+    datafusion: |2
+
+      SELECT
+          DATE_TRUNC('month', o_orderdate) as order_month,
+          o_orderpriority,
+          COUNT(o_orderkey) as order_count,
+          SUM(o_totalprice) as monthly_revenue
+      FROM orders
+      WHERE o_orderdate >= DATE '1995-01-01'
+      GROUP BY DATE_TRUNC('month', o_orderdate), o_orderpriority
+      ORDER BY order_month, o_orderpriority;
 
 # ORDER BY ALL - automatic ordering by all SELECT columns
 - id: orderby_all_simple
@@ -1622,6 +1885,18 @@ queries:
     JOIN region r ON n.n_regionkey = r.r_regionkey
     GROUP BY r_name, n_name
     ORDER BY ALL;
+  variants:
+    datafusion: |2
+
+      SELECT
+          r_name,
+          n_name,
+          COUNT(*) as supplier_count
+      FROM supplier s
+      JOIN nation n ON s.s_nationkey = n.n_nationkey
+      JOIN region r ON n.n_regionkey = r.r_regionkey
+      GROUP BY r_name, n_name
+      ORDER BY r_name, n_name, supplier_count;
 - id: orderby_all_desc
   category: orderby
   sql: |2
@@ -1635,6 +1910,17 @@ queries:
     GROUP BY p_brand, p_type
     ORDER BY ALL DESC
     LIMIT 100;
+  variants:
+    datafusion: |2
+
+      SELECT
+          p_brand,
+          p_type,
+          AVG(p_retailprice) as avg_price
+      FROM part
+      GROUP BY p_brand, p_type
+      ORDER BY p_brand DESC, p_type DESC, avg_price DESC
+      LIMIT 100;
 
 # ============================================================================
 # ARRAY type operations - semi-structured data via ARRAY_AGG
@@ -1788,6 +2074,14 @@ queries:
           100 IN UNNEST(parts) as has_part_100
       FROM supplier_parts
       LIMIT 100;
+    datafusion: |2
+
+      SELECT
+          ps_suppkey,
+          MAX(CASE WHEN ps_partkey = 100 THEN 1 ELSE 0 END) = 1 as has_part_100
+      FROM partsupp
+      GROUP BY ps_suppkey
+      LIMIT 100;
 - id: array_length
   category: array
   sql: |2
@@ -1835,6 +2129,15 @@ queries:
           ps_suppkey,
           length(parts) as num_parts
       FROM supplier_parts
+      ORDER BY num_parts DESC
+      LIMIT 100;
+    datafusion: |2
+
+      SELECT
+          ps_suppkey,
+          COUNT(*) as num_parts
+      FROM partsupp
+      GROUP BY ps_suppkey
       ORDER BY num_parts DESC
       LIMIT 100;
 - id: array_slice
@@ -1935,6 +2238,15 @@ queries:
           arrayMax(prices) as max_order
       FROM order_prices
       LIMIT 100;
+    datafusion: |2
+
+      SELECT
+          o_custkey,
+          MIN(o_totalprice) as min_order,
+          MAX(o_totalprice) as max_order
+      FROM orders
+      GROUP BY o_custkey
+      LIMIT 100;
   skip_on: [bigquery]
 - id: array_sort
   category: array
@@ -2028,6 +2340,14 @@ queries:
           l_orderkey,
           arrayDistinct(modes) as unique_modes
       FROM ship_modes
+      LIMIT 100;
+    datafusion: |2
+
+      SELECT
+          l_orderkey,
+          ARRAY_AGG(DISTINCT l_shipmode) as unique_modes
+      FROM lineitem
+      GROUP BY l_orderkey
       LIMIT 100;
   skip_on: [bigquery]
 
@@ -2158,6 +2478,17 @@ queries:
       FROM partsupp
       WHERE ps_suppkey <= 10
       GROUP BY ps_suppkey;
+    datafusion: |2
+
+      SELECT
+          ps_suppkey,
+          MAP(
+              ARRAY_AGG(CAST(ps_partkey AS VARCHAR)),
+              ARRAY_AGG(ps_supplycost)
+          ) as part_costs
+      FROM partsupp
+      WHERE ps_suppkey <= 10
+      GROUP BY ps_suppkey;
     clickhouse: |2
 
       SELECT
@@ -2191,6 +2522,26 @@ queries:
         part_costs['5'] as cost_for_part_5
     FROM supplier_costs
     LIMIT 10;
+  variants:
+    datafusion: |2
+
+      WITH supplier_costs AS (
+          SELECT
+              ps_suppkey,
+              MAP(
+                  ARRAY_AGG(CAST(ps_partkey AS VARCHAR)),
+                  ARRAY_AGG(ps_supplycost)
+              ) as part_costs
+          FROM partsupp
+          WHERE ps_suppkey <= 10
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          MAP_EXTRACT(part_costs, '1')[1] as cost_for_part_1,
+          MAP_EXTRACT(part_costs, '5')[1] as cost_for_part_5
+      FROM supplier_costs
+      LIMIT 10;
   skip_on: [bigquery]
 - id: map_keys_values
   category: map
@@ -2213,6 +2564,24 @@ queries:
         MAP_VALUES(part_costs) as costs
     FROM supplier_costs;
   variants:
+    datafusion: |2
+
+      WITH supplier_costs AS (
+          SELECT
+              ps_suppkey,
+              MAP(
+                  ARRAY_AGG(CAST(ps_partkey AS VARCHAR)),
+                  ARRAY_AGG(ps_supplycost)
+              ) as part_costs
+          FROM partsupp
+          WHERE ps_suppkey <= 5
+          GROUP BY ps_suppkey
+      )
+      SELECT
+          ps_suppkey,
+          MAP_KEYS(part_costs) as part_ids,
+          MAP_VALUES(part_costs) as costs
+      FROM supplier_costs;
     clickhouse: |2
 
       WITH supplier_costs AS (
@@ -2283,6 +2652,27 @@ queries:
           arrayMap(x -> x * 1.1, prices) as prices_with_tax
       FROM part_prices
       LIMIT 50;
+    datafusion: |2
+
+      WITH part_prices AS (
+          SELECT
+              p_brand,
+              ARRAY_AGG(p_retailprice) as prices
+          FROM part
+          GROUP BY p_brand
+      ),
+      exploded AS (
+          SELECT
+              p_brand,
+              UNNEST(prices) as price
+          FROM part_prices
+      )
+      SELECT
+          p_brand,
+          ARRAY_AGG(price * 1.1) as prices_with_tax
+      FROM exploded
+      GROUP BY p_brand
+      LIMIT 50;
   skip_on: [bigquery]
 - id: list_filter
   category: lambda
@@ -2329,6 +2719,28 @@ queries:
           o_custkey,
           arrayFilter(x -> x > 100000, prices) as large_orders
       FROM order_prices
+      LIMIT 100;
+    datafusion: |2
+
+      WITH order_prices AS (
+          SELECT
+              o_custkey,
+              ARRAY_AGG(o_totalprice) as prices
+          FROM orders
+          GROUP BY o_custkey
+      ),
+      exploded AS (
+          SELECT
+              o_custkey,
+              UNNEST(prices) as price
+          FROM order_prices
+      )
+      SELECT
+          o_custkey,
+          ARRAY_AGG(price) as large_orders
+      FROM exploded
+      WHERE price > 100000
+      GROUP BY o_custkey
       LIMIT 100;
   skip_on: [bigquery]
 - id: list_reduce
@@ -2377,6 +2789,27 @@ queries:
           arrayReduce('sum', qtys) as total_qty
       FROM quantities
       LIMIT 100;
+    datafusion: |2
+
+      WITH quantities AS (
+          SELECT
+              l_orderkey,
+              ARRAY_AGG(l_quantity) as qtys
+          FROM lineitem
+          GROUP BY l_orderkey
+      ),
+      exploded AS (
+          SELECT
+              l_orderkey,
+              UNNEST(qtys) as qty
+          FROM quantities
+      )
+      SELECT
+          l_orderkey,
+          SUM(qty) as total_qty
+      FROM exploded
+      GROUP BY l_orderkey
+      LIMIT 100;
   skip_on: [bigquery]
 
 # ============================================================================
@@ -2403,6 +2836,21 @@ queries:
     LIMIT 100;
   variants:
     snowflake: |2
+
+      SELECT
+          l.l_orderkey,
+          l.l_shipdate,
+          o.o_orderdate,
+          o.o_totalprice,
+          l.l_shipdate - o.o_orderdate as days_to_ship
+      FROM lineitem l
+      ASOF JOIN orders o
+          MATCH_CONDITION (l.l_shipdate >= o.o_orderdate)
+          ON l.l_orderkey = o.o_orderkey
+      WHERE l.l_shipdate >= DATE '1995-01-01'
+        AND l.l_shipdate < DATE '1995-02-01'
+      LIMIT 100;
+    datafusion: |2
 
       SELECT
           l.l_orderkey,
@@ -2464,4 +2912,206 @@ queries:
         dimension_value
         FOR dimension_name IN (p_size, p_retailprice)
     );
+  variants:
+    datafusion: |2
+
+      SELECT
+          p_partkey,
+          'p_size' as dimension_name,
+          CAST(p_size AS DECIMAL(15, 2)) as dimension_value
+      FROM part
+      WHERE p_partkey <= 100
+      UNION ALL
+      SELECT
+          p_partkey,
+          'p_retailprice' as dimension_name,
+          p_retailprice as dimension_value
+      FROM part
+      WHERE p_partkey <= 100;
   skip_on: [clickhouse]
+
+# ============================================================================
+# Additional fundamental queries - aligned with DataFrame registry
+# These queries test basic operations that complement the Impala-sourced queries
+# above. They were originally implemented in the DataFrame registry and are now
+# mirrored here for SQL/DataFrame mode parity.
+# ============================================================================
+
+# --- Filter fundamentals ---
+
+- id: filter_selective
+  category: filter
+  sql: |2
+
+    -- Selective compound filter on lineitem
+    SELECT l_orderkey, l_partkey, l_quantity, l_extendedprice
+    FROM lineitem
+    WHERE l_quantity > 45
+      AND l_extendedprice > 50000
+      AND l_discount < 0.05;
+
+- id: filter_non_selective
+  category: filter
+  sql: |2
+
+    -- Non-selective broad filter on lineitem
+    SELECT l_orderkey, l_partkey, l_quantity, l_extendedprice
+    FROM lineitem
+    WHERE l_quantity > 1;
+
+# --- OrderBy fundamentals ---
+
+- id: orderby_simple
+  category: orderby
+  sql: |2
+
+    -- Simple single-column sort with limit
+    SELECT o_orderkey, o_orderdate, o_totalprice
+    FROM orders
+    ORDER BY o_orderdate
+    LIMIT 100;
+
+- id: orderby_multi
+  category: orderby
+  sql: |2
+
+    -- Multi-column sort with limit
+    SELECT l_orderkey, l_linenumber, l_shipdate, l_quantity
+    FROM lineitem
+    ORDER BY l_shipdate, l_orderkey, l_linenumber
+    LIMIT 100;
+
+- id: orderby_desc
+  category: orderby
+  sql: |2
+
+    -- Descending sort with limit
+    SELECT o_orderkey, o_totalprice, o_orderdate
+    FROM orders
+    ORDER BY o_totalprice DESC
+    LIMIT 100;
+
+# --- String fundamentals ---
+
+- id: string_like
+  category: string
+  sql: |2
+
+    -- String contains (LIKE %pattern%)
+    SELECT p_partkey, p_name, p_type
+    FROM part
+    WHERE p_name LIKE '%blue%';
+
+- id: string_starts_with
+  category: string
+  sql: |2
+
+    -- String prefix match
+    SELECT p_partkey, p_name, p_type
+    FROM part
+    WHERE p_type LIKE 'STANDARD%';
+
+- id: string_ends_with
+  category: string
+  sql: |2
+
+    -- String suffix match
+    SELECT p_partkey, p_name, p_type
+    FROM part
+    WHERE p_type LIKE '%BRASS';
+
+- id: string_concat
+  category: string
+  sql: |2
+
+    -- String concatenation
+    SELECT c_custkey, c_name || ' - ' || c_mktsegment as customer_info
+    FROM customer
+    LIMIT 100;
+
+- id: string_substring
+  category: string
+  sql: |2
+
+    -- Substring extraction
+    SELECT c_custkey, SUBSTRING(c_phone FROM 1 FOR 3) as country_code
+    FROM customer
+    LIMIT 100;
+
+# --- Join fundamentals ---
+
+- id: shuffle_join
+  category: shuffle
+  sql: |2
+
+    -- Inner join with aggregation
+    SELECT o.o_orderkey, SUM(l.l_quantity) as total_qty
+    FROM orders o
+    JOIN lineitem l ON o.o_orderkey = l.l_orderkey
+    GROUP BY o.o_orderkey;
+
+# --- Top-N fundamentals ---
+
+- id: topn
+  category: topn
+  sql: |2
+
+    -- Top-N by value (descending sort + limit)
+    SELECT l_orderkey, l_partkey, l_extendedprice
+    FROM lineitem
+    ORDER BY l_extendedprice DESC
+    LIMIT 10;
+
+# --- Window fundamentals ---
+
+- id: window_rank
+  category: window
+  sql: |2
+
+    -- RANK window function with QUALIFY filter
+    SELECT l_orderkey, l_returnflag, l_quantity,
+           RANK() OVER (PARTITION BY l_returnflag ORDER BY l_quantity DESC) as qty_rank
+    FROM lineitem
+    QUALIFY RANK() OVER (PARTITION BY l_returnflag ORDER BY l_quantity DESC) <= 5;
+  variants:
+    datafusion: |2
+
+      SELECT l_orderkey, l_returnflag, l_quantity, qty_rank
+      FROM (
+          SELECT l_orderkey, l_returnflag, l_quantity,
+                 RANK() OVER (PARTITION BY l_returnflag ORDER BY l_quantity DESC) as qty_rank
+          FROM lineitem
+      ) ranked
+      WHERE qty_rank <= 5;
+
+- id: window_sum
+  category: window
+  sql: |2
+
+    -- Partitioned window SUM
+    SELECT l_orderkey, l_linenumber, l_extendedprice,
+           SUM(l_extendedprice) OVER (PARTITION BY l_orderkey) as order_total
+    FROM lineitem;
+
+- id: window_running_sum
+  category: window
+  sql: |2
+
+    -- Cumulative running sum
+    SELECT o_orderkey, o_orderdate, o_totalprice,
+           SUM(o_totalprice) OVER (ORDER BY o_orderdate) as cumulative_revenue
+    FROM orders
+    ORDER BY o_orderdate
+    LIMIT 100;
+
+# --- Limit with ordering ---
+
+- id: limit_ordered
+  category: limit
+  sql: |2
+
+    -- LIMIT clause with ordering on large result set
+    SELECT *
+    FROM lineitem
+    ORDER BY l_orderkey, l_linenumber
+    LIMIT 100;

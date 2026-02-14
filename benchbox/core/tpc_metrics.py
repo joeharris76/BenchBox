@@ -15,6 +15,7 @@ Classes:
 - ThroughputMetrics: Throughput@Size calculation and validation
 - CompositeMetrics: QphH@Size and QphDS@Size calculations
 - MetricsValidator: Validation of metric calculations
+- QueryResult: Container for individual query execution results
 - StatisticalAnalyzer: Statistical analysis of test results
 - MetricsReporter: Formatting and reporting of results
 
@@ -39,7 +40,7 @@ class BenchmarkType(Enum):
 
 
 @dataclass
-class TestResult:
+class QueryResult:
     """Container for individual test execution results."""
 
     query_name: str
@@ -60,7 +61,7 @@ class PowerTestResults:
     """Container for power test results."""
 
     scale_factor: float
-    test_results: list[TestResult]
+    test_results: list[QueryResult]
     total_time: float  # Total power test time in seconds
     benchmark_type: BenchmarkType
 
@@ -78,7 +79,7 @@ class ThroughputTestResults:
     """Container for throughput test results."""
 
     scale_factor: float
-    test_results: list[TestResult]
+    test_results: list[QueryResult]
     total_time: float  # Total throughput test time in seconds
     num_streams: int
     benchmark_type: BenchmarkType
@@ -452,12 +453,12 @@ class StatisticalAnalyzer:
     """Provides statistical analysis utilities for TPC test results."""
 
     @staticmethod
-    def calculate_execution_statistics(results: list[TestResult]) -> dict[str, float]:
+    def calculate_execution_statistics(results: list[QueryResult]) -> dict[str, float]:
         """
         Calculate statistical measures for query execution times.
 
         Args:
-            results: List of TestResult objects
+            results: List of QueryResult objects
 
         Returns:
             Dictionary containing statistical measures
@@ -507,16 +508,16 @@ class StatisticalAnalyzer:
         return stats
 
     @staticmethod
-    def detect_outliers(results: list[TestResult], threshold: float = 2.0) -> list[TestResult]:
+    def detect_outliers(results: list[QueryResult], threshold: float = 2.0) -> list[QueryResult]:
         """
         Detect outlier query execution times using z-score method.
 
         Args:
-            results: List of TestResult objects
+            results: List of QueryResult objects
             threshold: Z-score threshold for outlier detection
 
         Returns:
-            List of TestResult objects identified as outliers
+            List of QueryResult objects identified as outliers
         """
         successful_results = [r for r in results if r.success]
 
@@ -543,12 +544,14 @@ class StatisticalAnalyzer:
         return outliers
 
     @staticmethod
-    def calculate_confidence_interval(results: list[TestResult], confidence_level: float = 0.95) -> tuple[float, float]:
+    def calculate_confidence_interval(
+        results: list[QueryResult], confidence_level: float = 0.95
+    ) -> tuple[float, float]:
         """
         Calculate confidence interval for mean execution time.
 
         Args:
-            results: List of TestResult objects
+            results: List of QueryResult objects
             confidence_level: Confidence level (default: 0.95 for 95% CI)
 
         Returns:
@@ -783,12 +786,12 @@ class TPCMetricsCalculator:
 
         return result
 
-    def analyze_test_results(self, results: list[TestResult]) -> dict[str, Any]:
+    def analyze_test_results(self, results: list[QueryResult]) -> dict[str, Any]:
         """
         Perform comprehensive statistical analysis of test results.
 
         Args:
-            results: List of TestResult objects
+            results: List of QueryResult objects
 
         Returns:
             Dictionary containing statistical analysis results

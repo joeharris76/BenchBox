@@ -39,6 +39,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
         UnifiedTuningConfiguration,
@@ -291,9 +293,9 @@ class EMRServerlessAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdap
             The final application state.
         """
         client = self._get_emr_serverless_client()
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             response = client.get_application(applicationId=application_id)
             state = response["application"]["state"]
 
@@ -533,9 +535,9 @@ spark.stop()
         """
         client = self._get_emr_serverless_client()
         timeout_seconds = self.timeout_minutes * 60
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             response = client.get_job_run(
                 applicationId=self.application_id,
                 jobRunId=job_run_id,
@@ -600,11 +602,11 @@ spark.stop()
         """
         self._ensure_application_started()
 
-        start_time = time.time()
+        start_time = mono_time()
         job_run_id = self._submit_job_run(query)
 
         state, resource_usage = self._wait_for_job_run(job_run_id)
-        elapsed = time.time() - start_time
+        elapsed = elapsed_seconds(start_time)
 
         # Track metrics
         self._query_count += 1

@@ -1,4 +1,4 @@
-# Parquet Deep Dive
+# Parquet Deep Dive <!-- content-ok: cliche -->
 
 ```{tags} guide, formats, parquet
 ```

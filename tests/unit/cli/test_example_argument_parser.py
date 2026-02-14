@@ -302,15 +302,14 @@ class TestExampleArgumentParser:
         assert args.threads == 4
 
 
-@pytest.mark.skipif(IMPORTS_AVAILABLE, reason="Only run when imports are not available")
 class TestExampleArgumentParserMocked:
     """Test behavior when ExampleArgumentParser is not available."""
 
     def test_import_failure_handling(self):
         """Test that import failure is handled gracefully."""
-        # This test runs when IMPORTS_AVAILABLE is False
-        # Just verify that we can handle the missing import
-        assert not IMPORTS_AVAILABLE
+        if IMPORTS_AVAILABLE:
+            assert ExampleArgumentParser is not None
+            return
         assert "not available" in skip_reason
 
 

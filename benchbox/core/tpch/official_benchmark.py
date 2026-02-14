@@ -24,9 +24,7 @@ from benchbox.core.tpch.maintenance_test import (
     TPCHMaintenanceTestResult,
 )
 from benchbox.core.tpch.power_test import TPCHPowerTestResult
-from benchbox.core.tpch.throughput_test import (
-    TPCHThroughputTestResult,
-)
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 @dataclass
@@ -115,7 +113,7 @@ class TPCHOfficialBenchmark:
         if config is None:
             config = self.config
 
-        benchmark_start = time.time()
+        benchmark_start = mono_time()
 
         result = TPCHOfficialBenchmarkResult(
             config=config,
@@ -180,13 +178,13 @@ class TPCHOfficialBenchmark:
             if result.power_at_size > 0 and result.throughput_at_size > 0:
                 result.qphh_at_size = math.sqrt(result.power_at_size * result.throughput_at_size)
 
-            result.total_time = time.time() - benchmark_start
+            result.total_time = elapsed_seconds(benchmark_start)
             result.end_time = datetime.now().isoformat()
 
             return result
 
         except Exception as e:
-            result.total_time = time.time() - benchmark_start
+            result.total_time = elapsed_seconds(benchmark_start)
             result.end_time = datetime.now().isoformat()
             result.success = False
             result.errors.append(f"Benchmark execution failed: {e}")
@@ -264,6 +262,3 @@ class TPCHOfficialBenchmark:
 
 # Aliases for backward compatibility
 QphHResult = TPCHOfficialBenchmarkResult
-PowerTestResult = TPCHPowerTestResult  # Import from power_test module
-ThroughputTestResult = TPCHThroughputTestResult  # Import from throughput_test module
-MaintenanceTestResult = TPCHMaintenanceTestResult  # Import from maintenance_test module

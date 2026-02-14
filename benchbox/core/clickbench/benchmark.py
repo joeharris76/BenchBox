@@ -366,6 +366,11 @@ class ClickBenchBenchmark(BaseBenchmark):
         """
         return self.query_manager.get_query_categories()
 
+    @property
+    def csv_delimiter(self) -> str:
+        """ClickBench uses pipe-delimited CSV files."""
+        return "|"
+
     def get_csv_loading_config(self, table_name: str) -> list[str]:
         """Get CSV loading configuration for ClickBench tables.
 

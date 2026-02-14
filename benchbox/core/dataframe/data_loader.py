@@ -50,16 +50,26 @@ from benchbox.core.dataframe.capabilities import (
 from benchbox.core.dataframe.tuning.write_config import (
     DataFrameWriteConfiguration,
 )
+from benchbox.core.results import normalize_benchmark_id
 from benchbox.utils.compression import CompressionError, CompressionManager
-from benchbox.utils.file_format import detect_compression, detect_data_format, strip_compression_suffix
+from benchbox.utils.file_format import (
+    TRAILING_DUMMY_COLUMN,
+    detect_compression,
+    detect_data_format,
+    has_trailing_delimiter,
+    strip_compression_suffix,
+)
+from benchbox.utils.path_utils import get_benchmark_runs_dataframe_path
 
 if TYPE_CHECKING:
     from benchbox.core.tpch.schema import Table
 
 logger = logging.getLogger(__name__)
 
-# Default cache directory (can be overridden via environment)
-DEFAULT_CACHE_DIR = Path.home() / ".benchbox" / "dataframe-data"
+# Relative cache directory suffix (resolved against runtime CWD).
+# Unified with SQL datagen under benchmark_runs/datagen/ for data reuse.
+DEFAULT_CACHE_DIR = Path("benchmark_runs") / "datagen"
+DATAFRAME_CACHE_VERSION = "v2"
 
 
 class ConversionStatus(Enum):
@@ -242,27 +252,6 @@ class FormatConverter:
     """
 
     @staticmethod
-    def _has_trailing_delimiter(source_path: Path, delimiter: str) -> bool:
-        """Detect if the first data row ends with a trailing delimiter."""
-        compression_type = detect_compression(source_path)
-        try:
-            if compression_type:
-                manager = CompressionManager()
-                compressor = manager.get_compressor(compression_type)
-                with compressor.open_for_read(source_path, mode="rt") as handle:
-                    for line in handle:
-                        if line.strip():
-                            return line.rstrip("\n").endswith(delimiter)
-                return False
-            with source_path.open("rt", encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    if line.strip():
-                        return line.rstrip("\n").endswith(delimiter)
-            return False
-        except (CompressionError, OSError):
-            return False
-
-    @staticmethod
     def convert_csv_to_parquet(
         source_path: Path,
         target_path: Path,
@@ -270,6 +259,7 @@ class FormatConverter:
         delimiter: str = "|",
         compression: str = "zstd",
         write_config: DataFrameWriteConfiguration | None = None,
+        column_types: dict[str, str] | None = None,
     ) -> tuple[ConversionStatus, int]:
         """Convert CSV/TBL file to Parquet format.
 
@@ -283,6 +273,10 @@ class FormatConverter:
             delimiter: Field delimiter (default "|" for TBL files)
             compression: Parquet compression codec (zstd, snappy, gzip)
             write_config: Optional write configuration for physical layout
+            column_types: Optional dict mapping column names to PyArrow type
+                strings (e.g. {"l_shipdate": "date32"}) for explicit typing.
+                Without this, PyArrow infers types and date columns may be
+                read as strings.
 
         Returns:
             Tuple of (conversion status, row count)
@@ -298,21 +292,35 @@ class FormatConverter:
             format_type = detect_data_format(source_path)
             is_tbl_file = format_type == "tbl"
             has_trailing = (
-                is_tbl_file and bool(column_names) and FormatConverter._has_trailing_delimiter(source_path, delimiter)
+                is_tbl_file and bool(column_names) and has_trailing_delimiter(source_path, delimiter, column_names)
             )
 
             # Handle TBL files with trailing delimiter (TPC spec)
             actual_column_names = column_names
             if is_tbl_file and column_names and has_trailing:
-                actual_column_names = column_names + ["_trailing_"]
+                actual_column_names = column_names + [TRAILING_DUMMY_COLUMN]
 
             read_options = pv.ReadOptions(
                 column_names=actual_column_names if actual_column_names else None,
             )
             parse_options = pv.ParseOptions(delimiter=delimiter)
+            # Build explicit column types for PyArrow if provided
+            arrow_column_types = None
+            if column_types:
+                import pyarrow as pa
+
+                type_lookup = {
+                    "date32": pa.date32(),
+                    "int64": pa.int64(),
+                    "float64": pa.float64(),
+                    "string": pa.string(),
+                }
+                arrow_column_types = {col: type_lookup.get(dtype, pa.string()) for col, dtype in column_types.items()}
+
             convert_options = pv.ConvertOptions(
                 auto_dict_encode=True,
                 strings_can_be_null=True,
+                column_types=arrow_column_types,
             )
 
             logger.debug(f"Reading {source_path}")
@@ -434,29 +442,43 @@ class FormatConverter:
 class DataCache:
     """Manages cached DataFrame data files.
 
+    Default cache location is project-local under ``benchmark_runs/datagen/``,
+    unified with SQL datagen output for efficient data reuse across modes.
+    Override with the ``BENCHBOX_CACHE_DIR`` environment variable or the
+    ``cache_dir`` constructor parameter.
+
     Cache structure:
-        ~/.benchbox/dataframe-data/
+        benchmark_runs/datagen/
           tpch/
             sf_1.0/
               parquet/
-                _manifest.json
-                customer.parquet
-                lineitem.parquet
-                ...
+                v2/
+                  _manifest.json
+                  customer.parquet
+                  lineitem.parquet
+                  ...
             sf_0.01/
               parquet/
-                ...
+                v2/
+                  ...
           tpcds/
             ...
     """
 
-    def __init__(self, cache_dir: Path | None = None):
+    def __init__(self, cache_dir: str | Path | None = None):
         """Initialize the data cache.
 
         Args:
-            cache_dir: Custom cache directory (default: ~/.benchbox/dataframe-data/)
+            cache_dir: Custom cache directory (default: benchmark_runs/datagen/)
         """
-        self.cache_dir = cache_dir or Path(os.environ.get("BENCHBOX_CACHE_DIR", str(DEFAULT_CACHE_DIR)))
+        env_cache_dir = os.environ.get("BENCHBOX_CACHE_DIR")
+        if cache_dir is not None:
+            self.cache_dir = Path(cache_dir)
+        elif env_cache_dir:
+            self.cache_dir = Path(env_cache_dir)
+        else:
+            self.cache_dir = get_benchmark_runs_dataframe_path()
+        self.cache_version = DATAFRAME_CACHE_VERSION
 
     def get_cache_path(self, benchmark: str, scale_factor: float, format: DataFormat) -> Path:
         """Get the cache path for a benchmark/SF/format combination.
@@ -470,7 +492,7 @@ class DataCache:
             Path to cache directory
         """
         sf_str = f"sf_{scale_factor}"
-        return self.cache_dir / benchmark / sf_str / format.value
+        return self.cache_dir / benchmark / sf_str / format.value / self.cache_version
 
     def get_manifest_path(self, benchmark: str, scale_factor: float, format: DataFormat) -> Path:
         """Get the manifest file path.
@@ -700,7 +722,7 @@ class DataFrameDataLoader:
     def __init__(
         self,
         platform: str = "polars",
-        cache_dir: Path | None = None,
+        cache_dir: str | Path | None = None,
         prefer_parquet: bool = True,
         force_regenerate: bool = False,
         write_config: DataFrameWriteConfiguration | None = None,
@@ -784,11 +806,13 @@ class DataFrameDataLoader:
         Returns:
             Dictionary mapping table name to data file path
         """
-        # Get benchmark name
-        benchmark_name = getattr(benchmark, "name", "unknown").lower()
+        # Get benchmark name using canonical normalization
+        raw_name = getattr(benchmark, "name", None) or getattr(benchmark, "_name", None) or "unknown"
+        benchmark_name = normalize_benchmark_id(raw_name)
 
         # Determine source files
         source_files = self._get_source_files(benchmark, data_dir)
+        source_files = self._filter_source_files_for_benchmark(benchmark, source_files)
         if not source_files:
             raise ValueError("No source data files found")
 
@@ -879,6 +903,63 @@ class DataFrameDataLoader:
                 return resolved
 
         return {}
+
+    def _expected_benchmark_tables(self, benchmark: Any) -> set[str]:
+        """Infer expected table names for a benchmark run when available."""
+        expected: set[str] = set()
+        benchmark_name = (
+            getattr(benchmark, "name", None) or getattr(benchmark, "_name", None) or benchmark.__class__.__name__
+        )
+
+        if hasattr(benchmark, "get_schema"):
+            try:
+                schema = benchmark.get_schema()
+                if isinstance(schema, dict):
+                    expected.update(str(name).lower() for name in schema.keys())
+            except Exception:
+                pass
+
+        if hasattr(benchmark, "tables") and isinstance(benchmark.tables, dict):
+            expected.update(str(name).lower() for name in benchmark.tables.keys())
+
+        impl = getattr(benchmark, "_impl", None)
+        if impl is not None and hasattr(impl, "tables") and isinstance(impl.tables, dict):
+            expected.update(str(name).lower() for name in impl.tables.keys())
+
+        if not expected:
+            logger.warning(
+                "Unable to infer expected source tables for benchmark %s; DataFrame source filtering is disabled.",
+                benchmark_name,
+            )
+
+        return expected
+
+    def _filter_source_files_for_benchmark(
+        self,
+        benchmark: Any,
+        source_files: dict[str, list[Path]],
+    ) -> dict[str, list[Path]]:
+        """Drop source files that are outside the benchmark's expected table set."""
+        expected_tables = self._expected_benchmark_tables(benchmark)
+        if not expected_tables:
+            return {str(name).lower(): list(paths) for name, paths in source_files.items()}
+
+        filtered: dict[str, list[Path]] = {}
+        dropped: list[str] = []
+        for table_name, paths in source_files.items():
+            normalized_name = str(table_name).lower()
+            if normalized_name not in expected_tables:
+                dropped.append(normalized_name)
+                continue
+            filtered.setdefault(normalized_name, []).extend(paths)
+
+        if dropped:
+            logger.info(
+                "Filtered %d non-benchmark source tables from DataFrame conversion: %s",
+                len(dropped),
+                ", ".join(sorted(set(dropped))),
+            )
+        return filtered
 
     def _discover_files(self, data_dir: Path) -> dict[str, list[Path]]:
         """Discover data files in a directory.
@@ -981,8 +1062,9 @@ class DataFrameDataLoader:
         else:
             logger.info(f"Converting {len(source_files)} tables from CSV/TBL to Parquet")
 
-        # Get schema info for column names
+        # Get schema info for column names and types
         schema_info = self._get_schema_info(benchmark)
+        pyarrow_types = self._get_pyarrow_types(benchmark)
 
         converted_files: dict[str, Path | list[Path]] = {}
         table_metadata: dict[str, dict[str, Any]] = {}
@@ -990,8 +1072,9 @@ class DataFrameDataLoader:
         for table_name, source_path in source_files.items():
             source_list = source_path if isinstance(source_path, list) else [source_path]
 
-            # Get column names from schema
+            # Get column names and types from schema
             column_names = schema_info.get(table_name)
+            column_types = pyarrow_types.get(table_name)
 
             # Get table-specific write config (filter sort columns that exist in this table)
             table_write_config = self._get_table_write_config(write_config, table_name, column_names)
@@ -999,13 +1082,21 @@ class DataFrameDataLoader:
             converted_list: list[Path] = []
             table_entries: list[dict[str, Any]] = []
 
+            # Determine CSV delimiter: check benchmark for override, then infer from format
+            benchmark_delimiter = getattr(benchmark, "csv_delimiter", None)
+            if benchmark_delimiter is None:
+                impl = getattr(benchmark, "_impl", None)
+                if impl is not None:
+                    benchmark_delimiter = getattr(impl, "csv_delimiter", None)
+
             for source_entry in source_list:
                 format_type = detect_data_format(source_entry)
-                delimiter = "|" if format_type == "tbl" else ","
+                delimiter = "|" if format_type == "tbl" else (benchmark_delimiter or ",")
 
                 stripped_name = strip_compression_suffix(source_entry).name
                 if format_type == "tbl":
-                    base_name = stripped_name.replace(".tbl", "", 1)
+                    # Handle both .tbl (TPC-H) and .dat (TPC-DS) extensions
+                    base_name = stripped_name.replace(".tbl", "", 1).replace(".dat", "", 1)
                 elif format_type == "csv":
                     base_name = stripped_name.replace(".csv", "", 1)
                 else:
@@ -1019,6 +1110,7 @@ class DataFrameDataLoader:
                     column_names=column_names,
                     delimiter=delimiter,
                     write_config=table_write_config,
+                    column_types=column_types,
                 )
 
                 if status == ConversionStatus.SUCCESS:
@@ -1065,7 +1157,33 @@ class DataFrameDataLoader:
             tables=table_metadata,
         )
 
+        tracked_files: set[str] = set()
+        for table_info in table_metadata.values():
+            if "files" in table_info:
+                tracked_files.update(str(name) for name in table_info["files"])
+            elif "file" in table_info:
+                tracked_files.add(str(table_info["file"]))
+        self._prune_cache_leaf_files(cache_path, tracked_files)
+
         return converted_files
+
+    def _prune_cache_leaf_files(self, cache_path: Path, tracked_files: set[str]) -> int:
+        """Prune untracked leaf files from a cache directory.
+
+        Keeps `_manifest.json` and the tracked file names for the current run.
+        """
+        if not cache_path.exists():
+            return 0
+
+        preserved = set(tracked_files)
+        preserved.add("_manifest.json")
+        removed = 0
+        for child in cache_path.iterdir():
+            if child.is_dir() or child.name in preserved:
+                continue
+            child.unlink(missing_ok=True)
+            removed += 1
+        return removed
 
     def _get_table_write_config(
         self,
@@ -1137,17 +1255,68 @@ class DataFrameDataLoader:
             except Exception:
                 pass
 
-        # Try schema module for TPC-H
-        if not schema_info:
-            try:
-                from benchbox.core.tpch.schema import TABLES
+        # Merge TPC-H base table schema for any tables not already covered
+        # (e.g. Write Primitives returns staging table schemas but uses TPC-H base data)
+        try:
+            from benchbox.core.tpch.schema import TABLES
 
-                for table in TABLES:
+            for table in TABLES:
+                if table.name.lower() not in schema_info:
                     schema_info[table.name.lower()] = [col.name for col in table.columns]
-            except ImportError:
-                pass
+        except ImportError:
+            pass
 
         return schema_info
+
+    def _get_pyarrow_types(self, benchmark: Any) -> dict[str, dict[str, str]]:
+        """Extract PyArrow column types from benchmark schema.
+
+        Returns a mapping of table_name -> {column_name: pyarrow_type_string}
+        used to ensure proper type casting during CSV-to-Parquet conversion
+        (e.g. date columns typed as date32 instead of inferred as strings).
+
+        Args:
+            benchmark: Benchmark instance
+
+        Returns:
+            Dictionary mapping table name to dict of column name -> PyArrow type
+        """
+        type_info: dict[str, dict[str, str]] = {}
+
+        # Try get_schema() method (returns dicts with "type" field from get_sql_type())
+        if hasattr(benchmark, "get_schema"):
+            try:
+                schema = benchmark.get_schema()
+                for table_name, table_schema in schema.items():
+                    columns = table_schema.get("columns", [])
+                    col_types = {}
+                    for c in columns:
+                        sql_type = c.get("type", "")
+                        arrow_type = SchemaMapper.PYARROW_TYPE_MAP.get(sql_type)
+                        if arrow_type:
+                            col_types[c["name"]] = arrow_type
+                    if col_types:
+                        type_info[table_name.lower()] = col_types
+            except Exception:
+                pass
+
+        # Merge TPC-H base table types for any tables not already covered
+        try:
+            from benchbox.core.tpch.schema import TABLES
+
+            for table in TABLES:
+                if table.name.lower() not in type_info:
+                    col_types = {}
+                    for col in table.columns:
+                        arrow_type = SchemaMapper.PYARROW_TYPE_MAP.get(col.data_type.value)
+                        if arrow_type:
+                            col_types[col.name] = arrow_type
+                    if col_types:
+                        type_info[table.name.lower()] = col_types
+        except ImportError:
+            pass
+
+        return type_info
 
 
 def get_tpch_column_names() -> dict[str, list[str]]:

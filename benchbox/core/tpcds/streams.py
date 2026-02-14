@@ -101,6 +101,8 @@ class TPCDSPermutationGenerator:
 class TPCDSStreamManager:
     """Manages multiple query streams with different parameter sets."""
 
+    PERMUTATION_SEED = 19620718
+
     def __init__(self, query_manager, stream_configs: Optional[list[QueryStreamConfig]] = None) -> None:
         """Initialize stream manager."""
         self.query_manager = query_manager

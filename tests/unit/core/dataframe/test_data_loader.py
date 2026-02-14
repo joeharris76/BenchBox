@@ -20,6 +20,7 @@ import pytest
 
 from benchbox.core.dataframe.capabilities import DataFormat
 from benchbox.core.dataframe.data_loader import (
+    DATAFRAME_CACHE_VERSION,
     CacheManifest,
     ConversionStatus,
     DataCache,
@@ -225,6 +226,147 @@ class TestFormatConverter:
             assert status == ConversionStatus.FAILED
             assert row_count == 0
 
+    def test_convert_csv_to_parquet_date_column_types(self):
+        """Test that date columns are typed as date32 when column_types is provided.
+
+        Regression test: without explicit column_types, PyArrow infers date
+        strings (e.g. '1995-09-01') as string type, causing Polars queries
+        to fail with 'cannot compare date/datetime/time to a string value'.
+        """
+        import pyarrow.parquet as pq
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            # Create a TBL file with date columns (like TPC-H lineitem)
+            tbl_path = tmpdir / "lineitem.tbl"
+            tbl_path.write_text(
+                "1|100|50|1|17.0|100.00|0.04|0.02|N|O|1996-03-13|1996-02-12|1996-03-22|DELIVER IN PERSON|TRUCK|comment|\n"
+                "1|200|50|2|36.0|200.00|0.09|0.06|N|O|1996-04-12|1996-02-28|1996-04-20|TAKE BACK RETURN|MAIL|comment|\n"
+            )
+
+            parquet_path = tmpdir / "lineitem.parquet"
+            column_names = [
+                "l_orderkey",
+                "l_partkey",
+                "l_suppkey",
+                "l_linenumber",
+                "l_quantity",
+                "l_extendedprice",
+                "l_discount",
+                "l_tax",
+                "l_returnflag",
+                "l_linestatus",
+                "l_shipdate",
+                "l_commitdate",
+                "l_receiptdate",
+                "l_shipinstruct",
+                "l_shipmode",
+                "l_comment",
+            ]
+            column_types = {
+                "l_orderkey": "int64",
+                "l_partkey": "int64",
+                "l_suppkey": "int64",
+                "l_linenumber": "int64",
+                "l_quantity": "float64",
+                "l_extendedprice": "float64",
+                "l_discount": "float64",
+                "l_tax": "float64",
+                "l_returnflag": "string",
+                "l_linestatus": "string",
+                "l_shipdate": "date32",
+                "l_commitdate": "date32",
+                "l_receiptdate": "date32",
+                "l_shipinstruct": "string",
+                "l_shipmode": "string",
+                "l_comment": "string",
+            }
+
+            status, row_count = FormatConverter.convert_csv_to_parquet(
+                source_path=tbl_path,
+                target_path=parquet_path,
+                column_names=column_names,
+                delimiter="|",
+                column_types=column_types,
+            )
+
+            assert status == ConversionStatus.SUCCESS
+            assert row_count == 2
+
+            # Verify the Parquet schema has date types, not strings
+            table = pq.read_table(parquet_path)
+            schema = table.schema
+
+            import pyarrow as pa
+
+            assert schema.field("l_shipdate").type == pa.date32()
+            assert schema.field("l_commitdate").type == pa.date32()
+            assert schema.field("l_receiptdate").type == pa.date32()
+
+            # Verify date values are actual dates, not strings
+            shipdate_col = table.column("l_shipdate")
+            assert shipdate_col[0].as_py() == __import__("datetime").date(1996, 3, 13)
+
+    def test_convert_tbl_with_column_types_casts_dates(self):
+        """Test that column_types ensures date typing in TBL files.
+
+        TBL files are headerless with pipe delimiters. Without column_types,
+        auto_dict_encode may cause date columns to be dictionary-encoded as
+        strings instead of proper date32 types. This is the scenario that
+        caused the Polars regression.
+        """
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            tbl_path = tmpdir / "orders.tbl"
+            tbl_path.write_text(
+                "1|370|O|172799.49|1996-01-02|5-LOW|Clerk#000000951|0|comment|\n"
+                "2|781|O|38426.09|1996-12-01|1-URGENT|Clerk#000000880|0|comment|\n"
+            )
+
+            parquet_path = tmpdir / "orders.parquet"
+            column_names = [
+                "o_orderkey",
+                "o_custkey",
+                "o_orderstatus",
+                "o_totalprice",
+                "o_orderdate",
+                "o_orderpriority",
+                "o_clerk",
+                "o_shippriority",
+                "o_comment",
+            ]
+            column_types = {
+                "o_orderkey": "int64",
+                "o_custkey": "int64",
+                "o_orderstatus": "string",
+                "o_totalprice": "float64",
+                "o_orderdate": "date32",
+                "o_orderpriority": "string",
+                "o_clerk": "string",
+                "o_shippriority": "int64",
+                "o_comment": "string",
+            }
+
+            status, row_count = FormatConverter.convert_csv_to_parquet(
+                source_path=tbl_path,
+                target_path=parquet_path,
+                column_names=column_names,
+                delimiter="|",
+                column_types=column_types,
+            )
+
+            assert status == ConversionStatus.SUCCESS
+            assert row_count == 2
+
+            table = pq.read_table(parquet_path)
+            assert table.schema.field("o_orderdate").type == pa.date32()
+            assert table.column("o_orderdate")[0].as_py() == __import__("datetime").date(1996, 1, 2)
+
 
 class TestSourceFileDiscovery:
     """Tests for source file discovery with sharded paths."""
@@ -320,6 +462,21 @@ class TestCacheManifest:
 class TestDataCache:
     """Tests for DataCache class."""
 
+    def test_explicit_string_cache_dir_is_normalized_to_path(self):
+        """String cache_dir values should be normalized and usable for path joins."""
+        cache = DataCache("tmp/cache")
+        assert isinstance(cache.cache_dir, Path)
+
+        path = cache.get_cache_path("tpch", 1.0, DataFormat.PARQUET)
+        assert path == Path("tmp/cache") / "tpch" / "sf_1.0" / "parquet" / DATAFRAME_CACHE_VERSION
+
+    def test_default_cache_uses_runtime_cwd(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        """Default cache path should resolve from current CWD at DataCache construction time."""
+        with patch.dict("os.environ", {}, clear=True):
+            monkeypatch.chdir(tmp_path)
+            cache = DataCache()
+            assert cache.cache_dir == tmp_path / "benchmark_runs" / "datagen"
+
     def test_get_cache_path(self):
         """Test cache path generation."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -330,6 +487,7 @@ class TestDataCache:
             assert "tpch" in str(path)
             assert "sf_1.0" in str(path)
             assert "parquet" in str(path)
+            assert DATAFRAME_CACHE_VERSION in str(path)
 
     def test_get_manifest_path(self):
         """Test manifest path generation."""
@@ -339,6 +497,30 @@ class TestDataCache:
             path = cache.get_manifest_path("tpch", 0.01, DataFormat.PARQUET)
 
             assert path.name == "_manifest.json"
+
+    def test_old_cache_layout_is_ignored(self):
+        """Old cache layout without version segment should not be used."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            cache = DataCache(tmpdir)
+
+            old_cache_path = tmpdir / "tpch" / "sf_1.0" / "parquet"
+            old_cache_path.mkdir(parents=True)
+            (old_cache_path / "customer.parquet").touch()
+            with open(old_cache_path / "_manifest.json", "w") as f:
+                json.dump(
+                    {
+                        "benchmark": "tpch",
+                        "scale_factor": 1.0,
+                        "format": "parquet",
+                        "created_at": "2025-01-01T00:00:00",
+                        "source_hash": "abc123",
+                        "tables": {"customer": {"file": "customer.parquet"}},
+                    },
+                    f,
+                )
+
+            assert cache.has_cached_data("tpch", 1.0, DataFormat.PARQUET) is False
 
     def test_has_cached_data_empty(self):
         """Test cache check on empty cache."""
@@ -613,7 +795,7 @@ class TestDataFrameDataLoader:
             loader = DataFrameDataLoader(cache_dir=cache_dir)
 
             # Setup mock cache
-            cache_path = cache_dir / "tpch" / "sf_1.0" / "parquet"
+            cache_path = loader.cache.get_cache_path("tpch", 1.0, DataFormat.PARQUET)
             cache_path.mkdir(parents=True)
 
             # Create cached files

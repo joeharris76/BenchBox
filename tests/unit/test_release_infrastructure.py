@@ -130,7 +130,9 @@ class TestReleaseInfrastructure:
 
         # Check trigger events (YAML parses 'on' as True)
         on_events = workflow[True]  # YAML parses "on" as boolean True
-        assert "release" in on_events
+        assert "push" in on_events
+        assert "tags" in on_events["push"]
+        assert "v*" in on_events["push"]["tags"]
         assert "workflow_dispatch" in on_events
 
         # Check jobs exist

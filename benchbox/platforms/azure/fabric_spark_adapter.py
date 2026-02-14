@@ -36,6 +36,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
         ForeignKeyConfiguration,
@@ -348,10 +350,10 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         Returns:
             The final session state.
         """
-        start_time = time.time()
+        start_time = mono_time()
         session_url = f"{self.livy_endpoint}/{session_id}"
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             response = requests.get(
                 session_url,
                 headers=self._get_headers(),
@@ -426,7 +428,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
             "kind": kind,
         }
 
-        start_time = time.time()
+        start_time = mono_time()
 
         response = requests.post(
             statements_url,
@@ -444,7 +446,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         # Wait for statement to complete
         result = self._wait_for_statement(session_id, statement_id)
 
-        execution_time = time.time() - start_time
+        execution_time = elapsed_seconds(start_time)
         self._total_statement_time_seconds += execution_time
         self._query_count += 1
 
@@ -465,10 +467,10 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
             The statement result.
         """
         timeout_seconds = self.timeout_minutes * 60
-        start_time = time.time()
+        start_time = mono_time()
         statement_url = f"{self.livy_endpoint}/{session_id}/statements/{statement_id}"
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             response = requests.get(
                 statement_url,
                 headers=self._get_headers(),
@@ -633,11 +635,11 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         Returns:
             Dict with query results.
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         result = self._execute_statement(query, kind="sql")
 
-        execution_time = time.time() - start_time
+        execution_time = elapsed_seconds(start_time)
 
         # Parse result data
         data = result.get("data", {})
@@ -645,7 +647,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
 
         return {
             "success": True,
-            "execution_time": execution_time,
+            "execution_time_seconds": execution_time,
             "row_count": len(data.get("values", [])),
             "columns": [f.get("name") for f in schema.get("fields", [])],
             "data": data.get("values", []),

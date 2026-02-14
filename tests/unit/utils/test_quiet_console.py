@@ -1,11 +1,11 @@
 import pytest
 
-from benchbox.utils.printing import get_console, quiet_console, set_quiet
+from benchbox.utils.printing import get_console, get_quiet_console, quiet_console, set_quiet
 
 pytestmark = pytest.mark.fast
 
 
-def test_quiet_console_respects_quiet_flag():
+def test_quiet_console_respects_quiet_flag() -> None:
     set_quiet(False)
     console = get_console()
     with console.capture() as capture:
@@ -13,10 +13,11 @@ def test_quiet_console_respects_quiet_flag():
     assert "loud" in capture.get()
 
     set_quiet(True)
-    live_console = get_console(False)
-    with live_console.capture() as capture:
-        quiet_console.print("silent")
-    assert capture.get() == ""
+    sink_console = get_console()
+    assert sink_console is get_quiet_console()
+    assert sink_console is get_console(quiet=True)
+    assert sink_console is not get_console(quiet=False)
+    quiet_console.print("silent")
 
     # Reset global state for other tests
     set_quiet(False)

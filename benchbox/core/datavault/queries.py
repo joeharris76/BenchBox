@@ -743,8 +743,7 @@ SELECT
         THEN 1 ELSE 0 END) AS low_line_count
 FROM link_lineitem ll
 JOIN sat_lineitem sl ON ll.hk_lineitem_link = sl.hk_lineitem_link AND sl.load_end_dts IS NULL
-JOIN hub_order ho ON ll.hk_order = ho.hk_order
-JOIN sat_order so ON ho.hk_order = so.hk_order AND so.load_end_dts IS NULL
+JOIN sat_order so ON ll.hk_order = so.hk_order AND so.load_end_dts IS NULL
 WHERE sl.l_shipmode IN (':shipmode1', ':shipmode2')
   AND sl.l_commitdate < sl.l_receiptdate
   AND sl.l_shipdate < sl.l_commitdate
@@ -762,7 +761,7 @@ SELECT
 FROM (
     SELECT
         hc.c_custkey,
-        COUNT(ho.hk_order) AS c_count
+        COUNT(so.hk_order) AS c_count
     FROM hub_customer hc
     LEFT JOIN link_order_customer loc ON hc.hk_customer = loc.hk_customer
     LEFT JOIN hub_order ho ON loc.hk_order = ho.hk_order
@@ -859,22 +858,21 @@ SELECT
     ho.o_orderkey,
     so.o_orderdate,
     so.o_totalprice,
-    SUM(sl.l_quantity) AS total_qty
+    large_orders.total_qty
 FROM hub_customer hc
 JOIN sat_customer sc ON hc.hk_customer = sc.hk_customer AND sc.load_end_dts IS NULL
 JOIN link_order_customer loc ON hc.hk_customer = loc.hk_customer
 JOIN hub_order ho ON loc.hk_order = ho.hk_order
 JOIN sat_order so ON ho.hk_order = so.hk_order AND so.load_end_dts IS NULL
-JOIN link_lineitem ll ON ho.hk_order = ll.hk_order
-JOIN sat_lineitem sl ON ll.hk_lineitem_link = sl.hk_lineitem_link AND sl.load_end_dts IS NULL
-WHERE ho.hk_order IN (
-    SELECT ll2.hk_order
+JOIN (
+    SELECT
+        ll2.hk_order,
+        SUM(sl2.l_quantity) AS total_qty
     FROM link_lineitem ll2
     JOIN sat_lineitem sl2 ON ll2.hk_lineitem_link = sl2.hk_lineitem_link AND sl2.load_end_dts IS NULL
     GROUP BY ll2.hk_order
     HAVING SUM(sl2.l_quantity) > :quantity
-)
-GROUP BY sc.c_name, hc.c_custkey, ho.o_orderkey, so.o_orderdate, so.o_totalprice
+) large_orders ON ho.hk_order = large_orders.hk_order
 ORDER BY so.o_totalprice DESC, so.o_orderdate
 LIMIT 100
         """,
@@ -947,16 +945,14 @@ ORDER BY ss.s_name
 SELECT
     ss.s_name,
     COUNT(*) AS numwait
-FROM hub_supplier hs
-JOIN sat_supplier ss ON hs.hk_supplier = ss.hk_supplier AND ss.load_end_dts IS NULL
-JOIN link_lineitem ll1 ON hs.hk_supplier = ll1.hk_supplier
+FROM sat_supplier ss
+JOIN link_supplier_nation lsn ON ss.hk_supplier = lsn.hk_supplier
+JOIN sat_nation sn ON lsn.hk_nation = sn.hk_nation AND sn.load_end_dts IS NULL
+JOIN link_lineitem ll1 ON ss.hk_supplier = ll1.hk_supplier
 JOIN sat_lineitem sl1 ON ll1.hk_lineitem_link = sl1.hk_lineitem_link AND sl1.load_end_dts IS NULL
-JOIN hub_order ho ON ll1.hk_order = ho.hk_order
-JOIN sat_order so ON ho.hk_order = so.hk_order AND so.load_end_dts IS NULL
-JOIN link_supplier_nation lsn ON hs.hk_supplier = lsn.hk_supplier
-JOIN hub_nation hn ON lsn.hk_nation = hn.hk_nation
-JOIN sat_nation sn ON hn.hk_nation = sn.hk_nation AND sn.load_end_dts IS NULL
-WHERE so.o_orderstatus = 'F'
+JOIN sat_order so ON ll1.hk_order = so.hk_order AND so.load_end_dts IS NULL
+WHERE ss.load_end_dts IS NULL
+  AND so.o_orderstatus = 'F'
   AND sl1.l_receiptdate > sl1.l_commitdate
   AND sn.n_name = ':nation'
   AND EXISTS (

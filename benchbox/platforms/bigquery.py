@@ -13,9 +13,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -836,7 +837,7 @@ class BigQueryAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using BigQuery dataset and tables."""
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Create dataset if it doesn't exist
@@ -877,7 +878,7 @@ class BigQueryAdapter(PlatformAdapter):
             self.logger.error(f"Schema creation failed: {e}")
             raise
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
@@ -893,7 +894,7 @@ class BigQueryAdapter(PlatformAdapter):
             logger.info(f"Loading data from cloud storage: {path_info['provider']} bucket '{path_info['bucket']}'")
             print(f"  Loading data from {path_info['provider']} cloud storage")
 
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         try:
@@ -986,7 +987,7 @@ class BigQueryAdapter(PlatformAdapter):
 
                     try:
                         self.log_verbose(f"Loading data for table: {table_name}")
-                        load_start = time.time()
+                        load_start = mono_time()
                         table_name_upper = table_name.upper()
                         table_ref = connection.dataset(self.dataset_id).table(table_name_upper)
 
@@ -1038,7 +1039,7 @@ class BigQueryAdapter(PlatformAdapter):
 
                         table_stats[table_name_upper] = row_count
 
-                        load_time = time.time() - load_start
+                        load_time = elapsed_seconds(load_start)
                         chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
                         self.logger.info(
                             f"✅ Loaded {row_count:,} rows into {table_name_upper}{chunk_info} in {load_time:.2f}s"
@@ -1071,7 +1072,7 @@ class BigQueryAdapter(PlatformAdapter):
 
                     try:
                         self.log_verbose(f"Direct loading data for table: {table_name}")
-                        load_start = time.time()
+                        load_start = mono_time()
                         table_name_upper = table_name.upper()
 
                         # Load directly from local file(s)
@@ -1116,7 +1117,7 @@ class BigQueryAdapter(PlatformAdapter):
 
                         table_stats[table_name_upper] = row_count
 
-                        load_time = time.time() - load_start
+                        load_time = elapsed_seconds(load_start)
                         chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
                         self.logger.info(
                             f"✅ Loaded {row_count:,} rows into {table_name_upper}{chunk_info} in {load_time:.2f}s"
@@ -1126,7 +1127,7 @@ class BigQueryAdapter(PlatformAdapter):
                         self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
                         table_stats[table_name.upper()] = 0
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.logger.info(f"✅ Loaded {total_rows:,} total rows in {total_time:.2f}s")
 
@@ -1177,7 +1178,7 @@ class BigQueryAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute query with detailed timing and cost tracking."""
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Replace table references with fully qualified names
@@ -1200,7 +1201,7 @@ class BigQueryAdapter(PlatformAdapter):
             query_job = connection.query(translated_query, job_config=job_config)
             result = list(query_job.result())
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Get job statistics
@@ -1257,12 +1258,12 @@ class BigQueryAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

@@ -295,11 +295,12 @@ class TPCHSkewDataGenerator(VerbosityMixin):
             if (self.output_dir / filename).exists()
         }
 
-    def _apply_skew_to_tables(self, base_tables: dict[str, Path]) -> dict[str, Path]:
+    def _apply_skew_to_tables(self, base_tables: dict[str, Path | list[Path]]) -> dict[str, Path]:
         """Apply skew transformations to all tables.
 
         Args:
-            base_tables: Dictionary of table names to base data file paths
+            base_tables: Dictionary of table names to base data file path(s).
+                Values may be a single Path or a list of Paths (sharded generation).
 
         Returns:
             Dictionary of table names to skewed data file paths
@@ -309,8 +310,11 @@ class TPCHSkewDataGenerator(VerbosityMixin):
         # Tables that don't need modification (reference data)
         unchanged = {"nation", "region"}
 
-        for table_name, base_path in base_tables.items():
+        for table_name, base_path_or_paths in base_tables.items():
             output_path = self.output_dir / f"{table_name}.tbl"
+
+            # Normalize sharded files: concatenate into a single file for processing
+            base_path = self._normalize_shards(base_path_or_paths, table_name)
 
             if table_name in unchanged:
                 # Copy unchanged tables directly
@@ -340,6 +344,33 @@ class TPCHSkewDataGenerator(VerbosityMixin):
             self.log_verbose(f"  {table_name}: skew applied")
 
         return skewed_tables
+
+    @staticmethod
+    def _normalize_shards(path_or_paths: Path | list[Path], table_name: str) -> Path:
+        """Merge sharded files into a single path for processing.
+
+        When TPCHDataGenerator runs with parallel > 1, it produces multiple
+        shard files per table. This method concatenates them into a single
+        temporary file so the skew transforms can process the table as a whole.
+
+        Args:
+            path_or_paths: Single path or list of shard paths.
+            table_name: Table name (for logging context only).
+
+        Returns:
+            A single Path to the (possibly merged) data file.
+        """
+        if isinstance(path_or_paths, list):
+            if len(path_or_paths) == 1:
+                return path_or_paths[0]
+            # Concatenate shards into first shard's directory
+            merged = path_or_paths[0].parent / f"{table_name}_merged.tbl"
+            with open(merged, "wb") as out:
+                for shard in sorted(path_or_paths, key=lambda p: p.name):
+                    with open(shard, "rb") as inp:
+                        shutil.copyfileobj(inp, out)
+            return merged
+        return path_or_paths
 
     def _read_tbl_file(self, path: Path) -> list[list[str]]:
         """Read a .tbl file into list of rows.

@@ -27,9 +27,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 from .base.data_loading import FileFormatRegistry
 
@@ -665,7 +666,7 @@ class PrestoAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using Presto-optimized table definitions."""
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -708,7 +709,7 @@ class PrestoAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
@@ -723,7 +724,7 @@ class PrestoAdapter(PlatformAdapter):
         For benchmarking, we use INSERT statements with values or external table approach
         depending on data size and staging configuration.
         """
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         cursor = connection.cursor()
@@ -794,7 +795,7 @@ class PrestoAdapter(PlatformAdapter):
                 self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
 
                 try:
-                    load_start = time.time()
+                    load_start = mono_time()
                     total_rows_loaded = 0
 
                     for file_path in valid_files:
@@ -855,7 +856,7 @@ class PrestoAdapter(PlatformAdapter):
 
                     table_stats[table_name_lower] = total_rows_loaded
 
-                    load_time = time.time() - load_start
+                    load_time = elapsed_seconds(load_start)
                     self.logger.info(
                         f"✅ Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
                     )
@@ -894,7 +895,7 @@ class PrestoAdapter(PlatformAdapter):
 
                     table_stats[table_name.lower()] = 0
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.logger.info(f"✅ Loaded {total_rows:,} total rows in {total_time:.2f}s")
 
@@ -948,7 +949,7 @@ class PrestoAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute query with detailed timing and performance tracking."""
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -957,7 +958,7 @@ class PrestoAdapter(PlatformAdapter):
             cursor.execute(query)
             result = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Get query statistics
@@ -1004,12 +1005,12 @@ class PrestoAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

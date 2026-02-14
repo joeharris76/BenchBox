@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 from benchbox.core.tpcds.benchmark import TPCDSBenchmark
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tpcds.power_test import TPCDSPowerTestResult
@@ -117,7 +118,7 @@ class TPCDSOfficialBenchmark:
         if config is None:
             config = self.config
 
-        benchmark_start = time.time()
+        benchmark_start = mono_time()
 
         result = TPCDSOfficialBenchmarkResult(
             config=config,
@@ -213,13 +214,13 @@ class TPCDSOfficialBenchmark:
             if result.power_at_size > 0 and result.throughput_at_size > 0:
                 result.qphds_at_size = math.sqrt(result.power_at_size * result.throughput_at_size)
 
-            result.total_time = time.time() - benchmark_start
+            result.total_time = elapsed_seconds(benchmark_start)
             result.end_time = datetime.now().isoformat()
 
             return result
 
         except Exception as e:
-            result.total_time = time.time() - benchmark_start
+            result.total_time = elapsed_seconds(benchmark_start)
             result.end_time = datetime.now().isoformat()
             result.success = False
             result.errors.append(f"Benchmark execution failed: {e}")
@@ -293,23 +294,3 @@ class TPCDSOfficialBenchmark:
                     f.write(f"  - {error}\n")
 
         return output_path
-
-
-# Aliases for backward compatibility
-BenchmarkResult = TPCDSOfficialBenchmarkResult
-PhaseResult = TPCDSOfficialBenchmarkResult  # Generic alias
-
-
-# Mock QueryResult for test compatibility
-@dataclass
-class QueryResult:
-    query_id: int = 1
-    execution_time: float = 1.0
-    success: bool = True
-
-
-# Mock BenchmarkPhase enum for test compatibility
-class BenchmarkPhase:
-    POWER = "power"
-    THROUGHPUT = "throughput"
-    MAINTENANCE = "maintenance"

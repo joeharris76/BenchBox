@@ -34,6 +34,7 @@ def run_cli_command(
         command,
         cwd=resolved_cwd,
         env=effective_env,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         encoding="utf-8",

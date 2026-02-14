@@ -113,7 +113,7 @@ class TestTPCQueryResult:
 
         assert result_dict["query_id"] == "Q1"
         assert result_dict["stream_id"] == 0
-        assert result_dict["execution_time"] == 5.0
+        assert result_dict["execution_time_seconds"] == 5.0
         assert result_dict["status"] == "completed"
         assert result_dict["result_rows"] == 100
 
@@ -810,7 +810,7 @@ class MockTPCCompliantBenchmark(TPCCompliantBenchmark):
             "power_score": metrics.power_score,
             "throughput_score": metrics.throughput_score,
             "composite_score": metrics.composite_score,
-            "execution_time": metrics.execution_time,
+            "execution_time_seconds": metrics.execution_time,
             "throughput": metrics.throughput,
             "compliance_score": metrics.compliance_score,
         }

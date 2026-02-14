@@ -14,7 +14,6 @@ import os
 import re
 import subprocess
 import tempfile
-import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -22,7 +21,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from benchbox.utils.file_format import detect_compression
+from benchbox.utils.clock import elapsed_seconds, mono_time
+from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN, detect_compression
+from benchbox.utils.printing import quiet_console
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +128,19 @@ class BenchmarkTablesSource:
 
     def can_provide(self, benchmark: Any, data_dir: Path) -> bool:
         """Check if benchmark has tables attribute."""
-        return (
-            hasattr(benchmark, "tables")
-            and benchmark.tables
-            and hasattr(benchmark.tables, "items")
-            and not str(type(benchmark.tables)).startswith("<class 'unittest.mock.")
-        )
+        if not hasattr(benchmark, "tables"):
+            return False
+
+        tables = benchmark.tables
+        if not tables or not hasattr(tables, "items") or not callable(tables.items):
+            return False
+
+        try:
+            iter(tables.items())
+        except Exception:
+            return False
+
+        return True
 
     def get_data_source(self, benchmark: Any, data_dir: Path) -> DataSource | None:
         """Get data from benchmark.tables."""
@@ -154,13 +162,19 @@ class BenchmarkImplTablesSource:
 
     def can_provide(self, benchmark: Any, data_dir: Path) -> bool:
         """Check if benchmark._impl has tables attribute."""
-        return (
-            hasattr(benchmark, "_impl")
-            and hasattr(benchmark._impl, "tables")
-            and benchmark._impl.tables
-            and hasattr(benchmark._impl.tables, "items")
-            and not str(type(benchmark._impl.tables)).startswith("<class 'unittest.mock.")
-        )
+        if not hasattr(benchmark, "_impl") or not hasattr(benchmark._impl, "tables"):
+            return False
+
+        tables = benchmark._impl.tables
+        if not tables or not hasattr(tables, "items") or not callable(tables.items):
+            return False
+
+        try:
+            iter(tables.items())
+        except Exception:
+            return False
+
+        return True
 
     def get_data_source(self, benchmark: Any, data_dir: Path) -> DataSource | None:
         """Get data from benchmark._impl.tables."""
@@ -226,7 +240,7 @@ class ManifestFileSource:
                                     break
 
                     if mapping:
-                        print(
+                        quiet_console.print(
                             f"Using data files from _datagen_manifest.json (v2, format: {preferred_format or 'auto'})"
                         )
                         return DataSource(source_type="manifest_v2", tables=mapping)
@@ -253,7 +267,7 @@ class ManifestFileSource:
                         mapping[table] = table_files
 
             if mapping:
-                print("Using data files from _datagen_manifest.json (v1)")
+                quiet_console.print("Using data files from _datagen_manifest.json (v1)")
                 return DataSource(source_type="manifest", tables=mapping)
 
         except Exception as e:
@@ -654,11 +668,11 @@ class DuckDBNativeHandler(FileFormatHandler):
                 # Use explicit column names from schema plus an ignore column for trailing pipe
                 # Then EXCLUDE the ignore column in SELECT to get only the real columns.
                 # null_padding=true handles files that may or may not have trailing delimiters.
-                all_names = col_names + ["_trailing_ignore"]
+                all_names = col_names + [TRAILING_DUMMY_COLUMN]
                 names_param = ", ".join([f"'{col}'" for col in all_names])
                 insert_sql = f"""
                     INSERT INTO {validated_table}
-                    SELECT * EXCLUDE (_trailing_ignore) FROM read_csv('{escaped_path}',
+                    SELECT * EXCLUDE ({TRAILING_DUMMY_COLUMN}) FROM read_csv('{escaped_path}',
                         delim='|',
                         header=false,
                         nullstr='',
@@ -1680,7 +1694,7 @@ class DataLoader:
         Returns:
             Tuple of (table_stats, duration) where table_stats maps table names to row counts
         """
-        start_time = time.time()
+        start_time = mono_time()
         self.adapter.log_operation_start("Data loading", f"benchmark: {self.benchmark.__class__.__name__}")
         self.adapter.log_very_verbose(f"Data directory: {self.data_dir}")
 
@@ -1690,7 +1704,7 @@ class DataLoader:
         data_source = self.resolver.resolve(self.benchmark, self.data_dir)
         if not data_source:
             self.adapter.log_very_verbose("No data source found")
-            return table_stats, time.time() - start_time
+            return table_stats, elapsed_seconds(start_time)
 
         # Load based on source type
         if data_source.source_type == "legacy_get_tables":
@@ -1700,7 +1714,7 @@ class DataLoader:
 
         self.connection.commit()
 
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         total_rows = sum(table_stats.values())
         self.adapter.log_operation_complete(
             "Data loading", duration, f"{total_rows:,} total rows, {len(table_stats)} tables"
@@ -1724,7 +1738,7 @@ class DataLoader:
                 row_count = InMemoryDataHandler.load_table(table_name, table_data, self.connection)
                 table_stats[table_name] = row_count
             except Exception as e:
-                print(f"  ❌ Failed to load {table_name}: {e}")
+                quiet_console.print(f"  ❌ Failed to load {table_name}: {e}")
                 table_stats[table_name] = 0
 
         return table_stats
@@ -1752,7 +1766,7 @@ class DataLoader:
         # Load tables in the correct order
         for table_name in table_load_order:
             file_path_or_paths = data_files[table_name]
-            table_start = time.time()
+            table_start = mono_time()
 
             # Handle both single file and sharded (list of files) cases
             # When data is generated with parallel>1, tables may be sharded into multiple files
@@ -1769,28 +1783,30 @@ class DataLoader:
 
                 table_stats[table_name] = total_rows
                 if total_rows > 0:
-                    table_time = time.time() - table_start
+                    table_time = elapsed_seconds(table_start)
                     if self.adapter.verbose_enabled:
-                        print(
+                        quiet_console.print(
                             f"  ✅ Loaded {total_rows:,} rows into {table_name} "
                             f"in {table_time:.2f}s from {shard_count} shard(s)"
                         )
                     else:
-                        print(f"  ✅ Loaded {total_rows:,} rows into {table_name} from {shard_count} shard(s)")
+                        quiet_console.print(
+                            f"  ✅ Loaded {total_rows:,} rows into {table_name} from {shard_count} shard(s)"
+                        )
             else:
                 # Single file
                 file_path = Path(file_path_or_paths)
                 row_count = self._load_single_file(table_name, file_path)
                 table_stats[table_name] = row_count
                 if row_count > 0:
-                    table_time = time.time() - table_start
+                    table_time = elapsed_seconds(table_start)
                     if self.adapter.verbose_enabled:
-                        print(
+                        quiet_console.print(
                             f"  ✅ Loaded {row_count:,} rows into {table_name} "
                             f"in {table_time:.2f}s from {file_path.name}"
                         )
                     else:
-                        print(f"  ✅ Loaded {row_count:,} rows into {table_name} from {file_path.name}")
+                        quiet_console.print(f"  ✅ Loaded {row_count:,} rows into {table_name} from {file_path.name}")
 
         return table_stats
 
@@ -1805,7 +1821,7 @@ class DataLoader:
             Number of rows loaded, or 0 if loading failed
         """
         if not file_path.exists():
-            print(f"⚠️  Skipping {table_name} - file not found: {file_path}")
+            quiet_console.print(f"⚠️  Skipping {table_name} - file not found: {file_path}")
             return 0
 
         try:
@@ -1820,7 +1836,7 @@ class DataLoader:
                 handler = FileFormatRegistry.get_handler(file_path)
 
             if not handler:
-                print(f"⚠️  Skipping {table_name} - unsupported file format: {file_path.suffix}")
+                quiet_console.print(f"⚠️  Skipping {table_name} - unsupported file format: {file_path.suffix}")
                 return 0
 
             # Load table data
@@ -1829,10 +1845,10 @@ class DataLoader:
             return row_count
 
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"⚠️  Skipping {file_path.name} - decompression/file error: {e}")
+            quiet_console.print(f"⚠️  Skipping {file_path.name} - decompression/file error: {e}")
             return 0
         except Exception as e:
-            print(f"  ❌ Failed to load {file_path.name}: {e}")
+            quiet_console.print(f"  ❌ Failed to load {file_path.name}: {e}")
             return 0
 
 

@@ -29,7 +29,9 @@ htmlcov/
 .coverage.*
 .cache
 nosetests.xml
+test-results.xml
 coverage.xml
+coverage.json
 *.cover
 *.py,cover
 .hypothesis/
@@ -85,9 +87,3 @@ release/archive/
 # Release build directories (versioned release trees created by automate_release.py)
 # These should be created outside the repo via --target ../BenchBox-public
 /benchbox-*/
-
-# Claude Code configuration (share skills/commands, exclude local settings)
-.claude/settings.local.json
-
-ci-log.txt
-/site/

@@ -67,6 +67,7 @@ from benchbox.core.dataframe.tuning import DataFrameTuningConfiguration
 from benchbox.platforms.dataframe.expression_family import (
     ExpressionFamilyAdapter,
 )
+from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN, has_trailing_delimiter, is_tpc_format
 
 if TYPE_CHECKING:
     from pyspark.sql.window import WindowSpec
@@ -457,14 +458,12 @@ class PySparkDataFrameAdapter(ExpressionFamilyAdapter[PySparkDF, PySparkLazyDF, 
 
         reader = self.spark.read.option("delimiter", delimiter).option("header", str(has_header).lower())
 
-        # Handle TPC .tbl files with trailing delimiter
-        if path_str.endswith(".tbl") and column_names:
-            # TPC files have trailing delimiter, add dummy column
-            extended_names = column_names + ["_trailing_"]
+        # Handle TPC .tbl/.dat files with trailing delimiter
+        if is_tpc_format(path) and column_names and has_trailing_delimiter(path, delimiter, column_names):
+            extended_names = column_names + [TRAILING_DUMMY_COLUMN]
             schema = self._build_schema(extended_names)
             df = reader.schema(schema).csv(path_str)
-            # Drop the trailing column
-            df = df.drop("_trailing_")
+            df = df.drop(TRAILING_DUMMY_COLUMN)
         elif column_names:
             schema = self._build_schema(column_names)
             df = reader.schema(schema).csv(path_str)

@@ -19,9 +19,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -511,7 +512,7 @@ class AthenaAdapter(PlatformAdapter):
         In text mode:
         - Creates tables directly pointing to text file locations
         """
-        start_time = time.time()
+        start_time = mono_time()
         cursor = connection.cursor()
 
         try:
@@ -567,7 +568,7 @@ class AthenaAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def _convert_to_external_table(self, statement: str, is_staging: bool = False) -> str:
         """Convert CREATE TABLE to CREATE EXTERNAL TABLE for Athena.
@@ -692,7 +693,7 @@ class AthenaAdapter(PlatformAdapter):
         2. Run MSCK REPAIR TABLE to discover new partitions
         3. Verify row counts via SELECT COUNT(*)
         """
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         # Validate S3 bucket is configured
@@ -821,7 +822,7 @@ class AthenaAdapter(PlatformAdapter):
                 self.logger.info("🔄 Converting staging tables to Parquet format...")
                 table_stats = self._convert_staging_to_parquet(cursor, tables_to_convert, s3_client)
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             mode_desc = "Parquet" if is_parquet_mode else "text"
             self.logger.info(f"✅ Loaded {total_rows:,} total rows ({mode_desc} format) in {total_time:.2f}s")
@@ -956,14 +957,14 @@ class AthenaAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute query with cost tracking."""
-        start_time = time.time()
+        start_time = mono_time()
         cursor = connection.cursor()
 
         try:
             cursor.execute(query)
             result = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Track data scanned for cost calculation
@@ -1018,11 +1019,11 @@ class AthenaAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

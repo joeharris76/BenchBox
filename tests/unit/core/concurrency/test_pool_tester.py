@@ -17,7 +17,7 @@ from benchbox.core.concurrency.pool_tester import (
     PoolTestResult,
 )
 
-pytestmark = pytest.mark.medium  # Pool tests have sleep/wait time (~1-2s)
+pytestmark = [pytest.mark.medium, pytest.mark.fast, pytest.mark.unit]  # Include in CI fast coverage pass
 
 
 @pytest.fixture

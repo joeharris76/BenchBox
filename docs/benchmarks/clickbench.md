@@ -133,9 +133,9 @@ SELECT COUNT(DISTINCT UserID) FROM hits;
 
 **Q8: Basic GROUP BY**
 ```sql
-SELECT AdvEngineID, COUNT(*) FROM hits 
-WHERE AdvEngineID <> 0 
-GROUP BY AdvEngineID 
+SELECT AdvEngineID, COUNT(*) FROM hits
+WHERE AdvEngineID <> 0
+GROUP BY AdvEngineID
 ORDER BY COUNT(*) DESC;
 ```
 - **Purpose**: Test basic grouping with ordering
@@ -143,9 +143,9 @@ ORDER BY COUNT(*) DESC;
 
 **Q9: Distinct Users by Region**
 ```sql
-SELECT RegionID, COUNT(DISTINCT UserID) AS u FROM hits 
-GROUP BY RegionID 
-ORDER BY u DESC 
+SELECT RegionID, COUNT(DISTINCT UserID) AS u FROM hits
+GROUP BY RegionID
+ORDER BY u DESC
 LIMIT 10;
 ```
 - **Purpose**: Test complex aggregation with TOP-N
@@ -153,10 +153,10 @@ LIMIT 10;
 
 **Q13: Search Phrase Analysis**
 ```sql
-SELECT SearchPhrase, COUNT(*) AS c FROM hits 
-WHERE SearchPhrase <> '' 
-GROUP BY SearchPhrase 
-ORDER BY c DESC 
+SELECT SearchPhrase, COUNT(*) AS c FROM hits
+WHERE SearchPhrase <> ''
+GROUP BY SearchPhrase
+ORDER BY c DESC
 LIMIT 10;
 ```
 - **Purpose**: Test string grouping with high cardinality
@@ -173,10 +173,10 @@ SELECT COUNT(*) FROM hits WHERE URL LIKE '%google%';
 
 **Q22: Complex String Analysis**
 ```sql
-SELECT SearchPhrase, MIN(URL), COUNT(*) AS c FROM hits 
-WHERE URL LIKE '%google%' AND SearchPhrase <> '' 
-GROUP BY SearchPhrase 
-ORDER BY c DESC 
+SELECT SearchPhrase, MIN(URL), COUNT(*) AS c FROM hits
+WHERE URL LIKE '%google%' AND SearchPhrase <> ''
+GROUP BY SearchPhrase
+ORDER BY c DESC
 LIMIT 10;
 ```
 - **Purpose**: Test combined string operations with grouping
@@ -184,15 +184,15 @@ LIMIT 10;
 
 **Q29: Regex Operations**
 ```sql
-SELECT REGEXP_REPLACE(Referer, '^https?://(?:www\\.)?([^/]+)/.*$', '\\1') AS k, 
-       AVG(LENGTH(Referer)) AS l, 
-       COUNT(*) AS c, 
-       MIN(Referer) 
-FROM hits 
-WHERE Referer <> '' 
-GROUP BY k 
-HAVING COUNT(*) > 100000 
-ORDER BY l DESC 
+SELECT REGEXP_REPLACE(Referer, '^https?://(?:www\\.)?([^/]+)/.*$', '\\1') AS k,
+       AVG(LENGTH(Referer)) AS l,
+       COUNT(*) AS c,
+       MIN(Referer)
+FROM hits
+WHERE Referer <> ''
+GROUP BY k
+HAVING COUNT(*) > 100000
+ORDER BY l DESC
 LIMIT 25;
 ```
 - **Purpose**: Test complex regex and string functions
@@ -202,7 +202,7 @@ LIMIT 25;
 
 **Q30: Wide Aggregation**
 ```sql
-SELECT SUM(ResolutionWidth), SUM(ResolutionWidth + 1), ..., SUM(ResolutionWidth + 89) 
+SELECT SUM(ResolutionWidth), SUM(ResolutionWidth + 1), ..., SUM(ResolutionWidth + 89)
 FROM hits;
 ```
 - **Purpose**: Test wide query processing (89 aggregation columns)
@@ -210,12 +210,12 @@ FROM hits;
 
 **Q37: Time Series Analysis**
 ```sql
-SELECT SUM(ResolutionWidth), 
-       SUM(ResolutionWidth + 1), 
-       SUM(ResolutionWidth + 2) 
-FROM hits 
-GROUP BY AdvEngineID, DATE_TRUNC('minute', EventTime) 
-ORDER BY SUM(ResolutionWidth) DESC 
+SELECT SUM(ResolutionWidth),
+       SUM(ResolutionWidth + 1),
+       SUM(ResolutionWidth + 2)
+FROM hits
+GROUP BY AdvEngineID, DATE_TRUNC('minute', EventTime)
+ORDER BY SUM(ResolutionWidth) DESC
 LIMIT 10;
 ```
 - **Purpose**: Test temporal grouping with expressions
@@ -223,14 +223,14 @@ LIMIT 10;
 
 **Q43: Advanced-level Analytics**
 ```sql
-SELECT CounterID, 
-       AVG(LENGTH(URL)) AS l, 
-       COUNT(*) AS c 
-FROM hits 
-WHERE URL <> '' 
-GROUP BY CounterID 
-HAVING COUNT(*) > 100000 
-ORDER BY l DESC 
+SELECT CounterID,
+       AVG(LENGTH(URL)) AS l,
+       COUNT(*) AS c
+FROM hits
+WHERE URL <> ''
+GROUP BY CounterID
+HAVING COUNT(*) > 100000
+ORDER BY l DESC
 LIMIT 25;
 ```
 - **Purpose**: Test complex analytical patterns with HAVING
@@ -298,7 +298,7 @@ print(f"Loading data from {hits_file}...")
 load_start = time.time()
 conn.execute(f"""
     INSERT INTO hits
-    SELECT * FROM read_csv('{hits_file}', 
+    SELECT * FROM read_csv('{hits_file}',
                           header=true,
                           auto_detect=true,
                           ignore_errors=true)
@@ -320,40 +320,40 @@ results = {}
 for category, query_ids in query_categories.items():
     print(f"\\nRunning {category} queries...")
     category_results = {}
-    
+
     for query_id in query_ids:
         try:
             query_sql = clickbench.get_query(query_id)
-            
+
             start_time = time.time()
             result = conn.execute(query_sql).fetchall()
             execution_time = time.time() - start_time
-            
+
             category_results[query_id] = {
                 'time': execution_time,
                 'rows': len(result)
             }
             print(f"  {query_id}: {execution_time:.3f}s ({len(result)} rows)")
-            
+
         except Exception as e:
             category_results[query_id] = {
                 'error': str(e)
             }
             print(f"  {query_id}: ERROR - {str(e)[:50]}...")
-    
+
     results[category] = category_results
 
 conn.close()
 
 # Print summary
 total_time = sum(
-    r['time'] for cat_results in results.values() 
-    for r in cat_results.values() 
+    r['time'] for cat_results in results.values()
+    for r in cat_results.values()
     if 'time' in r
 )
 total_queries = sum(
-    1 for cat_results in results.values() 
-    for r in cat_results.values() 
+    1 for cat_results in results.values()
+    for r in cat_results.values()
     if 'time' in r
 )
 print(f"\\nSummary: {total_queries} queries executed in {total_time:.2f}s")
@@ -370,7 +370,7 @@ class ClickBenchPerformanceTester:
     def __init__(self, clickbench: ClickBench, connection):
         self.clickbench = clickbench
         self.connection = connection
-        
+
     def benchmark_query_category(self, category: str, iterations: int = 3) -> Dict:
         """Benchmark specific ClickBench query categories."""
         categories = {
@@ -381,20 +381,20 @@ class ClickBenchPerformanceTester:
             'complex': ['Q28', 'Q29', 'Q30', 'Q31'],
             'analytics': ['Q37', 'Q40', 'Q41', 'Q42', 'Q43']
         }
-        
+
         if category not in categories:
             raise ValueError(f"Invalid category: {category}")
-            
+
         query_ids = categories[category]
         results = {}
-        
+
         for query_id in query_ids:
             print(f"Benchmarking {query_id} ({category})...")
-            
+
             times = []
             for iteration in range(iterations):
                 query_sql = self.clickbench.get_query(query_id)
-                
+
                 start_time = time.time()
                 try:
                     result = self.connection.execute(query_sql).fetchall()
@@ -403,7 +403,7 @@ class ClickBenchPerformanceTester:
                 except Exception as e:
                     print(f"  Error in iteration {iteration + 1}: {e}")
                     continue
-            
+
             if times:
                 results[query_id] = {
                     'category': category,
@@ -421,13 +421,13 @@ class ClickBenchPerformanceTester:
                     'category': category,
                     'error': 'All iterations failed'
                 }
-        
+
         return results
-    
+
     def run_complete_benchmark(self) -> Dict:
         """Run all ClickBench categories and return systematic results."""
         complete_results = {}
-        
+
         # Test each category
         categories = ['scan', 'aggregation', 'grouping', 'string', 'complex', 'analytics']
         for category in categories:
@@ -438,12 +438,12 @@ class ClickBenchPerformanceTester:
             except Exception as e:
                 print(f"Error in {category} category: {e}")
                 complete_results[category] = {'error': str(e)}
-        
+
         # Calculate summary statistics
         all_times = []
         successful_queries = 0
         total_queries = 0
-        
+
         for category_data in complete_results.values():
             if isinstance(category_data, dict) and 'error' not in category_data:
                 for query_data in category_data.values():
@@ -451,7 +451,7 @@ class ClickBenchPerformanceTester:
                     if isinstance(query_data, dict) and 'times' in query_data:
                         all_times.extend(query_data['times'])
                         successful_queries += 1
-        
+
         if all_times:
             complete_results['summary'] = {
                 'total_queries': total_queries,
@@ -463,20 +463,20 @@ class ClickBenchPerformanceTester:
                 'total_max_time': max(all_times),
                 'geomean_time': self._geometric_mean(all_times)
             }
-        
+
         return complete_results
-    
+
     def _geometric_mean(self, values: List[float]) -> float:
         """Calculate geometric mean of execution times."""
         if not values:
             return 0.0
-        
+
         product = 1.0
         for value in values:
             product *= value
-        
+
         return product ** (1.0 / len(values))
-    
+
     def analyze_column_performance(self) -> Dict:
         """Analyze performance across different column types and operations."""
         column_tests = [
@@ -487,12 +487,12 @@ class ClickBenchPerformanceTester:
             ('string_agg', 'SELECT SearchPhrase, COUNT(*) FROM hits WHERE SearchPhrase <> \\'\\'GROUP BY SearchPhrase LIMIT 10'),
             ('mixed_agg', 'SELECT RegionID, SearchPhrase, COUNT(*) FROM hits WHERE SearchPhrase <> \\'\\'GROUP BY RegionID, SearchPhrase LIMIT 10')
         ]
-        
+
         results = {}
-        
+
         for test_name, query_sql in column_tests:
             print(f"Testing {test_name}...")
-            
+
             times = []
             for iteration in range(3):
                 try:
@@ -503,7 +503,7 @@ class ClickBenchPerformanceTester:
                 except Exception as e:
                     print(f"  Error: {e}")
                     break
-            
+
             if times:
                 results[test_name] = {
                     'avg_time': mean(times),
@@ -512,7 +512,7 @@ class ClickBenchPerformanceTester:
                 }
             else:
                 results[test_name] = {'error': 'Failed to execute'}
-        
+
         return results
 
 # Usage
@@ -675,21 +675,21 @@ print("Running all 43 ClickBench queries on ClickHouse...")
 query_results = {}
 for i in range(1, 44):
     query_id = f"Q{i}"
-    
+
     try:
         query_sql = clickbench.get_query(query_id)
-        
+
         start_time = time.time()
         result = client.query(query_sql)
         execution_time = time.time() - start_time
-        
+
         query_results[query_id] = {
             'time': execution_time,
             'rows': len(result.result_rows)
         }
-        
+
         print(f"{query_id}: {execution_time:.3f}s ({len(result.result_rows)} rows)")
-        
+
     except Exception as e:
         query_results[query_id] = {'error': str(e)}
         print(f"{query_id}: ERROR - {str(e)[:50]}...")
@@ -699,7 +699,7 @@ successful_queries = [r for r in query_results.values() if 'time' in r]
 if successful_queries:
     total_time = sum(r['time'] for r in successful_queries)
     avg_time = total_time / len(successful_queries)
-    
+
     print(f"\\nClickBench Results Summary:")
     print(f"Successful queries: {len(successful_queries)}/43")
     print(f"Total execution time: {total_time:.2f}s")
@@ -746,7 +746,7 @@ if successful_queries:
 |-------------|------------------|-------------|----------|------------|------------------|
 | **Columnar** | Column scanning | Vectorized ops | Column-wise hash | String columns | Vector processing |
 | **Row-based** | Index usage | Row aggregation | Row-wise groups | String indexes | Traditional optimization |
-| **In-Memory** | Memory bandwidth | Fast aggregation | In-memory hash | String caching | Memory-configured |
+| **In-Memory** | Memory bandwidth | Fast aggregation | In-memory hash | String caching | Memory-configured | <!-- content-ok: cliche -->
 | **GPU** | Parallel scanning | GPU aggregation | GPU hash tables | Limited support | Mixed CPU/GPU |
 
 ## Configuration Options
@@ -844,7 +844,7 @@ clickbench = ClickBench(
 -- For PostgreSQL
 ALTER TABLE hits ALTER COLUMN EventTime TYPE TIMESTAMP;
 
--- For MySQL  
+-- For MySQL
 ALTER TABLE hits MODIFY COLUMN Title TEXT CHARACTER SET utf8mb4;
 
 -- For DuckDB

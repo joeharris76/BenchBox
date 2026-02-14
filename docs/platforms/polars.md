@@ -242,7 +242,7 @@ import polars as pl
 pl.Config.set_global_string_cache()
 ```
 
-## DataFrame Mode Deep Dive
+## DataFrame Mode Deep Dive <!-- content-ok: cliche -->
 
 The `polars-df` platform executes TPC-H queries using Polars' native expression API instead of SQL. This provides:
 

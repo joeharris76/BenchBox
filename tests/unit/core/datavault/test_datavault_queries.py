@@ -121,6 +121,26 @@ class TestQueryContent:
         assert "with" in q15
         assert "revenue" in q15
 
+    def test_q12_stays_tpc_style_without_cte(self, query_manager):
+        """Q12 should stay close to TPC-H structure and avoid CTE wrappers."""
+        q12 = query_manager.get_query(12).lower()
+        assert "with " not in q12
+        assert "join hub_order" not in q12
+
+    def test_q18_uses_inline_large_orders_subquery(self, query_manager):
+        """Q18 should use an inline order-quantity subquery (no CTE)."""
+        q18 = query_manager.get_query(18).lower()
+        assert "with " not in q18
+        assert "join (" in q18
+        assert "having sum(sl2.l_quantity) >" in q18
+
+    def test_q21_preserves_exists_semantics(self, query_manager):
+        """Q21 should preserve EXISTS / NOT EXISTS structure from TPC-H intent."""
+        q21 = query_manager.get_query(21).lower()
+        assert "with " not in q21
+        assert "exists (" in q21
+        assert "not exists (" in q21
+
 
 class TestParameterSubstitution:
     """Tests for query parameter substitution."""

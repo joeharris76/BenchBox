@@ -104,6 +104,9 @@ class TPCHavocBenchmark(TPCHBenchmark):
             **kwargs,
         )
 
+        # Override inherited TPC-H name
+        self._name = "TPC-Havoc Benchmark"
+
         # Replace the TPC-H query manager with TPC-Havoc query manager
         self.query_manager = TPCHavocQueryManager()
 

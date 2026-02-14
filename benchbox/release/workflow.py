@@ -12,12 +12,10 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterable, Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
-HOLD_BACK_PATHS: Sequence[str] = (
-    # Note: tests, docs, and examples are now included in public releases
-)
+HOLD_BACK_PATHS: Sequence[str] = ()
 
 ALLOWED_ROOT_FILES: Sequence[str] = (
     ".gitignore",  # Synced with transformation to remove private-only patterns
@@ -38,10 +36,6 @@ ALLOWED_ROOT_FILES: Sequence[str] = (
     "pytest-ci.ini",
     "Makefile",
     "uv.lock",
-    # Claude Code configuration (for sharing development workflows)
-    "CLAUDE.md",
-    "AGENTS.md",
-    ".claude",
     # GitHub configuration (workflows, issue templates, PR templates)
     ".github",
     # Precompiled TPC binaries for data generation
@@ -52,11 +46,6 @@ ALLOWED_ROOT_FILES: Sequence[str] = (
     ".codespell-ignore.txt",
     # Landing page for GitHub Pages (index.html, style.css, etc.)
     "landing",
-)
-
-# Files to exclude when copying .claude directory
-CLAUDE_DIR_EXCLUDES: Sequence[str] = (
-    "settings.local.json",  # Contains user-specific permissions, not for sharing
 )
 
 # Files to exclude when copying docs directory
@@ -126,9 +115,10 @@ CLEANUP_PATTERNS: Sequence[str] = (
     "_sources",  # Always rebuild from whitelist to prevent stale accumulation
     "_project",  # Development-only working files
     "benchmark_runs",  # Execution outputs (should never be in releases)
+    ".claude",  # Claude Code configuration (private dev workflows)
+    ".codex",  # Codex configuration (private dev workflows)
 )
 
-SANITIZED_README = Path("release/README.public.md")
 
 # pyproject.toml transformations for public release
 # Maps private values to public values
@@ -152,7 +142,9 @@ GITIGNORE_PRIVATE_SECTIONS: Sequence[str] = (
     # TODO system _project/ includes
     "# TODO system infrastructure",
     # Firebolt-specific data directories
-    "# Firebolt data",
+    "# Firebolt data and core data directories",
+    # Claude Code local settings (private dev config)
+    "# Claude Code configuration",
 )
 
 # Individual gitignore lines to remove (exact match after stripping whitespace)
@@ -169,12 +161,12 @@ def _resolve_source_path(source: Path, relative: str) -> Path:
     return path
 
 
-def calculate_most_recent_saturday_midnight() -> tuple[int, str, str]:
-    """Calculate the most recent Saturday at midnight UTC.
+def calculate_release_timestamp() -> tuple[int, str, str]:
+    """Calculate the most recent whole hour in UTC.
 
     This ensures all release artifacts have consistent, predictable timestamps
-    that don't reveal the actual creation time. Using Saturday provides a stable
-    reference point that's easy to calculate and verify.
+    that don't reveal the exact creation time. The current UTC time is truncated
+    to the top of the hour.
 
     Returns:
         tuple[int, str, str]: (unix_timestamp, iso_format, git_format)
@@ -183,25 +175,16 @@ def calculate_most_recent_saturday_midnight() -> tuple[int, str, str]:
             - git_format: Git-compatible format (YYYY-MM-DD HH:MM:SS +0000)
 
     Example:
-        If today is Tuesday, January 7, 2025, this returns:
-        - January 4, 2025 at 00:00:00 UTC (most recent Saturday)
+        If now is 2025-01-07T14:37:22 UTC, this returns:
+        - 2025-01-07T14:00:00 UTC (truncated to the hour)
     """
     now = datetime.now(timezone.utc)
-
-    # Calculate days since most recent Saturday (weekday 5)
-    # Monday=0, Tuesday=1, ..., Saturday=5, Sunday=6
-    days_since_saturday = (now.weekday() + 2) % 7
-
-    # Go back to most recent Saturday
-    last_saturday = now - timedelta(days=days_since_saturday)
-
-    # Set to midnight
-    saturday_midnight = last_saturday.replace(hour=0, minute=0, second=0, microsecond=0)
+    truncated = now.replace(minute=0, second=0, microsecond=0)
 
     # Generate all three formats
-    unix_ts = int(saturday_midnight.timestamp())
-    iso_fmt = saturday_midnight.isoformat()
-    git_fmt = saturday_midnight.strftime("%Y-%m-%d %H:%M:%S %z")
+    unix_ts = int(truncated.timestamp())
+    iso_fmt = truncated.isoformat()
+    git_fmt = truncated.strftime("%Y-%m-%d %H:%M:%S %z")
 
     return unix_ts, iso_fmt, git_fmt
 
@@ -325,20 +308,12 @@ def _copy_root_files(source: Path, target: Path, allowed: Sequence[str]) -> None
             excludes: list[str] = list(GLOBAL_EXCLUDES)
             if item == "benchbox":
                 excludes.extend(HOLD_BACK_PATHS)
-            elif item == ".claude":
-                excludes.extend(CLAUDE_DIR_EXCLUDES)
             elif item == "docs":
                 excludes.extend(DOCS_DIR_EXCLUDES)
             _copy_with_excludes(src_path, dest_path, excludes)
         else:
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src_path, dest_path)
-
-
-def _apply_sanitized_readme(target: Path, sanitized_source: Path) -> None:
-    if not sanitized_source.exists():
-        raise FileNotFoundError(f"Sanitized README template not found. Expected at {sanitized_source}")
-    shutil.copy2(sanitized_source, target / "README.md")
 
 
 def _transform_pyproject(content: str) -> str:
@@ -402,7 +377,7 @@ def prepare_public_release(
         init_git: Initialize a fresh git repository and stage files.
         extra_root_files: Additional paths (relative to source) to include.
         timestamp: Unix timestamp for normalizing file times. If None, uses
-            the most recent Saturday at midnight UTC.
+            the most recent whole hour UTC.
     """
 
     if not source.is_dir():
@@ -443,7 +418,7 @@ def prepare_public_release(
 
     # Calculate or use provided timestamp for normalization
     if timestamp is None:
-        timestamp, _, _ = calculate_most_recent_saturday_midnight()
+        timestamp, _, _ = calculate_release_timestamp()
 
     _normalize_timestamps(target, timestamp)
 
@@ -580,11 +555,7 @@ def _should_exclude_file(rel_path: Path, root_item: str) -> bool:
                 return True
 
     # Check directory-specific excludes
-    if root_item == ".claude":
-        for exclude in CLAUDE_DIR_EXCLUDES:
-            if name == exclude or exclude in parts:
-                return True
-    elif root_item == "docs":
+    if root_item == "docs":
         for exclude in DOCS_DIR_EXCLUDES:
             if name == exclude or exclude in parts:
                 return True
@@ -652,8 +623,8 @@ def get_syncable_files(repo_root: Path) -> set[Path]:
     """Get all files that should be synced between private and public repos.
 
     Uses ALLOWED_ROOT_FILES to determine which top-level items to include,
-    then applies GLOBAL_EXCLUDES, directory-specific excludes (CLAUDE_DIR_EXCLUDES,
-    DOCS_DIR_EXCLUDES), HOLD_BACK_PATHS, and FORBIDDEN_PATTERNS to filter files.
+    then applies GLOBAL_EXCLUDES, directory-specific excludes (DOCS_DIR_EXCLUDES,
+    TESTS_DIR_EXCLUDES), HOLD_BACK_PATHS, and FORBIDDEN_PATTERNS to filter files.
 
     The _sources directory uses a whitelist approach via _SOURCES_INCLUDE_PATHS
     since it contains many build artifacts that should not be synced.
@@ -747,6 +718,29 @@ def _get_file_hash(file_path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def compute_source_fingerprint(package_dir: Path) -> str:
+    """Compute deterministic SHA256 fingerprint over all .py files in a package.
+
+    Walks all .py files under the given directory, sorted by relative path,
+    and produces a single hash combining each file's path and content hash.
+    This fingerprint is independent of timestamps, permissions, or metadata.
+
+    Args:
+        package_dir: Path to the package directory (e.g., repo_root / "benchbox")
+
+    Returns:
+        Hex-encoded SHA256 fingerprint string
+    """
+    import hashlib
+
+    combined = hashlib.sha256()
+    for py_file in sorted(package_dir.rglob("*.py")):
+        rel = py_file.relative_to(package_dir).as_posix()
+        content_hash = hashlib.sha256(py_file.read_bytes()).hexdigest()
+        combined.update(f"{rel}:{content_hash}\n".encode())
+    return combined.hexdigest()
 
 
 def _get_git_committed_hash(repo_path: Path, rel_path: Path) -> str | None:
@@ -992,8 +986,9 @@ def should_transform(rel_path: Path) -> bool:
 
 __all__ = [
     "prepare_public_release",
-    "calculate_most_recent_saturday_midnight",
+    "calculate_release_timestamp",
     "check_release_size",
+    "compute_source_fingerprint",
     "ReleaseSizeViolation",
     "DEFAULT_MAX_FILE_SIZE_MB",
     "DEFAULT_MAX_TOTAL_SIZE_MB",

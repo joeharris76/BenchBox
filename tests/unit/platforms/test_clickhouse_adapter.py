@@ -184,7 +184,7 @@ class TestClickHouseAdapter:
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["first_row"] == [1, "test"]
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
     @patch("benchbox.platforms.clickhouse.setup.ClickHouseClient")
     def test_execute_query_failure(self, mock_client_class):
@@ -207,7 +207,7 @@ class TestClickHouseAdapter:
         assert result["status"] == "FAILED"
         assert result["rows_returned"] == 0
         assert result["error"] == "Query failed"
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
     @patch("benchbox.platforms.clickhouse.setup.ClickHouseClient")
     def test_configure_for_benchmark_tuning_disabled(self, mock_client_class):

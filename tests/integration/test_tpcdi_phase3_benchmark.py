@@ -432,7 +432,7 @@ class TestTPCDIPhase3BenchmarkIntegration:
                 assert "etl_result" in results
                 assert "validation_result" in results
                 assert "report" in results
-                assert "execution_time" in results
+                assert "execution_time_seconds" in results
 
                 # Verify methods were called
                 mock_etl.assert_called_once()

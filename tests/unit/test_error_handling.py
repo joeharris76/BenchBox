@@ -377,7 +377,6 @@ class TestFileSystemEdgeCases:
                         TimeoutError,
                         ValueError,
                         KeyError,
-                        IndexError,
                         BlockingIOError,
                         csv.Error,
                     ),

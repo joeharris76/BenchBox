@@ -111,6 +111,18 @@ class DataFrameContext(Protocol):
         """
         ...
 
+    def element(self) -> Any:
+        """Create a list element expression for use inside list.eval().
+
+        In Polars, this returns pl.element() which references the current
+        list element. Named columns (col("element")) are not allowed
+        inside eval() contexts.
+
+        Returns:
+            Platform-specific element expression
+        """
+        ...
+
     def date_sub(self, column: Any, days: int) -> Any:
         """Subtract days from a date column.
 
@@ -521,6 +533,14 @@ class DataFrameContextImpl(Generic[DF], ABC):
         Returns:
             Platform-specific literal expression
         """
+
+    def element(self) -> Any:
+        """Create a list element expression for use inside list.eval().
+
+        Returns pl.element() on Polars. Raises NotImplementedError on
+        platforms that don't support list.eval().
+        """
+        raise NotImplementedError(f"element() not supported on {self._platform}")
 
     @abstractmethod
     def date_sub(self, column: Any, days: int) -> Any:

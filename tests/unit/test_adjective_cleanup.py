@@ -52,19 +52,18 @@ class TestAdjectiveCleanup(unittest.TestCase):
 
     def test_database_naming_functionality_unchanged(self):
         """Test that database naming functionality still works."""
-        try:
-            from benchbox.core.tuning.configuration import TuningConfiguration
+        from benchbox.utils.database_naming import generate_database_name
 
-            from benchbox.utils.database_naming import generate_database_name
-
-            config = TuningConfiguration(database={"primary_keys": True})
-            name = generate_database_name("tpch", 1.0, config, "test")
-            self.assertIsNotNone(name)
-            self.assertIsInstance(name, str)
-            self.assertGreater(len(name), 0)
-        except ImportError:
-            # Skip if modules not available
-            self.skipTest("Database naming modules not available")
+        tuning_config = {
+            "primary_keys": {"enabled": True},
+            "foreign_keys": {"enabled": False},
+            "platform_optimizations": {},
+            "table_tunings": {},
+        }
+        name = generate_database_name("tpch", 1.0, "duckdb", tuning_config=tuning_config, custom_name="test")
+        self.assertIsNotNone(name)
+        self.assertIsInstance(name, str)
+        self.assertGreater(len(name), 0)
 
     def test_tpc_validation_functionality_unchanged(self):
         """Test that TPC validation functionality still works."""

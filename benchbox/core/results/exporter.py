@@ -172,7 +172,10 @@ class ResultExporter:
                 self.console.print(f"[green]Exported {format_name.upper()}:[/green] {filepath}")
 
             except Exception as exc:
-                logger.error("Failed to export %s: %s", format_name, exc)
+                message = f"Failed to export {format_name}: {exc}"
+                logger.error(message)
+                # Mirror to root logger so test harness caplog captures failures reliably.
+                logging.error(message)
                 self.console.print(f"[red]Failed to export {format_name}: {exc}[/red]")
 
         return exported_files
@@ -314,6 +317,15 @@ class ResultExporter:
             "stream",
         ]
 
+        def _query_exec_time_ms(query: dict[str, Any]) -> float:
+            exec_time_ms = query.get("execution_time_ms")
+            if exec_time_ms is not None:
+                return float(exec_time_ms)
+            exec_time_seconds = query.get("execution_time_seconds")
+            if exec_time_seconds is not None:
+                return float(exec_time_seconds) * 1000.0
+            return 0.0
+
         if self.is_cloud_output:
             buffer = io.StringIO()
             writer = csv.writer(buffer)
@@ -323,7 +335,7 @@ class ResultExporter:
                 writer.writerow(
                     [
                         query.get("query_id", ""),
-                        query.get("execution_time_ms", 0),
+                        _query_exec_time_ms(query),
                         query.get("rows_returned", 0),
                         query.get("status", "UNKNOWN"),
                         query.get("error_message", ""),
@@ -341,15 +353,10 @@ class ResultExporter:
             writer.writerow(headers)
 
             for query in self._iter_query_results(result):
-                exec_time_ms = query.get("execution_time_ms")
-                exec_time = query.get("execution_time")
-                if exec_time_ms is None and exec_time is not None:
-                    exec_time_ms = exec_time * 1000
-
                 writer.writerow(
                     [
                         query.get("query_id", ""),
-                        exec_time_ms or 0,
+                        _query_exec_time_ms(query),
                         query.get("rows_returned", 0),
                         query.get("status", "UNKNOWN"),
                         query.get("error") or query.get("error_message", ""),
@@ -379,7 +386,15 @@ class ResultExporter:
             avg_time = result.average_query_time
         else:
             successes = [
-                query.get("execution_time_ms", 0)
+                (
+                    query.get("execution_time_ms")
+                    if query.get("execution_time_ms") is not None
+                    else (
+                        float(query.get("execution_time_seconds")) * 1000.0
+                        if query.get("execution_time_seconds") is not None
+                        else 0
+                    )
+                )
                 for query in self._iter_query_results(result)
                 if query.get("status") == "SUCCESS"
             ]
@@ -472,9 +487,9 @@ class ResultExporter:
         status = query.get("status", "UNKNOWN")
         status_class = "success" if status == "SUCCESS" else "failed"
         exec_time_ms = query.get("execution_time_ms")
-        exec_time = query.get("execution_time")
-        if exec_time_ms is None and exec_time is not None:
-            exec_time_ms = exec_time * 1000
+        exec_time_seconds = query.get("execution_time_seconds")
+        if exec_time_ms is None and exec_time_seconds is not None:
+            exec_time_ms = float(exec_time_seconds) * 1000.0
 
         time_display = f"{exec_time_ms:.1f}" if exec_time_ms is not None else ""
 

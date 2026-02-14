@@ -346,13 +346,11 @@ class TestTPCDSBenchmarkEnhanced:
 
     def test_benchmark_configuration_options(self, temp_dir):
         """Test various benchmark configuration options."""
-        pytest.skip("TPC-DS configuration validation requires dsqgen binaries unavailable in unit tests")
-
         # Test with verbose mode
         verbose_benchmark = TPCDSBenchmark(scale_factor=1, output_dir=temp_dir, verbose=True)
         assert hasattr(verbose_benchmark, "verbose")
+        assert verbose_benchmark.scale_factor == 1
 
         # Test with custom seed
         seeded_benchmark = TPCDSBenchmark(scale_factor=1, output_dir=temp_dir, seed=42)
-        # Verify seed is passed to components if supported
         assert seeded_benchmark.scale_factor == 1

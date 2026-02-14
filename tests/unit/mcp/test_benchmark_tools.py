@@ -6,6 +6,8 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import sys
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -353,3 +355,28 @@ class TestPopulateSqlQueryDetails:
         # Q6 is short, should not be truncated
         if "sql" in response:
             assert response.get("sql_truncated") is False
+
+
+class TestBenchmarkTiming:
+    """Tests for monotonic execution timing in benchmark MCP helpers."""
+
+    def test_generate_data_impl_execution_time_uses_monotonic_elapsed(self, tmp_path):
+        """Data-only metadata should use monotonic elapsed seconds."""
+        from benchbox.mcp.tools import benchmark as benchmark_tools
+
+        class _FakeBenchmark:
+            def __init__(self, scale_factor: float):
+                self.scale_factor = scale_factor
+
+            def generate_data(self, output_dir: Path, format: str = "parquet"):
+                (Path(output_dir) / "lineitem.parquet").write_text("x", encoding="utf-8")
+
+        mock_clock = Mock(return_value=103.21)
+        with (
+            patch.object(benchmark_tools, "get_benchmark_runs_datagen_path", return_value=tmp_path),
+            patch.object(benchmark_tools, "mono_time", mock_clock),
+            patch("benchbox.utils.clock.mono_time", mock_clock),
+        ):
+            response = benchmark_tools._generate_data_impl("tpch", _FakeBenchmark, 0.01, "exec-1", 100.0)
+
+        assert response["mcp_metadata"]["execution_time_seconds"] == 3.21

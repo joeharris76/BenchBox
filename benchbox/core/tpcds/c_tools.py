@@ -1069,7 +1069,3 @@ class TPCDSQueries:
     def clear_cache(self) -> None:
         """Clear parameter and query caches."""
         self.dsqgen.clear_cache()
-
-
-# Backward compatibility alias
-TPCDSQueryManager = TPCDSQueries

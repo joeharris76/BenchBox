@@ -15,6 +15,8 @@ from typing import Any, Callable
 import pyarrow as pa
 import pyarrow.csv as csv
 
+from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN
+
 
 @dataclass
 class ConversionOptions:
@@ -430,7 +432,7 @@ class BaseFormatConverter(FormatConverter):
         column_names = [col["name"] for col in schema["columns"]]
 
         # TBL files have trailing pipe delimiter, which creates an extra empty column
-        column_names_with_trailing = column_names + ["_trailing_delimiter"]
+        column_names_with_trailing = column_names + [TRAILING_DUMMY_COLUMN]
 
         tables = []
         total_files = len(source_files)

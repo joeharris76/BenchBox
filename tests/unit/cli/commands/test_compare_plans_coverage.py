@@ -1,0 +1,191 @@
+"""Coverage tests for cli/commands/compare_plans.py."""
+
+from __future__ import annotations
+
+import importlib
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from click.testing import CliRunner
+
+cp = importlib.import_module("benchbox.cli.commands.compare_plans")
+
+pytestmark = [pytest.mark.fast, pytest.mark.unit]
+
+
+@dataclass
+class _Sim:
+    overall_similarity: float
+    structural_similarity: float = 0.9
+    operator_similarity: float = 0.9
+    property_similarity: float = 0.9
+    type_mismatches: int = 0
+    property_mismatches: int = 0
+    structure_mismatches: int = 0
+
+
+@dataclass
+class _Cmp:
+    similarity: _Sim
+    plans_identical: bool = False
+    fingerprints_match: bool = False
+    summary: str = "summary"
+
+
+@dataclass
+class _Diff:
+    query_id: str
+    change_type: str
+    similarity: float
+    details: str
+
+
+@dataclass
+class _Perf:
+    query_id: str
+    baseline_time_ms: float
+    current_time_ms: float
+    perf_change_pct: float
+    is_regression: bool
+
+
+class _Summary:
+    baseline_run_id = "r1"
+    current_run_id = "r2"
+    plans_compared = 2
+    plans_unchanged = 1
+    plans_changed = 1
+    structural_differences = [_Diff("q1", "structure_change", 0.6, "detail"), _Diff("q2", "unchanged", 1.0, "ok")]
+    performance_correlations = [_Perf("q1", 10.0, 15.0, 50.0, True)]
+
+    def to_dict(self):
+        return {"baseline": self.baseline_run_id, "current": self.current_run_id}
+
+
+class _Exec:
+    def __init__(self, query_id: str, query_plan: object | None = object()):
+        self.query_id = query_id
+        self.query_plan = query_plan
+
+
+class _Phase:
+    def __init__(self, queries):
+        self.queries = queries
+
+
+class _Results:
+    def __init__(self, ids=("q1",), with_plans=True):
+        qp = object() if with_plans else None
+        self.phases = {"power": _Phase([_Exec(qid, qp) for qid in ids])}
+
+
+class _BR:
+    _sequence = []
+
+    @staticmethod
+    def from_dict(_d):
+        if _BR._sequence:
+            return _BR._sequence.pop(0)
+        return _Results()
+
+
+def _write_json(path: Path) -> None:
+    path.write_text(json.dumps({"schema_version": "1.0"}), encoding="utf-8")
+
+
+def test_compare_plans_summary_mode_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    p1 = tmp_path / "r1.json"
+    p2 = tmp_path / "r2.json"
+    out = tmp_path / "summary.json"
+    _write_json(p1)
+    _write_json(p2)
+
+    _BR._sequence = [_Results(), _Results()]
+    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+    monkeypatch.setattr(cp, "generate_plan_comparison_summary", lambda *_a, **_k: _Summary())
+
+    result = CliRunner().invoke(
+        cp.compare_plans,
+        ["--run1", str(p1), "--run2", str(p2), "--summary", "--output", "json", "--output-file", str(out)],
+    )
+    assert result.exit_code == 0
+    assert out.exists()
+
+
+def test_compare_plans_no_common_queries_exits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    p1 = tmp_path / "r1.json"
+    p2 = tmp_path / "r2.json"
+    _write_json(p1)
+    _write_json(p2)
+
+    _BR._sequence = [_Results(ids=("q1",)), _Results(ids=("q2",))]
+    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+
+    result = CliRunner().invoke(cp.compare_plans, ["--run1", str(p1), "--run2", str(p2)])
+    assert result.exit_code == 1
+    assert "No common queries" in result.output
+
+
+def test_compare_plans_threshold_success_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    p1 = tmp_path / "r1.json"
+    p2 = tmp_path / "r2.json"
+    _write_json(p1)
+    _write_json(p2)
+
+    _BR._sequence = [_Results(ids=("q1", "q2")), _Results(ids=("q1", "q2"))]
+    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+    monkeypatch.setattr(cp, "compare_query_plans", lambda *_a, **_k: _Cmp(similarity=_Sim(0.99)))
+
+    result = CliRunner().invoke(cp.compare_plans, ["--run1", str(p1), "--run2", str(p2), "--threshold", "0.95"])
+    assert result.exit_code == 0
+    assert "All queries have similarity" in result.output
+
+
+def test_compare_plans_specific_query_missing_plan_warns(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    p1 = tmp_path / "r1.json"
+    p2 = tmp_path / "r2.json"
+    _write_json(p1)
+    _write_json(p2)
+
+    _BR._sequence = [_Results(ids=("q1",), with_plans=False), _Results(ids=("q1",), with_plans=True)]
+    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+
+    result = CliRunner().invoke(cp.compare_plans, ["--run1", str(p1), "--run2", str(p2), "--query-id", "q1"])
+    assert result.exit_code == 0
+    assert "missing plan" in result.output
+
+
+def test_output_helpers_text_json_and_summary() -> None:
+    comparisons = [
+        ("q1", _Cmp(similarity=_Sim(0.98))),
+        ("q2", _Cmp(similarity=_Sim(0.7, type_mismatches=1, property_mismatches=1, structure_mismatches=1))),
+    ]
+    out = cp._output_text(comparisons, single_query=False, return_string=True)
+    assert "queries compared" in out
+
+    cp.render_comparison = lambda _comparison: "rendered"
+    single = cp._output_text([("q1", _Cmp(similarity=_Sim(0.8)))], single_query=True, return_string=True)
+    assert isinstance(single, str)
+
+    json_out = cp._output_json(comparisons, return_string=True)
+    assert '"query_id": "q1"' in json_out
+
+    summary_text = cp._output_summary_text(_Summary(), return_string=True)
+    assert "PLAN COMPARISON SUMMARY" in summary_text
+    assert "REGRESSIONS DETECTED" in summary_text
+
+    summary_json = cp._output_summary_json(_Summary(), return_string=True)
+    assert '"baseline": "r1"' in summary_json
+
+
+def test_output_html_helpers() -> None:
+    comparisons = [("q1", _Cmp(similarity=_Sim(0.92), summary="ok"))]
+    html1 = cp._output_summary_html(_Summary())
+    assert "Query Plan Comparison Report" in html1
+
+    results = SimpleNamespace(run_id="run")
+    html2 = cp._output_html(comparisons, single_query=False, results1=results, results2=results)
+    assert "Query Plan Comparison" in html2

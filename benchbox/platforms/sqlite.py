@@ -9,9 +9,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -75,12 +76,11 @@ class SQLiteAdapter(PlatformAdapter):
         Handles configuration from multiple sources:
         - connection_string: Path to database file (from DatabaseConfig)
         - database_path: Direct path specification (from options or CLI)
-        - Auto-generation: Creates path in benchmark_runs/datagen if needed
+        - Auto-generation: Creates path in benchmark_runs/databases if needed
         """
         from pathlib import Path
 
         from benchbox.utils.database_naming import generate_database_filename
-        from benchbox.utils.scale_factor import format_benchmark_name
 
         # Extract SQLite-specific configuration
         adapter_config = {}
@@ -93,16 +93,17 @@ class SQLiteAdapter(PlatformAdapter):
             # Extract from connection_string (set by platform_defaults.py)
             adapter_config["database_path"] = config["connection_string"]
         elif config.get("benchmark") and config.get("scale_factor") is not None:
-            # Generate database path using naming utilities (like DuckDB)
-            from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
+            # Generate database path using canonical benchmark_runs/databases path.
+            from benchbox.utils.path_utils import get_benchmark_runs_databases_path
 
-            # Use output_dir if provided, otherwise use canonical benchmark_runs/datagen path
             if config.get("output_dir"):
-                data_dir = Path(config["output_dir"]) / format_benchmark_name(
-                    config["benchmark"], config["scale_factor"]
+                data_dir = get_benchmark_runs_databases_path(
+                    config["benchmark"],
+                    config["scale_factor"],
+                    base_dir=Path(config["output_dir"]) / "databases",
                 )
             else:
-                data_dir = get_benchmark_runs_datagen_path(config["benchmark"], config["scale_factor"])
+                data_dir = get_benchmark_runs_databases_path(config["benchmark"], config["scale_factor"])
 
             db_filename = generate_database_filename(
                 benchmark_name=config["benchmark"],
@@ -238,7 +239,7 @@ class SQLiteAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using benchmark's SQL definitions."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
 
         # Use common schema creation helper
@@ -250,7 +251,7 @@ class SQLiteAdapter(PlatformAdapter):
         connection.executescript(schema_sql)
         connection.commit()
 
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         self.log_operation_complete("Schema creation", duration, "Schema and tables created")
         return duration
 
@@ -343,7 +344,7 @@ class SQLiteAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute a single query and return detailed results."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_verbose(f"Executing query {query_id}")
         self.log_very_verbose(f"Query SQL (first 200 chars): {query[:200]}{'...' if len(query) > 200 else ''}")
 
@@ -352,7 +353,7 @@ class SQLiteAdapter(PlatformAdapter):
             cursor.execute(query)
             results = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(results)
 
             # Validate row count if enabled and benchmark type is provided
@@ -394,11 +395,11 @@ class SQLiteAdapter(PlatformAdapter):
             return result
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
             }

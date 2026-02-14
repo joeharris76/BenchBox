@@ -48,6 +48,47 @@ def get_benchmark_runs_datagen_path(
     return base_dir / f"{benchmark_name}_{sf_fragment}"
 
 
+def get_benchmark_runs_databases_path(
+    benchmark_name: str,
+    scale_factor: float,
+    base_dir: str | Path | None = None,
+) -> Path:
+    """Get the canonical benchmark_runs/databases path for local DB artifacts.
+
+    Args:
+        benchmark_name: Normalized benchmark identifier (e.g., "tpch").
+        scale_factor: Scale factor used for data generation.
+        base_dir: Optional override for the databases root. When omitted,
+            uses ``Path.cwd() / "benchmark_runs" / "databases"``.
+
+    Returns:
+        Path pointing to ``benchmark_runs/databases/{benchmark_name}_{sf}`` where
+        ``sf`` is rendered via :func:`format_scale_factor`.
+    """
+    base_dir = Path(base_dir) if base_dir is not None else Path.cwd() / "benchmark_runs" / "databases"
+    sf_fragment = format_scale_factor(scale_factor)
+    return base_dir / f"{benchmark_name}_{sf_fragment}"
+
+
+def get_benchmark_runs_dataframe_path(base_dir: str | Path | None = None) -> Path:
+    """Get the canonical benchmark_runs/datagen directory for DataFrame cached data.
+
+    DataFrame cached data now lives alongside SQL datagen output under the
+    unified ``benchmark_runs/datagen/`` directory, enabling efficient reuse of
+    generated data across execution modes.
+
+    Args:
+        base_dir: Optional override for the datagen root. When omitted,
+            uses ``Path.cwd() / "benchmark_runs" / "datagen"``.
+
+    Returns:
+        Path pointing to ``benchmark_runs/datagen/``.
+    """
+    if base_dir is not None:
+        return Path(base_dir)
+    return Path.cwd() / "benchmark_runs" / "datagen"
+
+
 def get_results_path(benchmark_name: str, timestamp: str, base_dir: str | Path | None = None) -> Path:
     """Get results path for a benchmark run.
 

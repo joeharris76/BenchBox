@@ -269,17 +269,12 @@ class TestPandasFamilyAdapter:
         assert result["query_id"] == "Q1"
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 100
-        assert "execution_time" in result
+        assert "execution_time_seconds" in result
 
     def test_execute_query_timing_key_matches_schema_contract(self):
         """Test that timing key matches what result schema expects.
 
-        The result schema (benchbox.core.results.schema) expects either:
-        - 'execution_time_ms' (direct milliseconds)
-        - 'execution_time' (seconds, converted to ms)
-
-        NOT 'execution_time_seconds' or other variants.
-        This test prevents regressions where timing is silently dropped.
+        Runtime producers should emit canonical `execution_time_seconds`.
         """
         adapter = MockPandasAdapter()
         ctx = adapter.create_context()
@@ -299,29 +294,10 @@ class TestPandasFamilyAdapter:
 
         result = adapter.execute_query(ctx, query)
 
-        # The schema accepts these keys (see schema.py lines 131-133):
-        valid_timing_keys = {"execution_time_ms", "execution_time"}
-        invalid_timing_keys = {"execution_time_seconds", "exec_time", "time_ms"}
-
-        # Must have exactly one valid timing key
-        timing_keys_present = valid_timing_keys & set(result.keys())
-        assert len(timing_keys_present) >= 1, (
-            f"Result must contain a valid timing key from {valid_timing_keys}, got keys: {set(result.keys())}"
-        )
-
-        # Must NOT have invalid timing keys (they would be silently ignored)
-        invalid_keys_present = invalid_timing_keys & set(result.keys())
-        assert len(invalid_keys_present) == 0, (
-            f"Result contains invalid timing keys {invalid_keys_present} that would be silently ignored by the schema"
-        )
-
-        # Timing value must be non-negative (use is not None to handle 0.0 correctly)
-        exec_time = result.get("execution_time")
-        timing_value = exec_time if exec_time is not None else result.get("execution_time_ms")
-        assert timing_value is not None, (
-            f"Result must have execution_time or execution_time_ms, got keys: {set(result.keys())}"
-        )
-        assert timing_value >= 0, f"Timing must be non-negative, got {timing_value}"
+        assert "execution_time_seconds" in result
+        assert "execution_time" not in result
+        assert "execution_time_ms" not in result
+        assert result["execution_time_seconds"] >= 0.0
 
     def test_execute_query_failure(self):
         """Test query execution failure handling."""

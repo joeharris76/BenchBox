@@ -145,7 +145,7 @@ Modin can utilize multiple CPU cores for parallel execution. The actual performa
 - Operation type (some operations parallelize better than others)
 - Dataset size (larger datasets benefit more from parallelization)
 - Data distribution and partition characteristics
-- Available CPU cores and memory bandwidth
+- Available CPU cores and memory bandwidth <!-- content-ok: cliche -->
 - Backend engine (Ray, Dask, or Unidist)
 
 Run benchmarks with your specific workloads to measure actual performance characteristics.

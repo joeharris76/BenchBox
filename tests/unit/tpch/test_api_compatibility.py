@@ -12,7 +12,7 @@ import pytest
 
 from benchbox import TPCH
 from benchbox.core.tpch.benchmark import TPCHBenchmark
-from benchbox.core.tpch.queries import TPCHQueries, TPCHQueryManager
+from benchbox.core.tpch.queries import TPCHQueries
 
 pytestmark = pytest.mark.fast
 
@@ -20,15 +20,9 @@ pytestmark = pytest.mark.fast
 class TestAPICompatibility:
     """Test backward compatibility with existing API."""
 
-    def test_tpchquerymanager_import_compatibility(self):
-        """Test that TPCHQueryManager can still be imported and used."""
-        # Import should work
-
-        # Should be alias for TPCHQueries
-        assert TPCHQueryManager is TPCHQueries
-
-        # Should be instantiable
-        manager = TPCHQueryManager()
+    def test_tpchqueries_import_compatibility(self):
+        """Test that TPCHQueries can be imported and used."""
+        manager = TPCHQueries()
         assert isinstance(manager, TPCHQueries)
 
     def test_get_query_original_signature(self):
@@ -175,7 +169,7 @@ class TestAPICompatibility:
     def test_import_paths_compatibility(self):
         """Test that existing import paths still work."""
         # Test direct import
-        from benchbox.core.tpch.queries import TPCHQueryManager as Manager1
+        from benchbox.core.tpch.queries import TPCHQueries as Manager1
 
         assert Manager1 is TPCHQueries
 

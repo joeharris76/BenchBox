@@ -4,64 +4,109 @@
 ```
 
 ## Goals and Constraints
-- Automate publication-grade charts from canonical BenchBox results with zero manual wrangling.
-- One consistent theming surface across static (PNG/SVG/PDF) and interactive (HTML) outputs.
-- Self contained: Python-first, no Node/bundler; minimal dependency footprint while keeping quality.
-- Deterministic, headless rendering that works in CI and offline (Kaleido).
+- Automate terminal-friendly charts from canonical BenchBox results with zero manual wrangling.
+- One consistent theming surface across light and dark ASCII output.
+- Self contained: Python-first, no external rendering dependencies; zero additional packages required.
+- Works everywhere: CI logs, SSH sessions, LLM/MCP agents, screen readers.
 
 ## Library Selection
-- **Primary:** Plotly (graph_objects) + Kaleido for headless PNG/SVG/PDF. Covers bar/line/scatter/heatmap/box, interactive HTML, and template theming without a JS toolchain.
-- **Fallback-only:** Matplotlib for niche plot types if Plotly cannot express them cleanly.
-- **Excluded:** Chart.js/Altair/Seaborn/Node toolchains to avoid a second runtime and duplicate style layers.
+- **ASCII Output:** Custom implementation using ANSI escape codes and Unicode block characters for terminal display. Supports all chart types with colorblind-friendly palettes and ASCII fallback for basic terminals.
+- **No external charting dependencies:** Plotly, Matplotlib, Kaleido, and similar libraries are not used. All rendering is built-in.
 
 ## Module Architecture
 ```
 benchbox/core/visualization/
   __init__.py             # Public entrypoints and convenience re-exports
-  styles.py               # Color palettes, typography, sizing, Plotly templates (light/dark)
-  templates.py            # Named chart templates (flagship, head-to-head, trends, cost)
-  charts.py               # Chart classes (bar, line, scatter, heatmap, box) built on Plotly
-  exporters.py            # Export helpers for PNG/SVG/PDF/HTML with metadata and DPI controls
+  templates.py            # Named chart templates (flagship, head-to-head, trends, cost, comparison)
+  exporters.py            # Export helpers for ASCII text files; render_ascii_chart() factory
   result_plotter.py       # High-level orchestration over BenchmarkResults / canonical JSON
+  ascii/                  # ASCII chart implementations
+    base.py               # Base class, options, terminal detection, color helpers
+    bar_chart.py          # Performance bar chart
+    box_plot.py           # Distribution box plot
+    histogram.py          # Query latency histogram
+    line_chart.py         # Time-series line chart
+    scatter_plot.py       # Cost-performance scatter plot
+    comparison_bar.py     # Paired comparison bar chart (side-by-side runs)
+    diverging_bar.py      # Diverging bar chart (percentage change)
+    summary_box.py        # Summary statistics box
 ```
 
 ## Chart Taxonomy
 - **Performance bar:** Multi-platform comparisons with sorting, error bars, winners highlighted.
-- **Time-series line:** Performance over time/runs with regression/trend markers and annotations.
-- **Cost-performance scatter:** Price/performance frontier, quadrant shading, Pareto highlighting.
-- **Query variance heatmap:** Query × platform variance/CV for TPC-H/TPC-DS/Havoc consistency.
-- **Distribution box plot:** Latency distributions (per benchmark, platform, or query group).
+- **Time-series line:** Performance over time/runs with multi-series support.
+- **Cost-performance scatter:** Price/performance visualization with platform labels.
+- **Query variance heatmap:** Query x platform grid for TPC-H/TPC-DS/ClickBench analysis.
+- **Query latency histogram:** Per-query vertical bars showing latency; auto-splits for large benchmarks (>33 queries).
+- **Distribution box plot:** Latency distributions with quartiles, whiskers, and outlier markers.
+- **Comparison bar:** Paired side-by-side bars per query with percentage change annotations.
+- **Diverging bar:** Percentage change bars centered on zero (green for improvement, red for regression).
+- **Summary box:** Key statistics in a bordered box (total time, geometric mean, query count, etc.).
 
-## Style Guide (Publication-Ready Defaults)
-- Palette: Colorblind-friendly categorical set, `#1b9e77`, `#d95f02`, `#7570b3`, `#e7298a`, `#66a61e`, `#e6ab02`.
-- Neutral grays: `#2f3437` text, `#6b7075` secondary, gridlines `rgba(0,0,0,0.08)`.
-- Typography: Preferably Source Sans / Open Sans fallback; use 12-14 pt labels, 16-18 pt titles.
-- Sizing: Blog default 1280×720 (72 DPI); print 1600×900 @ 300 DPI; square variants 1080×1080 for social.
-- Annotations: Best/worst markers, confidence intervals/error bars, clear legends with platform naming.
-- Accessibility: WCAG AA contrast, colorblind palette, optional patterns for fills, alt-text metadata in exports.
+## Style Guide
+- Palette: Colorblind-friendly Okabe-Ito set, `#1b9e77`, `#d95f02`, `#7570b3`, `#e7298a`, `#66a61e`, `#e6ab02`.
+- Neutral grays: `#2f3437` text, `#6b7075` secondary.
+- Best/worst highlighting: green for fastest, red/orange for slowest.
+- Annotations: Best/worst markers, legends with platform naming, scale notes.
+- Accessibility: Colorblind-safe palette, Unicode/ASCII fallback, screen reader friendly text output.
 
 ## CLI Design (`benchbox visualize`)
-- Inputs: Single/multiple result JSON files or directories (globs). Auto-detect latest in `benchmark_runs/results` when none provided.
+- Inputs: Single/multiple result JSON files or directories. Auto-detect latest in `benchmark_runs/results` when none provided.
 - Core flags:
-  - `--chart-type` (`auto` default; supports bar|line|scatter|heatmap|box|all)
-  - `--template` (flagship|head-to-head|trends|cost-optimization)
-  - `--format` (`png,svg,html,pdf`; defaults png,html)
-  - `--output` (directory, defaults `./charts`)
-  - `--group-by` (`platform` or `benchmark` for batch comparisons)
-  - `--dpi` (72|300), `--theme` (light|dark)
+  - `--chart-type` (`auto` default; supports performance_bar|distribution_box|query_heatmap|query_histogram|cost_scatter|time_series|all)
+  - `--template` (default|flagship|head_to_head|trends|cost_optimization|comparison)
+  - `--theme` (light|dark)
+  - `--no-color` (disable ANSI colors for piping to files or plain terminals)
+  - `--no-unicode` (use ASCII-only characters for basic terminals)
 - Behavior:
-  - Smart selection: chooses chart set based on data (single platform → query breakdown; multi-platform → comparisons; cost data → scatter).
-  - Embeds metadata (benchmark, scale, platforms, BenchBox version, timestamp, source paths) into exports.
-  - Deterministic file naming: `<benchmark>_<platforms>_<metric>.<ext>`.
+  - Smart selection: when `auto`, renders all supported chart types based on available data.
+  - Templates bundle predefined chart sets for common content workflows.
 
-## Export and Performance
-- Headless rendering via Kaleido; no display server required.
-- PNG/SVG/PDF targets with configurable DPI; HTML uses inline assets, no CDN.
-- Batch-friendly: aims for <5s for a standard blog set; avoids loading heavy dependencies unless invoked.
+## ASCII Chart Output
+
+ASCII charts provide terminal-friendly visualization without requiring a browser or external dependencies:
+
+```bash
+# Display charts directly in terminal
+benchbox visualize results.json
+
+# Without colors (for piping or plain terminals)
+benchbox visualize results.json --no-color
+
+# Without Unicode (for terminals without Unicode support)
+benchbox visualize results.json --no-unicode
+
+# Specific chart type
+benchbox visualize results.json --chart-type performance_bar
+
+# Use a template
+benchbox visualize results.json --template flagship
+```
+
+**Features:**
+- 9 chart types: bar, box, heatmap, histogram, scatter, line, comparison bar, diverging bar, summary box
+- Colorblind-friendly Okabe-Ito palette with 256-color and 16-color fallbacks
+- Unicode block characters (▏▎▍▌▋▊▉█) with ASCII fallback ( .-=+#@)
+- Terminal width detection (40-120 character constraint)
+- Best/worst highlighting, legends, and statistical summaries
+- Light and dark themes
+
+**Use cases:**
+- LLM/MCP integration where agents interpret text output
+- CI/CD pipelines needing visual summaries in logs
+- SSH sessions without X11 forwarding
+- Screen reader accessibility
+- Quick result inspection during development
+
+## Export
+
+- ASCII charts render directly to the terminal (stdout).
+- Use `--no-color` to strip ANSI codes for piping to files or text processing.
+- Text file export available via the `export_ascii()` helper function.
 
 ## Dependency Footprint
-- Required for visualization: `plotly`, `kaleido`, `pandas` (data shaping), `pillow` (image post-processing).
-- Kept optional (lazy import + helpful error) to avoid bloating minimal BenchBox installs; CLI surfaces install guidance when missing.
+- Zero additional dependencies: visualization is built entirely on Python standard library plus the existing `rich` dependency for console output.
+- No lazy imports or optional packages needed for chart generation.
 
 ## Related Documentation
 

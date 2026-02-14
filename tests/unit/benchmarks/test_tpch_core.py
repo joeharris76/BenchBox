@@ -27,7 +27,7 @@ import pytest
 from benchbox import TPCH
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpch.generator import TPCHDataGenerator
-from benchbox.core.tpch.queries import TPCHQueryManager
+from benchbox.core.tpch.queries import TPCHQueries
 from benchbox.core.tpch.schema import (
     CUSTOMER,
     LINEITEM,
@@ -430,7 +430,7 @@ class TestTPCHQueryManager(unittest.TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures before each test method."""
-        self.query_manager = TPCHQueryManager()
+        self.query_manager = TPCHQueries()
 
     def test_query_loading(self) -> None:
         """Test that all 22 TPC-H queries are loaded."""

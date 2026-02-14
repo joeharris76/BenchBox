@@ -37,6 +37,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,7 +87,7 @@ class IncrementalLoadConfig:
 
     # Change detection settings
     enable_change_data_capture: bool = True
-    enable_cdc: bool = True  # Alias for compatibility
+    enable_cdc: Optional[bool] = None
     cdc_column_name: str = "LastModified"
     use_hash_based_detection: bool = True
     hash_columns: Optional[list[str]] = None
@@ -99,9 +101,9 @@ class IncrementalLoadConfig:
     # Watermark management
     enable_watermarks: bool = True
     watermark_table: str = "ETL_Watermarks"
-    watermark_table_name: str = "DataWatermarks"  # Alias for test compatibility
+    watermark_table_name: Optional[str] = None
     watermark_lag_minutes: int = 5  # Safety lag for CDC
-    enable_deduplication: bool = True  # For test compatibility
+    enable_deduplication: bool = True
 
     # Error handling
     max_retry_attempts: int = 3
@@ -113,6 +115,14 @@ class IncrementalLoadConfig:
     optimize_for_bulk_operations: bool = True
     use_staging_tables: bool = True
     staging_table_prefix: str = "STG_"
+
+    def __post_init__(self) -> None:
+        """Apply legacy aliases to canonical config fields."""
+        if self.enable_cdc is not None:
+            self.enable_change_data_capture = bool(self.enable_cdc)
+
+        if self.watermark_table_name:
+            self.watermark_table = self.watermark_table_name
 
 
 class ChangeDetector(ABC):
@@ -430,7 +440,7 @@ class IncrementalDataLoader:
             "success": False,
         }
 
-        start_time = datetime.now()
+        start_time = mono_time()
 
         try:
             # Get last processed timestamp for this table
@@ -462,7 +472,7 @@ class IncrementalDataLoader:
                     logger.debug(f"Processed {changes_processed} changes for {table_name}")
 
             table_stats["changes_detected"] = changes_processed
-            table_stats["processing_time"] = (datetime.now() - start_time).total_seconds()
+            table_stats["processing_time"] = elapsed_seconds(start_time)
             table_stats["success"] = True
 
             logger.debug(
@@ -794,18 +804,57 @@ class IncrementalDataLoader:
         }
 
         try:
-            # Use the mocked _load_data_batch method
-            batch_result = self._load_data_batch(table_name, data)
+            normalized_changes: list[ChangeRecord]
+            if isinstance(data, list) and all(isinstance(item, ChangeRecord) for item in data):
+                normalized_changes = data
+            elif hasattr(data, "to_dict"):
+                records = data.to_dict(orient="records")
+                normalized_changes = [
+                    ChangeRecord(
+                        table_name=table_name,
+                        operation="INSERT",
+                        primary_key={},
+                        changed_data=record,
+                        change_timestamp=datetime.now(),
+                        batch_id=batch_id,
+                    )
+                    for record in records
+                ]
+            elif isinstance(data, list):
+                normalized_changes = [
+                    ChangeRecord(
+                        table_name=table_name,
+                        operation="INSERT",
+                        primary_key={},
+                        changed_data=record if isinstance(record, dict) else {"value": record},
+                        change_timestamp=datetime.now(),
+                        batch_id=batch_id,
+                    )
+                    for record in data
+                ]
+            elif isinstance(data, dict):
+                normalized_changes = [
+                    ChangeRecord(
+                        table_name=table_name,
+                        operation="INSERT",
+                        primary_key={},
+                        changed_data=data,
+                        change_timestamp=datetime.now(),
+                        batch_id=batch_id,
+                    )
+                ]
+            else:
+                normalized_changes = []
+
+            batch_result = self._load_data_batch(normalized_changes, table_name)
 
             if isinstance(batch_result, dict) and "success" in batch_result:
                 results["success"] = batch_result["success"]
                 results["records_loaded"] = batch_result.get("records_loaded", 0)
             else:
-                # If not mocked, simulate processing
-                record_count = len(data) if hasattr(data, "__len__") else 1
+                record_count = len(normalized_changes)
                 results["records_loaded"] = record_count
 
-                # Configure watermark
                 self.table_watermarks[table_name] = datetime.now()
 
         except Exception as e:

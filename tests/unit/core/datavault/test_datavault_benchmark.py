@@ -47,6 +47,35 @@ def test_query_translation_via_base():
     assert "SELECT" in translated.upper()
 
 
+class TestDataFrameMode:
+    """Tests for DataFrame execution mode support."""
+
+    def test_supports_dataframe_mode(self):
+        """DataVaultBenchmark should declare DataFrame mode support."""
+        benchmark = DataVaultBenchmark(scale_factor=0.01)
+        assert benchmark.supports_dataframe_mode() is True
+
+    def test_get_dataframe_queries_returns_all_22(self):
+        """get_dataframe_queries should return all 22 Data Vault queries."""
+        benchmark = DataVaultBenchmark(scale_factor=0.01)
+        queries = benchmark.get_dataframe_queries()
+        assert len(queries) == 22
+
+    def test_dataframe_queries_have_both_implementations(self):
+        """Each query should have both expression and pandas implementations."""
+        benchmark = DataVaultBenchmark(scale_factor=0.01)
+        for query in benchmark.get_dataframe_queries():
+            assert query.expression_impl is not None, f"{query.query_id} missing expression_impl"
+            assert query.pandas_impl is not None, f"{query.query_id} missing pandas_impl"
+
+    def test_dataframe_query_ids_match_sql_queries(self):
+        """DataFrame query IDs should correspond to SQL query IDs (Q1-Q22)."""
+        benchmark = DataVaultBenchmark(scale_factor=0.01)
+        df_ids = sorted(q.query_id for q in benchmark.get_dataframe_queries())
+        expected = sorted(f"Q{i}" for i in range(1, 23))
+        assert df_ids == expected
+
+
 class TestHashAlgorithmValidation:
     """Tests for hash algorithm validation."""
 

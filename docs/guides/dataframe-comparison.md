@@ -106,7 +106,7 @@ benchbox compare-dataframes [OPTIONS]
 |--------|---------|-------------|
 | `-o, --output PATH` | none | Output directory for results |
 | `--format [json\|markdown\|text]` | `text` | Output format |
-| `--generate-charts` | false | Generate visualization charts |
+| `--generate-charts` | false | Generate ASCII visualization charts in output directory |
 | `--theme [light\|dark]` | `light` | Chart theme |
 | `--data-dir DIRECTORY` | auto | Directory containing benchmark data |
 
@@ -221,12 +221,9 @@ This creates:
 comparison_results/
 ├── comparison.md          # Markdown report
 └── charts/
-    ├── comparison_bar.png
-    ├── comparison_bar.html
-    ├── platform_distribution.png
-    ├── platform_distribution.html
-    ├── query_heatmap.png
-    └── query_heatmap.html
+    ├── performance_bar.txt
+    ├── distribution_box.txt
+    └── query_heatmap.txt
 ```
 
 ### Specific Query Subset
@@ -361,25 +358,22 @@ print(f"Average speedup: {summary.average_speedup:.2f}x")
 ### Generate Charts Programmatically
 
 ```python
-from benchbox.core.dataframe import (
-    DataFrameBenchmarkSuite,
-    DataFrameComparisonPlotter,
-)
+from benchbox.core.visualization import ResultPlotter, export_ascii
+from benchbox.core.visualization.ascii.base import ASCIIChartOptions
 
-# Run comparison
-suite = DataFrameBenchmarkSuite()
-results = suite.run_comparison(["polars-df", "pandas-df"], data_dir)
+# Load results from JSON files
+plotter = ResultPlotter.from_sources(["results/polars-df.json", "results/pandas-df.json"])
 
-# Generate charts
-plotter = DataFrameComparisonPlotter(results, theme="dark")
-exports = plotter.generate_charts(
-    output_dir="charts/",
-    formats=["png", "html", "svg"],
-    dpi=300,
-)
+# Render individual chart types
+from benchbox.core.visualization.ascii import ASCIIBarChart
+from benchbox.core.visualization.ascii.bar_chart import BarData
 
-for chart_type, paths in exports.items():
-    print(f"{chart_type}: {paths}")
+bar_data = [BarData(label=r.platform, value=r.total_time_ms or 0) for r in plotter.results]
+chart = ASCIIBarChart(data=bar_data, title="DataFrame Performance Comparison")
+print(chart.render())
+
+# Or use the CLI for automatic chart generation
+# benchbox visualize results/polars-df.json results/pandas-df.json
 ```
 
 ## Platform Categories

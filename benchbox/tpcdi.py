@@ -134,7 +134,11 @@ class TPCDI(BaseBenchmark):
         Returns:
             Dictionary containing ETL execution results and metrics
         """
-        return self._impl.run_etl_pipeline(connection, batch_type, validate_data)
+        return self._impl.run_etl_pipeline(
+            connection=connection,
+            batch_type=batch_type,
+            validate_data=validate_data,
+        )
 
     def validate_etl_results(self, connection: Any) -> dict[str, Any]:
         """Validate ETL results using data quality checks.

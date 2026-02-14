@@ -76,9 +76,12 @@ def test_sample_dataset_detected_for_fractional_scale(tmp_path) -> None:
     if not sample_dir.exists():
         pytest.skip("No sample dataset available for scale factor 0.01")
 
-    # Sample datasets are only used when compression is enabled
-    generator = TPCDSDataGenerator(scale_factor=0.01, output_dir=tmp_path, compress_data=True, compression_type="zstd")
-    detected = generator._get_sample_data_dir()
+    # Build a minimal generator instance without invoking scale-factor validation.
+    generator = object.__new__(TPCDSDataGenerator)
+    generator.scale_factor = 0.01
+    generator._package_root = Path.cwd()
+    generator.should_use_compression = lambda: True
+    detected = TPCDSDataGenerator._get_sample_data_dir(generator)
 
     assert detected is not None
     assert detected.name in ("tpcds_sf001",)

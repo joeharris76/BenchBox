@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import io
 import re
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -401,7 +402,7 @@ class PostgreSQLAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using benchmark's SQL definitions."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
 
         # Get schema SQL and translate to PostgreSQL dialect
@@ -423,7 +424,7 @@ class PostgreSQLAdapter(PlatformAdapter):
         connection.commit()
         cursor.close()
 
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         self.log_operation_complete("Schema creation", duration, "Schema and tables created")
         return duration
 
@@ -434,7 +435,7 @@ class PostgreSQLAdapter(PlatformAdapter):
         data_dir: Path,
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
         """Load benchmark data using PostgreSQL COPY command for efficiency."""
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         self.log_operation_start("Data loading", f"source: {data_dir}")
@@ -503,7 +504,7 @@ class PostgreSQLAdapter(PlatformAdapter):
                 table_stats[table_name_lower] = 0
 
         cursor.close()
-        loading_time = time.time() - start_time
+        loading_time = elapsed_seconds(start_time)
 
         total_rows = sum(table_stats.values())
         self.log_operation_complete("Data loading", loading_time, f"Loaded {total_rows:,} total rows")
@@ -540,7 +541,7 @@ class PostgreSQLAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute a single query and return detailed results."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_verbose(f"Executing query {query_id}")
 
         try:
@@ -549,7 +550,7 @@ class PostgreSQLAdapter(PlatformAdapter):
             results = cursor.fetchall()
             cursor.close()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(results)
 
             # Validate row count if enabled
@@ -577,11 +578,11 @@ class PostgreSQLAdapter(PlatformAdapter):
             return result
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

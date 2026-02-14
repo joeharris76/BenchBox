@@ -23,8 +23,8 @@ from benchbox.utils.printing import quiet_console
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from rich.console import Console
 
-# Module-level console for testing compatibility
-# Cast to Console for type checking since QuietConsoleProxy forwards all calls to Console
+# Module-level console handle used by display helpers.
+# Cast to Console for type checking since QuietConsoleProxy forwards all calls to Console.
 console: Any = quiet_console
 
 

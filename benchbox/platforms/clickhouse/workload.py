@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.cloud_storage import get_cloud_path_info, is_cloud_path
 from benchbox.utils.file_format import is_tpc_format
 
@@ -20,7 +20,7 @@ class ClickHouseWorkloadMixin:
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using ClickHouse-optimized table definitions."""
-        start_time = time.time()
+        start_time = mono_time()
 
         # Get constraint settings from tuning configuration
         enable_primary_keys, enable_foreign_keys = self._get_constraint_configuration()
@@ -49,7 +49,7 @@ class ClickHouseWorkloadMixin:
             self.logger.error(f"Schema creation failed: {e}")
             raise
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def _optimize_table_definition(self, statement: str) -> str:
         """Optimize table definition for ClickHouse."""
@@ -243,24 +243,21 @@ class ClickHouseWorkloadMixin:
         validation_details: dict[str, Any] = {}
 
         try:
-            # For Mock connections, assume all tables are accessible
-            if hasattr(connection, "_mock_name"):
-                accessible_tables = list(table_stats.keys())
-                inaccessible_tables = []
-            else:
-                # For real connections, verify tables are accessible
-                accessible_tables = []
-                inaccessible_tables = []
+            execute_fn = getattr(connection, "execute", None)
+            if not callable(execute_fn):
+                raise TypeError("ClickHouse connection must expose an execute() method")
 
-                for table_name in table_stats:
-                    try:
-                        # Use execute() instead of cursor() for ClickHouse
-                        # ClickHouseLocalClient and server connections both support execute()
-                        connection.execute(f"SELECT 1 FROM {table_name} LIMIT 1")
-                        accessible_tables.append(table_name)
-                    except Exception as e:
-                        self.logger.debug(f"Table {table_name} inaccessible: {e}")
-                        inaccessible_tables.append(table_name)
+            accessible_tables = []
+            inaccessible_tables = []
+
+            for table_name in table_stats:
+                try:
+                    # ClickHouseLocalClient and ClickHouse server clients both expose execute().
+                    execute_fn(f"SELECT 1 FROM {table_name} LIMIT 1")
+                    accessible_tables.append(table_name)
+                except Exception as e:
+                    self.logger.debug(f"Table {table_name} inaccessible: {e}")
+                    inaccessible_tables.append(table_name)
 
             if inaccessible_tables:
                 validation_details["inaccessible_tables"] = inaccessible_tables
@@ -287,7 +284,7 @@ class ClickHouseWorkloadMixin:
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute query with detailed timing and profiling."""
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Apply ClickHouse-specific query transformations for SQL compatibility
@@ -303,7 +300,7 @@ class ClickHouseWorkloadMixin:
             # Execute the transformed query
             result = connection.execute(transformed_query)
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Validate row count if enabled and benchmark type is provided
@@ -336,7 +333,7 @@ class ClickHouseWorkloadMixin:
                     return {
                         "query_id": query_id,
                         "status": "FAILED",
-                        "execution_time": execution_time,
+                        "execution_time_seconds": execution_time,
                         "rows_returned": actual_row_count,
                         "row_count_validation": {
                             "expected": validation_result.expected_row_count,
@@ -353,7 +350,7 @@ class ClickHouseWorkloadMixin:
             result_dict = {
                 "query_id": query_id,
                 "status": "SUCCESS",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": actual_row_count,
                 "first_row": result[0] if result else None,
                 "translated_query": None,  # Translation handled by base adapter
@@ -373,12 +370,12 @@ class ClickHouseWorkloadMixin:
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

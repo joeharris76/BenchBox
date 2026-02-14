@@ -234,7 +234,7 @@ class CompletenessValidator(BaseValidator):
 
         # Check for execution metadata
         for query_id, query_result in query_results.items():
-            required_query_fields = ["execution_time", "status", "row_count"]
+            required_query_fields = ["execution_time_seconds", "status", "row_count"]
             missing_query_fields = self._check_required_fields(query_result, required_query_fields)
 
             if missing_query_fields:
@@ -282,14 +282,14 @@ class QueryResultValidator(BaseValidator):
                 continue
 
             # Check execution time
-            execution_time = query_result.get("execution_time", 0)
+            execution_time = query_result.get("execution_time_seconds", 0)
             if execution_time > self.max_execution_time:
                 report.add_issue(
                     "WARNING",
                     f"Query {query_id} execution time ({execution_time}s) exceeds maximum ({self.max_execution_time}s)",
                     {
                         "query_id": query_id,
-                        "execution_time": execution_time,
+                        "execution_time_seconds": execution_time,
                         "max_time": self.max_execution_time,
                     },
                     self.name,
@@ -448,7 +448,7 @@ class TimingValidator(BaseValidator):
         execution_times = []
 
         for query_id, query_result in query_results.items():
-            execution_time = query_result.get("execution_time", 0)
+            execution_time = query_result.get("execution_time_seconds", 0)
 
             # Check minimum execution time
             if execution_time < self.min_query_time:
@@ -457,7 +457,7 @@ class TimingValidator(BaseValidator):
                     f"Query {query_id} execution time ({execution_time}s) below minimum ({self.min_query_time}s)",
                     {
                         "query_id": query_id,
-                        "execution_time": execution_time,
+                        "execution_time_seconds": execution_time,
                         "min_time": self.min_query_time,
                     },
                     self.name,
@@ -476,7 +476,7 @@ class TimingValidator(BaseValidator):
                         f"Query {query_id} execution time ({execution_time}s) below precision threshold ({self.precision_threshold}s)",
                         {
                             "query_id": query_id,
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "threshold": self.precision_threshold,
                         },
                         self.name,
@@ -764,7 +764,7 @@ class MetricsValidator(BaseValidator):
 
         if query_results:
             # Calculate average query execution time
-            execution_times = [qr.get("execution_time", 0) for qr in query_results.values()]
+            execution_times = [qr.get("execution_time_seconds", 0) for qr in query_results.values()]
             execution_times = [t for t in execution_times if t > 0]
 
             if execution_times:
@@ -1355,13 +1355,13 @@ def create_sample_test_results() -> dict[str, Any]:
         "query_results": {
             "1": {
                 "status": "success",
-                "execution_time": 5.2,
+                "execution_time_seconds": 5.2,
                 "row_count": 100,
                 "results": [{"col1": "value1", "col2": "value2"}],
             },
             "2": {
                 "status": "success",
-                "execution_time": 3.1,
+                "execution_time_seconds": 3.1,
                 "row_count": 50,
                 "results": [{"col1": "value3", "col2": "value4"}],
             },

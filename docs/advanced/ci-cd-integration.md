@@ -351,6 +351,8 @@ pipeline {
                         --benchmark ${params.BENCHMARK} \
                         --scale ${params.SCALE_FACTOR} \
                         --output results/
+
+                    benchbox export --last --format html --output-dir results/
                 """
             }
         }
@@ -374,17 +376,7 @@ pipeline {
         stage('Archive Results') {
             steps {
                 archiveArtifacts artifacts: 'results/*.json', fingerprint: true
-                archiveArtifacts artifacts: 'results/*.html', fingerprint: true
-            }
-        }
-
-        stage('Publish Report') {
-            steps {
-                publishHTML([
-                    reportDir: 'results',
-                    reportFiles: '*.html',
-                    reportName: 'Benchmark Report'
-                ])
+                archiveArtifacts artifacts: 'results/*.html', fingerprint: true, allowEmptyArchive: true
             }
         }
     }
@@ -843,7 +835,7 @@ if __name__ == "__main__":
 
 ### HTML Report Generation
 
-Generate HTML reports with charts:
+Generate HTML reports with formatted tables:
 
 ```python
 from benchbox.core.results.exporter import ResultExporter
@@ -858,6 +850,29 @@ comparison = exporter.compare_results(baseline_path, current_path)
 report_path = exporter.export_comparison_report(comparison)
 
 print(f"Report: {report_path}")
+```
+
+### ASCII Chart Generation
+
+Generate ASCII visualization charts for CI logs or text-based reports:
+
+```bash
+# Generate ASCII charts from results (renders to stdout)
+benchbox visualize results/*.json --no-color > comparison_charts.txt
+
+# Specific chart type for CI summary
+benchbox visualize results/*.json --chart-type performance_bar --no-color
+```
+
+```python
+from benchbox.core.visualization import ResultPlotter
+
+# Load results and generate charts programmatically
+plotter = ResultPlotter.from_sources(["results/tpch_duckdb.json"])
+
+# Export ASCII charts to text files
+charts = plotter.generate_charts(output_dir="reports/charts")
+print(f"Charts exported: {charts}")
 ```
 
 ### Slack Notifications

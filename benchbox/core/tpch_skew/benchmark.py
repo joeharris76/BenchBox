@@ -25,6 +25,7 @@ from benchbox.core.tpch_skew.skew_config import (
     SkewPreset,
     get_preset_config,
 )
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 class TPCHSkewBenchmark(TPCHBenchmark):
@@ -233,7 +234,6 @@ class TPCHSkewBenchmark(TPCHBenchmark):
             >>> results = benchmark.compare_with_uniform(adapter, queries=[1, 6, 14])
             >>> print(results["summary"]["avg_skew_slowdown"])
         """
-        import time
         from statistics import mean, stdev
 
         from benchbox.core.tpch.benchmark import TPCHBenchmark
@@ -282,7 +282,7 @@ class TPCHSkewBenchmark(TPCHBenchmark):
 
         # Phase 1: Run queries on uniform data
         self.log_verbose("Phase 1: Running queries on uniform TPC-H data...")
-        start_uniform = time.time()
+        start_uniform = mono_time()
 
         try:
             uniform_run_results = adapter.run_benchmark(
@@ -290,7 +290,7 @@ class TPCHSkewBenchmark(TPCHBenchmark):
                 query_subset=query_subset,
                 test_execution_type="standard",
             )
-            uniform_duration = time.time() - start_uniform
+            uniform_duration = elapsed_seconds(start_uniform)
             self.log_verbose(f"  Uniform benchmark completed in {uniform_duration:.2f}s")
 
             # Extract per-query timing from results
@@ -311,7 +311,7 @@ class TPCHSkewBenchmark(TPCHBenchmark):
 
         # Phase 2: Run queries on skewed data
         self.log_verbose("Phase 2: Running queries on skewed TPC-H data...")
-        start_skewed = time.time()
+        start_skewed = mono_time()
 
         try:
             skewed_run_results = adapter.run_benchmark(
@@ -319,7 +319,7 @@ class TPCHSkewBenchmark(TPCHBenchmark):
                 query_subset=query_subset,
                 test_execution_type="standard",
             )
-            skewed_duration = time.time() - start_skewed
+            skewed_duration = elapsed_seconds(start_skewed)
             self.log_verbose(f"  Skewed benchmark completed in {skewed_duration:.2f}s")
 
             # Extract per-query timing from results

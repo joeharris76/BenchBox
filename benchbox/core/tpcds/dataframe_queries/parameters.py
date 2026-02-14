@@ -574,16 +574,42 @@ TPCDS_DEFAULT_PARAMS: dict[int, dict[str, Any]] = {
 }
 
 
+# Module-level parameter overrides. When set by the dataframe_runner before
+# query execution, get_parameters() merges these into the defaults. This avoids
+# changing the call signature that all 99 query functions depend on.
+_parameter_overrides: dict[int, dict[str, Any]] | None = None
+
+
+def set_parameter_overrides(overrides: dict[int, dict[str, Any]] | None) -> None:
+    """Set parameter overrides for the current benchmark run.
+
+    Called by the dataframe_runner before query execution to inject seed-derived
+    parameters. Pass None to clear overrides and revert to static defaults.
+
+    Args:
+        overrides: Dict mapping query_id to param dict, or None to clear.
+    """
+    global _parameter_overrides
+    _parameter_overrides = overrides
+
+
 def get_parameters(query_id: int) -> TPCDSParameters:
     """Get parameters for a TPC-DS query.
+
+    If parameter overrides are active (set via set_parameter_overrides),
+    override values are merged on top of the defaults for the given query.
+    This allows seed-derived parameters from dsqgen to flow into DataFrame
+    queries without modifying any query function.
 
     Args:
         query_id: Query number (1-99)
 
     Returns:
-        TPCDSParameters object with default values
+        TPCDSParameters object with default or overridden values
     """
-    params = TPCDS_DEFAULT_PARAMS.get(query_id, {})
+    params = dict(TPCDS_DEFAULT_PARAMS.get(query_id, {}))
+    if _parameter_overrides is not None and query_id in _parameter_overrides:
+        params.update(_parameter_overrides[query_id])
     return TPCDSParameters(query_id=query_id, params=params)
 
 

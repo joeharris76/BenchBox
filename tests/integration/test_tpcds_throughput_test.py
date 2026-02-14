@@ -21,10 +21,10 @@ import pytest
 
 from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 from benchbox.core.tpcds.throughput_test import (
-    StreamResult,
-    ThroughputTestConfig,
-    ThroughputTestResult,
+    TPCDSThroughputStreamResult,
     TPCDSThroughputTest,
+    TPCDSThroughputTestConfig,
+    TPCDSThroughputTestResult,
 )
 
 # Mark all tests in this file as integration tests
@@ -93,7 +93,7 @@ def temp_output_dir():
 @pytest.fixture
 def throughput_test_config():
     """Basic throughput test configuration."""
-    return ThroughputTestConfig(
+    return TPCDSThroughputTestConfig(
         num_streams=2,
         scale_factor=1.0,
         base_seed=42,
@@ -115,7 +115,7 @@ class TestThroughputTestConfig:
 
     def test_default_config(self):
         """Test default configuration values."""
-        config = ThroughputTestConfig()
+        config = TPCDSThroughputTestConfig()
 
         assert config.num_streams == 4  # Default from TPCDSThroughputTestConfig
         assert config.scale_factor == 1.0
@@ -128,7 +128,7 @@ class TestThroughputTestConfig:
 
     def test_custom_config(self):
         """Test custom configuration values."""
-        config = ThroughputTestConfig(
+        config = TPCDSThroughputTestConfig(
             num_streams=4,
             scale_factor=10.0,
             base_seed=123,
@@ -238,7 +238,7 @@ class TestThroughputTest:
         test = TPCDSThroughputTest(throughput_test_config)
 
         # Create successful result
-        result = ThroughputTestResult(
+        result = TPCDSThroughputTestResult(
             config=throughput_test_config,
             start_time="2023-01-01T00:00:00",
             end_time="2023-01-01T00:01:40",
@@ -246,7 +246,7 @@ class TestThroughputTest:
             streams_executed=2,
             streams_successful=2,
             stream_results=[
-                StreamResult(
+                TPCDSThroughputStreamResult(
                     stream_id=0,
                     start_time=0,
                     end_time=50,
@@ -257,7 +257,7 @@ class TestThroughputTest:
                     query_results=[],
                     success=True,
                 ),
-                StreamResult(
+                TPCDSThroughputStreamResult(
                     stream_id=1,
                     start_time=0,
                     end_time=50,
@@ -281,7 +281,7 @@ class TestThroughputTest:
         test = TPCDSThroughputTest(throughput_test_config)
 
         # Create result with failures
-        result = ThroughputTestResult(
+        result = TPCDSThroughputTestResult(
             config=throughput_test_config,
             start_time="2023-01-01T00:00:00",
             end_time="2023-01-01T00:01:40",
@@ -289,7 +289,7 @@ class TestThroughputTest:
             streams_executed=2,
             streams_successful=1,
             stream_results=[
-                StreamResult(
+                TPCDSThroughputStreamResult(
                     stream_id=0,
                     start_time=0,
                     end_time=50,
@@ -300,7 +300,7 @@ class TestThroughputTest:
                     query_results=[],
                     success=True,
                 ),
-                StreamResult(
+                TPCDSThroughputStreamResult(
                     stream_id=1,
                     start_time=0,
                     end_time=50,
@@ -320,9 +320,9 @@ class TestThroughputTest:
         assert validation is False
 
     def test_result_structure(self, throughput_test_config, temp_output_dir):
-        """Test ThroughputTestResult structure and properties."""
+        """Test TPCDSThroughputTestResult structure and properties."""
         # Create test result
-        result = ThroughputTestResult(
+        result = TPCDSThroughputTestResult(
             config=throughput_test_config,
             start_time="2023-01-01T00:00:00",
             end_time="2023-01-01T00:01:40",
@@ -330,7 +330,7 @@ class TestThroughputTest:
             streams_executed=2,
             streams_successful=2,
             stream_results=[
-                StreamResult(
+                TPCDSThroughputStreamResult(
                     stream_id=0,
                     start_time=0,
                     end_time=50,
@@ -341,7 +341,7 @@ class TestThroughputTest:
                     query_results=[],
                     success=True,
                 ),
-                StreamResult(
+                TPCDSThroughputStreamResult(
                     stream_id=1,
                     start_time=0,
                     end_time=50,
@@ -417,7 +417,7 @@ class TestEndToEndThroughputTest:
     def test_minimal_throughput_test(self, temp_output_dir):
         """Test minimal throughput test execution."""
         # Create minimal config
-        config = ThroughputTestConfig(
+        config = TPCDSThroughputTestConfig(
             num_streams=1,
             scale_factor=1.0,
             stream_timeout=30,
@@ -468,7 +468,7 @@ class TestEndToEndThroughputTest:
     def test_concurrent_streams_execution(self, temp_output_dir):
         """Test concurrent stream execution."""
         # Create config with multiple streams
-        config = ThroughputTestConfig(
+        config = TPCDSThroughputTestConfig(
             num_streams=3,
             scale_factor=1.0,
             stream_timeout=10,

@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-02-09
+
+### Added
+
+- **DataFrame mode for all benchmarks** - Complete DataFrame query implementations across all
+  18 benchmarks including TPC-DS (102 queries), TPC-H (22 queries), SSB (13q), ClickBench (43q),
+  NYC Taxi (25q), TSBS DevOps (18q), H2ODB, AMPLab, CoffeeShop, TPC-H Skew, and Data Vault.
+  DataFrame platforms now include Polars, DuckDB, DataFusion, PySpark, Pandas, Modin, Dask,
+  and cuDF (GPU).
+- **ASCII chart visualizations** - Replaced Plotly HTML charts with terminal-native ASCII
+  rendering. Seven chart types: performance bar, distribution box, query heatmap, comparison bar,
+  diverging bar, summary box, and query latency histogram. Charts include ANSI colors, Unicode
+  box-drawing, and best/worst highlighting.
+- **14 new SQL platform adapters** - PostgreSQL, Trino, PrestoDB, Apache Spark, AWS Athena,
+  Azure Synapse, Microsoft Fabric, Firebolt, MotherDuck, InfluxDB 3.x, TimescaleDB, ClickHouse
+  Cloud (first-class), Onehouse Quanton, and managed Spark variants (EMR, Dataproc, Glue,
+  Fabric Spark, Synapse Spark, Dataproc Serverless).
+- **Open table format support** - Delta Lake, Apache Iceberg, Apache Hudi, DuckLake, and Vortex
+  columnar format with format conversion orchestration and manifest v2 for multi-format tracking.
+- **Physical tuning DDL generation** - Platform-specific DDL generators for DuckDB, Snowflake,
+  Redshift, BigQuery, ClickHouse, Firebolt, PostgreSQL, TimescaleDB, Trino/Presto/Athena, and
+  Spark family (Delta, Iceberg, Parquet, Hive) with sort keys, partitioning, clustering, and
+  compression support.
+- **Query plan capture and comparison** - Plan parsers for DuckDB, PostgreSQL, Redshift,
+  DataFusion, and SQLite. Comparison engine with regression detection, fingerprinting, historical
+  tracking with flapping detection, and CLI visualization.
+- **Interactive CLI wizard** - Guided benchmark configuration with platform selection, tuning
+  wizard, scale factor validation, phase/query selection, onboarding system, and persistent
+  preferences.
+- **TPC-DI benchmark** - Complete implementation across 4 phases: core schema, query suite,
+  ETL pipeline, and validation/testing.
+- **Cross-platform comparison engine** - `benchbox compare` command with multi-platform
+  analysis, SQL vs DataFrame comparison, and unified visualization.
+- **Unified tuning configuration** - YAML-based tuning system with per-platform DDL generation,
+  write-time physical layout configuration, and dry-run preview support.
+- Cloud storage and deployment modes for S3/GCS/ADLS/DBFS with credential setup wizard and
+  cost estimation for Snowflake, Redshift, Synapse, Fabric, and Firebolt
+- TPC compliance improvements: stream-aware validation, query permutations, warmup/measurement
+  iterations, maintenance operations (RF1/RF2), and `--seed` for reproducibility
+- Configurable compression (zstd, gzip, none) across all benchmarks and data generation
+- New benchmarks: AI/ML Primitives, Metadata Primitives, Write Primitives, Transaction Primitives
+- MCP server: `suggest_charts` and `generate_chart` tools, platform/mode parameters
+- `--queries` flag for running specific query subsets, `--validation-mode` flag,
+  tiered `--help`
+
+### Fixed
+
+- **TPC-DS data generation reliability** - Fixed segfaults with fractional scale factors,
+  parallel generation errors, streaming compression, and chunked file handling.
+- **Cloud platform stability** - Fixed credential refresh errors, schema creation ordering,
+  UC Volume uploads, S3 key handling, and BigQuery/Snowflake/Redshift/Databricks adapter issues.
+- **Type safety** - Multi-phase type checking campaign resolving 150+ type errors across
+  production code with proper annotations and TYPE_CHECKING imports.
+- **SQL dialect translation** - Fixed SQLGlot compatibility for DuckDB, ClickHouse, DataFusion,
+  and Netezza dialects; resolved reserved keyword quoting and identifier case sensitivity.
+- Security hardening: SQL injection prevention, parameterized queries, path traversal protection
+- CLI hanging in non-interactive mode, progress display precision, `--quiet` mode propagation
+- TPC compliance: correct stream permutations, maintenance phase SQL execution, Power@Size
+  calculation parity between SQL and DataFrame modes
+
+### Changed
+
+- Dropped Plotly HTML charts in favor of ASCII-only rendering
+- Lazy-load cloud platform adapters to speed up CLI startup and test suite
+- Optimized TPC-DS smoke tests with selective table generation
+
 ## [0.1.1] - 2026-01-24
 
 ### Fixed

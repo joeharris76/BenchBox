@@ -76,6 +76,40 @@ def test_generate_data_invokes_generator_and_transformer(tmp_path: Path) -> None
     assert benchmark.manifest == result["manifest"]
 
 
+class TestDataFrameMode:
+    """Tests for DataFrame execution mode support."""
+
+    def test_supports_dataframe_mode(self) -> None:
+        """TPCDSOBTBenchmark should declare DataFrame mode support."""
+        benchmark = TPCDSOBTBenchmark(scale_factor=1.0)
+        assert benchmark.supports_dataframe_mode() is True
+
+    def test_get_dataframe_queries_returns_all_3(self) -> None:
+        """get_dataframe_queries should return all 3 OBT queries."""
+        benchmark = TPCDSOBTBenchmark(scale_factor=1.0)
+        queries = benchmark.get_dataframe_queries()
+        assert len(queries) == 3
+
+    def test_dataframe_queries_have_both_implementations(self) -> None:
+        """Each query should have both expression and pandas implementations."""
+        benchmark = TPCDSOBTBenchmark(scale_factor=1.0)
+        for query in benchmark.get_dataframe_queries():
+            assert query.expression_impl is not None, f"{query.query_id} missing expression_impl"
+            assert query.pandas_impl is not None, f"{query.query_id} missing pandas_impl"
+
+    def test_dataframe_query_ids(self) -> None:
+        """DataFrame query IDs should be Q1-Q3."""
+        benchmark = TPCDSOBTBenchmark(scale_factor=1.0)
+        ids = sorted(q.query_id for q in benchmark.get_dataframe_queries())
+        assert ids == ["Q1", "Q2", "Q3"]
+
+    def test_normalize_does_not_confuse_obt_with_tpcds(self) -> None:
+        """normalize_benchmark_id must not resolve tpcds_obt to tpcds."""
+        from benchbox.core.results.builder import normalize_benchmark_id
+
+        assert normalize_benchmark_id("tpcds_obt") == "tpcds_obt"
+
+
 def test_get_query_and_execute_query(tmp_path: Path) -> None:
     benchmark = TPCDSOBTBenchmark(scale_factor=1.0, output_dir=tmp_path / "out", force_regenerate=True)
 

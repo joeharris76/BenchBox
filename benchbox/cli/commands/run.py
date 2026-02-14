@@ -59,6 +59,8 @@ from benchbox.utils.compression import CompressionManager
 from benchbox.utils.output_path import normalize_output_root
 from benchbox.utils.verbosity import VerbositySettings, compute_verbosity
 
+logger = logging.getLogger(__name__)
+
 # Benchmark name aliases - maps common variations to canonical names
 BENCHMARK_ALIASES: dict[str, str] = {
     # TPC-H variations
@@ -85,6 +87,24 @@ def normalize_benchmark_name(name: str) -> str:
     """Normalize benchmark name: lowercase and resolve aliases."""
     normalized = name.lower()
     return BENCHMARK_ALIASES.get(normalized, normalized)
+
+
+def _render_post_run_charts(
+    result: Any,
+    console: Any,
+    quiet: bool,
+) -> None:
+    """Render post-run summary charts to the console if applicable."""
+    if quiet or not result.query_results:
+        return
+    try:
+        from benchbox.core.visualization.post_run_summary import generate_post_run_summary
+
+        summary = generate_post_run_summary(result)
+        for chart in summary.charts:
+            console.print(Text.from_ansi(chart))
+    except Exception:
+        logger.debug("Failed to render post-run summary charts", exc_info=True)
 
 
 def _build_execution_context(
@@ -389,6 +409,7 @@ def setup_verbose_logging(
 # Output Control
 @advanced_option("--no-monitoring", is_flag=True, help="Disable metrics collection")
 @advanced_option("--no-progress", is_flag=True, help="Disable progress bars")
+@advanced_option("--ignore-memory-warnings", is_flag=True, help="Proceed despite insufficient memory warnings")
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -415,6 +436,7 @@ def run(
     seed: int | None,
     no_monitoring: bool,
     no_progress: bool,
+    ignore_memory_warnings: bool,
 ) -> None:
     """Run benchmarks.
 
@@ -444,6 +466,7 @@ def run(
 
     # Compression config -> legacy variables
     comp_config = compression or CompressionConfig()
+    compression_cli_set = compression is not None
     no_compression = not comp_config.enabled
     compression_type = comp_config.type
     compression_level = comp_config.level
@@ -949,19 +972,24 @@ def run(
             compression_type = "none"
             if logger:
                 logger.debug("Compression disabled via BENCHBOX_NO_COMPRESSION environment variable")
+        elif compression_cli_set:
+            # Explicit CLI compression always takes precedence over config defaults.
+            compress_data = comp_config.enabled
+            if logger:
+                logger.debug(
+                    "Compression set via CLI: enabled=%s, type=%s, level=%s",
+                    compress_data,
+                    compression_type,
+                    compression_level,
+                )
         else:
             # Use configuration defaults or CLI arguments
             config_compression_enabled = config.get("output.compression.enabled", False)
             compress_data = config_compression_enabled
 
-            # Use CLI compression type or config default
-            if compression_type == "zstd":  # Default CLI value
-                config_compression_type = config.get("output.compression.type", "zstd")
-                compression_type = config_compression_type
-
-            # Use CLI compression level or config default
-            if compression_level is None:
-                compression_level = config.get("output.compression.level", None)
+            # Use configuration defaults when CLI compression is not explicitly set.
+            compression_type = config.get("output.compression.type", "zstd")
+            compression_level = config.get("output.compression.level", None)
 
             if logger:
                 logger.debug(f"Compression enabled: type={compression_type}, level={compression_level}")
@@ -1141,6 +1169,7 @@ def run(
                 "enable_preflight_validation": enable_preflight_validation,
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
                 "enable_postload_validation": enable_postload_validation,
+                "ignore_memory_warnings": ignore_memory_warnings,
                 **({"seed": seed} if seed is not None else {}),
                 **({"validation_mode": validation_mode} if validation_mode is not None else {}),
                 **({"convert_format": convert_format} if convert_format is not None else {}),
@@ -1297,6 +1326,7 @@ def run(
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
                 "enable_postload_validation": enable_postload_validation,
                 "seed": seed,
+                "ignore_memory_warnings": ignore_memory_warnings,
                 **({"convert_format": convert_format} if convert_format is not None else {}),
                 **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
                 **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
@@ -1387,6 +1417,8 @@ def run(
             console.print(f"\n[green]✅ Benchmark completed: {result.validation_status}[/green]")
             for format_name, filepath in exported_files.items():
                 console.print(f"{format_name.upper()}: [dim]{filepath}[/dim]")
+
+            _render_post_run_charts(result, console, quiet)
 
             # Save configuration for quick restart
             from benchbox.cli.preferences import save_last_run_config
@@ -1514,6 +1546,7 @@ def run(
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
                 "enable_postload_validation": enable_postload_validation,
                 "seed": seed,
+                "ignore_memory_warnings": ignore_memory_warnings,
                 **({"convert_format": convert_format} if convert_format is not None else {}),
                 **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
                 **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
@@ -1762,6 +1795,7 @@ def run(
                     "estimated_time_range": benchmark_info.get("estimated_time_range", (0, 60)),
                     "complexity": benchmark_info.get("complexity", "medium"),
                     "seed": seed,
+                    "ignore_memory_warnings": ignore_memory_warnings,
                     **({"convert_format": convert_format} if convert_format is not None else {}),
                     **(
                         {"conversion_compression": conversion_compression} if conversion_compression is not None else {}
@@ -2150,6 +2184,8 @@ def run(
 
         for format_name, filepath in exported_files.items():
             console.print(f"{format_name.upper()}: [dim]{filepath}[/dim]")
+
+        _render_post_run_charts(result, console, quiet)
 
         # Save configuration for quick restart
         from benchbox.cli.preferences import save_last_run_config

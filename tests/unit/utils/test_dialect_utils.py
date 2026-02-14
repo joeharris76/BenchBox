@@ -7,6 +7,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 import pytest
 
 from benchbox.utils.dialect_utils import (
+    _query_has_group_or_order_by_all,
     fix_postgres_date_arithmetic,
     normalize_dialect_for_sqlglot,
     translate_sql_query,
@@ -169,6 +170,37 @@ class TestSQLTranslation:
         assert "customer_name" in result.lower()
         assert "join" in result.lower()
         assert "where" in result.lower()
+
+    def test_translate_duckdb_preserves_order_by_all_keyword(self):
+        """Test DuckDB translation keeps ORDER BY ALL as a keyword."""
+        query = """
+            SELECT r_name, n_name, COUNT(*) AS supplier_count
+            FROM region r
+            JOIN nation n ON n.n_regionkey = r.r_regionkey
+            GROUP BY r_name, n_name
+            ORDER BY ALL
+        """
+        result = translate_sql_query(query, target_dialect="duckdb", source_dialect="netezza", identify=True)
+        assert "ORDER BY ALL" in result.upper()
+        assert 'ORDER BY "ALL"' not in result.upper()
+
+    def test_translate_duckdb_preserves_group_by_all_keyword(self):
+        """Test DuckDB translation keeps GROUP BY ALL as a keyword."""
+        query = """
+            SELECT n_name, r_name, COUNT(*) AS nation_count
+            FROM nation n
+            JOIN region r ON n.n_regionkey = r.r_regionkey
+            GROUP BY ALL
+            ORDER BY n_name
+        """
+        result = translate_sql_query(query, target_dialect="duckdb", source_dialect="netezza", identify=True)
+        assert "GROUP BY ALL" in result.upper()
+        assert 'GROUP BY "ALL"' not in result.upper()
+
+    def test_translate_fix_is_gated_by_original_query_pattern(self):
+        """Test that built-in fix only triggers on explicit ORDER/GROUP BY ALL keyword usage."""
+        query = 'SELECT 1 AS "ALL" ORDER BY "ALL"'
+        assert _query_has_group_or_order_by_all(query) is False
 
 
 class TestIntegrationScenarios:

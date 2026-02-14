@@ -12,7 +12,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,6 +20,7 @@ from benchbox.core.results.platform_info import PlatformInfoInput
 from benchbox.core.runner.dataframe_runner import (
     DataFramePhases,
     DataFrameRunOptions,
+    _get_queries_for_benchmark,
     get_execution_mode,
     is_dataframe_execution,
     run_dataframe_benchmark,
@@ -227,6 +228,53 @@ class TestRunDataframeBenchmark:
         assert result.validation_status == "FAILED"
         assert result.validation_details is not None
         assert "error" in result.validation_details
+
+    def test_load_phase_uses_data_loader_preparation_pipeline(self, tmp_path):
+        """Data load phase should use DataFrameDataLoader.prepare_benchmark_data."""
+        adapter = MagicMock()
+        adapter.platform_name = "Polars"
+        adapter.create_context.return_value = MagicMock()
+        adapter.get_platform_info.return_value = {"platform": "Polars"}
+        adapter.get_standard_platform_info.return_value = PlatformInfoInput(name="Polars", execution_mode="dataframe")
+        adapter.load_table.return_value = 2
+
+        config = MagicMock()
+        config.name = "tpch"
+        config.display_name = "TPC-H"
+        config.scale_factor = 1.0
+        config.options = {}
+
+        benchmark_instance = MagicMock()
+        benchmark_instance.name = "tpch"
+        benchmark_instance.tables = {
+            "lineitem": [tmp_path / "lineitem.tbl.1.zst"],
+        }
+
+        prepared = {"lineitem": tmp_path / "lineitem.parquet"}
+
+        with patch("benchbox.core.runner.dataframe_runner.DataFrameDataLoader") as loader_cls:
+            loader = loader_cls.return_value
+            loader.prepare_benchmark_data.return_value = prepared
+
+            result = run_dataframe_benchmark(
+                benchmark_config=config,
+                adapter=adapter,
+                phases=DataFramePhases(load=True, execute=False),
+                benchmark_instance=benchmark_instance,
+            )
+
+        assert result.validation_status == "PASSED"
+        loader.prepare_benchmark_data.assert_called_once_with(
+            benchmark=benchmark_instance,
+            scale_factor=1.0,
+            data_dir=None,
+        )
+        adapter.load_table.assert_called_once()
+        args, kwargs = adapter.load_table.call_args
+        assert args[0] == adapter.create_context.return_value
+        assert args[1] == "lineitem"
+        assert args[2] == [tmp_path / "lineitem.parquet"]
+        assert kwargs["column_names"] is not None
 
 
 class TestModeCoexistence:
@@ -460,3 +508,22 @@ class TestMaintenancePhaseValidation:
         )
 
         assert result is not None
+
+
+class _StubTPCDSQueryManager:
+    def get_query(self, query_id, seed=None, variant=None):  # noqa: ANN001
+        _ = (query_id, seed, variant)
+        return "SELECT 1"
+
+
+def test_tpcds_dataframe_requires_variant_parity():
+    """TPC-DS DataFrame mode must fail if SQL variants are not implemented."""
+    config = MagicMock()
+    config.name = "tpcds"
+    config.options = {"tpcds_dataframe_variant_fallback": False}
+
+    benchmark_instance = MagicMock()
+    benchmark_instance.query_manager = _StubTPCDSQueryManager()
+
+    with pytest.raises(RuntimeError, match="missing variant DataFrame implementations"):
+        _get_queries_for_benchmark(config, benchmark_instance, stream_id=0)

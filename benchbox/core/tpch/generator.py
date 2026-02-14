@@ -28,6 +28,7 @@ from benchbox.utils.data_validation import BenchmarkDataValidator
 from benchbox.utils.datagen_manifest import DataGenerationManifest, resolve_compression_metadata
 from benchbox.utils.file_format import COMPRESSION_EXTENSIONS
 from benchbox.utils.scale_factor import format_scale_factor
+from benchbox.utils.stale_artifact_pruning import TableArtifactPattern, prune_stale_table_artifacts
 from benchbox.utils.tpc_compilation import CompilationStatus, ensure_tpc_binaries
 from benchbox.utils.verbosity import VerbosityMixin, compute_verbosity
 
@@ -807,6 +808,10 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
 
             return self._collect_existing_table_files(target_dir)
 
+        removed_stale = self._prune_stale_table_artifacts(target_dir)
+        if removed_stale and self.verbose_enabled:
+            self.logger.info("Removed %d stale TPC-H table artifacts before regeneration", len(removed_stale))
+
         sample_dir = self._get_sample_data_dir()
         if sample_dir is not None:
             self.log_verbose(f"⚡ Using bundled TPC-H sample dataset for scale factor {self.scale_factor}")
@@ -894,6 +899,42 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
                     existing[table] = sorted(chunk_files, key=lambda f: f.name)
 
         return existing
+
+    def _prune_stale_table_artifacts(self, target_dir: Path) -> list[Path]:
+        """Remove stale per-table artifacts before regeneration.
+
+        This prevents coexistence of raw, sharded, and compressed variants
+        from previous generation modes.
+
+        Args:
+            target_dir: Directory containing generated TPCH artifacts.
+
+        Returns:
+            List of deleted file paths.
+        """
+        table_files = (
+            "customer",
+            "lineitem",
+            "nation",
+            "orders",
+            "part",
+            "partsupp",
+            "region",
+            "supplier",
+        )
+        return prune_stale_table_artifacts(
+            target_dir=target_dir,
+            table_names=table_files,
+            pattern=TableArtifactPattern(
+                single_suffix=".tbl",
+                raw_shard_glob_template="{table}.tbl.*",
+                compressed_shard_glob_template="{table}.tbl.*{ext}",
+                shard_regex_template=r"^{table}\.tbl\.\d+(?:\.[a-z0-9]+)?$",
+            ),
+            compression_extensions=COMPRESSION_EXTENSIONS,
+            use_compression=self.should_use_compression(),
+            expect_sharded=int(getattr(self, "parallel", 1) or 1) > 1,
+        )
 
     def _get_sample_data_dir(self) -> Path | None:
         if self.scale_factor >= 1:

@@ -28,7 +28,7 @@ BenchBox _loosely_ follows [Semantic Versioning](https://semver.org/) using the 
 - **MINOR** when we add backward-compatible changes _OR significantly expand functionality_.
 - **PATCH** when we make bug fixes or documentation updates, _bug-fixes may not be backward-compatible_.
 
-Current release: v0.1.1. Check your installation with `benchbox --version`, which also reports metadata consistency diagnostics pulled from `pyproject.toml` and documentation markers.
+Current release: v0.1.2. Check your installation with `benchbox --version`, which also reports metadata consistency diagnostics pulled from `pyproject.toml` and documentation markers.
 
 **For Developers**: See [Release Automation Guide](release/RELEASE_AUTOMATION.md) for the automated release process with reproducible builds and timestamp normalization.
 
@@ -460,14 +460,15 @@ BenchBox provides a comprehensive command-line interface (CLI) for all benchmark
 
 ### Quick CLI Reference
 
-| Command               | Purpose                   | Example                                           |
-| --------------------- | ------------------------- | ------------------------------------------------- |
-| `benchbox run`        | Execute benchmarks        | `benchbox run --platform duckdb --benchmark tpch` |
-| `benchbox shell`      | Interactive SQL shell     | `benchbox shell --last --benchmark tpch`          |
-| `benchbox platforms`  | Manage database platforms | `benchbox platforms list`                         |
-| `benchbox check-deps` | Check dependencies        | `benchbox check-deps --platform databricks`       |
-| `benchbox profile`    | System analysis           | `benchbox profile`                                |
-| `benchbox benchmarks` | Manage benchmark suites   | `benchbox benchmarks list`                        |
+| Command               | Purpose                   | Example                                                   |
+| --------------------- | ------------------------- | --------------------------------------------------------- |
+| `benchbox run`        | Execute benchmarks        | `benchbox run --platform duckdb --benchmark tpch`         |
+| `benchbox visualize`  | Generate result charts    | `benchbox visualize results.json --format ascii`          |
+| `benchbox shell`      | Interactive SQL shell     | `benchbox shell --last --benchmark tpch`                  |
+| `benchbox platforms`  | Manage database platforms | `benchbox platforms list`                                 |
+| `benchbox check-deps` | Check dependencies        | `benchbox check-deps --platform databricks`               |
+| `benchbox profile`    | System analysis           | `benchbox profile`                                        |
+| `benchbox benchmarks` | Manage benchmark suites   | `benchbox benchmarks list`                                |
 
 ### Common CLI Workflows
 
@@ -643,6 +644,48 @@ benchbox run --platform duckdb --benchmark tpch --scale 0.1 \
 - Dry-run mode for configuration preview
 - Verbose logging for debugging
 - Query plan analysis with `--show-query-plans`
+
+### Visualizing Results
+
+BenchBox can generate charts from benchmark results in two formats:
+
+**Interactive HTML Charts:**
+```bash
+# Generate interactive HTML charts (opens in browser)
+benchbox visualize benchmark_runs/results/*.json --format html
+```
+
+**ASCII Charts (Terminal-Friendly):**
+```bash
+# Display charts directly in terminal
+benchbox visualize benchmark_runs/results/*.json --format ascii
+
+# ASCII without colors (for piping to files)
+benchbox visualize benchmark_runs/results/*.json --format ascii --no-color
+
+# ASCII without Unicode (for basic terminals)
+benchbox visualize benchmark_runs/results/*.json --format ascii --no-unicode
+```
+
+**Chart Types Available:**
+- `performance_bar` - Compare total execution time across platforms
+- `distribution_box` - Query time distribution with quartiles and outliers
+- `query_heatmap` - Per-query execution times across platforms
+- `query_histogram` - Vertical bars showing individual query latencies
+- `cost_scatter` - Cost vs performance trade-off (requires cost data)
+- `time_series` - Performance trends over multiple runs
+
+**Examples:**
+```bash
+# Specific chart type
+benchbox visualize results.json --format ascii --chart-type query_heatmap
+
+# Multiple chart types
+benchbox visualize results.json --format ascii --chart-type performance_bar --chart-type distribution_box
+
+# All charts
+benchbox visualize results.json --format ascii --chart-type all
+```
 
 ### Interactive vs Non-Interactive Mode
 

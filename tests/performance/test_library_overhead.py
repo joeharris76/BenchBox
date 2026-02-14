@@ -81,19 +81,6 @@ def _system_profile() -> SystemProfile:
     )
 
 
-def _average_time(func, *, iterations: int = 50, warmup: int = 5) -> float:
-    for _ in range(warmup):
-        result = func()
-        del result
-
-    start = time.perf_counter()
-    for _ in range(iterations):
-        result = func()
-        del result
-    duration = time.perf_counter() - start
-    return duration / iterations
-
-
 def _peak_memory(func, *, iterations: int = 25) -> int:
     gc.collect()
     tracemalloc.start()
@@ -116,52 +103,6 @@ def _baseline_kwargs(connection_path: str | None) -> dict[str, object]:
         "connection": {"database_path": connection_path},
         "enable_postload_validation": False,
     }
-
-
-@pytest.mark.performance
-@pytest.mark.parametrize(
-    "platform_name,connection_path",
-    [
-        ("mock-memory", None),
-        ("mock-file", "test.db"),
-    ],
-)
-@pytest.mark.skip(reason="Flaky: timing overhead ratios are system-dependent and fail under GC/load")
-def test_run_benchmark_lifecycle_overhead(platform_name: str, connection_path: str | None) -> None:
-    """Library orchestration should add minimal overhead to adapter execution."""
-
-    adapter = DummyAdapter(platform_name, workload=0.001)
-    benchmark = DummyBenchmark()
-    config = BenchmarkConfig(
-        name="dummy",
-        display_name="Dummy Benchmark",
-        scale_factor=1.0,
-        concurrency=1,
-        test_execution_type="standard",
-        options={},
-    )
-
-    baseline_kwargs = _baseline_kwargs(connection_path)
-
-    baseline_time = _average_time(lambda: adapter.run_benchmark(benchmark, **baseline_kwargs))
-    adapter.reset()
-
-    lifecycle_time = _average_time(
-        lambda: run_benchmark_lifecycle(
-            benchmark_config=config,
-            database_config=None,
-            system_profile=_system_profile(),
-            platform_config={"database_path": connection_path} if connection_path else None,
-            phases=LifecyclePhases(generate=False, load=False, execute=True),
-            validation_opts=ValidationOptions(),
-            platform_adapter=adapter,
-            benchmark_instance=benchmark,
-        )
-    )
-
-    # Library orchestration should add less than 30% overhead compared to direct adapter usage
-    ratio = lifecycle_time / baseline_time if baseline_time else float("inf")
-    assert ratio < 1.3, f"Lifecycle overhead too high: ratio={ratio:.2f}"
 
 
 @pytest.mark.performance
@@ -207,7 +148,7 @@ def test_result_exporter_memory_efficiency(tmp_path: Path) -> None:
         {
             "query_id": f"Q{i}",
             "status": "SUCCESS",
-            "execution_time": 0.05 + (i * 0.001),
+            "execution_time_seconds": 0.05 + (i * 0.001),
             "rows_returned": 10 + i,
         }
         for i in range(20)

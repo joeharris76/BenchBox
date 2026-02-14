@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from benchbox.platforms.datafusion import DataFusionAdapter
+from benchbox.platforms.datafusion import DataFusionAdapter, DataFusionConnectionCompat
 
 pytestmark = pytest.mark.fast
 
@@ -30,7 +30,7 @@ class TestDataFusionAdapter:
                 batch_size=16384,
             )
             assert adapter.platform_name == "DataFusion"
-            assert adapter.get_target_dialect() == "postgres"
+            assert adapter.get_target_dialect() == "datafusion"
             assert str(adapter.working_dir) == tmpdir
             assert adapter.memory_limit == "8G"
             assert adapter.target_partitions == 4
@@ -109,7 +109,8 @@ class TestDataFusionAdapter:
                         with patch.object(adapter, "handle_existing_database"):
                             connection = adapter.create_connection()
 
-                        assert connection == mock_ctx
+                        assert isinstance(connection, DataFusionConnectionCompat)
+                        assert connection._context == mock_ctx
 
                         # Verify configuration was applied
                         mock_config.with_target_partitions.assert_called_once_with(4)
@@ -283,7 +284,7 @@ class TestDataFusionAdapter:
             assert result["query_id"] == "query_1"
             assert result["status"] == "SUCCESS"
             assert result["rows_returned"] == 10
-            assert result["execution_time"] >= 0
+            assert result["execution_time_seconds"] >= 0
 
     @patch("benchbox.platforms.datafusion.SessionContext")
     def test_execute_query_failure(self, mock_session_context):
@@ -392,6 +393,159 @@ class TestDataFusionAdapter:
             assert not working_dir.exists()
 
     @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_connection_compat_execute_fetchall(self, mock_session_context):
+        """Test DataFusion compatibility wrapper exposes execute/fetch methods."""
+        mock_batch = Mock()
+        mock_batch.schema.names = ["a", "b"]
+        mock_batch.to_pylist.return_value = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
+
+        mock_df = Mock()
+        mock_df.collect.return_value = [mock_batch]
+
+        mock_ctx = Mock()
+        mock_ctx.sql.return_value = mock_df
+
+        compat = DataFusionConnectionCompat(mock_ctx)
+        cursor = compat.execute("SELECT * FROM t")
+        rows = cursor.fetchall()
+
+        assert rows == [(1, "x"), (2, "y")]
+        assert cursor.rowcount == 2
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_connection_compat_execute_is_lazy_for_select(self, mock_session_context):
+        """SELECT statements should stay lazy until fetch is requested."""
+        mock_batch = Mock()
+        mock_batch.schema.names = ["a"]
+        mock_batch.to_pylist.return_value = [{"a": 1}]
+
+        mock_df = Mock()
+        mock_df.collect.return_value = [mock_batch]
+
+        mock_ctx = Mock()
+        mock_ctx.sql.return_value = mock_df
+
+        compat = DataFusionConnectionCompat(mock_ctx)
+        cursor = compat.execute("SELECT a FROM t")
+        mock_df.collect.assert_not_called()
+
+        assert cursor.fetchall() == [(1,)]
+        mock_df.collect.assert_called_once()
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_connection_compat_execute_is_eager_for_insert(self, mock_session_context):
+        """INSERT statements should execute immediately for side effects."""
+        mock_df = Mock()
+        mock_df.collect.return_value = []
+
+        mock_ctx = Mock()
+        mock_ctx.sql.return_value = mock_df
+
+        compat = DataFusionConnectionCompat(mock_ctx)
+        compat.execute("INSERT INTO t VALUES (1)")
+
+        mock_df.collect.assert_called_once()
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_working_dir_lock_lifecycle(self, mock_session_context):
+        """Test working-dir lock supports reentrant acquire/release in one process."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir)
+            lock_file = adapter._get_working_dir_lock_file()
+
+            assert adapter._acquire_working_dir_lock(timeout_seconds=1)
+            assert adapter._acquire_working_dir_lock(timeout_seconds=1)
+            assert lock_file.exists()
+            adapter._release_working_dir_lock()
+            # First release should only decrement reentrant depth.
+            assert lock_file.exists()
+            adapter._release_working_dir_lock()
+            assert not lock_file.exists()
+
+            assert adapter._acquire_working_dir_lock(timeout_seconds=1)
+            adapter._release_working_dir_lock()
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_working_dir_lock_reentrant_does_not_warn(self, mock_session_context):
+        """Nested acquire in same process should not emit lock-wait warning."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir)
+            with patch.object(adapter.logger, "warning") as mock_warning:
+                assert adapter._acquire_working_dir_lock(timeout_seconds=1)
+                assert adapter._acquire_working_dir_lock(timeout_seconds=1)
+                adapter._release_working_dir_lock()
+                adapter._release_working_dir_lock()
+            assert mock_warning.call_count == 0
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_working_dir_lock_is_owner_safe_across_instances(self, mock_session_context):
+        """A second adapter instance in the same process must not steal/release another instance's lock."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            owner = DataFusionAdapter(working_dir=tmpdir)
+            contender = DataFusionAdapter(working_dir=tmpdir)
+            lock_file = owner._get_working_dir_lock_file()
+
+            assert owner._acquire_working_dir_lock(timeout_seconds=1)
+            assert lock_file.exists()
+
+            # Same-process contender should reenter process-wide ownership, not rewrite lock ownership.
+            assert contender._acquire_working_dir_lock(timeout_seconds=1)
+            assert lock_file.exists()
+
+            # Contender release should only decrement depth, not remove owner's lock.
+            contender._release_working_dir_lock()
+            assert lock_file.exists()
+
+            owner._release_working_dir_lock()
+            assert not lock_file.exists()
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_working_dir_lock_recovers_stale_dead_owner(self, mock_session_context):
+        """Test stale lock is removed when lock owner PID is no longer running."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir)
+            lock_file = adapter._get_working_dir_lock_file()
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_file.write_text("pid:999999\ntime:0\n", encoding="utf-8")
+
+            with patch.object(adapter, "_is_pid_running", return_value=False):
+                assert adapter._acquire_working_dir_lock(timeout_seconds=1)
+            adapter._release_working_dir_lock()
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_working_dir_lock_logs_verbose_on_detection(self, mock_session_context):
+        """Test verbose log is emitted immediately when an existing lock is found."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir)
+            lock_file = adapter._get_working_dir_lock_file()
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_file.write_text("pid:123\ntime:0\n", encoding="utf-8")
+
+            with patch.object(adapter, "log_verbose") as mock_verbose:
+                with patch.object(adapter, "_is_pid_running", return_value=False):
+                    assert adapter._acquire_working_dir_lock(timeout_seconds=1)
+
+            assert any("lock detected" in str(call.args[0]).lower() for call in mock_verbose.call_args_list)
+            adapter._release_working_dir_lock()
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_working_dir_lock_logs_warning_when_waiting(self, mock_session_context):
+        """Test standard warning log is emitted when waiting on lock."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir)
+            lock_file = adapter._get_working_dir_lock_file()
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_file.write_text("pid:123\ntime:0\n", encoding="utf-8")
+
+            # Simulate lock owner still alive so we wait, then timeout quickly.
+            with patch.object(adapter, "_is_pid_running", return_value=True):
+                with patch.object(adapter.logger, "warning") as mock_warning:
+                    acquired = adapter._acquire_working_dir_lock(timeout_seconds=0.2)
+            assert acquired is False
+            assert mock_warning.call_count >= 1
+            assert "waiting for release" in str(mock_warning.call_args_list[0].args[0]).lower()
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
     def test_validate_platform_capabilities(self, mock_session_context):
         """Test platform capability validation."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -431,6 +585,7 @@ class TestDataFusionAdapter:
             assert adapter.target_partitions == 8
             assert adapter.data_format == "parquet"
             assert adapter.batch_size == 16384
+            assert str(Path(tmpdir) / "databases") in str(adapter.working_dir)
 
     @patch("benchbox.platforms.datafusion.SessionContext")
     def test_add_cli_arguments(self, mock_session_context):

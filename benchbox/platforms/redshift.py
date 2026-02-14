@@ -11,9 +11,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -946,7 +947,7 @@ class RedshiftAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using Redshift-optimized table definitions."""
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -998,13 +999,13 @@ class RedshiftAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
         """Load data using Redshift COPY command with S3 integration."""
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         cursor = connection.cursor()
@@ -1082,7 +1083,7 @@ class RedshiftAdapter(PlatformAdapter):
                     self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
 
                     try:
-                        load_start = time.time()
+                        load_start = mono_time()
                         # Normalize table name to lowercase for Redshift consistency
                         table_name_lower = table_name.lower()
 
@@ -1216,7 +1217,7 @@ class RedshiftAdapter(PlatformAdapter):
                         if self.auto_analyze:
                             cursor.execute(f"ANALYZE {qualified_table}")
 
-                        load_time = time.time() - load_start
+                        load_time = elapsed_seconds(load_start)
                         self.logger.info(
                             f"✅ Loaded {row_count:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
                         )
@@ -1248,7 +1249,7 @@ class RedshiftAdapter(PlatformAdapter):
 
                     try:
                         self.log_verbose(f"Direct loading data for table: {table_name}")
-                        load_start = time.time()
+                        load_start = mono_time()
                         # Normalize table name to lowercase for Redshift consistency
                         table_name_lower = table_name.lower()
 
@@ -1298,7 +1299,7 @@ class RedshiftAdapter(PlatformAdapter):
 
                         table_stats[table_name_lower] = total_rows_loaded
 
-                        load_time = time.time() - load_start
+                        load_time = elapsed_seconds(load_start)
                         chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
                         self.logger.info(
                             f"✅ Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
@@ -1308,7 +1309,7 @@ class RedshiftAdapter(PlatformAdapter):
                         self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
                         table_stats[table_name.lower()] = 0
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.logger.info(f"✅ Loaded {total_rows:,} total rows in {total_time:.2f}s")
 
@@ -1492,7 +1493,7 @@ class RedshiftAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute query with detailed timing and performance tracking."""
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -1502,7 +1503,7 @@ class RedshiftAdapter(PlatformAdapter):
             cursor.execute(query)
             result = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Get query statistics
@@ -1556,12 +1557,12 @@ class RedshiftAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

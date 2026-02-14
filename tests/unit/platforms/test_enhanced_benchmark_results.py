@@ -77,7 +77,7 @@ class MockPlatformAdapter(PlatformAdapter):
         return {
             "query_id": query_id,
             "status": "SUCCESS",
-            "execution_time": 0.1,
+            "execution_time_seconds": 0.1,
             "rows_returned": 10,
         }
 
@@ -379,14 +379,14 @@ class TestPlatformAdapterEnhancedMethods:
                 {
                     "query_id": 1,
                     "position": 1,
-                    "execution_time": 0.1,
+                    "execution_time_seconds": 0.1,
                     "success": True,
                     "result_count": 42,
                 },
                 {
                     "query_id": 2,
                     "position": 2,
-                    "execution_time": 0.2,
+                    "execution_time_seconds": 0.2,
                     "success": True,
                     "result_count": 84,
                 },
@@ -456,13 +456,13 @@ class TestPlatformAdapterEnhancedMethods:
             {
                 "query_id": "Q1",
                 "status": "SUCCESS",
-                "execution_time": 1.5,
+                "execution_time_seconds": 1.5,
                 "rows_returned": 100,
             },
             {
                 "query_id": "Q2",
                 "status": "FAILED",
-                "execution_time": 0.5,
+                "execution_time_seconds": 0.5,
                 "rows_returned": 0,
                 "error": "Table not found",
             },
@@ -527,8 +527,9 @@ class TestEnhancedBenchmarkIntegration:
                 total_queries=len(query_results),
                 successful_queries=len([r for r in query_results if r.get("status") == "SUCCESS"]),
                 failed_queries=len([r for r in query_results if r.get("status") != "SUCCESS"]),
-                total_execution_time=sum(r.get("execution_time", 0) for r in query_results),
-                average_query_time=sum(r.get("execution_time", 0) for r in query_results) / max(len(query_results), 1),
+                total_execution_time=sum(r.get("execution_time_seconds", 0) for r in query_results),
+                average_query_time=sum(r.get("execution_time_seconds", 0) for r in query_results)
+                / max(len(query_results), 1),
             )
 
         self.mock_benchmark.create_enhanced_benchmark_result = mock_create_enhanced_benchmark_result
@@ -539,13 +540,13 @@ class TestEnhancedBenchmarkIntegration:
                 {
                     "query_id": "Q1",
                     "status": "SUCCESS",
-                    "execution_time": 1.0,
+                    "execution_time_seconds": 1.0,
                     "rows_returned": 2,
                 },
                 {
                     "query_id": "Q2",
                     "status": "SUCCESS",
-                    "execution_time": 1.5,
+                    "execution_time_seconds": 1.5,
                     "rows_returned": 2,
                 },
             ]

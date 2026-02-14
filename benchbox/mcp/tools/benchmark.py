@@ -13,8 +13,6 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -34,6 +32,8 @@ from benchbox.mcp.errors import (
     make_not_found_error,
     make_unsupported_mode_error,
 )
+from benchbox.utils.clock import elapsed_seconds, mono_time
+from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
 from benchbox.utils.printing import get_quiet_console
 
 logger = logging.getLogger(__name__)
@@ -244,7 +244,7 @@ def _run_benchmark_impl(
 ) -> dict[str, Any]:
     """Core implementation for running benchmarks."""
     execution_id = f"mcp_{uuid.uuid4().hex[:8]}"
-    start_time = datetime.now()
+    start_time = mono_time()
 
     try:
         benchmark_lower = benchmark.lower()
@@ -316,7 +316,7 @@ def _run_benchmark_impl(
         if result is not None:
             result.execution_context = execution_context.model_dump()
 
-        execution_time = (datetime.now() - start_time).total_seconds()
+        execution_time = elapsed_seconds(start_time)
 
         result_file_path = None
         result_payload: dict[str, Any] | None = None
@@ -348,6 +348,20 @@ def _run_benchmark_impl(
             "result_file": result_file_path,
         }
 
+        # Generate summary charts for MCP response
+        if result and result.query_results:
+            try:
+                from benchbox.core.visualization.post_run_summary import generate_post_run_summary
+
+                summary = generate_post_run_summary(result)
+                if summary.charts:
+                    response["summary_charts"] = {
+                        "summary_box": summary.summary_box,
+                        "query_histogram": summary.query_histogram,
+                    }
+            except Exception:
+                logger.debug("Failed to generate post-run summary charts", exc_info=True)
+
         return response
 
     except Exception as e:
@@ -361,7 +375,7 @@ def _run_benchmark_impl(
         error_response["status"] = "failed"
         error_response["platform"] = platform
         error_response["benchmark"] = benchmark
-        error_response["execution_time_seconds"] = round((datetime.now() - start_time).total_seconds(), 2)
+        error_response["execution_time_seconds"] = round(elapsed_seconds(start_time), 2)
         return error_response
 
 
@@ -370,10 +384,10 @@ def _generate_data_impl(
     benchmark_class: type,
     scale_factor: float,
     execution_id: str,
-    start_time: datetime,
+    start_time: float,
 ) -> dict[str, Any]:
     """Generate benchmark data without running queries."""
-    data_dir = Path("benchmark_runs/data") / benchmark_lower / f"sf{scale_factor}"
+    data_dir = get_benchmark_runs_datagen_path(benchmark_lower, scale_factor)
     data_dir.mkdir(parents=True, exist_ok=True)
 
     bm = benchmark_class(scale_factor=scale_factor)
@@ -397,7 +411,7 @@ def _generate_data_impl(
         generated_files = list(data_dir.glob("*.*"))
 
     total_size = sum(f.stat().st_size for f in generated_files if f.is_file())
-    execution_time = (datetime.now() - start_time).total_seconds()
+    execution_time = elapsed_seconds(start_time)
 
     return {
         "mcp_metadata": {

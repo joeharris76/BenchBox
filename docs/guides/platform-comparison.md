@@ -128,8 +128,8 @@ Mode is automatically detected from arguments:
 |--------|---------|-------------|
 | `-o, --output PATH` | none | Output directory for results |
 | `--format [json\|markdown\|text\|csv]` | `text` | Output format |
-| `--generate-charts` | false | Generate visualization charts |
-| `--theme [light\|dark]` | `light` | Chart theme |
+| `--generate-charts` | false | Generate ASCII visualization charts in output directory |
+| `--theme [light\|dark]` | `light` | Chart color theme (with --generate-charts) |
 | `--data-dir DIRECTORY` | auto | Directory containing benchmark data |
 
 ### Query Plan Options (file mode)
@@ -246,10 +246,9 @@ comparison_results/
 ├── comparison.md
 ├── comparison.json
 └── charts/
-    ├── sql_performance.png
-    ├── sql_performance.html
-    ├── sql_distribution.png
-    └── sql_query_heatmap.png
+    ├── performance_bar.txt
+    ├── distribution_box.txt
+    └── query_heatmap.txt
 ```
 
 ### Compare Result Files
@@ -395,25 +394,22 @@ print(f"Speedup ratio: {summary.speedup_ratio:.2f}x")
 ### Generate Charts Programmatically
 
 ```python
-from benchbox.core.comparison import (
-    UnifiedBenchmarkSuite,
-    UnifiedComparisonPlotter,
-)
+from benchbox.core.visualization import ResultPlotter, export_ascii
+from benchbox.core.visualization.ascii.base import ASCIIChartOptions
 
-# Run comparison
-suite = UnifiedBenchmarkSuite()
-results = suite.run_comparison(["duckdb", "sqlite"])
+# Load results from JSON files
+plotter = ResultPlotter.from_sources(["results/duckdb.json", "results/sqlite.json"])
 
-# Generate charts
-plotter = UnifiedComparisonPlotter(results, theme="dark")
-exports = plotter.generate_charts(
-    output_dir="charts/",
-    formats=["png", "html", "svg"],
-    dpi=300,
-)
+# Render individual chart types
+from benchbox.core.visualization.ascii import ASCIIBarChart
+from benchbox.core.visualization.ascii.bar_chart import BarData
 
-for chart_type, paths in exports.items():
-    print(f"{chart_type}: {paths}")
+bar_data = [BarData(label=r.platform, value=r.total_time_ms or 0) for r in plotter.results]
+chart = ASCIIBarChart(data=bar_data, title="Performance Comparison")
+print(chart.render())
+
+# Or use the CLI for automatic chart generation
+# benchbox visualize results/duckdb.json results/sqlite.json
 ```
 
 ### Platform Type Detection

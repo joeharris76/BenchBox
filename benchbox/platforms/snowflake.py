@@ -11,9 +11,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -572,7 +573,7 @@ class SnowflakeAdapter(PlatformAdapter):
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using Snowflake table definitions."""
         self.log_operation_start("Snowflake schema creation")
-        start_time = time.time()
+        start_time = mono_time()
 
         self.log_verbose(f"Creating schema for benchmark: {benchmark.__class__.__name__}")
         self.log_very_verbose(f"Target database: {self.database}, schema: {self.schema}")
@@ -591,7 +592,7 @@ class SnowflakeAdapter(PlatformAdapter):
 
             # Check if we can skip table creation (tables exist with data)
             if self._should_skip_schema_creation(benchmark, connection):
-                elapsed_time = time.time() - start_time
+                elapsed_time = elapsed_seconds(start_time)
                 self.log_operation_complete(
                     "Snowflake schema creation", details=f"Skipped (existing data is valid) in {elapsed_time:.2f}s"
                 )
@@ -624,7 +625,7 @@ class SnowflakeAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        elapsed_time = time.time() - start_time
+        elapsed_time = elapsed_seconds(start_time)
         self.log_operation_complete("Snowflake schema creation", details=f"Completed in {elapsed_time:.2f}s")
         return elapsed_time
 
@@ -637,7 +638,7 @@ class SnowflakeAdapter(PlatformAdapter):
         self.log_verbose(f"Starting data loading for benchmark: {benchmark.__class__.__name__}")
         self.log_very_verbose(f"Data directory: {data_dir}")
 
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         cursor = connection.cursor()
@@ -727,7 +728,7 @@ class SnowflakeAdapter(PlatformAdapter):
                 self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
 
                 try:
-                    load_start = time.time()
+                    load_start = mono_time()
                     table_name_upper = table_name.upper()
 
                     # Create stage for file upload
@@ -791,7 +792,7 @@ class SnowflakeAdapter(PlatformAdapter):
                     actual_count = cursor.fetchone()[0]
                     table_stats[table_name_upper] = actual_count
 
-                    load_time = time.time() - load_start
+                    load_time = elapsed_seconds(load_start)
                     self.log_verbose(
                         f"✅ Loaded {actual_count:,} rows into {table_name_upper}{chunk_info} in {load_time:.2f}s"
                     )
@@ -800,7 +801,7 @@ class SnowflakeAdapter(PlatformAdapter):
                     self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
                     table_stats[table_name.upper()] = 0
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.log_verbose(f"✅ Loaded {total_rows:,} total rows in {total_time:.2f}s")
             self.log_operation_complete(
@@ -1005,7 +1006,7 @@ class SnowflakeAdapter(PlatformAdapter):
         self.log_operation_start("Snowflake query execution", query_id)
         self.log_very_verbose(f"Executing query {query_id}: {query[:100]}...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -1020,7 +1021,7 @@ class SnowflakeAdapter(PlatformAdapter):
             cursor.execute(query)
             result = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Get query history for performance metrics
@@ -1076,14 +1077,14 @@ class SnowflakeAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             self.log_verbose(f"Query {query_id} failed after {execution_time:.3f}s: {e}")
             self.log_operation_complete("Snowflake query execution", query_id, f"FAILED: {e}")
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

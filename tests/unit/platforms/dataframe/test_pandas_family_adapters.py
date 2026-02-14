@@ -84,7 +84,15 @@ class TestPandasFamilyPlatformListing:
         platforms = list_available_dataframe_platforms()
 
         # All DataFrame platforms (both pandas and expression family)
-        expected = {"polars-df", "pandas-df", "modin-df", "cudf-df", "dask-df", "datafusion-df", "pyspark-df"}
+        expected = {
+            "polars-df",
+            "pandas-df",
+            "modin-df",
+            "cudf-df",
+            "dask-df",
+            "datafusion-df",
+            "pyspark-df",
+        }
         assert set(platforms.keys()) == expected
 
 

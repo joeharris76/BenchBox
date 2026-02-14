@@ -54,6 +54,8 @@ from benchbox.platforms.base.models import (
     ValidationPhase,
 )
 from benchbox.platforms.base.utils import is_non_interactive
+from benchbox.utils.clock import elapsed_seconds, mono_time
+from benchbox.utils.printing import quiet_console
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings
 
 # Import result models for type hints
@@ -468,7 +470,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 except (TypeError, ValueError):  # pragma: no cover - defensive
                     return None
 
-            time_value = _extract(result, "execution_time")
+            time_value = _extract(result, "execution_time_seconds")
             if time_value is None:
                 time_value = _extract(result, "duration")
 
@@ -643,8 +645,8 @@ class PlatformAdapter(VerbosityMixin, ABC):
         """Return the name of this database platform.
 
         Default implementation returns the class name. Concrete adapters may
-        override to provide a user-friendly display name. Tests may instantiate
-        lightweight mock adapters without overriding this property.
+        override to provide a user-friendly display name. Lightweight adapters
+        can rely on this default when no custom name is required.
         """
         return self.__class__.__name__
 
@@ -777,20 +779,20 @@ class PlatformAdapter(VerbosityMixin, ABC):
         missing_deps = [dep for dep in required if not available_deps.get(dep, False)]
 
         if missing_deps:
-            print("❌ Missing required dependencies:")
+            quiet_console.print("❌ Missing required dependencies:")
             for dep in missing_deps:
-                print(f"   - {dep}")
+                quiet_console.print(f"   - {dep}")
 
-            print("\n💡 Installation instructions:")
+            quiet_console.print("\n💡 Installation instructions:")
             for dep in missing_deps:
                 install_cmd = PlatformAdapter._get_install_command(dep)
                 if install_cmd:
-                    print(f"   {dep}: {install_cmd}")
+                    quiet_console.print(f"   {dep}: {install_cmd}")
 
             if exit_on_missing:
                 sys.exit(1)
         else:
-            print("✅ All required dependencies are available")
+            quiet_console.print("✅ All required dependencies are available")
 
         return available_deps
 
@@ -862,7 +864,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             NotImplementedError: If tuning is not supported by the platform
             ValueError: If the tuning configuration is invalid for this platform
         """
-        # Default no-op implementation for tests and platforms without tuning support
+        # Default no-op implementation for platforms without tuning support.
         return None
 
     def supports_tuning_type(self, tuning_type: TuningType) -> bool:
@@ -1415,7 +1417,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
         result_dict = {
             "query_id": str(query_id),
             "status": "FAILED" if error else "SUCCESS",
-            "execution_time": execution_time,
+            "execution_time_seconds": execution_time,
             "rows_returned": actual_row_count,
             "first_row": first_row,
         }
@@ -1463,14 +1465,14 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
         Args:
             query_id: Query identifier
-            start_time: Query start time (from time.time())
+            start_time: Query start time (from mono_time())
             exception: The exception that occurred
             log_error: Whether to log the error (default True)
 
         Returns:
             Dictionary with standardized failure result fields
         """
-        execution_time = time.time() - start_time
+        execution_time = elapsed_seconds(start_time)
 
         if log_error:
             self.logger.error(
@@ -1481,7 +1483,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
         return {
             "query_id": query_id,
             "status": "FAILED",
-            "execution_time": execution_time,
+            "execution_time_seconds": execution_time,
             "rows_returned": 0,
             "error": str(exception),
             "error_type": type(exception).__name__,
@@ -1502,7 +1504,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
         return {
             "query_id": query_id,
             "status": "DRY_RUN",
-            "execution_time": 0.0,
+            "execution_time_seconds": 0.0,
             "rows_returned": 0,
             "first_row": None,
             "error": None,
@@ -1547,10 +1549,9 @@ class PlatformAdapter(VerbosityMixin, ABC):
         try:
             plan = self.get_query_plan(connection, query)
             if plan:
-                from rich.console import Console
                 from rich.panel import Panel
 
-                console = Console()
+                console = quiet_console
                 console.print(Panel.fit("Query Profiling Information", style="cyan"))
                 console.print(f"{query}")
                 console.print(plan)
@@ -1908,11 +1909,11 @@ class PlatformAdapter(VerbosityMixin, ABC):
         if not hasattr(benchmark, "tables") and not hasattr(getattr(benchmark, "_impl", None), "tables"):
             return None
 
-        start_time = time.time()
+        start_time = mono_time()
         tables_dict = benchmark.tables if hasattr(benchmark, "tables") else getattr(benchmark._impl, "tables", {})
 
-        # Handle Mock objects or None values
-        if not tables_dict or not hasattr(tables_dict, "items") or hasattr(tables_dict, "_mock_name"):
+        # Require mapping-like tables metadata.
+        if not tables_dict or not hasattr(tables_dict, "items"):
             return None
 
         per_table_stats = {}
@@ -1922,26 +1923,20 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
         try:
             table_items = tables_dict.items()
-            # Check if table_items is actually iterable (not a Mock)
-            if hasattr(table_items, "__iter__") and not hasattr(table_items, "_mock_name"):
-                # Try to iterate to check it's not a Mock masquerading as iterable
-                try:
-                    # Test iteration without consuming
-                    iter(table_items)
-                    # Additional safety check for Mock objects
-                    if hasattr(tables_dict, "_mock_name"):
-                        return None
-                except (TypeError, AttributeError):
-                    return None
-            else:
+            # Validate iterability before consuming table entries.
+            if not hasattr(table_items, "__iter__"):
+                return None
+            try:
+                iter(table_items)
+            except (TypeError, AttributeError):
                 return None
         except (AttributeError, TypeError):
-            # Handle cases where tables_dict is a Mock or doesn't have items()
+            # Handle malformed table containers.
             return None
 
         try:
             for table_name, table_data in table_items:
-                table_start = time.time()
+                table_start = mono_time()
                 try:
                     if hasattr(table_data, "__iter__") and not isinstance(table_data, str):
                         rows = list(table_data)
@@ -1955,7 +1950,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                             estimated_bytes = 0
 
                         per_table_stats[table_name] = TableGenerationStats(
-                            generation_time_ms=int((time.time() - table_start) * 1000),
+                            generation_time_ms=int(elapsed_seconds(table_start) * 1000),
                             status="SUCCESS",
                             rows_generated=row_count,
                             data_size_bytes=estimated_bytes,
@@ -1968,7 +1963,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
                 except Exception as e:
                     per_table_stats[table_name] = TableGenerationStats(
-                        generation_time_ms=int((time.time() - table_start) * 1000),
+                        generation_time_ms=int(elapsed_seconds(table_start) * 1000),
                         status="FAILED",
                         rows_generated=0,
                         data_size_bytes=0,
@@ -1986,7 +1981,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             overall_status = "PARTIAL_FAILURE" if tables_generated > 0 else "FAILED"
 
         return DataGenerationPhase(
-            duration_ms=int((time.time() - start_time) * 1000),
+            duration_ms=int(elapsed_seconds(start_time) * 1000),
             status=overall_status,
             tables_generated=tables_generated,
             total_rows_generated=total_rows,
@@ -2001,55 +1996,50 @@ class PlatformAdapter(VerbosityMixin, ABC):
         # Convert existing schema creation time from seconds to milliseconds
         duration_ms = int(schema_creation_time * 1000)
 
-        # Get table names from benchmark
-        table_names = []
-        if hasattr(benchmark, "get_table_names"):
-            table_names = benchmark.get_table_names()
-        elif hasattr(benchmark, "tables"):
-            try:
-                table_names = list(benchmark.tables.keys())
-            except Exception:
-                # Fallback for testing with Mocks
-                table_names = ["test_table"]
-        elif hasattr(getattr(benchmark, "_impl", None), "tables"):
-            table_names = list(benchmark._impl.tables.keys())
+        def _extract_table_names(raw_table_names: Any) -> list[str]:
+            if raw_table_names is None:
+                return []
+            if isinstance(raw_table_names, dict):
+                return [str(name) for name in raw_table_names.keys()]
+            if isinstance(raw_table_names, str):
+                return [raw_table_names]
+            if isinstance(raw_table_names, (list, tuple, set)):
+                return [str(name) for name in raw_table_names]
+            if hasattr(raw_table_names, "keys") and callable(raw_table_names.keys):
+                try:
+                    return [str(name) for name in raw_table_names.keys()]
+                except Exception:
+                    return []
+            return []
 
-        # Ensure we always have a real list/tuple for len()
-        if hasattr(table_names, "__len__") and not isinstance(table_names, (list, tuple, str)):
-            table_names = ["test_table"]  # Safe fallback for mocking
+        table_names: list[str] = []
+
+        if hasattr(benchmark, "get_table_names") and callable(benchmark.get_table_names):
+            try:
+                table_names = _extract_table_names(benchmark.get_table_names())
+            except Exception:
+                table_names = []
+
+        if not table_names and hasattr(benchmark, "tables"):
+            table_names = _extract_table_names(benchmark.tables)
+
+        if not table_names:
+            impl = getattr(benchmark, "_impl", None)
+            table_names = _extract_table_names(getattr(impl, "tables", None))
 
         # For now, create basic per-table stats since we don't have detailed timing
         per_table_creation = {}
+        table_count = len(table_names)
 
-        # Calculate time per table safely
-        try:
-            table_count = len(table_names) if table_names else 1
+        if table_count > 0:
             estimated_time_per_table = max(1, duration_ms // table_count)
-        except (TypeError, AttributeError):
-            # Fallback for Mock objects or other issues
-            estimated_time_per_table = max(1, duration_ms // 1)
-
-        # Safely iterate over table names
-        try:
-            table_names_iter = (
-                table_names if hasattr(table_names, "__iter__") and not isinstance(table_names, str) else ["test_table"]
-            )
-        except Exception:
-            table_names_iter = ["test_table"]
-
-        for table_name in table_names_iter:
-            per_table_creation[table_name] = TableCreationStats(
-                creation_time_ms=estimated_time_per_table,
-                status="SUCCESS",
-                constraints_applied=1,  # Rough estimate
-                indexes_created=1,  # Rough estimate
-            )
-
-        # Calculate table count safely
-        try:
-            table_count = len(table_names) if table_names else 1
-        except (TypeError, AttributeError):
-            table_count = 1
+            for table_name in table_names:
+                per_table_creation[table_name] = TableCreationStats(
+                    creation_time_ms=estimated_time_per_table,
+                    status="SUCCESS",
+                    constraints_applied=1,  # Rough estimate
+                    indexes_created=1,  # Rough estimate
+                )
 
         return SchemaCreationPhase(
             duration_ms=duration_ms,
@@ -2105,7 +2095,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _create_enhanced_validation_phase(self, benchmark=None, connection=None, table_stats=None) -> ValidationPhase:
         """Create validation phase tracking with actual data validation."""
-        start_time = time.time()
+        start_time = mono_time()
 
         validation_details = {
             "row_count_matches": True,
@@ -2133,7 +2123,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             )
             validation_details.update(integrity_validation_details)
 
-        duration_ms = int((time.time() - start_time) * 1000)
+        duration_ms = int(elapsed_seconds(start_time) * 1000)
 
         return ValidationPhase(
             duration_ms=max(50, duration_ms),  # Minimum 50ms
@@ -2159,12 +2149,10 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 empty_tables.append(table_name)
                 continue
 
-            # Check against expected minimums if available
-            # Handle Mock objects gracefully
+            # Check against expected minimums if available.
             if (
                 expected_row_counts
                 and hasattr(expected_row_counts, "__contains__")
-                and not hasattr(expected_row_counts, "_mock_name")
                 and table_name in expected_row_counts
             ):
                 min_expected = expected_row_counts[table_name]
@@ -2231,28 +2219,22 @@ class PlatformAdapter(VerbosityMixin, ABC):
         validation_details = {}
 
         try:
-            # Handle Mock connections gracefully during testing
-            if hasattr(connection, "_mock_name"):
-                # For Mock connections, assume all tables are accessible
-                accessible_tables = list(table_stats.keys())
-                inaccessible_tables = []
-            else:
-                # For real connections, verify tables are accessible
-                accessible_tables = []
-                inaccessible_tables = []
+            # Verify tables are accessible through the provided connection object.
+            accessible_tables = []
+            inaccessible_tables = []
 
-                for table_name in table_stats:
+            for table_name in table_stats:
+                try:
+                    # Try a simple SELECT to verify table is accessible.
+                    # Use cursor API (not all connection objects support execute() directly).
+                    cursor = connection.cursor()
                     try:
-                        # Try a simple SELECT to verify table is accessible
-                        # Use cursor API (not all connection objects support execute() directly)
-                        cursor = connection.cursor()
-                        try:
-                            cursor.execute(f"SELECT 1 FROM {table_name} LIMIT 1")
-                            accessible_tables.append(table_name)
-                        finally:
-                            cursor.close()
-                    except Exception:
-                        inaccessible_tables.append(table_name)
+                        cursor.execute(f"SELECT 1 FROM {table_name} LIMIT 1")
+                        accessible_tables.append(table_name)
+                    finally:
+                        cursor.close()
+                except Exception:
+                    inaccessible_tables.append(table_name)
 
             if inaccessible_tables:
                 validation_details["inaccessible_tables"] = inaccessible_tables
@@ -2290,10 +2272,6 @@ class PlatformAdapter(VerbosityMixin, ABC):
             Row count as integer, or 0 if unable to determine
         """
         try:
-            # Handle Mock connections gracefully during testing
-            if hasattr(connection, "_mock_name"):
-                return 0
-
             cursor = connection.cursor()
             cursor.execute(f"SELECT COUNT(*) FROM {table}")
             result = cursor.fetchone()
@@ -2325,12 +2303,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
         except Exception:
             pass
         # 3) Fall back to whatever was generated (least strict)
-        if (
-            hasattr(benchmark, "tables")
-            and benchmark.tables
-            and not hasattr(benchmark.tables, "_mock_name")
-            and hasattr(benchmark.tables, "keys")
-        ):
+        if hasattr(benchmark, "tables") and benchmark.tables and hasattr(benchmark.tables, "keys"):
             try:
                 return [t.lower() for t in benchmark.tables.keys()]
             except (TypeError, AttributeError):
@@ -2342,10 +2315,6 @@ class PlatformAdapter(VerbosityMixin, ABC):
         # This is platform-specific and can be overridden
         # Default implementation that works for many SQL databases
         try:
-            # Handle Mock objects gracefully during testing
-            if hasattr(connection, "_mock_name"):
-                return []  # Return empty list for Mock connections
-
             result = connection.execute("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' OR table_schema = database()
@@ -2455,7 +2424,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             query_executions: list[QueryExecution] = []
             for idx, query_result in enumerate(stream_result.query_results, start=1):
                 execution_order = query_result.get("position") or query_result.get("execution_order") or idx
-                execution_time_ms = int(float(query_result.get("execution_time", 0.0)) * 1000)
+                execution_time_ms = int(float(query_result.get("execution_time_seconds", 0.0)) * 1000)
 
                 query_executions.append(
                     QueryExecution(
@@ -2545,7 +2514,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                     query_id=result.get("query_id", f"Q{i + 1}"),
                     stream_id=stream_id,
                     execution_order=i + 1,
-                    execution_time_ms=round(result.get("execution_time", 0) * 1000, 2),
+                    execution_time_ms=round(result.get("execution_time_seconds", 0) * 1000, 2),
                     status=result.get("status", "UNKNOWN"),
                     rows_returned=result.get("rows_returned"),
                     error_message=result.get("error"),
@@ -2556,10 +2525,9 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def run_enhanced_benchmark(self, benchmark, **run_config) -> EnhancedBenchmarkResults:
         """Run complete benchmark with enhanced phase tracking."""
-        import time
         import uuid
 
-        start_time = time.time()
+        start_time = mono_time()
         execution_id = str(uuid.uuid4())[:8]
         self._reset_plan_capture_stats()
         if "capture_plans" in run_config:
@@ -2578,15 +2546,15 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 getattr(benchmark, "_impl", None), "tables", None
             )
             if not has_tables:
-                print("Generating benchmark data...")
-                data_gen_start = time.time()
+                quiet_console.print("Generating benchmark data...")
+                data_gen_start = mono_time()
                 benchmark.generate_data()
-                print(f"✅ Data generation completed in {time.time() - data_gen_start:.2f}s")
+                quiet_console.print(f"✅ Data generation completed in {elapsed_seconds(data_gen_start):.2f}s")
                 # Refresh data generation phase with actual generation
                 data_generation_phase = self._create_enhanced_data_generation_phase(benchmark)
 
             # Step 2: Create connection
-            print(f"Connecting to {self.platform_name}...")
+            quiet_console.print(f"Connecting to {self.platform_name}...")
             self.log_very_verbose(f"database_was_reused flag BEFORE connection: {self.database_was_reused}")
             connection = self.create_connection(**run_config.get("connection", {}))
             self.connection = connection
@@ -2595,16 +2563,16 @@ class PlatformAdapter(VerbosityMixin, ABC):
             # Step 3: Validate tuning configuration if enabled
             effective_tuning_config = self.get_effective_tuning_configuration()
             if self.tuning_enabled and effective_tuning_config:
-                print("Validating unified tuning configuration...")
+                quiet_console.print("Validating unified tuning configuration...")
                 tuning_errors = effective_tuning_config.validate_for_platform(self.platform_name)
                 if tuning_errors:
                     raise ValueError(f"Invalid tuning configuration: {'; '.join(tuning_errors)}")
-                print("✅ Unified tuning configuration validated")
+                quiet_console.print("✅ Unified tuning configuration validated")
 
             # Step 4: Schema creation phase
             self.log_verbose(f"Checking database_was_reused flag before schema creation: {self.database_was_reused}")
             if self.database_was_reused:
-                print("✅ Database being reused - skipping schema creation and data loading")
+                quiet_console.print("✅ Database being reused - skipping schema creation and data loading")
                 schema_time = 0.0
                 schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
                 loading_time = 0.0
@@ -2625,37 +2593,36 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 data_loading_phase = self._create_enhanced_data_loading_phase(table_stats, loading_time, None)
                 tuning_metadata_saved = False  # Skip tuning for reused databases
             else:
-                print("Creating database schema...")
-                time.time()
+                quiet_console.print("Creating database schema...")
                 schema_time = self.create_schema(benchmark, connection)
                 schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
 
                 # Step 5: Apply tunings if enabled
                 tuning_metadata_saved = False
                 if self.tuning_enabled and effective_tuning_config:
-                    print("Applying unified tuning configuration...")
+                    quiet_console.print("Applying unified tuning configuration...")
                     self.apply_unified_tuning(effective_tuning_config, connection)
-                    print("✅ Unified tuning configuration applied")
+                    quiet_console.print("✅ Unified tuning configuration applied")
 
                     # Save tuning metadata for future validation
-                    print("Saving tuning metadata...")
+                    quiet_console.print("Saving tuning metadata...")
                     tuning_metadata_saved = self.save_tuning_metadata(connection)
                     if tuning_metadata_saved:
-                        print("✅ Tuning metadata saved")
+                        quiet_console.print("✅ Tuning metadata saved")
                     else:
-                        print("⚠️ Failed to save tuning metadata")
+                        quiet_console.print("⚠️ Failed to save tuning metadata")
 
                 # Step 6: Data loading phase
-                print("Loading benchmark data...")
+                quiet_console.print("Loading benchmark data...")
                 data_dir = Path(benchmark.output_dir) if hasattr(benchmark, "output_dir") else Path(".")
                 table_stats, loading_time, per_table_timings = self.load_data(benchmark, connection, data_dir)
-                print(f"✅ Data loading completed in {loading_time:.2f}s")
+                quiet_console.print(f"✅ Data loading completed in {loading_time:.2f}s")
                 data_loading_phase = self._create_enhanced_data_loading_phase(
                     table_stats, loading_time, per_table_timings
                 )
 
             # Step 7: Validation phase
-            print("Validating benchmark data...")
+            quiet_console.print("Validating benchmark data...")
             validation_phase = self._create_enhanced_validation_phase(benchmark, connection, table_stats)
 
             # Prepare tuning information early (before potential validation failure)
@@ -2672,15 +2639,15 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 or validation_phase.schema_validation == "FAILED"
                 or validation_phase.data_integrity_checks == "FAILED"
             ):
-                print("❌ Data validation failed - benchmark execution halted")
+                quiet_console.print("❌ Data validation failed - benchmark execution halted")
                 if validation_phase.validation_details:
                     details = validation_phase.validation_details
                     if "empty_tables" in details and details["empty_tables"]:
-                        print(f"⚠️  Empty tables detected: {', '.join(details['empty_tables'])}")
+                        quiet_console.print(f"⚠️  Empty tables detected: {', '.join(details['empty_tables'])}")
                     if "missing_tables" in details and details["missing_tables"]:
-                        print(f"⚠️  Missing tables: {', '.join(details['missing_tables'])}")
+                        quiet_console.print(f"⚠️  Missing tables: {', '.join(details['missing_tables'])}")
                     if "inaccessible_tables" in details and details["inaccessible_tables"]:
-                        print(f"⚠️  Inaccessible tables: {', '.join(details['inaccessible_tables'])}")
+                        quiet_console.print(f"⚠️  Inaccessible tables: {', '.join(details['inaccessible_tables'])}")
 
                 # Create a failed benchmark result
                 return self._create_failed_benchmark_result(
@@ -2695,7 +2662,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                     tuning_metadata_saved,
                 )
 
-            print("✅ Data validation passed")
+            quiet_console.print("✅ Data validation passed")
 
             # Step 8: Apply optimizations
             benchmark_type = run_config.get("benchmark_type", "olap")
@@ -2703,7 +2670,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
             # Step 9: Execute queries based on test execution type
             test_execution_type = run_config.get("test_execution_type", "standard")
-            print(f"Executing benchmark queries ({test_execution_type} mode)...")
+            quiet_console.print(f"Executing benchmark queries ({test_execution_type} mode)...")
             self._last_throughput_test_result = None
             query_results = self._execute_queries_by_type(benchmark, connection, run_config)
 
@@ -2728,7 +2695,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             query_executions = self._create_standard_execution_phase(query_results, stream_id)
 
             # Step 10: Compile enhanced results
-            total_duration = time.time() - start_time
+            total_duration = elapsed_seconds(start_time)
 
             # Create setup phase
             setup_phase = SetupPhase(
@@ -2740,7 +2707,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
             # Calculate summary metrics first
             successful_queries = len([r for r in query_results if r["status"] == "SUCCESS"])
-            total_exec_time = sum(r["execution_time"] for r in query_results if r["status"] == "SUCCESS")
+            total_exec_time = sum(r["execution_time_seconds"] for r in query_results if r["status"] == "SUCCESS")
             avg_time = total_exec_time / max(successful_queries, 1)
             if self.capture_plans:
                 total_queries_executed = len(query_results)
@@ -2948,9 +2915,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _execute_throughput_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute TPC Throughput Test with concurrent query streams."""
-        from rich.console import Console
-
-        console = Console()
+        console = quiet_console
 
         # Detect benchmark type and route to appropriate implementation
         benchmark_name = getattr(benchmark, "_name", type(benchmark).__name__.lower())
@@ -2974,9 +2939,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _execute_maintenance_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute TPC Maintenance Test with data maintenance operations."""
-        from rich.console import Console
-
-        console = Console()
+        console = quiet_console
 
         # Detect benchmark type and route to appropriate implementation
         benchmark_name = getattr(benchmark, "_name", type(benchmark).__name__.lower())
@@ -3000,9 +2963,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _execute_combined_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute combined TPC test (Power + Throughput + Maintenance)."""
-        from rich.console import Console
-
-        console = Console()
+        console = quiet_console
 
         # Detect benchmark type and route to appropriate implementation
         benchmark_name = getattr(benchmark, "_name", type(benchmark).__name__.lower())
@@ -3067,9 +3028,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
     def _execute_all_queries(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute all benchmark queries and collect results."""
 
-        from rich.console import Console
-
-        console = Console()
+        console = quiet_console
 
         # Get queries with platform-specific dialect translation if supported
         if hasattr(self, "get_target_dialect") and hasattr(benchmark, "get_queries"):
@@ -3192,14 +3151,25 @@ class PlatformAdapter(VerbosityMixin, ABC):
                     # This is for benchmarks that execute discrete operations (INSERT/UPDATE/DELETE/etc.)
                     # rather than just read-only queries
                     if isinstance(benchmark, OperationExecutor):
-                        # Use benchmark's operation execution method
-                        op_result = benchmark.execute_operation(query_id, connection, use_transaction=True)
+                        # Build kwargs for operation execution
+                        op_kwargs: dict[str, Any] = {}
+                        op_kwargs["platform_key"] = self.get_target_dialect()
+
+                        # Allow adapter subclasses to preprocess operation SQL
+                        if hasattr(self, "preprocess_operation_sql") and hasattr(benchmark, "get_operation"):
+                            operation = benchmark.get_operation(str(query_id))
+                            preprocessed = self.preprocess_operation_sql(str(query_id), operation)
+                            if preprocessed is not None:
+                                op_kwargs["sql_override"] = preprocessed
+
+                        op_result = benchmark.execute_operation(query_id, connection, **op_kwargs)
+                        op_status = getattr(op_result, "status", None) or ("SUCCESS" if op_result.success else "FAILED")
 
                         # Convert OperationResult to standard query result format
                         result = {
                             "query_id": str(query_id),
-                            "status": "SUCCESS" if op_result.success else "FAILED",
-                            "execution_time": op_result.write_duration_ms / 1000.0,  # Convert to seconds
+                            "status": op_status,
+                            "execution_time_seconds": op_result.write_duration_ms / 1000.0,  # Convert to seconds
                             "rows_returned": op_result.rows_affected if op_result.rows_affected > 0 else 0,
                             "error": op_result.error,
                             "validation_time": op_result.validation_duration_ms / 1000.0,
@@ -3224,7 +3194,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                     results.append(result)
 
                     # Show result with appropriate color based on status
-                    execution_time = result.get("execution_time", 0)
+                    execution_time = result.get("execution_time_seconds", 0)
                     rows_returned = result.get("rows_returned", 0)
                     time_display = self._format_execution_time(execution_time)
                     status = result.get("status", "SUCCESS")
@@ -3236,6 +3206,12 @@ class PlatformAdapter(VerbosityMixin, ABC):
                         # Truncate error message for console display
                         error_preview = error_msg[:80] + "..." if len(error_msg) > 80 else error_msg
                         console.print(f"[red]❌ Query {i}/{total_queries}: {query_id} FAILED - {error_preview}[/red]")
+                    elif status == "SKIPPED":
+                        skip_reason = result.get("error", "Operation not supported on this platform")
+                        reason_preview = skip_reason[:80] + "..." if len(skip_reason) > 80 else skip_reason
+                        console.print(
+                            f"[yellow]⏭️ Query {i}/{total_queries}: {query_id} SKIPPED - {reason_preview}[/yellow]"
+                        )
                     else:
                         # Query succeeded - show with validation info if available
                         if validation_status == "PASSED":
@@ -3259,7 +3235,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                     error_result = {
                         "query_id": str(query_id),
                         "status": "FAILED",
-                        "execution_time": 0.0,
+                        "execution_time_seconds": 0.0,
                         "rows_returned": 0,
                         "error": str(e),
                     }
@@ -3276,10 +3252,15 @@ class PlatformAdapter(VerbosityMixin, ABC):
             console.print(f"[yellow]Benchmark cancelled. Processed {len(results)}/{total_queries} queries.[/yellow]")
         else:
             successful = len([r for r in results if r.get("status") == "SUCCESS"])
-            failed = total_queries - successful
+            skipped = len([r for r in results if r.get("status") == "SKIPPED"])
+            failed = len([r for r in results if r.get("status") == "FAILED"])
             if failed > 0:
                 console.print(
-                    f"[yellow]Completed {total_queries} queries: {successful} passed, {failed} failed.[/yellow]"
+                    f"[yellow]Completed {total_queries} queries: {successful} passed, {skipped} skipped, {failed} failed.[/yellow]"
+                )
+            elif skipped > 0:
+                console.print(
+                    f"[green]Completed {total_queries} queries: {successful} passed, {skipped} skipped.[/green]"
                 )
             else:
                 console.print(f"[green]Completed all {total_queries} queries.[/green]")
@@ -3644,11 +3625,9 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _execute_tpch_power_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute TPC-H Power Test using production TPCHPowerTest implementation."""
-        from rich.console import Console
-
         from benchbox.core.tpch.power_test import TPCHPowerTest
 
-        console = Console()
+        console = quiet_console
 
         try:
             # Extract configuration
@@ -3696,7 +3675,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 for query_result in power_test_result.query_results:
                     platform_result = {
                         "query_id": query_result["query_id"],
-                        "execution_time": query_result["execution_time"],
+                        "execution_time_seconds": query_result["execution_time_seconds"],
                         "status": "SUCCESS" if query_result["success"] else "FAILED",
                         "rows_returned": query_result.get("result_count", 0),
                         "test_type": "power",
@@ -3753,7 +3732,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 for query_result in power_test_result.query_results:
                     platform_result = {
                         "query_id": query_result["query_id"],
-                        "execution_time": query_result["execution_time"],
+                        "execution_time_seconds": query_result["execution_time_seconds"],
                         "status": "SUCCESS" if query_result["success"] else "FAILED",
                         "rows_returned": query_result.get("result_count", 0),
                         "test_type": "power",
@@ -3774,7 +3753,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             return [
                 {
                     "query_id": "power_test_error",
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "status": "FAILED",
                     "rows_returned": 0,
                     "error": str(e),
@@ -3802,9 +3781,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             List of query results from all warmup and measurement iterations, with each result
             tagged with iteration number and run_type ("warmup" or "measurement").
         """
-        from rich.console import Console
-
-        console = Console()
+        console = quiet_console
 
         # Extract configuration (same defaults as TPC-H power test)
         iterations = run_config.get("iterations", GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS)
@@ -3858,12 +3835,10 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _execute_tpcds_power_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute TPC-DS Power Test using production TPCDSPowerTest implementation."""
-        from rich.console import Console
-
         from benchbox.core.expected_results.tpcds_results import set_config_validation_mode
         from benchbox.core.tpcds.power_test import TPCDSPowerTest
 
-        console = Console()
+        console = quiet_console
 
         try:
             # Extract configuration
@@ -3918,7 +3893,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 for query_result in power_test_result.query_results:
                     platform_result = {
                         "query_id": query_result["query_id"],
-                        "execution_time": query_result["execution_time"],
+                        "execution_time_seconds": query_result["execution_time_seconds"],
                         "status": "SUCCESS" if query_result["success"] else "FAILED",
                         "rows_returned": query_result.get("result_count", 0),
                         "test_type": "power",
@@ -3959,7 +3934,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                         console.print(f"[dim]Target dialect: {dialect} | Detailed per-query results:[/dim]")
                     for qr in power_test_result.query_results:
                         qname = f"q{qr.get('query_id')}"
-                        dur = qr.get("execution_time", 0.0)
+                        dur = qr.get("execution_time_seconds", 0.0)
                         status = "SUCCESS" if qr.get("success") else "FAILED"
                         rows = qr.get("result_count", 0)
                         console.print(f"  • {qname}: {dur:.2f}s, {status}, rows={rows}")
@@ -3984,7 +3959,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 for query_result in power_test_result.query_results:
                     platform_result = {
                         "query_id": query_result["query_id"],
-                        "execution_time": query_result["execution_time"],
+                        "execution_time_seconds": query_result["execution_time_seconds"],
                         "status": "SUCCESS" if query_result["success"] else "FAILED",
                         "rows_returned": query_result.get("result_count", 0),
                         "test_type": "power",
@@ -4005,7 +3980,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             return [
                 {
                     "query_id": "power_test_error",
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "status": "FAILED",
                     "rows_returned": 0,
                     "error": str(e),
@@ -4015,12 +3990,10 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _execute_tpcds_throughput_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute TPC-DS Throughput Test using production TPCDSThroughputTest implementation."""
-        from rich.console import Console
-
         from benchbox.core.expected_results.tpcds_results import set_config_validation_mode
         from benchbox.core.tpcds.throughput_test import TPCDSThroughputTest
 
-        console = Console()
+        console = quiet_console
 
         try:
             # Extract configuration
@@ -4083,7 +4056,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 for stream_result in throughput_test_result.stream_results:
                     for qr in stream_result.query_results:
                         qname = f"q{qr.get('query_id')}"
-                        dur = qr.get("execution_time", 0.0)
+                        dur = qr.get("execution_time_seconds", 0.0)
                         status = "SUCCESS" if qr.get("success") else "FAILED"
                         rows = qr.get("result_count", 0)
                         console.print(
@@ -4119,7 +4092,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 for query_result in stream_result.query_results:
                     platform_result = {
                         "query_id": query_result["query_id"],
-                        "execution_time": query_result["execution_time"],
+                        "execution_time_seconds": query_result["execution_time_seconds"],
                         "status": "SUCCESS" if query_result["success"] else "FAILED",
                         "rows_returned": query_result.get("result_count", 0),
                         "test_type": "throughput",
@@ -4137,7 +4110,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             return [
                 {
                     "query_id": "throughput_test_error",
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "status": "FAILED",
                     "rows_returned": 0,
                     "error": str(e),
@@ -4147,14 +4120,12 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
     def _execute_tpch_throughput_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute TPC-H Throughput Test using production TPCHThroughputTest implementation."""
-        from rich.console import Console
-
         from benchbox.core.tpch.throughput_test import (
             TPCHThroughputTest,
             TPCHThroughputTestConfig,
         )
 
-        console = Console()
+        console = quiet_console
 
         try:
             scale_factor = run_config.get("scale_factor", 1.0)
@@ -4215,7 +4186,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 for qr in stream_result.query_results:
                     platform_result = {
                         "query_id": qr.get("query_id"),
-                        "execution_time": qr.get("execution_time", 0.0),
+                        "execution_time_seconds": qr.get("execution_time_seconds", 0.0),
                         "status": "SUCCESS" if qr.get("success") else "FAILED",
                         "rows_returned": qr.get("result_count", 0),
                         "test_type": "throughput",
@@ -4233,7 +4204,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             return [
                 {
                     "query_id": "throughput_test_error",
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "status": "FAILED",
                     "rows_returned": 0,
                     "error": str(e),
@@ -4245,11 +4216,9 @@ class PlatformAdapter(VerbosityMixin, ABC):
         """Execute TPC-DS Maintenance Test using production TPCDSMaintenanceTest implementation."""
         from pathlib import Path
 
-        from rich.console import Console
-
         from benchbox.core.tpcds.maintenance_test import TPCDSMaintenanceTest
 
-        console = Console()
+        console = quiet_console
 
         try:
             # Extract configuration
@@ -4305,7 +4274,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             for operation in maintenance_test_result["operations"]:
                 platform_result = {
                     "query_id": f"{operation.operation_type.lower()}_{operation.table_name}",
-                    "execution_time": operation.duration,
+                    "execution_time_seconds": operation.duration,
                     "status": "SUCCESS" if operation.success else "FAILED",
                     "rows_returned": operation.rows_affected,
                     "test_type": "maintenance",
@@ -4323,7 +4292,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             return [
                 {
                     "query_id": "maintenance_test_error",
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "status": "FAILED",
                     "rows_returned": 0,
                     "error": str(e),
@@ -4335,11 +4304,9 @@ class PlatformAdapter(VerbosityMixin, ABC):
         """Execute TPC-H Maintenance Test using production TPCHMaintenanceTest implementation."""
         from pathlib import Path
 
-        from rich.console import Console
-
         from benchbox.core.tpch.maintenance_test import TPCHMaintenanceTest
 
-        console = Console()
+        console = quiet_console
 
         try:
             scale_factor = run_config.get("scale_factor", 1.0)
@@ -4397,7 +4364,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 query_results.append(
                     {
                         "query_id": op.operation_type,
-                        "execution_time": op.duration,
+                        "execution_time_seconds": op.duration,
                         "status": "SUCCESS" if op.success else "FAILED",
                         "rows_returned": op.rows_affected,
                         "test_type": "maintenance",
@@ -4411,7 +4378,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             return [
                 {
                     "query_id": "maintenance_test_error",
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "status": "FAILED",
                     "rows_returned": 0,
                     "error": str(e),
@@ -4524,7 +4491,7 @@ class PlatformAdapterConnection:
             self._current_query_id,
             benchmark_type=self.benchmark_type,
             scale_factor=self.scale_factor,
-            validate_row_count=True,  # Enable validation for TPC tests
+            validate_row_count=True,  # Enforce expected row-count checks for TPC workloads.
             stream_id=self._current_stream_id,
         )
         return PlatformAdapterCursor(result)
@@ -4546,7 +4513,7 @@ class PlatformAdapterConnection:
 
 
 class PlatformAdapterCursor:
-    """Mock cursor that wraps platform adapter query results."""
+    """Cursor-like wrapper around platform adapter execution results."""
 
     def __init__(self, platform_result: dict):
         """Initialize with platform adapter result.
@@ -4559,9 +4526,20 @@ class PlatformAdapterCursor:
 
     def _extract_rows(self):
         """Extract rows from platform result."""
-        # For TPC tests, we mainly need row count, not actual data
+        explicit_rows = self.platform_result.get("rows")
+        if isinstance(explicit_rows, (list, tuple)):
+            return list(explicit_rows)
+
+        first_row = self.platform_result.get("first_row")
+        if first_row is not None:
+            return [first_row]
+
         row_count = self.platform_result.get("rows_returned", 0)
-        return [("mock_row",)] * row_count  # Create mock rows
+        if isinstance(row_count, int) and row_count > 0:
+            # Preserve cardinality semantics even when the adapter only reports row counts.
+            return [(None,)] * row_count
+
+        return []
 
     def fetchall(self):
         """Return all rows."""

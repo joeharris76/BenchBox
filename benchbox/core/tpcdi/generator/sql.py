@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 try:
     import duckdb
@@ -162,7 +163,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info(f"Generating date dimension ({start_year}-{end_year})...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         # Generate all dates in range using SQL
         conn.execute(f"""
@@ -197,7 +198,7 @@ class TPCDISQLGenerator:
         result = conn.execute("SELECT COUNT(*) FROM DimDate").fetchone()
         records_generated = result[0] if result else 0
 
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
         self.generation_stats["records_generated"] += records_generated
         self.generation_stats["tables_generated"] += 1
         self.generation_stats["generation_times"]["DimDate"] = generation_time
@@ -213,7 +214,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info("Generating time dimension...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         # Generate times at 5-minute intervals using SQL
         conn.execute("""
@@ -248,7 +249,7 @@ class TPCDISQLGenerator:
         result = conn.execute("SELECT COUNT(*) FROM DimTime").fetchone()
         records_generated = result[0] if result else 0
 
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
         self.generation_stats["records_generated"] += records_generated
         self.generation_stats["tables_generated"] += 1
         self.generation_stats["generation_times"]["DimTime"] = generation_time
@@ -266,7 +267,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info(f"Generating {num_companies:,} company records...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         conn.execute(f"""
             INSERT INTO DimCompany
@@ -300,7 +301,7 @@ class TPCDISQLGenerator:
                 CROSS JOIN (SELECT state FROM lookup_us_states ORDER BY random() LIMIT 1) state
         """)
 
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
         self.generation_stats["records_generated"] += num_companies
         self.generation_stats["tables_generated"] += 1
         self.generation_stats["generation_times"]["DimCompany"] = generation_time
@@ -318,7 +319,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info(f"Generating {num_securities:,} security records...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         conn.execute(f"""
             INSERT INTO DimSecurity
@@ -344,7 +345,7 @@ class TPCDISQLGenerator:
                 CROSS JOIN (SELECT unnest(['NYSE', 'NASDAQ', 'AMEX']) as exchange_id ORDER BY random() LIMIT 1) exchange
         """)
 
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
         self.generation_stats["records_generated"] += num_securities
         self.generation_stats["tables_generated"] += 1
         self.generation_stats["generation_times"]["DimSecurity"] = generation_time
@@ -362,7 +363,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info(f"Generating {num_customers:,} customer records...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         conn.execute(f"""
             INSERT INTO DimCustomer
@@ -412,7 +413,7 @@ class TPCDISQLGenerator:
                 CROSS JOIN (SELECT state FROM lookup_us_states ORDER BY random() LIMIT 1) state
         """)
 
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
         self.generation_stats["records_generated"] += num_customers
         self.generation_stats["tables_generated"] += 1
         self.generation_stats["generation_times"]["DimCustomer"] = generation_time
@@ -431,7 +432,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info(f"Generating {num_accounts:,} account records...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         conn.execute(f"""
             INSERT INTO DimAccount
@@ -452,7 +453,7 @@ class TPCDISQLGenerator:
                 CROSS JOIN (SELECT status FROM lookup_statuses ORDER BY random() LIMIT 1) st
         """)
 
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
         self.generation_stats["records_generated"] += num_accounts
         self.generation_stats["tables_generated"] += 1
         self.generation_stats["generation_times"]["DimAccount"] = generation_time
@@ -470,7 +471,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info(f"Generating {num_trades:,} trade records...")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         conn.execute(f"""
             INSERT INTO FactTrade
@@ -511,7 +512,7 @@ class TPCDISQLGenerator:
                 CROSS JOIN (SELECT type FROM lookup_trade_types ORDER BY random() LIMIT 1) tt
         """)
 
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
         self.generation_stats["records_generated"] += num_trades
         self.generation_stats["tables_generated"] += 1
         self.generation_stats["generation_times"]["FactTrade"] = generation_time
@@ -538,7 +539,7 @@ class TPCDISQLGenerator:
         if self.enable_progress:
             self.logger.info(f"Starting SQL-based TPC-DI data generation (Scale Factor: {self.scale_factor})")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         # Setup lookup tables first
         self._setup_lookup_tables(conn)
@@ -558,16 +559,16 @@ class TPCDISQLGenerator:
 
         for table_name in tables:
             if table_name in table_generators:
-                table_start = time.time()
+                table_start = mono_time()
                 records_generated = table_generators[table_name](conn)
                 results[table_name] = records_generated
 
-                table_time = time.time() - table_start
+                table_time = elapsed_seconds(table_start)
                 if self.enable_progress:
                     throughput = records_generated / table_time if table_time > 0 else 0
                     self.logger.info(f"  {table_name}: {throughput:,.0f} records/second")
 
-        total_time = time.time() - start_time
+        total_time = elapsed_seconds(start_time)
         total_records = sum(results.values())
 
         if self.enable_progress:

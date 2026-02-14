@@ -19,6 +19,13 @@ class BenchBoxError(Exception):
     """
 
 
+class InsufficientMemoryError(BenchBoxError):
+    """Raised when available memory is insufficient for the requested benchmark.
+
+    Users can bypass this check with --ignore-memory-warnings.
+    """
+
+
 class ConfigurationError(BenchBoxError):
     """Configuration validation error.
 

@@ -14,6 +14,7 @@ from benchbox.base import BaseBenchmark
 from benchbox.core.h2odb.generator import H2ODataGenerator
 from benchbox.core.h2odb.queries import H2OQueryManager
 from benchbox.core.h2odb.schema import TABLES, get_all_create_table_sql
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
@@ -307,8 +308,6 @@ class H2OBenchmark(BaseBenchmark):
         Returns:
             Dictionary containing benchmark results
         """
-        import time
-
         if queries is None:
             queries = list(self.query_manager.get_all_queries().keys())
 
@@ -330,11 +329,10 @@ class H2OBenchmark(BaseBenchmark):
             }
 
             for i in range(iterations):
-                start_time = time.time()
+                start_time = mono_time()
                 try:
                     result = self.execute_query(query_id, connection)
-                    end_time = time.time()
-                    execution_time = end_time - start_time
+                    execution_time = elapsed_seconds(start_time)
 
                     query_results["iterations"].append(
                         {

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 if TYPE_CHECKING:
     from cloudpathlib import CloudPath
 
@@ -243,9 +245,9 @@ class TransactionPrimitivesBenchmark(BaseBenchmark, OperationExecutor):
 
         # Try to acquire lock with timeout
         lock_name = "staging_table_setup"
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             try:
                 # Attempt to insert lock row (fails if already exists)
                 import os
@@ -260,7 +262,7 @@ class TransactionPrimitivesBenchmark(BaseBenchmark, OperationExecutor):
                     f"INSERT INTO transaction_primitives_setup_lock (lock_name, holder_info) "
                     f"VALUES ('{escaped_lock_name}', '{escaped_holder_info}')"
                 )
-                self.log_verbose(f"Acquired setup lock (waited {time.time() - start_time:.1f}s)")
+                self.log_verbose(f"Acquired setup lock (waited {elapsed_seconds(start_time):.1f}s)")
                 return True
             except Exception as e:
                 error_msg = str(e).lower()

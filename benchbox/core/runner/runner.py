@@ -612,6 +612,7 @@ def run_benchmark_lifecycle(
                 ignore_memory_warnings=bool(options.get("ignore_memory_warnings", False)),
                 force_regenerate=bool(options.get("force_regenerate", False)),
                 prefer_parquet=bool(options.get("prefer_parquet", True)),
+                cache_dir=options.get("cache_dir"),
                 verbose=verbosity_settings.verbose,
                 very_verbose=verbosity_settings.very_verbose,
             )
@@ -715,6 +716,7 @@ def run_benchmark_lifecycle(
             ignore_memory_warnings=bool(options.get("ignore_memory_warnings", False)),
             force_regenerate=bool(options.get("force_regenerate", False)),
             prefer_parquet=bool(options.get("prefer_parquet", True)),
+            cache_dir=options.get("cache_dir"),
             verbose=verbosity_settings.verbose,
             very_verbose=verbosity_settings.very_verbose,
         )

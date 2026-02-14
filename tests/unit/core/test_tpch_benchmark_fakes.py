@@ -38,7 +38,7 @@ def fake_tpch_components(monkeypatch, tmp_path):
             return f"SELECT {query_id}"
 
     monkeypatch.setattr("benchbox.core.tpch.benchmark.TPCHDataGenerator", FakeTPCHDataGenerator)
-    monkeypatch.setattr("benchbox.core.tpch.benchmark.TPCHQueryManager", lambda: FakeTPCHQueryManager())
+    monkeypatch.setattr("benchbox.core.tpch.benchmark.TPCHQueries", lambda: FakeTPCHQueryManager())
 
     # Ensure stream permutations are predictable for stream-based queries
     monkeypatch.setattr(

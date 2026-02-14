@@ -194,7 +194,11 @@ class StandardDisplays:
                 "query_id": entry.get("query_id") or entry.get("id") or "UNKNOWN",
                 "query_name": entry.get("query_name") or entry.get("name") or entry.get("query_id") or "UNKNOWN",
                 "status": entry.get("status", "UNKNOWN"),
-                "execution_time_ms": float(entry.get("execution_time_ms", entry.get("execution_time", 0.0))),
+                "execution_time_ms": float(
+                    entry.get("execution_time_ms")
+                    or (float(entry["execution_time_seconds"]) * 1000.0 if "execution_time_seconds" in entry else 0.0)
+                    or (float(entry["execution_time"]) * 1000.0 if "execution_time" in entry else 0.0)
+                ),
                 "rows_returned": entry.get("rows_returned", 0),
                 "error_message": entry.get("error_message"),
             }

@@ -6,12 +6,12 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import logging
-import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from benchbox.core.connection import DatabaseConnection
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.cloud_storage import create_path_handler
 from benchbox.utils.scale_factor import format_scale_factor
 from benchbox.utils.verbosity import VerbosityMixin, compute_verbosity
@@ -142,6 +142,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
         # Handle special cases first
         special_mappings = {
             "ClickBench": "clickbench",
+            "ClickBenchBenchmark": "clickbench",
             "AMPLab": "amplab",
             "AMPLabBenchmark": "amplab",
             "H2ODB": "h2odb",
@@ -149,6 +150,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
             "JoinOrder": "joinorder",
             "JoinOrderBenchmark": "joinorder",
             "TPCHavoc": "tpchavoc",
+            "TPCHavocBenchmark": "tpchavoc",
             "TPCHBenchmark": "tpch",
             "TPCDSBenchmark": "tpcds",
             "TPCDIBenchmark": "tpcdi",
@@ -165,8 +167,12 @@ class BaseBenchmark(VerbosityMixin, ABC):
         if class_name in special_mappings:
             return special_mappings[class_name]
 
-        # For standard cases, just lowercase
-        # TPCH -> tpch, TPCDS -> tpcds, etc.
+        # Prefer stripping the common suffix before lowercasing to keep
+        # class-based benchmark IDs stable (e.g. ClickBenchBenchmark -> clickbench).
+        if class_name.endswith("Benchmark"):
+            return class_name[:-9].lower()
+
+        # For standard cases, just lowercase (e.g. TPCH -> tpch).
         return class_name.lower()
 
     def get_data_source_benchmark(self) -> Optional[str]:
@@ -246,7 +252,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
 
         try:
             logger.info("Setting up database schema and loading data...")
-            start_time = time.time()
+            start_time = mono_time()
 
             # Generate data if not already generated
             if not hasattr(self, "_data_generated") or not self._data_generated:
@@ -257,7 +263,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
             # Load data into database
             self._load_data(connection)
 
-            setup_time = time.time() - start_time
+            setup_time = elapsed_seconds(start_time)
             logger.info(f"Database setup completed in {setup_time:.2f} seconds")
 
         except Exception as e:
@@ -298,7 +304,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
             query_text = self.get_query(query_id, params=params)
 
             logger.debug(f"Executing query {query_id}")
-            start_time = time.time()
+            start_time = mono_time()
 
             # Execute the query
             cursor = connection.execute(query_text)
@@ -310,7 +316,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
                 results = connection.fetchall(cursor)
                 row_count = len(results) if results else 0
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             logger.info(f"Query {query_id} completed in {execution_time:.3f} seconds")
             if fetch_results:
@@ -318,7 +324,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
 
             return {
                 "query_id": query_id,
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "query_text": query_text,
                 "results": results,
                 "row_count": row_count,
@@ -358,16 +364,16 @@ class BaseBenchmark(VerbosityMixin, ABC):
         """
         logger = logging.getLogger(__name__)
 
-        benchmark_start_time = time.time()
+        benchmark_start_time = mono_time()
         setup_time = 0.0
 
         try:
             # Set up database if requested
             if setup_database:
                 logger.info("Setting up database for benchmark...")
-                setup_start_time = time.time()
+                setup_start_time = mono_time()
                 self.setup_database(connection)
-                setup_time = time.time() - setup_start_time
+                setup_time = elapsed_seconds(setup_start_time)
 
             # Determine which queries to run
             if query_ids is None:
@@ -394,7 +400,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
                     query_results.append(
                         {
                             "query_id": query_id,
-                            "execution_time": 0.0,
+                            "execution_time_seconds": 0.0,
                             "query_text": None,
                             "results": None,
                             "row_count": 0,
@@ -402,10 +408,10 @@ class BaseBenchmark(VerbosityMixin, ABC):
                         }
                     )
 
-            total_execution_time = time.time() - benchmark_start_time - setup_time
+            total_execution_time = elapsed_seconds(benchmark_start_time) - setup_time
 
             # Calculate summary statistics
-            query_times = [r["execution_time"] for r in query_results if "error" not in r]
+            query_times = [r["execution_time_seconds"] for r in query_results if "error" not in r]
 
             benchmark_result = {
                 "benchmark_name": self.__class__.__name__,
@@ -508,7 +514,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
             if "error" in result:
                 lines.append(f"Query {query_id}: FAILED - {result['error']}")
             else:
-                exec_time = result["execution_time"]
+                exec_time = result["execution_time_seconds"]
                 row_count = result["row_count"]
                 lines.append(f"Query {query_id}: {exec_time:.3f}s ({row_count} rows)")
 

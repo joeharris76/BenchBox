@@ -178,6 +178,29 @@ class TestTPCDSStreamingCompression:
                             for file_path in table_paths:
                                 assert str(file_path).endswith(".zst"), f"Expected .zst file, got {file_path}"
 
+    def test_generate_local_prunes_stale_artifacts_when_regenerating(self, temp_dir, mock_dsdgen_path):
+        """_generate_local should prune stale table artifacts before regeneration."""
+        with patch.object(TPCDSDataGenerator, "_find_or_build_dsdgen") as mock_find:
+            mock_find.return_value = mock_dsdgen_path
+
+            generator = TPCDSDataGenerator(
+                scale_factor=1.0,
+                output_dir=temp_dir,
+                compression_type="none",
+                compress_data=False,
+                force_regenerate=True,
+            )
+
+            with patch.object(generator.validator, "should_regenerate_data", return_value=(True, None)):
+                with patch.object(generator, "_prune_stale_table_artifacts", return_value=[]) as mock_prune:
+                    with patch.object(generator, "_run_dsdgen_native", return_value=None):
+                        with patch.object(generator, "_gather_existing_table_files", return_value={}):
+                            with patch.object(generator, "_validate_file_format_consistency"):
+                                with patch.object(generator, "_write_manifest"):
+                                    generator._generate_local(temp_dir)
+
+            mock_prune.assert_called_once_with(temp_dir)
+
 
 @pytest.mark.requires_zstd
 def test_streaming_compression_integration():

@@ -89,3 +89,24 @@ class TestBaseBenchmark:
             assert isinstance(query, str)
             assert query.strip()
             assert "SELECT" in query.upper()  # Should be valid SQL
+
+    def test_benchmark_name_normalizes_benchmark_suffix_variants(self, temp_dir: Path) -> None:
+        """Class names ending with Benchmark should normalize to canonical lowercase IDs."""
+
+        class _NamedBenchmarkBase(BaseBenchmark):
+            def generate_data(self):
+                return []
+
+            def get_queries(self):
+                return {}
+
+            def get_query(self, query_id, *, params=None):
+                return "SELECT 1"
+
+        clickbench_cls = type("ClickBenchBenchmark", (_NamedBenchmarkBase,), {})
+        tpchavoc_cls = type("TPCHavocBenchmark", (_NamedBenchmarkBase,), {})
+        generic_cls = type("CustomWorkloadBenchmark", (_NamedBenchmarkBase,), {})
+
+        assert clickbench_cls(scale_factor=0.01, output_dir=temp_dir)._get_benchmark_name() == "clickbench"
+        assert tpchavoc_cls(scale_factor=0.01, output_dir=temp_dir)._get_benchmark_name() == "tpchavoc"
+        assert generic_cls(scale_factor=0.01, output_dir=temp_dir)._get_benchmark_name() == "customworkload"

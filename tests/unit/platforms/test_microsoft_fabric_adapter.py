@@ -7,8 +7,6 @@ Tests the FabricWarehouseAdapter class including:
 - Data loading via OneLake
 - Query execution
 
-Note: MicrosoftFabricAdapter is a backward compatibility alias for FabricWarehouseAdapter.
-
 Copyright 2026 Joe Harris / BenchBox Project
 
 Licensed under the MIT License. See LICENSE file in the project root for details.
@@ -25,7 +23,6 @@ from benchbox.core.exceptions import ConfigurationError
 from benchbox.platforms.fabric_warehouse import (
     FABRIC_DIALECT,
     FabricWarehouseAdapter,
-    MicrosoftFabricAdapter,
 )
 
 pytestmark = pytest.mark.fast
@@ -55,7 +52,7 @@ def fabric_stubs(monkeypatch):
 @pytest.fixture()
 def fabric_adapter(fabric_stubs):
     """Create a Fabric adapter instance for testing."""
-    return MicrosoftFabricAdapter(
+    return FabricWarehouseAdapter(
         workspace="test-workspace-guid",
         warehouse="test_warehouse",
         auth_method="service_principal",
@@ -68,13 +65,9 @@ def fabric_adapter(fabric_stubs):
 class TestFabricWarehouseAdapter:
     """Tests for FabricWarehouseAdapter initialization and configuration."""
 
-    def test_backward_compat_alias(self, fabric_stubs):
-        """Test that MicrosoftFabricAdapter is an alias for FabricWarehouseAdapter."""
-        assert MicrosoftFabricAdapter is FabricWarehouseAdapter
-
     def test_initialization_defaults(self, fabric_stubs):
         """Test adapter initializes with correct defaults."""
-        adapter = MicrosoftFabricAdapter(
+        adapter = FabricWarehouseAdapter(
             workspace="test-workspace",
             database="test_db",
             auth_method="default_credential",
@@ -92,7 +85,7 @@ class TestFabricWarehouseAdapter:
 
     def test_initialization_with_config(self, fabric_stubs):
         """Test adapter accepts custom configuration."""
-        adapter = MicrosoftFabricAdapter(
+        adapter = FabricWarehouseAdapter(
             server="custom.datawarehouse.fabric.microsoft.com",
             database="custom_db",
             schema="custom_schema",
@@ -116,7 +109,7 @@ class TestFabricWarehouseAdapter:
     def test_missing_workspace_and_server_raises_error(self, fabric_stubs):
         """Test that missing workspace/server raises ConfigurationError."""
         with pytest.raises(ConfigurationError, match="requires connection details"):
-            MicrosoftFabricAdapter(
+            FabricWarehouseAdapter(
                 database="test_db",
                 auth_method="default_credential",
             )
@@ -124,7 +117,7 @@ class TestFabricWarehouseAdapter:
     def test_missing_database_raises_error(self, fabric_stubs):
         """Test that missing database/warehouse raises ConfigurationError."""
         with pytest.raises(ConfigurationError, match="requires a database/warehouse name"):
-            MicrosoftFabricAdapter(
+            FabricWarehouseAdapter(
                 workspace="test-workspace",
                 auth_method="default_credential",
             )
@@ -132,7 +125,7 @@ class TestFabricWarehouseAdapter:
     def test_service_principal_missing_credentials_raises_error(self, fabric_stubs):
         """Test that service_principal auth without credentials raises error."""
         with pytest.raises(ConfigurationError, match="service principal authentication is incomplete"):
-            MicrosoftFabricAdapter(
+            FabricWarehouseAdapter(
                 workspace="test-workspace",
                 database="test_db",
                 auth_method="service_principal",
@@ -141,7 +134,7 @@ class TestFabricWarehouseAdapter:
 
     def test_workspace_generates_server_endpoint(self, fabric_stubs):
         """Test that workspace generates correct server endpoint."""
-        adapter = MicrosoftFabricAdapter(
+        adapter = FabricWarehouseAdapter(
             workspace="abc123-def456",
             database="test_db",
             auth_method="default_credential",
@@ -151,7 +144,7 @@ class TestFabricWarehouseAdapter:
 
     def test_warehouse_used_as_database(self, fabric_stubs):
         """Test that warehouse parameter sets database."""
-        adapter = MicrosoftFabricAdapter(
+        adapter = FabricWarehouseAdapter(
             workspace="test-workspace",
             warehouse="my_warehouse",
             auth_method="default_credential",
@@ -247,7 +240,7 @@ class TestQueryExecution:
         assert result["status"] == "SUCCESS"
         assert result["query_id"] == "Q1"
         assert result["rows_returned"] == 2
-        assert "execution_time" in result
+        assert "execution_time_seconds" in result
 
     def test_execute_query_failure(self, fabric_adapter, fabric_stubs):
         """Test query execution handles errors."""
@@ -332,7 +325,7 @@ class TestFromConfig:
             "auth_method": "default_credential",
         }
 
-        adapter = MicrosoftFabricAdapter.from_config(config)
+        adapter = FabricWarehouseAdapter.from_config(config)
 
         # Database name should be auto-generated
         assert adapter.database is not None
@@ -348,7 +341,7 @@ class TestFromConfig:
             "auth_method": "default_credential",
         }
 
-        adapter = MicrosoftFabricAdapter.from_config(config)
+        adapter = FabricWarehouseAdapter.from_config(config)
 
         assert adapter.database == "custom_database"
 

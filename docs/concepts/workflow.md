@@ -328,8 +328,7 @@ benchbox aggregate \
   --output-file performance_trends.csv
 
 # Visualize trends
-benchbox plot performance_trends.csv \
-  --output performance_chart.png
+benchbox visualize benchmark_runs/results/*.json
 ```
 
 **Metrics Tracked**:

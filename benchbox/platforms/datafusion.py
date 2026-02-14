@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -30,13 +31,96 @@ except ImportError:
     RuntimeEnv = None  # type: ignore[assignment, misc]
 
 from benchbox.platforms.base import PlatformAdapter
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.file_format import get_delimiter_for_file
 
 logger = logging.getLogger(__name__)
 
 
+class DataFusionCursorCompat:
+    """DB-API-like cursor wrapper for DataFusion SQL results."""
+
+    def __init__(self, dataframe: Any):
+        self._dataframe = dataframe
+        self._rows: list[tuple[Any, ...]] | None = None
+        self.rowcount = -1
+
+    def _materialize(self) -> list[tuple[Any, ...]]:
+        if self._rows is not None:
+            return self._rows
+
+        rows: list[tuple[Any, ...]] = []
+        batches = self._dataframe.collect()
+
+        for batch in batches:
+            column_names = [str(name) for name in batch.schema.names]
+            for row in batch.to_pylist():
+                rows.append(tuple(row.get(name) for name in column_names))
+
+        self.rowcount = len(rows)
+        self._rows = rows
+        return rows
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        rows = self._materialize()
+        return rows[0] if rows else None
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self._materialize()
+
+
+class DataFusionConnectionCompat:
+    """SessionContext wrapper exposing a DB-API-like execute() method."""
+
+    def __init__(self, context: Any):
+        self._context = context
+
+    @staticmethod
+    def _requires_eager_execution(query: str) -> bool:
+        """Return True for SQL statements that must execute immediately for side effects."""
+        statement = query.lstrip()
+        while statement.startswith("--"):
+            newline_pos = statement.find("\n")
+            if newline_pos == -1:
+                return False
+            statement = statement[newline_pos + 1 :].lstrip()
+
+        upper_statement = statement.upper()
+        eager_prefixes = (
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "MERGE",
+            "CREATE",
+            "DROP",
+            "ALTER",
+            "TRUNCATE",
+            "COPY",
+        )
+        return upper_statement.startswith(eager_prefixes)
+
+    def execute(self, query: str, parameters: Any = None) -> DataFusionCursorCompat:
+        if parameters is not None:
+            raise ValueError("DataFusion SQL execute() does not support bound parameters in this adapter path")
+        cursor = DataFusionCursorCompat(self._context.sql(query))
+        if self._requires_eager_execution(query):
+            cursor.fetchall()
+        return cursor
+
+    def sql(self, query: str) -> Any:
+        return self._context.sql(query)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._context, name)
+
+
 class DataFusionAdapter(PlatformAdapter):
     """Apache DataFusion platform adapter with optimized bulk loading and execution."""
+
+    # Process-wide lock bookkeeping keyed by working-dir lock file path.
+    # This ensures ownership/reentrancy is shared across adapter instances.
+    _process_working_dir_lock_depth: dict[str, int] = {}
+    _process_working_dir_lock_guard = threading.Lock()
 
     @property
     def platform_name(self) -> str:
@@ -45,9 +129,34 @@ class DataFusionAdapter(PlatformAdapter):
     def get_target_dialect(self) -> str:
         """Get the target SQL dialect for DataFusion.
 
-        DataFusion uses PostgreSQL-compatible SQL dialect.
+        Returns platform dialect identifier so catalog variants can target DataFusion.
+        SQL translation normalizes this to PostgreSQL semantics where needed.
         """
-        return "postgres"
+        return "datafusion"
+
+    def preprocess_operation_sql(self, operation_id: str, operation: Any) -> str | None:
+        """Preprocess write operation SQL for DataFusion compatibility.
+
+        Rewrites COPY-based bulk load SQL to CREATE EXTERNAL TABLE pattern.
+        Returns None for non-bulk_load operations (no preprocessing needed).
+
+        Args:
+            operation_id: Operation identifier
+            operation: WriteOperation object with category, write_sql, file_dependencies
+
+        Returns:
+            Transformed SQL string, or None if no preprocessing needed
+        """
+        if operation.category.lower() == "bulk_load":
+            from benchbox.platforms.datafusion_write_transformer import transform_write_sql
+
+            return transform_write_sql(
+                operation_id,
+                operation.category,
+                operation.write_sql,
+                operation.file_dependencies,
+            )
+        return None
 
     @staticmethod
     def add_cli_arguments(parser) -> None:
@@ -96,7 +205,6 @@ class DataFusionAdapter(PlatformAdapter):
         from pathlib import Path
 
         from benchbox.utils.database_naming import generate_database_filename
-        from benchbox.utils.scale_factor import format_benchmark_name
 
         # Extract DataFusion-specific configuration
         adapter_config = {}
@@ -107,15 +215,16 @@ class DataFusionAdapter(PlatformAdapter):
         else:
             # Generate database directory path using standard naming convention
             # DataFusion stores data in Parquet format (.parquet extension determined by platform)
-            from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
+            from benchbox.utils.path_utils import get_benchmark_runs_databases_path
 
-            # Use output_dir if provided, otherwise use canonical benchmark_runs/datagen path
             if config.get("output_dir"):
-                data_dir = Path(config["output_dir"]) / format_benchmark_name(
-                    config["benchmark"], config["scale_factor"]
+                data_dir = get_benchmark_runs_databases_path(
+                    config["benchmark"],
+                    config["scale_factor"],
+                    base_dir=Path(config["output_dir"]) / "databases",
                 )
             else:
-                data_dir = get_benchmark_runs_datagen_path(config["benchmark"], config["scale_factor"])
+                data_dir = get_benchmark_runs_databases_path(config["benchmark"], config["scale_factor"])
 
             db_filename = generate_database_filename(
                 benchmark_name=config["benchmark"],
@@ -169,7 +278,6 @@ class DataFusionAdapter(PlatformAdapter):
 
         # Schema tracking (populated during create_schema)
         self._table_schemas = {}
-
         # Create working directory
         self.working_dir.mkdir(parents=True, exist_ok=True)
 
@@ -206,8 +314,16 @@ class DataFusionAdapter(PlatformAdapter):
         """Create DataFusion SessionContext with optimized configuration."""
         self.log_operation_start("DataFusion connection")
 
-        # Handle existing database using base class method
-        self.handle_existing_database(**connection_config)
+        # Serialize database management on shared working dirs to avoid cleanup races.
+        lock_acquired = self._acquire_working_dir_lock(timeout_seconds=10, **connection_config)
+        if not lock_acquired:
+            raise RuntimeError("Could not acquire DataFusion working directory lock after 10 seconds")
+
+        try:
+            # Handle existing database using base class method
+            self.handle_existing_database(**connection_config)
+        finally:
+            self._release_working_dir_lock(**connection_config)
 
         # Configure runtime environment for disk spilling and memory management
         # Note: RuntimeEnv/RuntimeEnvBuilder API varies by version
@@ -305,7 +421,138 @@ class DataFusionAdapter(PlatformAdapter):
 
         self.log_operation_complete("DataFusion connection", details=f"Applied: {', '.join(config_applied)}")
 
-        return ctx
+        return DataFusionConnectionCompat(ctx)
+
+    def _get_working_dir_lock_file(self, **connection_config) -> Path:
+        """Get lock file path for working-dir lifecycle operations."""
+        working_dir = Path(connection_config.get("working_dir", self.working_dir))
+        return working_dir.parent / f".{working_dir.name}.db_manage.lock"
+
+    def _is_pid_running(self, pid: int) -> bool:
+        """Return True when process exists, False when definitely absent."""
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Process exists but may be owned by another user.
+            return True
+        except Exception:
+            return False
+
+    def _read_lock_pid(self, lock_file: Path) -> int | None:
+        """Read PID from lock file content, returning None if unavailable."""
+        try:
+            content = lock_file.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                if line.startswith("pid:"):
+                    return int(line.split(":", 1)[1].strip())
+        except Exception:
+            return None
+        return None
+
+    def _acquire_working_dir_lock(self, timeout_seconds: int = 300, **connection_config) -> bool:
+        """Acquire lock for DataFusion working-dir lifecycle operations."""
+        lock_file = self._get_working_dir_lock_file(**connection_config)
+        lock_key = str(lock_file.resolve())
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+        start_time = mono_time()
+        lock_detected_logged = False
+        wait_warning_emitted = False
+
+        while elapsed_seconds(start_time) < timeout_seconds:
+            try:
+                with self._process_working_dir_lock_guard:
+                    # Reentrant fast-path shared across all adapter instances.
+                    existing_depth = self._process_working_dir_lock_depth.get(lock_key, 0)
+                    if existing_depth > 0:
+                        self._process_working_dir_lock_depth[lock_key] = existing_depth + 1
+                        return True
+
+                    fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(f"pid:{os.getpid()}\n")
+                        f.write(f"time:{time.time()}\n")
+                    self._process_working_dir_lock_depth[lock_key] = 1
+                    return True
+            except FileExistsError:
+                try:
+                    age_seconds = time.time() - lock_file.stat().st_mtime
+                    lock_pid = self._read_lock_pid(lock_file)
+
+                    # Recover interrupted self-owned lock files when no active owner is tracked.
+                    if lock_pid == os.getpid():
+                        with self._process_working_dir_lock_guard:
+                            existing_depth = self._process_working_dir_lock_depth.get(lock_key, 0)
+                        if existing_depth == 0:
+                            self.log_verbose(
+                                f"Removing stale self-owned DataFusion working-dir lock: {lock_file} "
+                                f"(pid={lock_pid}, age={age_seconds:.1f}s)"
+                            )
+                            lock_file.unlink(missing_ok=True)
+                            continue
+
+                    # Verbose signal for immediate lock detection visibility.
+                    if not lock_detected_logged:
+                        self.log_verbose(
+                            f"DataFusion working-dir lock detected: {lock_file} "
+                            f"(pid={lock_pid}, age={age_seconds:.1f}s)"
+                        )
+                        lock_detected_logged = True
+
+                    # Standard warning signal when we're blocked and waiting.
+                    if not wait_warning_emitted:
+                        self.logger.warning(
+                            f"DataFusion working directory lock is held by another process "
+                            f"(pid={lock_pid}). Waiting for release..."
+                        )
+                        wait_warning_emitted = True
+
+                    owner_dead = lock_pid is not None and not self._is_pid_running(lock_pid)
+                    # Treat lock as stale when owner is gone, or metadata is absent and lock is old enough.
+                    if owner_dead or (lock_pid is None and age_seconds > 10):
+                        self.log_verbose(
+                            f"Removing stale DataFusion working-dir lock: {lock_file} "
+                            f"(pid={lock_pid}, age={age_seconds:.1f}s)"
+                        )
+                        lock_file.unlink(missing_ok=True)
+                        continue
+                except Exception:
+                    pass
+                time.sleep(0.2)
+            except Exception as e:
+                self.log_verbose(f"Failed to acquire DataFusion working-dir lock: {e}")
+                return False
+
+        return False
+
+    def _release_working_dir_lock(self, **connection_config) -> None:
+        """Release lock for DataFusion working-dir lifecycle operations."""
+        lock_file = self._get_working_dir_lock_file(**connection_config)
+        lock_key = str(lock_file.resolve())
+
+        should_unlink = False
+        with self._process_working_dir_lock_guard:
+            depth = self._process_working_dir_lock_depth.get(lock_key, 0)
+            if depth > 1:
+                self._process_working_dir_lock_depth[lock_key] = depth - 1
+                return
+            if depth == 1:
+                self._process_working_dir_lock_depth.pop(lock_key, None)
+                should_unlink = True
+            else:
+                # No tracked ownership in this process: do not unlink another owner's lock.
+                return
+
+        if should_unlink:
+            try:
+                lock_file.unlink(missing_ok=True)
+            except Exception as e:
+                self.log_verbose(f"Failed to release DataFusion working-dir lock: {e}")
 
     def _parse_memory_limit(self, memory_limit: str) -> str:
         """Parse memory limit string to bytes.
@@ -339,7 +586,7 @@ class DataFusionAdapter(PlatformAdapter):
         Note: For DataFusion, actual table creation happens during load_data() via
         CREATE EXTERNAL TABLE. This method validates the schema is available.
         """
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
 
         # Get constraint settings from tuning configuration
@@ -356,7 +603,7 @@ class DataFusionAdapter(PlatformAdapter):
         # This is cleaner than parsing SQL and provides type-safe access
         self._table_schemas = self._get_benchmark_schema(benchmark)
 
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         self.log_operation_complete(
             "Schema creation", duration, f"Schema validated for {len(self._table_schemas)} tables"
         )
@@ -426,7 +673,7 @@ class DataFusionAdapter(PlatformAdapter):
         """
         from benchbox.platforms.base.data_loading import DataSourceResolver
 
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Data loading", f"format: {self.data_format}")
 
         # Resolve data source
@@ -441,7 +688,7 @@ class DataFusionAdapter(PlatformAdapter):
 
         # Load each table
         for table_name, file_paths in data_source.tables.items():
-            table_start = time.time()
+            table_start = mono_time()
 
             # Ensure file_paths is a list
             if not isinstance(file_paths, list):
@@ -457,13 +704,13 @@ class DataFusionAdapter(PlatformAdapter):
                 # Load CSV directly
                 row_count = self._load_table_csv(connection, table_name_lower, file_paths, data_dir)
 
-            table_duration = time.time() - table_start
+            table_duration = elapsed_seconds(table_start)
             table_stats[table_name_lower] = row_count
             per_table_timings[table_name_lower] = {"total_ms": table_duration * 1000}
 
             self.log_verbose(f"Loaded table {table_name_lower}: {row_count:,} rows in {table_duration:.2f}s")
 
-        total_duration = time.time() - start_time
+        total_duration = elapsed_seconds(start_time)
         total_rows = sum(table_stats.values())
 
         self.log_operation_complete(
@@ -474,18 +721,15 @@ class DataFusionAdapter(PlatformAdapter):
 
         return table_stats, total_duration, per_table_timings
 
-    def _detect_csv_format(self, file_paths: list[Path]) -> tuple[str, bool]:
-        """Detect CSV delimiter and format from file extension.
+    def _detect_csv_format(self, file_paths: list[Path]) -> str:
+        """Detect CSV delimiter from file extension.
 
         Returns:
-            Tuple of (delimiter, has_trailing_delimiter)
+            Delimiter string
         """
         if file_paths:
-            delimiter = get_delimiter_for_file(file_paths[0])
-            # TPC benchmark format uses pipe delimiter with trailing delimiter
-            has_trailing = delimiter == "|"
-            return delimiter, has_trailing
-        return ",", False
+            return get_delimiter_for_file(file_paths[0])
+        return ","
 
     def _load_table_csv(self, connection: Any, table_name: str, file_paths: list[Path], data_dir: Path) -> int:
         """Load table from CSV files using CREATE EXTERNAL TABLE.
@@ -493,8 +737,8 @@ class DataFusionAdapter(PlatformAdapter):
         Handles TPC benchmark format with trailing pipe delimiters and
         uses glob patterns for multiple files.
         """
-        # Detect delimiter and format
-        delimiter, has_trailing_delimiter = self._detect_csv_format(file_paths)
+        # Detect delimiter
+        delimiter = self._detect_csv_format(file_paths)
 
         # Get schema information for proper column names
         schema_info = self._table_schemas.get(table_name, {})
@@ -547,12 +791,6 @@ class DataFusionAdapter(PlatformAdapter):
             "'has_header' 'false'",
             f"'delimiter' '{delimiter}'",
         ]
-
-        # Add format-specific options
-        if has_trailing_delimiter and columns:
-            # For TPC files with trailing delimiters, we rely on explicit schema
-            # to prevent extra empty column
-            self.log_very_verbose(f"Handling TPC format with trailing delimiter for {table_name}")
 
         options_clause = ", ".join(options)
 
@@ -630,7 +868,7 @@ class DataFusionAdapter(PlatformAdapter):
         parquet_file = parquet_dir / f"{table_name}.parquet"
 
         # Detect delimiter - PyArrow's CSV reader handles trailing delimiters automatically
-        delimiter, _ = self._detect_csv_format(file_paths)
+        delimiter = self._detect_csv_format(file_paths)
 
         # Get schema information for proper column names and types
         schema_info = self._table_schemas.get(table_name, {})
@@ -758,7 +996,18 @@ class DataFusionAdapter(PlatformAdapter):
         self.log_verbose(f"Executing query {query_id}")
         self.log_very_verbose(f"Query SQL (first 200 chars): {query[:200]}{'...' if len(query) > 200 else ''}")
 
-        # In dry-run mode, capture SQL instead of executing
+        # Apply DataFusion-specific query transformations for SQL compatibility
+        from benchbox.platforms.datafusion_query_transformer import DataFusionQueryTransformer
+
+        transformer = DataFusionQueryTransformer(verbose=getattr(self, "very_verbose", False))
+        query = transformer.transform(query, query_id=query_id)
+        if transformer.get_transformations_applied():
+            self.log_verbose(
+                f"Query {query_id}: Applied transformations: {', '.join(transformer.get_transformations_applied())}"
+            )
+
+        # In dry-run mode we intentionally capture transformed SQL so output
+        # reflects what DataFusion would execute after compatibility rewrites.
         if self.dry_run_mode:
             self.capture_sql(query, "query", None)
             self.log_very_verbose(f"Captured query {query_id} for dry-run")
@@ -766,14 +1015,14 @@ class DataFusionAdapter(PlatformAdapter):
             return {
                 "query_id": query_id,
                 "status": "DRY_RUN",
-                "execution_time": 0.0,
+                "execution_time_seconds": 0.0,
                 "rows_returned": 0,
                 "first_row": None,
                 "error": None,
                 "dry_run": True,
             }
 
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Execute the query
@@ -797,7 +1046,7 @@ class DataFusionAdapter(PlatformAdapter):
                     for i in range(first_batch.num_columns)
                 )
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             logger.debug(f"Query {query_id} completed in {execution_time:.3f}s, returned {actual_row_count} rows")
 
             # Validate row count if enabled
@@ -835,7 +1084,7 @@ class DataFusionAdapter(PlatformAdapter):
             )
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             logger.error(
                 f"Query {query_id} failed after {execution_time:.3f}s: {e}",
                 exc_info=True,
@@ -844,7 +1093,7 @@ class DataFusionAdapter(PlatformAdapter):
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

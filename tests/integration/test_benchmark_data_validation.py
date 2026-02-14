@@ -107,7 +107,7 @@ class MockPlatformAdapter(PlatformAdapter):
     def execute_query(self, connection, query, query_id):
         return {
             "query_id": query_id,
-            "execution_time": 0.1,
+            "execution_time_seconds": 0.1,
             "rows_returned": 10,
             "success": True,
         }
@@ -361,7 +361,7 @@ class TestBenchmarkDataValidation:
 
         # Mock query execution
         self.adapter._execute_all_queries = Mock(
-            return_value=[{"query_id": "Q1", "execution_time": 0.1, "status": "SUCCESS"}]
+            return_value=[{"query_id": "Q1", "execution_time_seconds": 0.1, "status": "SUCCESS"}]
         )
 
         benchmark = MockBenchmark()

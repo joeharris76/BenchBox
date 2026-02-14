@@ -941,10 +941,13 @@ class TestPySparkNotAvailable:
 
     def test_adapter_import_error_when_not_available(self):
         """Test that adapter raises ImportError when PySpark not installed."""
-        if PYSPARK_AVAILABLE:
-            pytest.skip("PySpark is installed, skipping unavailable test")
-
         from benchbox.platforms.dataframe.pyspark_df import PySparkDataFrameAdapter
+
+        if PYSPARK_AVAILABLE:
+            # When PySpark is available, adapter should construct without import failures.
+            adapter = PySparkDataFrameAdapter(master="local[1]", driver_memory="512m")
+            adapter.close()
+            return
 
         with pytest.raises(ImportError, match="PySpark not installed"):
             PySparkDataFrameAdapter()

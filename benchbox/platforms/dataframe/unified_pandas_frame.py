@@ -491,6 +491,23 @@ class UnifiedPandasGroupBy(Generic[DF]):
         )
         return UnifiedPandasFrame(result, self._adapter)
 
+    def _native_groupby(self) -> Any:
+        """Create the native groupby object."""
+        if _is_dask_df(self._df):
+            return self._df.groupby(self._by, **self._kwargs)  # type: ignore[union-attr]
+        return self._df.groupby(self._by, as_index=self._as_index, **self._kwargs)  # type: ignore[union-attr]
+
+    def __getitem__(self, key: str | list[str]) -> Any:
+        """Column selection on grouped data (e.g., grouped["col"]).
+
+        Args:
+            key: Column name or list of column names
+
+        Returns:
+            Native grouped series/frame for further operations (quantile, etc.)
+        """
+        return self._native_groupby()[key]
+
     def __getattr__(self, name: str) -> Any:
         """Proxy attribute access to native groupby.
 
@@ -502,12 +519,4 @@ class UnifiedPandasGroupBy(Generic[DF]):
         Returns:
             The attribute from native groupby
         """
-        # Create native groupby
-        # Note: _df is typed as generic DF but we know it has groupby at runtime
-        if _is_dask_df(self._df):
-            # Dask doesn't support as_index
-            grouped = self._df.groupby(self._by, **self._kwargs)  # type: ignore[union-attr]
-        else:
-            grouped = self._df.groupby(self._by, as_index=self._as_index, **self._kwargs)  # type: ignore[union-attr]
-
-        return getattr(grouped, name)
+        return getattr(self._native_groupby(), name)

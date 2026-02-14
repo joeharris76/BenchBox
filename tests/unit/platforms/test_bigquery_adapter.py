@@ -324,7 +324,7 @@ class TestBigQueryAdapter:
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["first_row"] == (1, "test")
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
         # Should include BigQuery-specific statistics
         assert result["job_id"] == "job_123"
@@ -380,7 +380,7 @@ class TestBigQueryAdapter:
         assert result["rows_returned"] == 0
         assert result["error"] == "Query failed"
         assert result["error_type"] == "Exception"
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
     @patch("benchbox.platforms.bigquery.bigquery")
     def test_get_platform_metadata(self, mock_bigquery, dependencies_available):

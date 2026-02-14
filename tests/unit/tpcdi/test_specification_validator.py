@@ -9,6 +9,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -25,6 +26,58 @@ from benchbox.core.tpcdi.specification_validator import (
     TPCDISpecificationValidator,
     validate_tpcdi_benchmark_compliance,
 )
+
+
+class _PortableCursor:
+    def __init__(self, tables: dict[str, list[str]]) -> None:
+        self._tables = tables
+        self.description: list[tuple[Any, ...]] | None = None
+        self._rows: list[tuple[Any, ...]] = []
+
+    def execute(self, query: str) -> "_PortableCursor":
+        normalized = " ".join(query.strip().split())
+        upper = normalized.upper()
+        if upper.startswith("PRAGMA"):
+            raise RuntimeError("PRAGMA is not supported")
+        if upper.startswith("SELECT 1 FROM "):
+            table = normalized.split("FROM ", 1)[1].split(" LIMIT", 1)[0].strip().strip('"')
+            if table not in self._tables:
+                raise RuntimeError(f"Unknown table: {table}")
+            self.description = [("1", None, None, None, None, None, None)]
+            self._rows = [(1,)]
+            return self
+        if upper.startswith("SELECT * FROM "):
+            table = normalized.split("FROM ", 1)[1].split(" LIMIT", 1)[0].strip().strip('"')
+            columns = self._tables.get(table)
+            if columns is None:
+                raise RuntimeError(f"Unknown table: {table}")
+            self.description = [(column, None, None, None, None, None, None) for column in columns]
+            self._rows = []
+            return self
+        raise RuntimeError(f"Unsupported query: {query}")
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        if not self._rows:
+            return None
+        return self._rows.pop(0)
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        rows = list(self._rows)
+        self._rows = []
+        return rows
+
+
+class _PortableConnection:
+    def __init__(self, tables: dict[str, list[str]]) -> None:
+        self._tables = tables
+
+    def cursor(self) -> _PortableCursor:
+        return _PortableCursor(self._tables)
+
+    def execute(self, query: str) -> _PortableCursor:
+        cursor = self.cursor()
+        cursor.execute(query)
+        return cursor
 
 
 class TestTPCDISpecificationValidator:
@@ -128,6 +181,40 @@ class TestTPCDISpecificationValidator:
         # Should find our test tables
         customer_checks = [r for r in schema_checks if "DimCustomer" in r.check_name]
         assert len(customer_checks) > 0
+
+    def test_schema_compliance_uses_portable_column_discovery(self, test_benchmark):
+        """Schema validation should not depend on SQLite PRAGMA metadata."""
+        connection = _PortableConnection(
+            tables={
+                "DimCustomer": [
+                    "CustomerID",
+                    "FirstName",
+                    "LastName",
+                    "Email",
+                    "Phone",
+                    "Address",
+                    "Status",
+                    "EffectiveDate",
+                    "EndDate",
+                ],
+                "FactTrade": [
+                    "TradeID",
+                    "CustomerID",
+                    "AccountID",
+                    "SecurityID",
+                    "BrokerID",
+                    "TradeDate",
+                    "TradeType",
+                    "Quantity",
+                    "Price",
+                ],
+            }
+        )
+        validator = TPCDISpecificationValidator(test_benchmark, connection, "duckdb")
+        validator._validate_schema_compliance()
+        schema_checks = [r for r in validator.check_results if r.category == "Schema"]
+        assert any(r.check_name == "DimCustomer Schema" and r.passed for r in schema_checks)
+        assert any(r.check_name == "FactTrade Schema" and r.passed for r in schema_checks)
 
     def test_data_model_compliance_validation(self, test_benchmark, test_database):
         """Test data model compliance validation."""

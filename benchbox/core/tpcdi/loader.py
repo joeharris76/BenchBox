@@ -12,13 +12,14 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import csv
 import logging
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
 import pandas as pd
 import sqlglot
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class TPCDIDataLoader:
         logger.info(f"Loading data into dimension table {table_name}")
 
         result = LoadResult(table_name=table_name)
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Get pre-load count
@@ -78,14 +79,14 @@ class TPCDIDataLoader:
             result.post_load_count = self._get_table_count(table_name)
 
             result.records_loaded = loaded_count
-            result.load_time = time.time() - start_time
+            result.load_time = elapsed_seconds(start_time)
             result.success = True
 
             logger.info(f"Successfully loaded {loaded_count:,} records into {table_name} in {result.load_time:.2f}s")
 
         except Exception as e:
             result.error_message = str(e)
-            result.load_time = time.time() - start_time
+            result.load_time = elapsed_seconds(start_time)
             logger.error(f"Failed to load data into {table_name}: {e}")
 
         return result
@@ -103,7 +104,7 @@ class TPCDIDataLoader:
         logger.info(f"Loading data into fact table {table_name}")
 
         result = LoadResult(table_name=table_name)
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Get pre-load count
@@ -124,14 +125,14 @@ class TPCDIDataLoader:
             result.post_load_count = self._get_table_count(table_name)
 
             result.records_loaded = loaded_count
-            result.load_time = time.time() - start_time
+            result.load_time = elapsed_seconds(start_time)
             result.success = True
 
             logger.info(f"Successfully loaded {loaded_count:,} records into {table_name} in {result.load_time:.2f}s")
 
         except Exception as e:
             result.error_message = str(e)
-            result.load_time = time.time() - start_time
+            result.load_time = elapsed_seconds(start_time)
             logger.error(f"Failed to load data into {table_name}: {e}")
 
         return result
@@ -150,7 +151,7 @@ class TPCDIDataLoader:
         logger.info(f"Loading CSV file {file_path} into {table_name}")
 
         result = LoadResult(table_name=table_name)
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             if not file_path.exists():
@@ -177,11 +178,11 @@ class TPCDIDataLoader:
             result.error_message = load_result.error_message
             result.pre_load_count = load_result.pre_load_count
             result.post_load_count = load_result.post_load_count
-            result.load_time = time.time() - start_time
+            result.load_time = elapsed_seconds(start_time)
 
         except Exception as e:
             result.error_message = str(e)
-            result.load_time = time.time() - start_time
+            result.load_time = elapsed_seconds(start_time)
             logger.error(f"Failed to load CSV file {file_path}: {e}")
 
         return result
@@ -288,8 +289,8 @@ class TPCDIDataLoader:
         for table_name in tables:
             try:
                 # Database-specific optimization commands
-                if self.dialect.lower() in ["duckdb", "sqlite"]:
-                    # DuckDB/SQLite: ANALYZE for statistics
+                if self.dialect.lower() == "duckdb":
+                    # DuckDB: ANALYZE for statistics
                     optimize_sql = f"ANALYZE {table_name}"
                 elif self.dialect.lower() in ["postgres", "postgresql"]:
                     # PostgreSQL: ANALYZE and VACUUM

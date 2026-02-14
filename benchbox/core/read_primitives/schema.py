@@ -3,6 +3,10 @@
 This module defines the TPC-H schema for the primitives benchmark, which tests
 fundamental database operations on standard TPC-H tables.
 
+Table definitions are derived from the canonical TPC-H schema in
+``benchbox.core.tpch.schema`` and converted to the dict format used by
+the Read Primitives benchmark and its standalone loading helpers.
+
 The TPC-H schema consists of:
 - 8 base tables (CUSTOMER, LINEITEM, NATION, ORDERS, PART, PARTSUPP, REGION, SUPPLIER)
 
@@ -16,138 +20,43 @@ This implementation is derived from TPC Benchmark™ H (TPC-H) - Copyright © Tr
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-from typing import cast
+from typing import Any, cast
 
-# REGION table
-REGION = {
-    "name": "region",
-    "columns": [
-        {"name": "r_regionkey", "type": "INTEGER", "primary_key": True},
-        {"name": "r_name", "type": "VARCHAR(25)"},
-        {"name": "r_comment", "type": "VARCHAR(152)"},
-    ],
-}
+from benchbox.core.tpch.schema import TABLES as _TPCH_TABLES, Table
 
-# NATION table
-NATION = {
-    "name": "nation",
-    "columns": [
-        {"name": "n_nationkey", "type": "INTEGER", "primary_key": True},
-        {"name": "n_name", "type": "VARCHAR(25)"},
-        {"name": "n_regionkey", "type": "INTEGER", "foreign_key": "region.r_regionkey"},
-        {"name": "n_comment", "type": "VARCHAR(152)"},
-    ],
-}
 
-# CUSTOMER table
-CUSTOMER = {
-    "name": "customer",
-    "columns": [
-        {"name": "c_custkey", "type": "INTEGER", "primary_key": True},
-        {"name": "c_name", "type": "VARCHAR(25)"},
-        {"name": "c_address", "type": "VARCHAR(40)"},
-        {"name": "c_nationkey", "type": "INTEGER", "foreign_key": "nation.n_nationkey"},
-        {"name": "c_phone", "type": "VARCHAR(15)"},
-        {"name": "c_acctbal", "type": "DECIMAL(15,2)"},
-        {"name": "c_mktsegment", "type": "VARCHAR(10)"},
-        {"name": "c_comment", "type": "VARCHAR(117)"},
-    ],
-}
+def _table_to_dict(table: Table) -> dict[str, Any]:
+    """Convert a canonical TPC-H ``Table`` object to a plain dict.
 
-# SUPPLIER table
-SUPPLIER = {
-    "name": "supplier",
-    "columns": [
-        {"name": "s_suppkey", "type": "INTEGER", "primary_key": True},
-        {"name": "s_name", "type": "VARCHAR(25)"},
-        {"name": "s_address", "type": "VARCHAR(40)"},
-        {"name": "s_nationkey", "type": "INTEGER", "foreign_key": "nation.n_nationkey"},
-        {"name": "s_phone", "type": "VARCHAR(15)"},
-        {"name": "s_acctbal", "type": "DECIMAL(15,2)"},
-        {"name": "s_comment", "type": "VARCHAR(101)"},
-    ],
-}
+    The dict format is used throughout Read Primitives for schema introspection
+    and standalone data loading (``load_data_to_database``, ``_load_data``).
+    """
+    columns: list[dict[str, Any]] = []
+    pk_columns: list[str] = []
 
-# PART table
-PART = {
-    "name": "part",
-    "columns": [
-        {"name": "p_partkey", "type": "INTEGER", "primary_key": True},
-        {"name": "p_name", "type": "VARCHAR(55)"},
-        {"name": "p_mfgr", "type": "VARCHAR(25)"},
-        {"name": "p_brand", "type": "VARCHAR(10)"},
-        {"name": "p_type", "type": "VARCHAR(25)"},
-        {"name": "p_size", "type": "INTEGER"},
-        {"name": "p_container", "type": "VARCHAR(10)"},
-        {"name": "p_retailprice", "type": "DECIMAL(15,2)"},
-        {"name": "p_comment", "type": "VARCHAR(23)"},
-    ],
-}
+    for col in table.columns:
+        col_dict: dict[str, Any] = {"name": col.name, "type": col.get_sql_type()}
+        if col.primary_key:
+            pk_columns.append(col.name)
+        if col.foreign_key:
+            ref_table, ref_col = col.foreign_key
+            col_dict["foreign_key"] = f"{ref_table}.{ref_col}"
+        columns.append(col_dict)
 
-# PARTSUPP table
-PARTSUPP = {
-    "name": "partsupp",
-    "columns": [
-        {"name": "ps_partkey", "type": "INTEGER", "foreign_key": "part.p_partkey"},
-        {"name": "ps_suppkey", "type": "INTEGER", "foreign_key": "supplier.s_suppkey"},
-        {"name": "ps_availqty", "type": "INTEGER"},
-        {"name": "ps_supplycost", "type": "DECIMAL(15,2)"},
-        {"name": "ps_comment", "type": "VARCHAR(199)"},
-    ],
-    "primary_key": ["ps_partkey", "ps_suppkey"],
-}
+    # Single-column PK: inline on the column; composite PK: table-level list
+    if len(pk_columns) == 1:
+        for col_dict in columns:
+            if col_dict["name"] == pk_columns[0]:
+                col_dict["primary_key"] = True
+    elif len(pk_columns) > 1:
+        result: dict[str, Any] = {"name": table.name, "columns": columns, "primary_key": pk_columns}
+        return result
 
-# ORDERS table
-ORDERS = {
-    "name": "orders",
-    "columns": [
-        {"name": "o_orderkey", "type": "INTEGER", "primary_key": True},
-        {"name": "o_custkey", "type": "INTEGER", "foreign_key": "customer.c_custkey"},
-        {"name": "o_orderstatus", "type": "VARCHAR(1)"},
-        {"name": "o_totalprice", "type": "DECIMAL(15,2)"},
-        {"name": "o_orderdate", "type": "DATE"},
-        {"name": "o_orderpriority", "type": "VARCHAR(15)"},
-        {"name": "o_clerk", "type": "VARCHAR(15)"},
-        {"name": "o_shippriority", "type": "INTEGER"},
-        {"name": "o_comment", "type": "VARCHAR(79)"},
-    ],
-}
+    return {"name": table.name, "columns": columns}
 
-# LINEITEM table
-LINEITEM = {
-    "name": "lineitem",
-    "columns": [
-        {"name": "l_orderkey", "type": "INTEGER", "foreign_key": "orders.o_orderkey"},
-        {"name": "l_partkey", "type": "INTEGER", "foreign_key": "part.p_partkey"},
-        {"name": "l_suppkey", "type": "INTEGER", "foreign_key": "supplier.s_suppkey"},
-        {"name": "l_linenumber", "type": "INTEGER"},
-        {"name": "l_quantity", "type": "DECIMAL(15,2)"},
-        {"name": "l_extendedprice", "type": "DECIMAL(15,2)"},
-        {"name": "l_discount", "type": "DECIMAL(15,2)"},
-        {"name": "l_tax", "type": "DECIMAL(15,2)"},
-        {"name": "l_returnflag", "type": "VARCHAR(1)"},
-        {"name": "l_linestatus", "type": "VARCHAR(1)"},
-        {"name": "l_shipdate", "type": "DATE"},
-        {"name": "l_commitdate", "type": "DATE"},
-        {"name": "l_receiptdate", "type": "DATE"},
-        {"name": "l_shipinstruct", "type": "VARCHAR(25)"},
-        {"name": "l_shipmode", "type": "VARCHAR(10)"},
-        {"name": "l_comment", "type": "VARCHAR(44)"},
-    ],
-    "primary_key": ["l_orderkey", "l_linenumber"],
-}
 
-# All tables in the TPC-H schema
-TABLES = {
-    "region": REGION,
-    "nation": NATION,
-    "customer": CUSTOMER,
-    "supplier": SUPPLIER,
-    "part": PART,
-    "partsupp": PARTSUPP,
-    "orders": ORDERS,
-    "lineitem": LINEITEM,
-}
+# Build TABLES dict from canonical TPC-H schema
+TABLES: dict[str, dict[str, Any]] = {table.name: _table_to_dict(table) for table in _TPCH_TABLES}
 
 
 def get_create_table_sql(
@@ -160,7 +69,7 @@ def get_create_table_sql(
 
     Args:
         table_name: Name of the table to create
-        dialect: SQL dialect to use (standard, postgres, mysql, etc.)
+        dialect: SQL dialect to use (currently unused, reserved for future dialect-specific DDL)
         enable_primary_keys: Whether to include primary key constraints
         enable_foreign_keys: Whether to include foreign key constraints
 
@@ -175,6 +84,7 @@ def get_create_table_sql(
 
     table = TABLES[table_name]
     columns = []
+    fk_defs: list[str] = []
 
     for col in cast(list, table["columns"]):
         col_def = f"{cast(str, col['name'])} {cast(str, col['type'])}"
@@ -183,19 +93,19 @@ def get_create_table_sql(
             col_def += " PRIMARY KEY"
         columns.append(col_def)
 
+        # Collect foreign key constraints from per-column "foreign_key" field
+        if enable_foreign_keys and col.get("foreign_key"):
+            fk_ref = cast(str, col["foreign_key"])  # e.g. "region.r_regionkey"
+            ref_table, ref_column = fk_ref.split(".", 1)
+            fk_defs.append(f"FOREIGN KEY ({col['name']}) REFERENCES {ref_table}({ref_column})")
+
     # Handle composite primary keys (only if enabled)
     if enable_primary_keys and "primary_key" in table and isinstance(table["primary_key"], list):
         pk_cols = ", ".join(cast(list[str], table["primary_key"]))
         columns.append(f"PRIMARY KEY ({pk_cols})")
 
-    # Handle foreign keys (only if enabled)
-    if enable_foreign_keys and "foreign_keys" in table:
-        for fk in cast(list, table["foreign_keys"]):
-            cast(str, fk["name"])
-            fk_column = cast(str, fk["column"])
-            ref_table = cast(str, fk["references"]["table"])
-            ref_column = cast(str, fk["references"]["column"])
-            columns.append(f"FOREIGN KEY ({fk_column}) REFERENCES {ref_table}({ref_column})")
+    # Append foreign key constraints
+    columns.extend(fk_defs)
 
     sql = f"CREATE TABLE {table['name']} (\n"
     sql += ",\n".join(f"  {col}" for col in columns)

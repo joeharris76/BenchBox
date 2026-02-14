@@ -12,7 +12,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import csv
 import json
-import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import (
@@ -27,14 +26,18 @@ if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 
 from benchbox.base import BaseBenchmark
+from benchbox.core.dataframe.maintenance_interface import get_maintenance_operations_for_platform
 from benchbox.core.tpcdi.config import TPCDIConfig
 from benchbox.core.tpcdi.etl import (
+    DataFrameETLBackend,
     ETLResult,
+    SQLETLBackend,
+    TPCDIETLBackend,
     TPCDIETLPipeline,
 )
 from benchbox.core.tpcdi.etl.customer_mgmt_processor import CustomerManagementProcessor
@@ -43,6 +46,7 @@ from benchbox.core.tpcdi.etl.error_recovery import ErrorRecoveryManager
 from benchbox.core.tpcdi.etl.finwire_processor import FinWireProcessor
 from benchbox.core.tpcdi.etl.incremental_loader import IncrementalDataLoader
 from benchbox.core.tpcdi.etl.parallel_batch_processor import ParallelBatchProcessor
+from benchbox.core.tpcdi.etl.results import ETLPhaseResult
 from benchbox.core.tpcdi.etl.scd_processor import EnhancedSCDType2Processor
 from benchbox.core.tpcdi.generator import TPCDIDataGenerator
 from benchbox.core.tpcdi.loader import TPCDIDataLoader
@@ -54,6 +58,7 @@ from benchbox.core.tpcdi.schema import (
     get_all_create_table_sql,
 )
 from benchbox.core.tpcdi.validation import DataQualityResult, TPCDIValidator
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 class TPCDIBenchmark(BaseBenchmark):
@@ -486,7 +491,6 @@ class TPCDIBenchmark(BaseBenchmark):
         Returns:
             Dictionary containing benchmark results
         """
-        import time
 
         if queries is None:
             queries = list(self.query_manager.get_all_queries().keys())
@@ -511,10 +515,10 @@ class TPCDIBenchmark(BaseBenchmark):
             }
 
             for i in range(iterations):
-                start_time = time.time()
+                start_time = mono_time()
                 try:
                     result = self.execute_query(query_id, connection)
-                    end_time = time.time()
+                    end_time = mono_time()
                     execution_time = end_time - start_time
 
                     cast(list[dict[str, Any]], query_results["iterations"]).append(
@@ -555,6 +559,234 @@ class TPCDIBenchmark(BaseBenchmark):
             results["queries"][query_id] = query_results
 
         return results
+
+    # ========================================================================
+    # DataFrame Mode Support
+    # ========================================================================
+
+    def supports_dataframe_mode(self) -> bool:
+        """TPC-DI supports DataFrame mode through benchmark-managed ETL orchestration."""
+        return True
+
+    def skip_dataframe_data_loading(self) -> bool:
+        """TPC-DI manages its own ETL input/output lifecycle.
+
+        The generic DataFrame loader path is query-centric and table-oriented.
+        TPC-DI runs staged ETL and therefore should bypass that loading path.
+        """
+        return True
+
+    def get_dataframe_etl_capabilities(
+        self,
+        platform_name: str,
+        maintenance_ops: Any | None = None,
+    ) -> dict[str, Any]:
+        """Get transactional ETL capabilities for a DataFrame platform.
+
+        This is the capability contract for TPC-DI DataFrame ETL execution.
+        TPC-DI requires transaction-aware write semantics for reliable
+        incremental and SCD2 processing.
+        """
+        if maintenance_ops is None:
+            maintenance_ops = get_maintenance_operations_for_platform(platform_name)
+        return self._build_dataframe_etl_capabilities(platform_name, maintenance_ops)
+
+    def _build_dataframe_etl_capabilities(self, platform_name: str, maintenance_ops: Any | None) -> dict[str, Any]:
+        """Build ETL capability payload from a resolved maintenance implementation."""
+        if maintenance_ops is None:
+            return {
+                "platform": platform_name,
+                "has_maintenance_interface": False,
+                "supports_transactions": False,
+                "transaction_isolation": "none",
+                "supports_incremental_loads": False,
+                "supports_scd2": False,
+                "contract_status": "missing",
+                "notes": "No DataFrame maintenance interface available for platform",
+            }
+
+        caps = maintenance_ops.get_capabilities()
+        supports_incremental = bool(caps.supports_transactions and caps.supports_insert)
+        supports_scd2 = bool(caps.supports_transactions and caps.supports_update and caps.supports_insert)
+        return {
+            "platform": platform_name,
+            "has_maintenance_interface": True,
+            "supports_transactions": bool(caps.supports_transactions),
+            "transaction_isolation": str(caps.transaction_isolation.value),
+            "supports_incremental_loads": supports_incremental,
+            "supports_scd2": supports_scd2,
+            "contract_status": "ready" if supports_incremental and supports_scd2 else "partial",
+            "notes": caps.notes,
+        }
+
+    def execute_dataframe_workload(
+        self,
+        *,
+        ctx: Any,
+        adapter: Any,
+        benchmark_config: Any,
+        query_filter: set[str] | None = None,
+        monitor: Any | None = None,
+        run_options: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Execute TPC-DI ETL stages for DataFrame mode.
+
+        This path runs benchmark-managed ETL stages and returns stage-level
+        results compatible with the DataFrame benchmark runner output schema.
+        """
+        # Reserved for future benchmarking telemetry integration.
+        _ = (monitor, run_options)
+        options = getattr(benchmark_config, "options", {}) or {}
+        require_transactional_capabilities = bool(options.get("tpcdi_require_transactional_capabilities", True))
+
+        platform_name = str(getattr(adapter, "platform_name", "unknown"))
+        maintenance_ops = get_maintenance_operations_for_platform(platform_name)
+        etl_caps = self.get_dataframe_etl_capabilities(platform_name, maintenance_ops=maintenance_ops)
+
+        legacy_override_keys = sorted(str(key) for key in options if str(key).startswith("tpcdi_dataframe_"))
+        if legacy_override_keys:
+            return [
+                {
+                    "query_id": "TDI_WORKLOAD",
+                    "status": "FAILED",
+                    "execution_time_seconds": 0.0,
+                    "error": (
+                        "TPC-DI DataFrame ETL no longer supports backend overrides. "
+                        f"Unsupported option keys: {', '.join(legacy_override_keys)}. "
+                        "Execution must use the selected platform connection only."
+                    ),
+                }
+            ]
+
+        results: list[dict[str, Any]] = [
+            {
+                "query_id": "TDI_CAPABILITIES",
+                "status": "SUCCESS" if etl_caps.get("has_maintenance_interface") else "FAILED",
+                "execution_time_seconds": 0.0,
+                "rows_returned": 1,
+                "first_row": etl_caps,
+            }
+        ]
+
+        if not etl_caps.get("has_maintenance_interface"):
+            results.append(
+                {
+                    "query_id": "TDI_WORKLOAD",
+                    "status": "FAILED",
+                    "execution_time_seconds": 0.0,
+                    "error": "TPC-DI DataFrame ETL requires DataFrame maintenance operations for the selected platform.",
+                }
+            )
+            return results
+
+        if require_transactional_capabilities and (
+            not etl_caps.get("supports_transactions")
+            or not etl_caps.get("supports_incremental_loads")
+            or not etl_caps.get("supports_scd2")
+        ):
+            results.append(
+                {
+                    "query_id": "TDI_TRANSACTIONAL_CONTRACT",
+                    "status": "FAILED",
+                    "execution_time_seconds": 0.0,
+                    "error": (
+                        "TPC-DI DataFrame ETL requires transactional maintenance capabilities "
+                        "(transactions + incremental + SCD2)."
+                    ),
+                }
+            )
+            return results
+
+        stage_map = {
+            "TDI_HISTORICAL": "historical",
+            "TDI_INCREMENTAL": "incremental",
+            "TDI_SCD": "scd",
+        }
+
+        selected_stage_ids = set(stage_map)
+        if query_filter:
+            normalized_filter = {q.upper() for q in query_filter}
+            selected_stage_ids = {qid for qid in stage_map if qid in normalized_filter}
+
+        if not selected_stage_ids:
+            results.append(
+                {
+                    "query_id": "TDI_WORKLOAD",
+                    "status": "SKIPPED",
+                    "execution_time_seconds": 0.0,
+                    "error": "No ETL stages selected by query filter",
+                }
+            )
+            return results
+
+        if maintenance_ops is None:
+            results.append(
+                {
+                    "query_id": "TDI_WORKLOAD",
+                    "status": "FAILED",
+                    "execution_time_seconds": 0.0,
+                    "error": (
+                        "TPC-DI DataFrame ETL requires DataFrame maintenance operations for the selected platform."
+                    ),
+                }
+            )
+            return results
+
+        backend = DataFrameETLBackend(maintenance_ops=maintenance_ops, platform_name=platform_name)
+        return results + self._execute_etl_stage_queries(
+            backend=backend,
+            stage_map=stage_map,
+            selected_stage_ids=selected_stage_ids,
+        )
+
+    def _execute_etl_stage_queries(
+        self,
+        *,
+        backend: TPCDIETLBackend,
+        stage_map: dict[str, str],
+        selected_stage_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        """Execute selected ETL stages and format as query-style benchmark results."""
+        stage_results: list[dict[str, Any]] = []
+        for query_id in ("TDI_HISTORICAL", "TDI_INCREMENTAL", "TDI_SCD"):
+            if query_id not in selected_stage_ids:
+                continue
+
+            batch_type = stage_map[query_id]
+            start = mono_time()
+            try:
+                result = self.run_etl_pipeline(backend=backend, batch_type=batch_type, validate_data=True)
+                duration = float(result.get("total_duration", elapsed_seconds(start)))
+                records_processed = int(result.get("phases", {}).get("transform", {}).get("records_processed", 0))
+                records_loaded = int(result.get("phases", {}).get("load", {}).get("records_loaded", 0))
+                quality_score = float(result.get("validation_results", {}).get("data_quality_score", 0.0))
+
+                stage_results.append(
+                    {
+                        "query_id": query_id,
+                        "status": "SUCCESS" if result.get("success") else "FAILED",
+                        "execution_time_seconds": duration,
+                        "records_processed": records_processed,
+                        "records_loaded": records_loaded,
+                        "rows_returned": records_loaded,
+                        "first_row": {
+                            "batch_type": batch_type,
+                            "records_processed": records_processed,
+                            "records_loaded": records_loaded,
+                            "data_quality_score": quality_score,
+                        },
+                    }
+                )
+            except Exception as exc:
+                stage_results.append(
+                    {
+                        "query_id": query_id,
+                        "status": "FAILED",
+                        "execution_time_seconds": elapsed_seconds(start),
+                        "error": str(exc),
+                    }
+                )
+        return stage_results
 
     # Extended query execution methods for comprehensive query suite
 
@@ -942,7 +1174,8 @@ class TPCDIBenchmark(BaseBenchmark):
 
     def run_etl_pipeline(
         self,
-        connection: Any,
+        connection: Any | None = None,
+        backend: TPCDIETLBackend | None = None,
         batch_type: str = "historical",
         validate_data: bool = True,
     ) -> dict[str, Any]:
@@ -956,8 +1189,12 @@ class TPCDIBenchmark(BaseBenchmark):
         Returns:
             Dictionary containing ETL execution results and metrics
         """
+        if backend is None:
+            if connection is None:
+                raise ValueError("run_etl_pipeline requires either backend or connection")
+            backend = self._create_sql_etl_backend(connection=connection)
 
-        start_time = time.time()
+        start_time = mono_time()
         pipeline_results: dict[str, Any] = {
             "batch_type": batch_type,
             "start_time": datetime.now().isoformat(),
@@ -973,11 +1210,11 @@ class TPCDIBenchmark(BaseBenchmark):
             self.batch_status[batch_type]["status"] = "running"
 
             # Phase 1: Extract - Generate source data
-            extract_start = time.time()
+            extract_start = mono_time()
             source_files = self.generate_source_data(
                 formats=["csv", "xml", "fixed_width", "json"], batch_types=[batch_type]
             )
-            extract_time = time.time() - extract_start
+            extract_time = elapsed_seconds(extract_start)
 
             pipeline_results["phases"]["extract"] = {
                 "duration": extract_time,
@@ -986,12 +1223,12 @@ class TPCDIBenchmark(BaseBenchmark):
             }
 
             # Phase 2: Transform - Process source data
-            transform_start = time.time()
+            transform_start = mono_time()
             if self.enable_parallel:
                 transformation_results = self._transform_source_data_parallel(source_files, batch_type)
             else:
                 transformation_results = self._transform_source_data(source_files, batch_type)
-            transform_time = time.time() - transform_start
+            transform_time = elapsed_seconds(transform_start)
 
             pipeline_results["phases"]["transform"] = {
                 "duration": transform_time,
@@ -1001,9 +1238,9 @@ class TPCDIBenchmark(BaseBenchmark):
             }
 
             # Phase 3: Load - Load into target warehouse
-            load_start = time.time()
-            load_results = self._load_warehouse_data(connection, transformation_results, batch_type)
-            load_time = time.time() - load_start
+            load_start = mono_time()
+            load_results = backend.load_dataframes(transformation_results["staged_data"], batch_type=batch_type)
+            load_time = elapsed_seconds(load_start)
 
             pipeline_results["phases"]["load"] = {
                 "duration": load_time,
@@ -1013,9 +1250,9 @@ class TPCDIBenchmark(BaseBenchmark):
 
             # Phase 4: Validate (if requested)
             if validate_data:
-                validation_start = time.time()
-                validation_results = self.validate_etl_results(connection)
-                validation_time = time.time() - validation_start
+                validation_start = mono_time()
+                validation_results = backend.validate_results()
+                validation_time = elapsed_seconds(validation_start)
 
                 pipeline_results["validation_results"] = validation_results
                 pipeline_results["phases"]["validation"] = {
@@ -1024,7 +1261,7 @@ class TPCDIBenchmark(BaseBenchmark):
                     "data_quality_score": validation_results.get("data_quality_score", 0),
                 }
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
 
             # Configure simple stats
             self.etl_stats["batches_processed"] += 1
@@ -1063,7 +1300,8 @@ class TPCDIBenchmark(BaseBenchmark):
         transformation_results: dict[str, Any] = {
             "records_processed": 0,
             "transformations_applied": [],
-            "staging_files": [],
+            "staged_data": {},
+            "staged_data_parts": {},
         }
 
         for format_type, files in source_files.items():
@@ -1079,10 +1317,9 @@ class TPCDIBenchmark(BaseBenchmark):
                 else:
                     continue
 
-                transformation_results["records_processed"] += result["records_processed"]
-                transformation_results["transformations_applied"].extend(result["transformations"])
-                transformation_results["staging_files"].append(result["staging_file"])
+                self._accumulate_transformation_result(transformation_results, result)
 
+        self._materialize_staged_data(transformation_results)
         return transformation_results
 
     def _transform_source_data_parallel(self, source_files: dict[str, list[str]], batch_type: str) -> dict[str, Any]:
@@ -1090,7 +1327,8 @@ class TPCDIBenchmark(BaseBenchmark):
         transformation_results: dict[str, Any] = {
             "records_processed": 0,
             "transformations_applied": [],
-            "staging_files": [],
+            "staged_data": {},
+            "staged_data_parts": {},
         }
 
         # Collect all transformation tasks
@@ -1117,18 +1355,16 @@ class TPCDIBenchmark(BaseBenchmark):
                 for future in futures:
                     try:
                         result = future.result()
-                        transformation_results["records_processed"] += result["records_processed"]
-                        transformation_results["transformations_applied"].extend(result["transformations"])
-                        transformation_results["staging_files"].append(result["staging_file"])
+                        self._accumulate_transformation_result(transformation_results, result)
                     except Exception as e:
                         logging.error(f"Error in parallel transformation: {e}")
                         # Continue processing other files
 
+        self._materialize_staged_data(transformation_results)
         return transformation_results
 
     def _transform_csv_file(self, file_path: str, batch_type: str) -> dict[str, Any]:
-        """Transform a CSV file to staging format."""
-        staging_file = self.staging_dir / f"staged_{Path(file_path).name}"
+        """Transform a CSV file to a table DataFrame."""
         transformations = ["csv_to_staging", "data_type_conversion", "null_handling"]
 
         # Read CSV file using pandas
@@ -1172,18 +1408,16 @@ class TPCDIBenchmark(BaseBenchmark):
             # Default transformation - add BatchID
             df["BatchID"] = 1
 
-        # Save to staging file using pandas
-        df.to_csv(staging_file, sep="|", index=False)
-
+        table_name = self._get_target_table_from_source_name(file_path)
         return {
             "records_processed": len(df),
             "transformations": transformations,
-            "staging_file": str(staging_file),
+            "table_name": table_name,
+            "dataframe": df,
         }
 
     def _transform_xml_file(self, file_path: str, batch_type: str) -> dict[str, Any]:
-        """Transform an XML file to staging format."""
-        staging_file = self.staging_dir / f"staged_{Path(file_path).stem}.csv"
+        """Transform an XML file to a table DataFrame."""
         transformations = ["xml_parsing", "xml_to_relational", "data_flattening"]
 
         # Parse XML and convert to pandas DataFrame
@@ -1229,17 +1463,16 @@ class TPCDIBenchmark(BaseBenchmark):
         ]
 
         df = pd.DataFrame(data, columns=columns)
-        df.to_csv(staging_file, sep="|", index=False)
 
         return {
             "records_processed": len(df),
             "transformations": transformations,
-            "staging_file": str(staging_file),
+            "table_name": self._get_target_table_from_source_name(file_path),
+            "dataframe": df,
         }
 
     def _transform_fixed_width_file(self, file_path: str, batch_type: str) -> dict[str, Any]:
-        """Transform a fixed-width file to staging format."""
-        staging_file = self.staging_dir / f"staged_{Path(file_path).stem}.csv"
+        """Transform a fixed-width file to a table DataFrame."""
         transformations = ["fixed_width_parsing", "field_extraction", "data_trimming"]
 
         # Parse fixed-width file using pandas
@@ -1253,18 +1486,15 @@ class TPCDIBenchmark(BaseBenchmark):
         df["batch_id"] = batch_type
         df["load_timestamp"] = datetime.now().isoformat()
 
-        # Save to staging file
-        df.to_csv(staging_file, sep="|", index=False)
-
         return {
             "records_processed": len(df),
             "transformations": transformations,
-            "staging_file": str(staging_file),
+            "table_name": self._get_target_table_from_source_name(file_path),
+            "dataframe": df,
         }
 
     def _transform_json_file(self, file_path: str, batch_type: str) -> dict[str, Any]:
-        """Transform a JSON file to staging format."""
-        staging_file = self.staging_dir / f"staged_{Path(file_path).stem}.csv"
+        """Transform a JSON file to a table DataFrame."""
         transformations = ["json_parsing", "json_normalization", "schema_mapping"]
 
         # Read JSON file using pandas
@@ -1291,86 +1521,82 @@ class TPCDIBenchmark(BaseBenchmark):
         existing_columns = [col for col in columns if col in df.columns]
         df = df[existing_columns]
 
-        # Save to staging file
-        df.to_csv(staging_file, sep="|", index=False)
-
         return {
             "records_processed": len(df),
             "transformations": transformations,
-            "staging_file": str(staging_file),
+            "table_name": self._get_target_table_from_source_name(file_path),
+            "dataframe": df,
         }
+
+    def _accumulate_transformation_result(
+        self,
+        aggregate: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        """Merge a single transform result into aggregate transformation payload."""
+        aggregate["records_processed"] += result["records_processed"]
+        aggregate["transformations_applied"].extend(result["transformations"])
+
+        table_name_raw = result.get("table_name")
+        dataframe_raw = result.get("dataframe")
+        if table_name_raw is None or dataframe_raw is None:
+            return
+
+        if not isinstance(table_name_raw, str):
+            raise TypeError("Transform result 'table_name' must be a string when provided")
+        if not isinstance(dataframe_raw, pd.DataFrame):
+            raise TypeError("Transform result 'dataframe' must be a pandas DataFrame when provided")
+
+        parts = aggregate.get("staged_data_parts")
+        if not isinstance(parts, dict):
+            raise TypeError("Transformation aggregate is missing 'staged_data_parts' dictionary")
+        table_parts = parts.setdefault(table_name_raw, [])
+        if not isinstance(table_parts, list):
+            raise TypeError("Transformation aggregate 'staged_data_parts' entries must be lists of DataFrames")
+        table_parts.append(dataframe_raw)
+
+    def _materialize_staged_data(self, aggregate: dict[str, Any]) -> None:
+        """Materialize per-table staged DataFrames with a single concat per table."""
+        parts = aggregate.get("staged_data_parts")
+        if not isinstance(parts, dict):
+            raise TypeError("Transformation aggregate is missing 'staged_data_parts' dictionary")
+        staged_data: dict[str, pd.DataFrame] = {}
+        for table_name, table_parts in parts.items():
+            if not isinstance(table_name, str):
+                raise TypeError("Transformation aggregate contains a non-string table name")
+            if not isinstance(table_parts, list):
+                raise TypeError("Transformation aggregate contains non-list staged_data_parts entries")
+            if not table_parts:
+                continue
+            for dataframe in table_parts:
+                if not isinstance(dataframe, pd.DataFrame):
+                    raise TypeError("Transformation aggregate contains non-DataFrame staged_data_parts entries")
+            if len(table_parts) == 1:
+                staged_data[table_name] = table_parts[0]
+            else:
+                staged_data[table_name] = pd.concat(table_parts, ignore_index=True)
+        aggregate["staged_data"] = staged_data
+
+    def _create_sql_etl_backend(self, *, connection: Any) -> SQLETLBackend:
+        """Create SQL ETL backend from benchmark SQL connection."""
+        validation_queries = list(self.query_manager.get_queries_by_type("validation"))
+        return SQLETLBackend(
+            connection=connection,
+            create_tables_sql=self.get_create_tables_sql(),
+            execute_validation_query=self.execute_query,
+            validation_query_ids=validation_queries,
+        )
 
     def _load_warehouse_data(
         self, connection: Any, transformation_results: dict[str, Any], batch_type: str
     ) -> dict[str, Any]:
-        """Load transformed data into target warehouse."""
-        load_results: dict[str, Any] = {"records_loaded": 0, "tables_updated": []}
+        """Load transformed data into SQL warehouse (compatibility wrapper)."""
+        backend = self._create_sql_etl_backend(connection=connection)
+        return backend.load_dataframes(transformation_results.get("staged_data", {}), batch_type=batch_type)
 
-        # Create warehouse schema if it doesn't exist
-        schema_sql = self.get_create_tables_sql()
-        if hasattr(connection, "executescript"):
-            connection.executescript(schema_sql)
-        else:
-            cursor = connection.cursor()
-            for statement in schema_sql.split(";"):
-                if statement.strip():
-                    cursor.execute(statement)
-
-        # Load staging files into warehouse tables
-        for staging_file in transformation_results["staging_files"]:
-            records_loaded = self._load_staging_file(connection, staging_file, batch_type)
-            load_results["records_loaded"] += records_loaded
-
-            # Track which tables were updated
-            table_name = self._get_target_table_from_file(staging_file)
-            if table_name and table_name not in load_results["tables_updated"]:
-                load_results["tables_updated"].append(table_name)
-
-        return load_results
-
-    def _load_staging_file(self, connection: Any, staging_file: str, batch_type: str) -> int:
-        """Load a staging file into the appropriate warehouse table."""
-        table_name = self._get_target_table_from_file(staging_file)
-        if not table_name:
-            return 0
-
-        # Read staging file using pandas
-        df = pd.read_csv(staging_file, delimiter="|")
-
-        if df.empty:
-            return 0
-
-        # Prepare insert statement
-        headers = df.columns.tolist()
-        placeholders = ",".join(["?" for _ in headers])
-        insert_sql = f"INSERT INTO {table_name} ({','.join(headers)}) VALUES ({placeholders})"
-
-        # Load data in batches
-        batch_size = 1000
-        records_loaded = 0
-
-        for start_idx in range(0, len(df), batch_size):
-            batch_df = df.iloc[start_idx : start_idx + batch_size]
-            batch_data = [tuple(row) for row in batch_df.values]
-
-            if hasattr(connection, "executemany"):
-                connection.executemany(insert_sql, batch_data)
-            else:
-                cursor = connection.cursor()
-                for record in batch_data:
-                    cursor.execute(insert_sql, record)
-
-            records_loaded += len(batch_data)
-
-            # Commit transaction
-        if hasattr(connection, "commit"):
-            connection.commit()
-
-        return records_loaded
-
-    def _get_target_table_from_file(self, staging_file: str) -> Optional[str]:
-        """Determine target table name from staging file name."""
-        file_name = Path(staging_file).name.lower()
+    def _get_target_table_from_source_name(self, source_name: str) -> Optional[str]:
+        """Determine target table name from source file name."""
+        file_name = Path(source_name).name.lower()
 
         if "customer" in file_name:
             return "DimCustomer"
@@ -1386,6 +1612,10 @@ class TPCDIBenchmark(BaseBenchmark):
         else:
             return None
 
+    def _get_target_table_from_file(self, staging_file: str) -> Optional[str]:
+        """Backward-compatible alias for older call sites."""
+        return self._get_target_table_from_source_name(staging_file)
+
     def validate_etl_results(self, connection: Any) -> dict[str, Any]:
         """Validate ETL results using data quality checks.
 
@@ -1396,192 +1626,7 @@ class TPCDIBenchmark(BaseBenchmark):
             Dictionary containing validation results and data quality metrics
         """
 
-        validation_results: dict[str, Any] = {
-            "validation_queries": {},
-            "data_quality_issues": [],
-            "data_quality_score": 0,
-            "completeness_checks": {},
-            "consistency_checks": {},
-            "accuracy_checks": {},
-        }
-
-        # Run validation queries
-        validation_queries = self.query_manager.get_queries_by_type("validation")
-        for query_id in validation_queries:
-            try:
-                result = self.execute_query(query_id, connection)
-                validation_results["validation_queries"][query_id] = {
-                    "success": True,
-                    "row_count": len(result) if result else 0,
-                    "result": result[:10] if result else [],  # First 10 rows for review
-                }
-            except Exception as e:
-                validation_results["validation_queries"][query_id] = {
-                    "success": False,
-                    "error": str(e),
-                }
-                validation_results["data_quality_issues"].append(
-                    {
-                        "type": "query_execution_error",
-                        "query_id": query_id,
-                        "error": str(e),
-                    }
-                )
-
-        # Completeness checks
-        validation_results["completeness_checks"] = self._check_data_completeness(connection)
-
-        # Consistency checks
-        validation_results["consistency_checks"] = self._check_data_consistency(connection)
-
-        # Accuracy checks
-        validation_results["accuracy_checks"] = self._check_data_accuracy(connection)
-
-        # Calculate overall data quality score
-        validation_results["data_quality_score"] = self._calculate_data_quality_score(validation_results)
-
-        return validation_results
-
-    def _check_data_completeness(self, connection: Any) -> dict[str, Any]:
-        """Check data completeness across tables."""
-        completeness_results: dict[str, Any] = {}
-
-        for table_name in TABLES:
-            try:
-                # Check total record count
-                cursor = connection.execute(f"SELECT COUNT(*) FROM {table_name}")
-                total_count = cursor.fetchone()[0]
-
-                # Check for null values in key columns
-                null_checks = {}
-                table_schema = TABLES[table_name]
-                key_columns = [col["name"] for col in table_schema["columns"] if not col.get("nullable", True)]
-
-                for column in key_columns[:5]:  # Check first 5 key columns
-                    try:
-                        cursor = connection.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {column} IS NULL")
-                        null_count = cursor.fetchone()[0]
-                        null_checks[column] = {
-                            "null_count": null_count,
-                            "null_percentage": (null_count / total_count * 100) if total_count > 0 else 0,
-                        }
-                    except Exception as e:
-                        null_checks[column] = {"error": str(e)}
-
-                completeness_results[table_name] = {
-                    "total_records": total_count,
-                    "null_checks": null_checks,
-                }
-
-            except Exception as e:
-                completeness_results[table_name] = {"error": str(e)}
-
-        return completeness_results
-
-    def _check_data_consistency(self, connection: Any) -> dict[str, Any]:
-        """Check data consistency across tables."""
-        consistency_results: dict[str, Any] = {}
-
-        try:
-            # Check referential integrity between fact and dimension tables
-            cursor = connection.execute("""
-                SELECT COUNT(*) as orphaned_trades
-                FROM FactTrade f
-                LEFT JOIN DimCustomer c ON f.SK_CustomerID = c.SK_CustomerID
-                WHERE c.SK_CustomerID IS NULL
-            """)
-            orphaned_trades = cursor.fetchone()[0]
-            consistency_results["orphaned_trades"] = orphaned_trades
-
-            # Check for duplicate primary keys
-            cursor = connection.execute("""
-                SELECT COUNT(*) - COUNT(DISTINCT SK_CustomerID) as duplicate_customers
-                FROM DimCustomer
-            """)
-            duplicate_customers = cursor.fetchone()[0]
-            consistency_results["duplicate_customers"] = duplicate_customers
-
-            # Check date consistency
-            cursor = connection.execute("""
-                SELECT COUNT(*) as invalid_dates
-                FROM FactTrade
-                WHERE SK_CreateDateID > SK_CloseDateID
-            """)
-            invalid_dates = cursor.fetchone()[0]
-            consistency_results["invalid_date_sequences"] = invalid_dates
-
-        except Exception as e:
-            consistency_results["error"] = str(e)
-
-        return consistency_results
-
-    def _check_data_accuracy(self, connection: Any) -> dict[str, Any]:
-        """Check data accuracy and business rule compliance."""
-        accuracy_results: dict[str, Any] = {}
-
-        try:
-            # Check for negative trade prices
-            cursor = connection.execute("""
-                SELECT COUNT(*) as negative_prices
-                FROM FactTrade
-                WHERE TradePrice < 0
-            """)
-            negative_prices = cursor.fetchone()[0]
-            accuracy_results["negative_trade_prices"] = negative_prices
-
-            # Check for invalid customer tiers
-            cursor = connection.execute("""
-                SELECT COUNT(*) as invalid_tiers
-                FROM DimCustomer
-                WHERE Tier NOT IN (1, 2, 3)
-            """)
-            invalid_tiers = cursor.fetchone()[0]
-            accuracy_results["invalid_customer_tiers"] = invalid_tiers
-
-            # Check for future birth dates
-            cursor = connection.execute("""
-                SELECT COUNT(*) as future_birth_dates
-                FROM DimCustomer
-                WHERE DOB > DATE('now')
-            """)
-            future_births = cursor.fetchone()[0]
-            accuracy_results["future_birth_dates"] = future_births
-
-        except Exception as e:
-            accuracy_results["error"] = str(e)
-
-        return accuracy_results
-
-    def _calculate_data_quality_score(self, validation_results: dict[str, Any]) -> float:
-        """Calculate overall data quality score from validation results."""
-        score = 100.0
-
-        # Deduct points for validation query failures
-        validation_queries = validation_results.get("validation_queries", {})
-        failed_queries = sum(1 for result in validation_queries.values() if not result.get("success", False))
-        total_queries = len(validation_queries)
-        if total_queries > 0:
-            score -= (failed_queries / total_queries) * 20
-
-        # Deduct points for consistency issues
-        consistency_checks = validation_results.get("consistency_checks", {})
-        if consistency_checks.get("orphaned_trades", 0) > 0:
-            score -= 15
-        if consistency_checks.get("duplicate_customers", 0) > 0:
-            score -= 10
-        if consistency_checks.get("invalid_date_sequences", 0) > 0:
-            score -= 10
-
-        # Deduct points for accuracy issues
-        accuracy_checks = validation_results.get("accuracy_checks", {})
-        if accuracy_checks.get("negative_trade_prices", 0) > 0:
-            score -= 15
-        if accuracy_checks.get("invalid_customer_tiers", 0) > 0:
-            score -= 10
-        if accuracy_checks.get("future_birth_dates", 0) > 0:
-            score -= 10
-
-        return max(0.0, score)
+        return self._create_sql_etl_backend(connection=connection).validate_results()
 
     def _get_simple_stats(self) -> dict[str, Any]:
         """Get simple ETL processing stats."""
@@ -1679,6 +1724,7 @@ class TPCDIBenchmark(BaseBenchmark):
         """
         logging.info(f"Starting complete TPC-DI benchmark (scale factor: {self.config.scale_factor})")
         start_time = datetime.now()
+        start_mono = mono_time()
 
         try:
             # Initialize connection-dependent systems
@@ -1715,7 +1761,7 @@ class TPCDIBenchmark(BaseBenchmark):
                 "etl_result": self._serialize_etl_result(etl_result),
                 "validation_result": self._serialize_validation_result(validation_result),
                 "report": self._serialize_report(report),
-                "execution_time": (end_time - start_time).total_seconds(),
+                "execution_time_seconds": elapsed_seconds(start_mono),
             }
 
         except Exception as e:
@@ -1723,7 +1769,7 @@ class TPCDIBenchmark(BaseBenchmark):
             return {
                 "success": False,
                 "error": str(e),
-                "execution_time": (datetime.now() - start_time).total_seconds(),
+                "execution_time_seconds": elapsed_seconds(start_mono),
             }
 
     def run_etl_benchmark(self, connection: Any, dialect: str = "duckdb") -> ETLResult:
@@ -1737,31 +1783,83 @@ class TPCDIBenchmark(BaseBenchmark):
             ETL execution results
         """
         self._initialize_connection_dependent_systems(connection, dialect)
+        stage_map = {
+            "TDI_HISTORICAL": "historical",
+            "TDI_INCREMENTAL": "incremental",
+            "TDI_SCD": "scd",
+        }
+        backend = self._create_sql_etl_backend(connection=connection)
+        start_time = datetime.now()
+        stage_results = self._execute_etl_stage_queries(
+            backend=backend,
+            stage_map=stage_map,
+            selected_stage_ids=set(stage_map),
+        )
+        end_time = datetime.now()
+        return self._build_etl_result_from_stage_results(stage_results, start_time=start_time, end_time=end_time)
 
-        etl_result = ETLResult(start_time=datetime.now())
+    def _build_etl_result_from_stage_results(
+        self,
+        stage_results: list[dict[str, Any]],
+        *,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> ETLResult:
+        """Convert shared stage execution results to ETLResult model."""
+        etl_result = ETLResult(start_time=start_time or datetime.now())
+        stage_lookup = {str(result.get("query_id")): result for result in stage_results}
 
-        # Run historical load
-        logging.info("Running historical load phase...")
-        historical_result = self.etl_pipeline.run_historical_load(self.config.scale_factor)
-        etl_result.historical_load = historical_result
+        historical = stage_lookup.get("TDI_HISTORICAL")
+        if historical is not None:
+            etl_result.historical_load = ETLPhaseResult(
+                phase_name="Historical Load",
+                total_execution_time=float(historical.get("execution_time_seconds", 0.0)),
+                total_records_processed=self._extract_records_processed(historical),
+                success=str(historical.get("status", "")).upper() == "SUCCESS",
+            )
 
-        # Run incremental loads (3 batches by default)
-        logging.info("Running incremental load phases...")
-        for batch_id in range(2, 5):  # Batches 2, 3, 4
-            incremental_result = self.etl_pipeline.run_incremental_load(batch_id, self.config.scale_factor)
-            etl_result.incremental_loads.append(incremental_result)
+        for query_id, phase_name in (("TDI_INCREMENTAL", "Incremental Load"), ("TDI_SCD", "SCD Load")):
+            result = stage_lookup.get(query_id)
+            if result is None:
+                continue
+            etl_result.incremental_loads.append(
+                ETLPhaseResult(
+                    phase_name=phase_name,
+                    total_execution_time=float(result.get("execution_time_seconds", 0.0)),
+                    total_records_processed=self._extract_records_processed(result),
+                    success=str(result.get("status", "")).upper() == "SUCCESS",
+                )
+            )
 
-        etl_result.end_time = datetime.now()
-        assert etl_result.start_time is not None  # Set at ETLResult creation
+        etl_result.end_time = end_time or datetime.now()
+        assert etl_result.start_time is not None
         etl_result.total_execution_time = (etl_result.end_time - etl_result.start_time).total_seconds()
-        etl_result.success = historical_result.success and all(inc.success for inc in etl_result.incremental_loads)
-
-        # Calculate total records processed
-        etl_result.total_records_processed = historical_result.total_records_processed
-        for incremental in etl_result.incremental_loads:
-            etl_result.total_records_processed += incremental.total_records_processed
-
+        if etl_result.total_execution_time <= 0.0:
+            phase_duration = (
+                etl_result.historical_load.total_execution_time if etl_result.historical_load else 0.0
+            ) + sum(phase.total_execution_time for phase in etl_result.incremental_loads)
+            etl_result.total_execution_time = phase_duration
+            etl_result.end_time = etl_result.start_time + timedelta(seconds=phase_duration)
+        all_phase_success = []
+        if etl_result.historical_load is not None:
+            all_phase_success.append(etl_result.historical_load.success)
+        all_phase_success.extend(phase.success for phase in etl_result.incremental_loads)
+        etl_result.success = all(all_phase_success) if all_phase_success else False
+        etl_result.total_records_processed = (
+            etl_result.historical_load.total_records_processed if etl_result.historical_load else 0
+        ) + sum(phase.total_records_processed for phase in etl_result.incremental_loads)
         return etl_result
+
+    @staticmethod
+    def _extract_records_processed(stage: dict[str, Any]) -> int:
+        """Extract records_processed from a stage result dict, tolerating zero values."""
+        value = stage.get("records_processed")
+        if value is not None:
+            return int(value)
+        value = stage.get("first_row", {}).get("records_processed")
+        if value is not None:
+            return int(value)
+        return int(stage.get("rows_returned", 0))
 
     def run_data_validation(self, connection: Any) -> DataQualityResult:
         """Run data quality validation.
@@ -1909,6 +2007,7 @@ class TPCDIBenchmark(BaseBenchmark):
 
         logging.info("Starting enhanced TPC-DI ETL pipeline (Phase 3)")
         start_time = datetime.now()
+        start_mono = mono_time()
 
         # Initialize connection-dependent systems
         self._initialize_connection_dependent_systems(connection, dialect)
@@ -1929,10 +2028,10 @@ class TPCDIBenchmark(BaseBenchmark):
         try:
             # Phase 1: Enhanced Data Processing with FinWire and Customer Management
             logging.info("Phase 1: Enhanced data processing...")
-            phase1_start = time.time()
+            phase1_start = mono_time()
 
             phase1_results = self._run_enhanced_data_processing()
-            phase1_time = time.time() - phase1_start
+            phase1_time = elapsed_seconds(phase1_start)
 
             pipeline_results["phases"]["enhanced_data_processing"] = {
                 "duration": phase1_time,
@@ -1943,10 +2042,10 @@ class TPCDIBenchmark(BaseBenchmark):
 
             # Phase 2: Enhanced SCD Type 2 Processing
             logging.info("Phase 2: Enhanced SCD Type 2 processing...")
-            phase2_start = time.time()
+            phase2_start = mono_time()
 
             phase2_results = self._run_enhanced_scd_processing(connection)
-            phase2_time = time.time() - phase2_start
+            phase2_time = elapsed_seconds(phase2_start)
 
             pipeline_results["phases"]["enhanced_scd_processing"] = {
                 "duration": phase2_time,
@@ -1958,10 +2057,10 @@ class TPCDIBenchmark(BaseBenchmark):
             # Phase 3: Parallel Batch Processing (if enabled)
             if enable_parallel_processing:
                 logging.info("Phase 3: Parallel batch processing...")
-                phase3_start = time.time()
+                phase3_start = mono_time()
 
                 phase3_results = self._run_parallel_batch_processing()
-                phase3_time = time.time() - phase3_start
+                phase3_time = elapsed_seconds(phase3_start)
 
                 pipeline_results["phases"]["parallel_batch_processing"] = {
                     "duration": phase3_time,
@@ -1972,10 +2071,10 @@ class TPCDIBenchmark(BaseBenchmark):
 
             # Phase 4: Incremental Data Loading
             logging.info("Phase 4: Incremental data loading...")
-            phase4_start = time.time()
+            phase4_start = mono_time()
 
             phase4_results = self._run_incremental_data_loading(connection)
-            phase4_time = time.time() - phase4_start
+            phase4_time = elapsed_seconds(phase4_start)
 
             pipeline_results["phases"]["incremental_loading"] = {
                 "duration": phase4_time,
@@ -1987,10 +2086,10 @@ class TPCDIBenchmark(BaseBenchmark):
             # Phase 5: Data Quality Monitoring (if enabled)
             if enable_data_quality_monitoring:
                 logging.info("Phase 5: Data quality monitoring...")
-                phase5_start = time.time()
+                phase5_start = mono_time()
 
                 phase5_results = self._run_data_quality_monitoring(connection)
-                phase5_time = time.time() - phase5_start
+                phase5_time = elapsed_seconds(phase5_start)
 
                 pipeline_results["phases"]["data_quality_monitoring"] = {
                     "duration": phase5_time,
@@ -2035,7 +2134,7 @@ class TPCDIBenchmark(BaseBenchmark):
 
             end_time = datetime.now()
             pipeline_results["end_time"] = end_time.isoformat()
-            pipeline_results["total_duration"] = (end_time - start_time).total_seconds()
+            pipeline_results["total_duration"] = elapsed_seconds(start_mono)
 
             logging.info(
                 f"Enhanced ETL pipeline completed successfully in {pipeline_results['total_duration']:.2f} seconds"
@@ -2054,7 +2153,7 @@ class TPCDIBenchmark(BaseBenchmark):
             pipeline_results["success"] = False
             pipeline_results["error"] = str(e)
             pipeline_results["end_time"] = datetime.now().isoformat()
-            pipeline_results["total_duration"] = (datetime.now() - start_time).total_seconds()
+            pipeline_results["total_duration"] = elapsed_seconds(start_mono)
             logging.error(f"Enhanced ETL pipeline failed: {e}")
             # Don't raise - return the error details for debugging
 

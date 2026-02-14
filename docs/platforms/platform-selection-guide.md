@@ -21,7 +21,7 @@ This guide helps you choose the optimal database platform for your BenchBox benc
 - Run on your own hardware
 - Minimal operational overhead
 
-### I need high performance at scale
+### I need fast analytical queries at scale
 **Look for**: Scalable architectures (cloud or self-hosted)
 - Column-oriented storage optimized for analytical workloads
 - Horizontal scaling capabilities

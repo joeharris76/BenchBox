@@ -13,7 +13,6 @@ from pathlib import Path
 
 from benchbox.release.workflow import (
     ALLOWED_ROOT_FILES,
-    CLAUDE_DIR_EXCLUDES,
     CLEANUP_PATTERNS,
     DOCS_DIR_EXCLUDES,
     FORBIDDEN_PATTERNS,
@@ -87,17 +86,23 @@ class TestGetSyncableFiles:
         build_files = [p for p in result if "_build" in str(p)]
         assert len(build_files) == 0, f"Found build files: {build_files}"
 
-    def test_excludes_claude_settings_local(self, tmp_path: Path):
-        """Test that .claude/settings.local.json is excluded."""
+    def test_excludes_claude_and_codex_directories(self, tmp_path: Path):
+        """Test that .claude/ and .codex/ directories are fully excluded."""
         (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "skills").mkdir()
+        (tmp_path / ".claude" / "skills" / "workflow.md").write_text("# workflow")
         (tmp_path / ".claude" / "settings.json").write_text("{}")
-        (tmp_path / ".claude" / "settings.local.json").write_text("{}")
+        (tmp_path / ".codex").mkdir()
+        (tmp_path / ".codex" / "skills").mkdir()
+        (tmp_path / ".codex" / "skills" / "task.md").write_text("# task")
 
         result = get_syncable_files(tmp_path)
 
-        # Should include settings.json but not settings.local.json
-        assert Path(".claude/settings.json") in result
-        assert Path(".claude/settings.local.json") not in result
+        # Neither .claude nor .codex files should be included
+        claude_files = [p for p in result if ".claude" in str(p)]
+        codex_files = [p for p in result if ".codex" in str(p)]
+        assert len(claude_files) == 0, f"Found .claude files: {claude_files}"
+        assert len(codex_files) == 0, f"Found .codex files: {codex_files}"
 
     def test_excludes_forbidden_patterns(self, tmp_path: Path):
         """Test that FORBIDDEN_PATTERNS are excluded."""
@@ -387,7 +392,7 @@ _project/*
 venv/
 .venv/
 
-# Firebolt data directories
+# Firebolt data and core data directories
 /firebolt-data
 /firebolt-core-data
 
@@ -504,9 +509,12 @@ class TestExclusionConstants:
         """Test that DOCS_DIR_EXCLUDES includes _build."""
         assert "_build" in DOCS_DIR_EXCLUDES
 
-    def test_claude_excludes_includes_settings_local(self):
-        """Test that CLAUDE_DIR_EXCLUDES includes settings.local.json."""
-        assert "settings.local.json" in CLAUDE_DIR_EXCLUDES
+    def test_claude_and_codex_not_in_allowed_roots(self):
+        """Test that .claude, .codex, CLAUDE.md, AGENTS.md are excluded from public release."""
+        assert ".claude" not in ALLOWED_ROOT_FILES
+        assert ".codex" not in ALLOWED_ROOT_FILES
+        assert "CLAUDE.md" not in ALLOWED_ROOT_FILES
+        assert "AGENTS.md" not in ALLOWED_ROOT_FILES
 
     def test_forbidden_patterns_includes_data_files(self):
         """Test that FORBIDDEN_PATTERNS includes data file extensions."""
@@ -726,6 +734,8 @@ class TestCleanupUnwantedFiles:
             "_sources",
             "_project",
             "benchmark_runs",
+            ".claude",
+            ".codex",
         }
         assert set(CLEANUP_PATTERNS) == expected_patterns
 

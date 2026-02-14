@@ -186,8 +186,10 @@ def detect_data_format(path: Union[str, Path]) -> str:
     path = Path(path)
     suffixes = [s.lower() for s in path.suffixes]
 
-    # Check each suffix, skipping compression extensions
-    for suffix in suffixes:
+    # Check suffixes right-to-left (innermost extension last, outermost first
+    # after stripping compression). This ensures that in compound names like
+    # "table.dat.parquet", the rightmost data format (.parquet) wins.
+    for suffix in reversed(suffixes):
         if suffix in COMPRESSION_EXTENSIONS:
             continue
         if suffix in _FORMAT_NAMES:
@@ -343,6 +345,109 @@ def get_delimiter_for_file(path: Union[str, Path]) -> str:
         ','
     """
     return "|" if is_tpc_format(path) else ","
+
+
+# Canonical dummy column name for trailing delimiter handling.
+# TPC data files use | as a field terminator (not separator), creating an
+# extra empty field when split. This constant standardizes the dummy column
+# name across all adapters.
+TRAILING_DUMMY_COLUMN: str = "_trailing_delimiter_"
+
+
+def has_trailing_delimiter(
+    path: Union[str, Path],
+    delimiter: str,
+    column_names: list[str] | None = None,
+) -> bool:
+    """Check if a delimited file has an extra trailing field beyond the schema columns.
+
+    TPC data files use field-terminating delimiters (each field ends with |),
+    so a line with N values has N delimiter characters and splits into N+1
+    elements (the last being empty). A dummy column is needed only when the
+    split field count exceeds the expected column count.
+
+    For example, TPC-H region (3 columns):
+      ``0|AFRICA|comment|``  ->  split gives 4 elements  ->  4 > 3  ->  True
+
+    But TPC-DS time_dim (10 columns, dsdgen emits 9 values):
+      ``0|AAA...|0|0|0|0|AM|third|night|``  ->  split gives 10  ->  10 == 10  ->  False
+
+    When column_names is None, falls back to checking whether the first
+    non-empty line ends with the delimiter character.
+
+    Args:
+        path: Path to the data file (may be compressed)
+        delimiter: Field delimiter character
+        column_names: Expected column names (if known). When provided, uses
+            smart field-count comparison. When None, uses simple ends-with check.
+
+    Returns:
+        True if the file has a trailing delimiter that requires a dummy column
+    """
+    from benchbox.utils.compression import CompressionError, CompressionManager
+
+    path = Path(path)
+
+    if column_names is not None:
+        expected = len(column_names)
+
+        def _count_fields(line: str) -> int:
+            return len(line.rstrip("\n").split(delimiter))
+
+        compression_type = detect_compression(path)
+        try:
+            if compression_type:
+                manager = CompressionManager()
+                compressor = manager.get_compressor(compression_type)
+                with compressor.open_for_read(path, mode="rt") as handle:
+                    for line in handle:
+                        if line.strip():
+                            return _count_fields(line) > expected
+                return False
+            with path.open("rt", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if line.strip():
+                        return _count_fields(line) > expected
+            return False
+        except (CompressionError, OSError):
+            return False
+    else:
+        # Schema-less fallback: check if first non-empty line ends with delimiter
+        compression_type = detect_compression(path)
+        try:
+            if compression_type:
+                manager = CompressionManager()
+                compressor = manager.get_compressor(compression_type)
+                with compressor.open_for_read(path, mode="rt") as handle:
+                    for line in handle:
+                        stripped = line.rstrip("\n")
+                        if stripped:
+                            return stripped.endswith(delimiter)
+                return False
+            with path.open("rt", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    stripped = line.rstrip("\n")
+                    if stripped:
+                        return stripped.endswith(delimiter)
+            return False
+        except (CompressionError, OSError):
+            return False
+
+
+def get_column_names_with_trailing(column_names: list[str], has_trailing: bool) -> list[str]:
+    """Append the canonical trailing dummy column name when needed.
+
+    Args:
+        column_names: Original column names from the schema
+        has_trailing: Whether the file has a trailing delimiter
+
+    Returns:
+        column_names unchanged if has_trailing is False, or
+        column_names + [TRAILING_DUMMY_COLUMN] if True
+    """
+    if has_trailing:
+        return column_names + [TRAILING_DUMMY_COLUMN]
+    return column_names
 
 
 def is_parquet_format(path: Union[str, Path]) -> bool:

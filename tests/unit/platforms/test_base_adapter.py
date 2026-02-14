@@ -66,7 +66,7 @@ class MockPlatformAdapter(PlatformAdapter):
         return {
             "query_id": query_id,
             "status": "SUCCESS",
-            "execution_time": 0.1,
+            "execution_time_seconds": 0.1,
             "rows_returned": 10,
         }
 
@@ -119,7 +119,7 @@ class MockPlatformAdapterWithDialect(MockPlatformAdapter):
                 {
                     "query_id": f"q{i}",
                     "status": "SUCCESS",
-                    "execution_time": 0.2,
+                    "execution_time_seconds": 0.2,
                     "rows_returned": 100,
                 }
                 for i in range(1, 23)
@@ -627,7 +627,7 @@ class TestPlatformAdapterWorkflow:
             return {
                 "query_id": query_id,
                 "status": "SUCCESS",
-                "execution_time": 0.1,
+                "execution_time_seconds": 0.1,
                 "rows_returned": 10,
             }
 
@@ -1158,8 +1158,8 @@ class TestStandardExecutionPhase:
         adapter = MockPlatformAdapter()
 
         query_results = [
-            {"query_id": "Q1", "execution_time": 1.5, "status": "SUCCESS", "rows_returned": 100},
-            {"query_id": "Q2", "execution_time": 2.0, "status": "SUCCESS", "rows_returned": 50},
+            {"query_id": "Q1", "execution_time_seconds": 1.5, "status": "SUCCESS", "rows_returned": 100},
+            {"query_id": "Q2", "execution_time_seconds": 2.0, "status": "SUCCESS", "rows_returned": 50},
         ]
 
         result = adapter._create_standard_execution_phase(query_results, "test_stream")
@@ -1176,7 +1176,7 @@ class TestStandardExecutionPhase:
         """Test creating execution phase with default stream ID."""
         adapter = MockPlatformAdapter()
 
-        query_results = [{"execution_time": 0.5}]
+        query_results = [{"execution_time_seconds": 0.5}]
 
         result = adapter._create_standard_execution_phase(query_results)
 
@@ -1205,8 +1205,8 @@ class TestThroughputPhaseCreation:
         stream1.end_time = "2025-01-01T10:01:00"
         stream1.duration = 60.0
         stream1.query_results = [
-            {"query_id": "Q1", "execution_time": 1.0, "success": True},
-            {"query_id": "Q2", "execution_time": 2.0, "success": True},
+            {"query_id": "Q1", "execution_time_seconds": 1.0, "success": True},
+            {"query_id": "Q2", "execution_time_seconds": 2.0, "success": True},
         ]
         stream1.queries_executed = 2
 
@@ -1469,3 +1469,23 @@ class TestConnectionFactoryCursorPattern:
         assert mock_connection.cursor.call_count == 4
         # Verify all cursors are unique objects
         assert len(cursors_created) == 4
+
+
+class TestMonotonicPhaseTiming:
+    """Regression tests for monotonic phase timing in adapter helpers."""
+
+    def test_data_generation_phase_does_not_require_wall_clock(self):
+        adapter = MockPlatformAdapter()
+        benchmark = SimpleNamespace(tables={"orders": [{"id": 1}, {"id": 2}]})
+
+        mock_clock = Mock(side_effect=[10.0, 10.1, 10.3, 10.8])
+        with (
+            patch("benchbox.platforms.base.adapter.mono_time", mock_clock),
+            patch("benchbox.utils.clock.mono_time", mock_clock),
+        ):
+            phase = adapter._create_enhanced_data_generation_phase(benchmark)
+
+        assert phase is not None
+        assert phase.duration_ms == 800
+        assert phase.tables_generated == 1
+        assert phase.per_table_stats["orders"].generation_time_ms == 200

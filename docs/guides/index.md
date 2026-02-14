@@ -33,7 +33,7 @@ Guides for getting the best performance from your benchmarks:
 Working with different data formats and storage systems:
 
 - [Table Format Guides](table-formats/index.md) - Conceptual guides for Parquet, Delta Lake, Iceberg, and Vortex
-  - [Parquet Deep Dive](table-formats/parquet-deep-dive.md) - Row groups, compression, statistics
+  - [Parquet Deep Dive](table-formats/parquet-deep-dive.md) - Row groups, compression, statistics <!-- content-ok: cliche -->
   - [Delta Lake Guide](table-formats/delta-lake-guide.md) - Transactions, OPTIMIZE, Z-ORDER
   - [Apache Iceberg Guide](table-formats/iceberg-guide.md) - Multi-engine support, partition evolution
   - [Vortex Guide](table-formats/vortex-guide.md) - Composable encodings, DuckDB integration

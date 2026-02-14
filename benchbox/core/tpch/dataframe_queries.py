@@ -29,27 +29,97 @@ from typing import Any
 from benchbox.core.dataframe.context import DataFrameContext
 from benchbox.core.dataframe.query import DataFrameQuery, QueryCategory, QueryRegistry
 
-# TPC-H Query Parameters (default values for SF=1)
-# These are the "standard" substitution parameters from the spec
-TPCH_PARAMS = {
-    "q1_delta": 90,  # days before max shipdate
-    "q1_date": date(1998, 12, 1),  # reference date (max shipdate - 90)
-    "q3_segment": "BUILDING",
-    "q3_date": date(1995, 3, 15),
-    "q4_date": date(1993, 7, 1),
-    "q5_region": "ASIA",
-    "q5_date": date(1994, 1, 1),
-    "q6_date": date(1994, 1, 1),
-    "q6_discount": 0.06,
-    "q6_quantity": 24,
-    "q7_nation1": "FRANCE",
-    "q7_nation2": "GERMANY",
-    "q10_date": date(1993, 10, 1),
-    "q12_shipmode1": "MAIL",
-    "q12_shipmode2": "SHIP",
-    "q12_date": date(1994, 1, 1),
-    "q14_date": date(1995, 9, 1),
+# TPC-H Default Parameters per query (keyed by query_id 1-22).
+# These match the inline values currently used by each query function and serve
+# as the fallback when no seed-derived overrides are active.
+TPCH_DEFAULT_PARAMS: dict[int, dict[str, Any]] = {
+    1: {"cutoff_date": date(1998, 9, 2)},
+    2: {"size": 15, "type_suffix": "BRASS", "region_name": "EUROPE"},
+    3: {"segment": "BUILDING", "order_date": date(1995, 3, 15)},
+    4: {"start_date": date(1993, 7, 1), "end_date": date(1993, 10, 1)},
+    5: {"region_name": "ASIA", "start_date": date(1994, 1, 1), "end_date": date(1995, 1, 1)},
+    6: {
+        "start_date": date(1994, 1, 1),
+        "end_date": date(1995, 1, 1),
+        "discount_low": 0.05,
+        "discount_high": 0.07,
+        "quantity_limit": 24,
+    },
+    7: {"nation1": "FRANCE", "nation2": "GERMANY", "start_date": date(1995, 1, 1), "end_date": date(1996, 12, 31)},
+    8: {
+        "target_nation": "BRAZIL",
+        "target_region": "AMERICA",
+        "target_type": "ECONOMY ANODIZED STEEL",
+        "start_date": date(1995, 1, 1),
+        "end_date": date(1996, 12, 31),
+    },
+    9: {"color": "green"},
+    10: {"start_date": date(1993, 10, 1), "end_date": date(1994, 1, 1)},
+    11: {"nation_name": "GERMANY", "fraction": 0.0001},
+    12: {
+        "shipmode1": "MAIL",
+        "shipmode2": "SHIP",
+        "start_date": date(1994, 1, 1),
+        "end_date": date(1995, 1, 1),
+    },
+    13: {"word1": "special", "word2": "requests"},
+    14: {"start_date": date(1995, 9, 1), "end_date": date(1995, 10, 1)},
+    15: {"start_date": date(1996, 1, 1), "end_date": date(1996, 4, 1)},
+    16: {"brand": "Brand#45", "type_prefix": "MEDIUM POLISHED", "sizes": [49, 14, 23, 45, 19, 3, 36, 9]},
+    17: {"brand": "Brand#23", "container": "MED BOX"},
+    18: {"quantity_threshold": 300},
+    19: {
+        "brand1": "Brand#12",
+        "brand2": "Brand#23",
+        "brand3": "Brand#34",
+        "quantity1": 1,
+        "quantity2": 10,
+        "quantity3": 20,
+    },
+    20: {
+        "color_prefix": "forest",
+        "nation_name": "CANADA",
+        "start_date": date(1994, 1, 1),
+        "end_date": date(1995, 1, 1),
+    },
+    21: {"nation_name": "SAUDI ARABIA"},
+    22: {"country_codes": ["13", "31", "23", "29", "30", "18", "17"]},
 }
+
+# Module-level parameter overrides. When set by the dataframe_runner before
+# query execution, get_tpch_parameters() merges these into the defaults.
+_parameter_overrides: dict[int, dict[str, Any]] | None = None
+
+
+def set_parameter_overrides(overrides: dict[int, dict[str, Any]] | None) -> None:
+    """Set parameter overrides for the current benchmark run.
+
+    Called by the dataframe_runner before query execution to inject seed-derived
+    parameters. Pass None to clear overrides and revert to static defaults.
+
+    Args:
+        overrides: Dict mapping query_id (1-22) to param dict, or None to clear.
+    """
+    global _parameter_overrides
+    _parameter_overrides = overrides
+
+
+def get_tpch_parameters(query_id: int) -> dict[str, Any]:
+    """Get parameters for a TPC-H query.
+
+    If parameter overrides are active (set via set_parameter_overrides),
+    override values are merged on top of the defaults for the given query.
+
+    Args:
+        query_id: Query number (1-22)
+
+    Returns:
+        Dict of parameter values for this query.
+    """
+    params = dict(TPCH_DEFAULT_PARAMS.get(query_id, {}))
+    if _parameter_overrides is not None and query_id in _parameter_overrides:
+        params.update(_parameter_overrides[query_id])
+    return params
 
 
 # =============================================================================
@@ -68,8 +138,8 @@ def q1_expression_impl(ctx: DataFrameContext) -> Any:
     lit = ctx.lit
 
     # Filter: l_shipdate <= date '1998-12-01' - interval '90' day
-    # Using 1998-09-02 which is 90 days before 1998-12-01
-    cutoff_date = date(1998, 9, 2)
+    params = get_tpch_parameters(1)
+    cutoff_date = params["cutoff_date"]
 
     result = (
         lineitem.filter(col("l_shipdate") <= lit(cutoff_date))
@@ -102,8 +172,9 @@ def q3_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    segment = "BUILDING"
-    order_date = date(1995, 3, 15)
+    params = get_tpch_parameters(3)
+    segment = params["segment"]
+    order_date = params["order_date"]
 
     # Join customer -> orders -> lineitem
     # Filter by segment, order date, and ship date
@@ -133,8 +204,9 @@ def q4_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    start_date = date(1993, 7, 1)
-    end_date = date(1993, 10, 1)
+    params = get_tpch_parameters(4)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Find orders with late lineitems using semi-join pattern
     late_orders = lineitem.filter(col("l_commitdate") < col("l_receiptdate")).select("l_orderkey").unique()
@@ -165,9 +237,10 @@ def q5_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    region_name = "ASIA"
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
+    params = get_tpch_parameters(5)
+    region_name = params["region_name"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     result = (
         region.filter(col("r_name") == lit(region_name))
@@ -198,11 +271,12 @@ def q6_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
-    discount_low = 0.05
-    discount_high = 0.07
-    quantity_limit = 24
+    params = get_tpch_parameters(6)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
+    discount_low = params["discount_low"]
+    discount_high = params["discount_high"]
+    quantity_limit = params["quantity_limit"]
 
     result = (
         lineitem.filter(
@@ -231,8 +305,9 @@ def q10_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    start_date = date(1993, 10, 1)
-    end_date = date(1994, 1, 1)
+    params = get_tpch_parameters(10)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     result = (
         customer.join(orders, left_on="c_custkey", right_on="o_custkey")
@@ -268,10 +343,11 @@ def q12_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    shipmode1 = "MAIL"
-    shipmode2 = "SHIP"
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
+    params = get_tpch_parameters(12)
+    shipmode1 = params["shipmode1"]
+    shipmode2 = params["shipmode2"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     result = (
         lineitem.filter(
@@ -309,8 +385,9 @@ def q14_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    start_date = date(1995, 9, 1)
-    end_date = date(1995, 10, 1)
+    params = get_tpch_parameters(14)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     result = (
         lineitem.filter((col("l_shipdate") >= lit(start_date)) & (col("l_shipdate") < lit(end_date)))
@@ -342,10 +419,11 @@ def q7_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    nation1 = "FRANCE"
-    nation2 = "GERMANY"
-    start_date = date(1995, 1, 1)
-    end_date = date(1996, 12, 31)
+    params = get_tpch_parameters(7)
+    nation1 = params["nation1"]
+    nation2 = params["nation2"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Alias nation table for supplier and customer nations
     n1 = nation.select(col("n_nationkey").alias("n1_nationkey"), col("n_name").alias("supp_nation"))
@@ -389,11 +467,12 @@ def q8_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    target_nation = "BRAZIL"
-    target_region = "AMERICA"
-    target_type = "ECONOMY ANODIZED STEEL"
-    start_date = date(1995, 1, 1)
-    end_date = date(1996, 12, 31)
+    params = get_tpch_parameters(8)
+    target_nation = params["target_nation"]
+    target_region = params["target_region"]
+    target_type = params["target_type"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Alias nation for supplier nation
     n2 = nation.select(col("n_nationkey").alias("n2_nationkey"), col("n_name").alias("nation"))
@@ -440,7 +519,8 @@ def q9_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    color = "green"
+    params = get_tpch_parameters(9)
+    color = params["color"]
 
     result = (
         part.filter(col("p_name").str.contains(color))
@@ -476,8 +556,9 @@ def q13_expression_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     col = ctx.col
 
-    word1 = "special"
-    word2 = "requests"
+    params = get_tpch_parameters(13)
+    word1 = params["word1"]
+    word2 = params["word2"]
 
     # Left outer join customers to orders (excluding special requests)
     # Count orders per customer
@@ -513,7 +594,8 @@ def q18_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    quantity_threshold = 300
+    params = get_tpch_parameters(18)
+    quantity_threshold = params["quantity_threshold"]
 
     # Find orders with large total quantity
     large_orders = (
@@ -546,12 +628,13 @@ def q19_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    brand1 = "Brand#12"
-    brand2 = "Brand#23"
-    brand3 = "Brand#34"
-    quantity1 = 1
-    quantity2 = 10
-    quantity3 = 20
+    params = get_tpch_parameters(19)
+    brand1 = params["brand1"]
+    brand2 = params["brand2"]
+    brand3 = params["brand3"]
+    quantity1 = params["quantity1"]
+    quantity2 = params["quantity2"]
+    quantity3 = params["quantity3"]
 
     sm_containers = ["SM CASE", "SM BOX", "SM PACK", "SM PKG"]
     med_containers = ["MED BAG", "MED BOX", "MED PKG", "MED PACK"]
@@ -612,9 +695,10 @@ def q2_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    size = 15
-    type_suffix = "BRASS"
-    region_name = "EUROPE"
+    params = get_tpch_parameters(2)
+    size = params["size"]
+    type_suffix = params["type_suffix"]
+    region_name = params["region_name"]
 
     # Find minimum supply cost per part in the region
     min_cost_per_part = (
@@ -664,8 +748,9 @@ def q11_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    nation_name = "GERMANY"
-    fraction = 0.0001  # Scale-dependent threshold
+    params = get_tpch_parameters(11)
+    nation_name = params["nation_name"]
+    fraction = params["fraction"]
 
     # Calculate total value for the nation
     nation_stock = (
@@ -700,8 +785,9 @@ def q15_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    start_date = date(1996, 1, 1)
-    end_date = date(1996, 4, 1)
+    params = get_tpch_parameters(15)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Calculate revenue per supplier (CTE-like pattern)
     revenue = (
@@ -736,9 +822,10 @@ def q16_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    brand = "Brand#45"
-    type_prefix = "MEDIUM POLISHED"
-    sizes = [49, 14, 23, 45, 19, 3, 36, 9]
+    params = get_tpch_parameters(16)
+    brand = params["brand"]
+    type_prefix = params["type_prefix"]
+    sizes = params["sizes"]
 
     # Find suppliers with complaints (to exclude)
     complaint_suppliers = supplier.filter(col("s_comment").str.contains("Customer.*Complaints")).select("s_suppkey")
@@ -768,8 +855,9 @@ def q17_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    brand = "Brand#23"
-    container = "MED BOX"
+    params = get_tpch_parameters(17)
+    brand = params["brand"]
+    container = params["container"]
 
     # Calculate average quantity per part
     avg_qty_per_part = lineitem.group_by("l_partkey").agg((col("l_quantity").mean() * lit(0.2)).alias("avg_qty"))
@@ -799,10 +887,11 @@ def q20_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    color_prefix = "forest"
-    nation_name = "CANADA"
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
+    params = get_tpch_parameters(20)
+    color_prefix = params["color_prefix"]
+    nation_name = params["nation_name"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Find parts with color prefix
     forest_parts = part.filter(col("p_name").str.starts_with(color_prefix)).select("p_partkey")
@@ -850,7 +939,8 @@ def q21_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    nation_name = "SAUDI ARABIA"
+    params = get_tpch_parameters(21)
+    nation_name = params["nation_name"]
 
     # Step 1: Target suppliers from the specified nation (small set ~400)
     target_suppliers = (
@@ -922,7 +1012,8 @@ def q22_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
-    country_codes = ["13", "31", "23", "29", "30", "18", "17"]
+    params = get_tpch_parameters(22)
+    country_codes = params["country_codes"]
 
     # Extract country code from phone
     customer_with_code = customer.with_columns(col("c_phone").str.slice(0, 2).alias("cntrycode"))
@@ -959,7 +1050,8 @@ def q1_pandas_impl(ctx: DataFrameContext) -> Any:
     """TPC-H Q1: Pricing Summary Report (Pandas Family)."""
     lineitem = ctx.get_table("lineitem")
 
-    cutoff_date = date(1998, 9, 2)
+    params = get_tpch_parameters(1)
+    cutoff_date = params["cutoff_date"]
 
     # Filter
     filtered = lineitem[lineitem["l_shipdate"] <= cutoff_date]
@@ -992,11 +1084,12 @@ def q6_pandas_impl(ctx: DataFrameContext) -> Any:
     """TPC-H Q6: Forecasting Revenue Change (Pandas Family)."""
     lineitem = ctx.get_table("lineitem")
 
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
-    discount_low = 0.05
-    discount_high = 0.07
-    quantity_limit = 24
+    params = get_tpch_parameters(6)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
+    discount_low = params["discount_low"]
+    discount_high = params["discount_high"]
+    quantity_limit = params["quantity_limit"]
 
     # Filter
     filtered = lineitem[
@@ -1024,8 +1117,9 @@ def q3_pandas_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     lineitem = ctx.get_table("lineitem")
 
-    segment = "BUILDING"
-    order_date = date(1995, 3, 15)
+    params = get_tpch_parameters(3)
+    segment = params["segment"]
+    order_date = params["order_date"]
 
     # Filter customer by segment
     filtered_customer = customer[customer["c_mktsegment"] == segment]
@@ -1062,8 +1156,9 @@ def q4_pandas_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     lineitem = ctx.get_table("lineitem")
 
-    start_date = date(1993, 7, 1)
-    end_date = date(1993, 10, 1)
+    params = get_tpch_parameters(4)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Find orders with late lineitems
     late_lineitems = lineitem[lineitem["l_commitdate"] < lineitem["l_receiptdate"]]
@@ -1094,9 +1189,10 @@ def q5_pandas_impl(ctx: DataFrameContext) -> Any:
     nation = ctx.get_table("nation")
     region = ctx.get_table("region")
 
-    region_name = "ASIA"
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
+    params = get_tpch_parameters(5)
+    region_name = params["region_name"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Filter region
     asia_region = region[region["r_name"] == region_name]
@@ -1138,8 +1234,9 @@ def q10_pandas_impl(ctx: DataFrameContext) -> Any:
     lineitem = ctx.get_table("lineitem")
     nation = ctx.get_table("nation")
 
-    start_date = date(1993, 10, 1)
-    end_date = date(1994, 1, 1)
+    params = get_tpch_parameters(10)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Join customer -> orders, filter by date
     customer_orders = customer.merge(orders, left_on="c_custkey", right_on="o_custkey")
@@ -1179,9 +1276,10 @@ def q2_pandas_impl(ctx: DataFrameContext) -> Any:
     nation = ctx.get_table("nation")
     region = ctx.get_table("region")
 
-    size = 15
-    type_suffix = "BRASS"
-    region_name = "EUROPE"
+    params = get_tpch_parameters(2)
+    size = params["size"]
+    type_suffix = params["type_suffix"]
+    region_name = params["region_name"]
 
     # Filter region
     europe_region = region[region["r_name"] == region_name]
@@ -1236,10 +1334,11 @@ def q7_pandas_impl(ctx: DataFrameContext) -> Any:
     customer = ctx.get_table("customer")
     nation = ctx.get_table("nation")
 
-    nation1 = "FRANCE"
-    nation2 = "GERMANY"
-    start_date = date(1995, 1, 1)
-    end_date = date(1996, 12, 31)
+    params = get_tpch_parameters(7)
+    nation1 = params["nation1"]
+    nation2 = params["nation2"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Create nation aliases
     n1 = nation[["n_nationkey", "n_name"]].copy()
@@ -1296,11 +1395,12 @@ def q8_pandas_impl(ctx: DataFrameContext) -> Any:
     nation = ctx.get_table("nation")
     region = ctx.get_table("region")
 
-    target_nation = "BRAZIL"
-    target_region = "AMERICA"
-    target_type = "ECONOMY ANODIZED STEEL"
-    start_date = date(1995, 1, 1)
-    end_date = date(1996, 12, 31)
+    params = get_tpch_parameters(8)
+    target_nation = params["target_nation"]
+    target_region = params["target_region"]
+    target_type = params["target_type"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Create nation alias for supplier
     n2 = nation[["n_nationkey", "n_name"]].copy()
@@ -1365,7 +1465,8 @@ def q9_pandas_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     nation = ctx.get_table("nation")
 
-    color = "green"
+    params = get_tpch_parameters(9)
+    color = params["color"]
 
     # Filter parts by name containing color
     filtered_parts = part[part["p_name"].str.contains(color, case=False, na=False)]
@@ -1411,8 +1512,9 @@ def q11_pandas_impl(ctx: DataFrameContext) -> Any:
     supplier = ctx.get_table("supplier")
     nation = ctx.get_table("nation")
 
-    nation_name = "GERMANY"
-    fraction = 0.0001
+    params = get_tpch_parameters(11)
+    nation_name = params["nation_name"]
+    fraction = params["fraction"]
 
     # Join partsupp -> supplier
     joined = partsupp.merge(supplier, left_on="ps_suppkey", right_on="s_suppkey")
@@ -1444,10 +1546,11 @@ def q12_pandas_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     lineitem = ctx.get_table("lineitem")
 
-    shipmode1 = "MAIL"
-    shipmode2 = "SHIP"
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
+    params = get_tpch_parameters(12)
+    shipmode1 = params["shipmode1"]
+    shipmode2 = params["shipmode2"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Filter lineitem
     filtered = lineitem[
@@ -1481,8 +1584,9 @@ def q13_pandas_impl(ctx: DataFrameContext) -> Any:
     customer = ctx.get_table("customer")
     orders = ctx.get_table("orders")
 
-    word1 = "special"
-    word2 = "requests"
+    params = get_tpch_parameters(13)
+    word1 = params["word1"]
+    word2 = params["word2"]
 
     # Filter orders to exclude special requests
     filtered_orders = orders[~orders["o_comment"].str.contains(f"{word1}.*{word2}", regex=True, na=False)]
@@ -1510,8 +1614,9 @@ def q14_pandas_impl(ctx: DataFrameContext) -> Any:
     lineitem = ctx.get_table("lineitem")
     part = ctx.get_table("part")
 
-    start_date = date(1995, 9, 1)
-    end_date = date(1995, 10, 1)
+    params = get_tpch_parameters(14)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Filter lineitem by date
     filtered = lineitem[(lineitem["l_shipdate"] >= start_date) & (lineitem["l_shipdate"] < end_date)]
@@ -1540,8 +1645,9 @@ def q15_pandas_impl(ctx: DataFrameContext) -> Any:
     supplier = ctx.get_table("supplier")
     lineitem = ctx.get_table("lineitem")
 
-    start_date = date(1996, 1, 1)
-    end_date = date(1996, 4, 1)
+    params = get_tpch_parameters(15)
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Filter lineitem and calculate revenue per supplier
     filtered = lineitem[(lineitem["l_shipdate"] >= start_date) & (lineitem["l_shipdate"] < end_date)]
@@ -1572,9 +1678,10 @@ def q16_pandas_impl(ctx: DataFrameContext) -> Any:
     part = ctx.get_table("part")
     supplier = ctx.get_table("supplier")
 
-    brand = "Brand#45"
-    type_prefix = "MEDIUM POLISHED"
-    sizes = [49, 14, 23, 45, 19, 3, 36, 9]
+    params = get_tpch_parameters(16)
+    brand = params["brand"]
+    type_prefix = params["type_prefix"]
+    sizes = params["sizes"]
 
     # Find suppliers with complaints
     complaint_suppliers = supplier[supplier["s_comment"].str.contains("Customer.*Complaints", regex=True, na=False)][
@@ -1609,8 +1716,9 @@ def q17_pandas_impl(ctx: DataFrameContext) -> Any:
     lineitem = ctx.get_table("lineitem")
     part = ctx.get_table("part")
 
-    brand = "Brand#23"
-    container = "MED BOX"
+    params = get_tpch_parameters(17)
+    brand = params["brand"]
+    container = params["container"]
 
     # Filter parts
     filtered_parts = part[(part["p_brand"] == brand) & (part["p_container"] == container)]
@@ -1642,7 +1750,8 @@ def q18_pandas_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     lineitem = ctx.get_table("lineitem")
 
-    quantity_threshold = 300
+    params = get_tpch_parameters(18)
+    quantity_threshold = params["quantity_threshold"]
 
     # Find orders with large total quantity
     order_qty = lineitem.groupby("l_orderkey", as_index=False).agg(total_qty=("l_quantity", "sum"))
@@ -1675,12 +1784,13 @@ def q19_pandas_impl(ctx: DataFrameContext) -> Any:
     lineitem = ctx.get_table("lineitem")
     part = ctx.get_table("part")
 
-    brand1 = "Brand#12"
-    brand2 = "Brand#23"
-    brand3 = "Brand#34"
-    quantity1 = 1
-    quantity2 = 10
-    quantity3 = 20
+    params = get_tpch_parameters(19)
+    brand1 = params["brand1"]
+    brand2 = params["brand2"]
+    brand3 = params["brand3"]
+    quantity1 = params["quantity1"]
+    quantity2 = params["quantity2"]
+    quantity3 = params["quantity3"]
 
     sm_containers = ["SM CASE", "SM BOX", "SM PACK", "SM PKG"]
     med_containers = ["MED BAG", "MED BOX", "MED PKG", "MED PACK"]
@@ -1737,10 +1847,11 @@ def q20_pandas_impl(ctx: DataFrameContext) -> Any:
     part = ctx.get_table("part")
     lineitem = ctx.get_table("lineitem")
 
-    color_prefix = "forest"
-    nation_name = "CANADA"
-    start_date = date(1994, 1, 1)
-    end_date = date(1995, 1, 1)
+    params = get_tpch_parameters(20)
+    color_prefix = params["color_prefix"]
+    nation_name = params["nation_name"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
 
     # Find parts with color prefix
     forest_parts = part[part["p_name"].str.startswith(color_prefix)]["p_partkey"]
@@ -1779,7 +1890,8 @@ def q21_pandas_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     nation = ctx.get_table("nation")
 
-    nation_name = "SAUDI ARABIA"
+    params = get_tpch_parameters(21)
+    nation_name = params["nation_name"]
 
     # Join supplier -> nation, filter by nation
     supplier_nation = supplier.merge(nation, left_on="s_nationkey", right_on="n_nationkey")
@@ -1843,7 +1955,8 @@ def q22_pandas_impl(ctx: DataFrameContext) -> Any:
     customer = ctx.get_table("customer")
     orders = ctx.get_table("orders")
 
-    country_codes = ["13", "31", "23", "29", "30", "18", "17"]
+    params = get_tpch_parameters(22)
+    country_codes = params["country_codes"]
 
     # Extract country code from phone
     customer = customer.copy()

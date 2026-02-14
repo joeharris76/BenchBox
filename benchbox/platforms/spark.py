@@ -13,9 +13,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -433,7 +434,7 @@ class SparkAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using Spark-optimized table definitions."""
-        start_time = time.time()
+        start_time = mono_time()
 
         spark = connection
 
@@ -473,7 +474,7 @@ class SparkAdapter(PlatformAdapter):
             self.logger.error(f"Schema creation failed: {e}")
             raise
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
@@ -488,7 +489,7 @@ class SparkAdapter(PlatformAdapter):
         from benchbox.platforms.base.data_loading import DataSourceResolver
         from benchbox.platforms.base.utils import detect_file_format
 
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
         per_table_timings = {}
 
@@ -520,7 +521,7 @@ class SparkAdapter(PlatformAdapter):
                 self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
 
                 try:
-                    load_start = time.time()
+                    load_start = mono_time()
                     table_name_lower = table_name.lower()
                     total_rows_loaded = 0
 
@@ -552,10 +553,7 @@ class SparkAdapter(PlatformAdapter):
                                     if i < len(df.columns):
                                         df = df.withColumnRenamed(df.columns[i], col_name)
 
-                            # Handle TPC trailing delimiter (creates extra null column)
-                            if format_info.has_trailing_delimiter and table_schema:
-                                if len(df.columns) > len(table_schema.fields):
-                                    df = df.drop(df.columns[-1])
+                            # Trailing delimiter handling is done via shared utility in pyspark_df.py
 
                         if table_schema:
                             df = self._cast_dataframe_to_schema(df, table_schema)
@@ -569,7 +567,7 @@ class SparkAdapter(PlatformAdapter):
 
                     table_stats[table_name_lower] = total_rows_loaded
 
-                    load_time = time.time() - load_start
+                    load_time = elapsed_seconds(load_start)
                     per_table_timings[table_name_lower] = {"total_ms": load_time * 1000}
                     self.logger.info(
                         f"Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
@@ -579,7 +577,7 @@ class SparkAdapter(PlatformAdapter):
                     self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
                     table_stats[table_name.lower()] = 0
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.logger.info(f"Loaded {total_rows:,} total rows in {total_time:.2f}s")
 
@@ -644,7 +642,7 @@ class SparkAdapter(PlatformAdapter):
             self.capture_sql(query, "query", None)
             return self._build_dry_run_result(query_id)
 
-        start_time = time.time()
+        start_time = mono_time()
 
         spark = connection
 
@@ -657,7 +655,7 @@ class SparkAdapter(PlatformAdapter):
             result_df = spark.sql(query)
             result = result_df.collect()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Get query statistics

@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,9 +124,7 @@ class TPCDISpecificationValidator:
 
         # Validate table existence
         if self.connection:
-            cursor = self.connection.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            existing_tables = {row[0] for row in cursor.fetchall()}
+            existing_tables = self._discover_existing_tables(required_dim_tables + required_fact_tables)
 
             # Check dimension tables
             missing_dim_tables = set(required_dim_tables) - existing_tables
@@ -190,14 +190,54 @@ class TPCDISpecificationValidator:
                 )
             )
 
+    def _discover_existing_tables(self, candidate_tables: list[str]) -> set[str]:
+        """Discover existing tables without relying on engine-specific catalog tables."""
+        existing_tables: set[str] = set()
+        if not self.connection:
+            return existing_tables
+
+        cursor = self.connection.cursor()
+        for table_name in candidate_tables:
+            queries = [
+                f'SELECT 1 FROM "{table_name}" LIMIT 1',
+                f"SELECT 1 FROM {table_name} LIMIT 1",
+            ]
+            for query in queries:
+                try:
+                    cursor.execute(query)
+                    cursor.fetchone()
+                    existing_tables.add(table_name)
+                    break
+                except Exception:
+                    continue
+
+        return existing_tables
+
+    def _get_table_columns(self, table_name: str) -> set[str]:
+        """Discover table columns in an engine-agnostic way using cursor metadata."""
+        if not self.connection:
+            return set()
+
+        cursor = self.connection.cursor()
+        queries = [
+            f'SELECT * FROM "{table_name}" LIMIT 0',
+            f"SELECT * FROM {table_name} LIMIT 0",
+        ]
+        for query in queries:
+            try:
+                cursor.execute(query)
+                description = cursor.description or []
+                return {str(col[0]) for col in description if col and col[0]}
+            except Exception:
+                continue
+        return set()
+
     def _validate_table_schemas(self, existing_tables):
         """Validate individual table schemas against TPC-DI specification."""
 
         # DimCustomer validation
         if "DimCustomer" in existing_tables:
-            cursor = self.connection.cursor()
-            cursor.execute("PRAGMA table_info(DimCustomer)")
-            columns = {col[1] for col in cursor.fetchall()}
+            columns = self._get_table_columns("DimCustomer")
 
             required_customer_columns = {
                 "CustomerID",
@@ -237,9 +277,7 @@ class TPCDISpecificationValidator:
 
         # FactTrade validation
         if "FactTrade" in existing_tables:
-            cursor = self.connection.cursor()
-            cursor.execute("PRAGMA table_info(FactTrade)")
-            columns = {col[1] for col in cursor.fetchall()}
+            columns = self._get_table_columns("FactTrade")
 
             required_trade_columns = {
                 "TradeID",
@@ -330,15 +368,14 @@ class TPCDISpecificationValidator:
             return False
 
         try:
-            cursor = self.connection.cursor()
-
             # Check if dimension tables have proper surrogate keys
             dimension_tables = ["DimCustomer", "DimAccount", "DimSecurity"]
 
             for table in dimension_tables:
                 try:
-                    cursor.execute(f"PRAGMA table_info({table})")
-                    columns = [col[1] for col in cursor.fetchall()]
+                    columns = self._get_table_columns(table)
+                    if not columns:
+                        continue
 
                     # Look for surrogate key pattern (table name + 'SK' or 'Key')
                     surrogate_key_found = any(col.endswith(("SK", "Key", "ID")) for col in columns)
@@ -590,12 +627,11 @@ class TPCDISpecificationValidator:
                         continue
 
                     # Execute query with timing and result validation
-                    import time
 
-                    start_time = time.time()
+                    start_time = mono_time()
                     cursor = self.connection.execute(query_sql)
                     results = cursor.fetchall()
-                    execution_time = time.time() - start_time
+                    execution_time = elapsed_seconds(start_time)
 
                     # Validate result structure and content
                     result_validation = self._validate_query_result_structure(query_id, results, query_sql)
@@ -603,7 +639,7 @@ class TPCDISpecificationValidator:
                     query_execution_results.append(
                         {
                             "query_id": query_id,
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "row_count": len(results),
                             "result_validation": result_validation,
                             "success": True,
@@ -643,7 +679,7 @@ class TPCDISpecificationValidator:
 
             if success_rate >= 0.75:  # At least 75% success rate
                 avg_time = (
-                    sum(r["execution_time"] for r in successful_queries) / len(successful_queries)
+                    sum(r["execution_time_seconds"] for r in successful_queries) / len(successful_queries)
                     if successful_queries
                     else 0
                 )

@@ -1338,7 +1338,7 @@ class TPCDSBenchmark(BaseBenchmark):
                     query_result = {
                         "query_id": query_id,
                         "stream_id": stream_id,
-                        "execution_time": 0.0,
+                        "execution_time_seconds": 0.0,
                         "result_count": 0,
                         "success": False,
                         "error": None,
@@ -1362,7 +1362,7 @@ class TPCDSBenchmark(BaseBenchmark):
 
                         query_result.update(
                             {
-                                "execution_time": execution_time,
+                                "execution_time_seconds": execution_time,
                                 "result_count": len(results) if results else 0,
                                 "success": True,
                                 "error": None,
@@ -1377,7 +1377,7 @@ class TPCDSBenchmark(BaseBenchmark):
 
                         query_result.update(
                             {
-                                "execution_time": execution_time,
+                                "execution_time_seconds": execution_time,
                                 "result_count": 0,
                                 "success": False,
                                 "error": str(e),
@@ -1554,7 +1554,7 @@ class TPCDSBenchmark(BaseBenchmark):
                 query_start = time.time()
                 query_result = {
                     "query_id": query_id,
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "result_count": 0,
                     "status": "failed",
                     "error": None,
@@ -1577,7 +1577,7 @@ class TPCDSBenchmark(BaseBenchmark):
 
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "result_count": len(query_results) if query_results else 0,
                             "status": "success",
                             "error": None,
@@ -1596,7 +1596,7 @@ class TPCDSBenchmark(BaseBenchmark):
 
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "result_count": 0,
                             "status": "failed",
                             "error": error_msg,

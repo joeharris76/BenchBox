@@ -39,10 +39,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING, Any, Callable
 
 from benchbox.platforms.databricks.adapter import DatabricksAdapter
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.dependencies import get_package_install_message
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ except Exception as exc:  # pragma: no cover - defensive guard
     DatabricksSession = None  # type: ignore[assignment,misc]
     _databricks_connect_error = str(exc)
 
-# Check if PySpark is available (for local testing/mocking)
+# Check if PySpark is available for local execution contexts.
 try:
     from pyspark.sql import (
         DataFrame as SparkDataFrame,
@@ -284,7 +284,7 @@ class DatabricksDataFrameAdapter(DatabricksAdapter):
                 connection, q1_builder, "Q1"
             )
         """
-        start_time = time.time()
+        start_time = mono_time()
         self.log_verbose(f"Executing DataFrame query {query_id}")
 
         try:
@@ -309,7 +309,7 @@ class DatabricksDataFrameAdapter(DatabricksAdapter):
 
             # Collect results
             result = result_df.collect()
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result)
 
             self.log_verbose(f"Query {query_id} completed: {actual_row_count} rows in {execution_time:.3f}s")
@@ -351,11 +351,11 @@ class DatabricksDataFrameAdapter(DatabricksAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

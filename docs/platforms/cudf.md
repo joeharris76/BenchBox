@@ -106,7 +106,7 @@ GPU memory limits dataset size. Guidelines for common GPUs:
 ### Strengths
 
 - **Massive parallelism** - Thousands of GPU cores for data processing
-- **High memory bandwidth** - GPU memory provides higher bandwidth than system memory
+- **High memory bandwidth** - GPU memory provides higher bandwidth than system memory <!-- content-ok: cliche -->
 - **Vectorized operations** - SIMD-like execution across GPU threads
 - **Zero-copy integration** - Efficient data sharing with other RAPIDS libraries
 

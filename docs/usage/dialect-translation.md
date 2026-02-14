@@ -87,8 +87,6 @@ mysql_query = tpch.translate_query(1, "mysql")
 
 **Planned platforms** (see [Development Roadmap](../development/roadmap.md)):
 - 🔄 MySQL
-- 🔄 SQL Server
-- 🔄 Oracle
 - 🔄 LakeSail Spark
 - 🔄 Apache Doris
 - 🔄 StarRocks

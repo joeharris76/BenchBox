@@ -107,7 +107,7 @@ def _show_deprecation_warning():
 @click.option(
     "--generate-charts",
     is_flag=True,
-    help="Generate visualization charts (requires viz dependencies)",
+    help="Generate ASCII charts in output directory",
 )
 @click.option(
     "--theme",
@@ -382,9 +382,10 @@ def _run_platform_comparison(
             charts_dir = output_dir / "charts"
             exports = plotter.generate_charts(output_dir=charts_dir)
             if exports:
-                console.print(f"[green]Charts generated in {charts_dir}[/green]")
+                chart_list = ", ".join(f"{ct}.txt" for ct in exports)
+                console.print(f"[green]Charts generated in {charts_dir}: {chart_list}[/green]")
             else:
-                console.print("[yellow]No charts generated (check dependencies)[/yellow]")
+                console.print("[yellow]No charts generated (insufficient data)[/yellow]")
         except Exception as e:
             console.print(f"[yellow]Chart generation failed: {e}[/yellow]")
 
@@ -457,9 +458,10 @@ def _run_sql_vs_dataframe(
             charts_dir = output_dir / "charts"
             exports = plotter.generate_charts(output_dir=charts_dir)
             if exports:
-                console.print(f"[green]Charts generated in {charts_dir}[/green]")
+                chart_list = ", ".join(f"{ct}.txt" for ct in exports)
+                console.print(f"[green]Charts generated in {charts_dir}: {chart_list}[/green]")
             else:
-                console.print("[yellow]No charts generated (check dependencies)[/yellow]")
+                console.print("[yellow]No charts generated (insufficient data)[/yellow]")
         except Exception as e:
             console.print(f"[yellow]Chart generation failed: {e}[/yellow]")
 

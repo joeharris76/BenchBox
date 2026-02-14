@@ -611,7 +611,7 @@ class TestTrinoAdapter:
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["first_row"] == (1, "test")
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
         mock_cursor.execute.assert_called_with("SELECT * FROM test")
         mock_cursor.close.assert_called_once()

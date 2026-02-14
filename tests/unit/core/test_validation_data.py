@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -232,3 +233,36 @@ def test_try_approximate_count_variants():
     ]:
         val = dv._try_approximate_count(C(42), "tbl", platform)
         assert val in (42, None)
+
+
+def test_validate_row_counts_uses_monotonic_elapsed_time():
+    class FakeCursor:
+        def execute(self, _):
+            return None
+
+        def fetchone(self):
+            return (10,)
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+    class FakeAdapter:
+        platform_name = "duckdb"
+        config = {}
+
+        def create_connection(self, **_):
+            return FakeConn()
+
+        def close_connection(self, _):
+            return None
+
+    dv = DataValidator(FakeAdapter())
+    mock_clock = Mock(side_effect=[100.0, 101.75])
+    with (
+        patch("benchbox.core.validation.data.mono_time", mock_clock),
+        patch("benchbox.utils.clock.mono_time", mock_clock),
+    ):
+        result = dv.validate_row_counts({"orders": 10})
+
+    assert result.execution_time == pytest.approx(1.75)

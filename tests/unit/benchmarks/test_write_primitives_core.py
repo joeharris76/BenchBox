@@ -63,6 +63,12 @@ class TestWritePrimitivesSchema:
         assert "l_orderkey" in sql
         assert "l_quantity" in sql
 
+    def test_get_create_table_sql_datafusion_omits_primary_key_constraints(self):
+        """DataFusion dialect should not emit PRIMARY KEY constraints."""
+        sql = get_create_table_sql("insert_ops_lineitem", dialect="datafusion")
+        assert "CREATE TABLE insert_ops_lineitem" in sql
+        assert "PRIMARY KEY" not in sql
+
     def test_get_create_table_sql_invalid(self):
         """Test that invalid table raises ValueError."""
         with pytest.raises(ValueError, match="Unknown staging table"):
@@ -74,6 +80,14 @@ class TestWritePrimitivesSchema:
         assert "CREATE TABLE" in sql
         assert "insert_ops_lineitem" in sql
         assert "write_ops_log" in sql
+
+    def test_benchmark_get_schema_includes_tpch_base_tables(self, tmp_path):
+        """Write Primitives schema should include TPC-H base tables for platform loaders."""
+        benchmark = WritePrimitivesBenchmark(output_dir=tmp_path)
+        schema = benchmark.get_schema()
+        assert "orders" in schema
+        assert "lineitem" in schema
+        assert schema["orders"]["columns"][0]["name"] == "o_orderkey"
 
 
 class TestWritePrimitivesCatalog:
@@ -124,6 +138,18 @@ class TestWritePrimitivesCatalog:
         catalog = load_write_primitives_catalog()
         # Just verify we have operations, don't hardcode count
         assert len(catalog.operations) > 100, f"Expected >100 operations, got {len(catalog.operations)}"
+
+    def test_batch_insert_key_ranges_match_cleanup_ranges(self):
+        """Batch INSERT key generation must align with cleanup ranges to avoid duplicate key reruns."""
+        catalog = load_write_primitives_catalog()
+
+        batch_100 = catalog.operations["insert_batch_values_100"]
+        assert "generate_series(0, 99)" in batch_100.write_sql
+        assert "BETWEEN 9000100 AND 9000199" in (batch_100.cleanup_sql or "")
+
+        batch_1000 = catalog.operations["insert_batch_values_1000"]
+        assert "generate_series(0, 999)" in batch_1000.write_sql
+        assert "BETWEEN 9001000 AND 9001999" in (batch_1000.cleanup_sql or "")
 
     def test_all_operations_have_validation_or_cleanup(self):
         """Test that all operations have either validation queries or cleanup SQL."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -210,6 +211,7 @@ class TemplateLoader:
 
         self.body_sql = "\n".join(lines).strip()
         self.limit_value = self._parse_limit()
+        self._expand_ulist_defaults()
         self.parameters = self._parse_parameters()
 
     def _store_definition(self, line: str) -> None:
@@ -226,6 +228,40 @@ class TemplateLoader:
             return int(raw)
         except ValueError:
             return None
+
+    def _expand_ulist_defaults(self) -> None:
+        """Expand ulist() parameters by replacing indexed [NAME.N] placeholders with generated values."""
+        expanded_names: list[str] = []
+        for name, expr in self.definitions.items():
+            if name.startswith("_"):
+                continue
+            if not expr.lower().startswith("ulist("):
+                continue
+            values = self._generate_ulist_values(name, expr)
+            if values is None:
+                continue  # Unsupported generator — fall back to scalar default
+            for i, val in enumerate(values, 1):
+                self.body_sql = self.body_sql.replace(f"[{name}.{i}]", str(val))
+            # Also replace bare [NAME] with first value (if present)
+            self.body_sql = self.body_sql.replace(f"[{name}]", str(values[0]))
+            expanded_names.append(name)
+        for name in expanded_names:
+            del self.definitions[name]
+
+    def _generate_ulist_values(self, name: str, expr: str) -> list[int] | None:
+        """Generate distinct values for a ulist() expression. Returns None for unsupported generators."""
+        match = re.match(r"ulist\(random\((\d+),(\d+)", expr, re.IGNORECASE)
+        if not match:
+            return None  # dist() or rowcount() — not yet supported
+        lo, hi = int(match.group(1)), int(match.group(2))
+        count_match = re.search(r",\s*(\d+)\)\s*$", expr)
+        if not count_match:
+            return None
+        count = int(count_match.group(1))
+        rng = random.Random(self.query_id * 1000 + hash(name) % 10000)
+        if hi - lo + 1 < count:
+            return None  # Range too small for unique values
+        return rng.sample(range(lo, hi + 1), count)
 
     def _parse_parameters(self) -> dict[str, TemplateParameter]:
         params: dict[str, TemplateParameter] = {}
@@ -1124,13 +1160,45 @@ class QueryConverter:
             if query_id == 46:
                 sql_text = sql_text.replace("  amt", "  obt.ext_sales_price AS amt")
 
+        # Q79: Same CROSS JOIN → filtered join fix as Q34/Q46/Q68.
+        # The subquery (aliased ms) must be joined on sale_id + ship_customer_sk,
+        # and the inner obt alias must be renamed to avoid ambiguity.
         if query_id == 79:
+            # Rename inner subquery's SELECT columns to avoid ambiguity
+            sql_text = sql_text.replace(
+                "CROSS JOIN (\n  SELECT\n    obt.sale_id,\n    obt.ship_customer_sk",
+                "CROSS JOIN (\n  SELECT\n    sub_obt.sale_id AS ms_sale_id,\n    sub_obt.ship_customer_sk AS ms_ship_customer_sk",
+            )
+            # Rename inner FROM alias
+            sql_text = sql_text.replace(
+                "FROM tpcds_sales_returns_obt AS obt\n  WHERE\n    (\n      obt.sold_date_sk",
+                "FROM tpcds_sales_returns_obt AS sub_obt\n  WHERE\n    (\n      sub_obt.sold_date_sk",
+            )
+            # Fix inner subquery column references
+            sql_text = sql_text.replace("obt.store_sk = store_s_store_sk", "sub_obt.store_sk = store_s_store_sk")
+            sql_text = sql_text.replace("obt.ship_hdemo_sk", "sub_obt.ship_hdemo_sk")
+            sql_text = sql_text.replace("obt.coupon_amt", "sub_obt.coupon_amt")
+            sql_text = sql_text.replace("obt.net_profit", "sub_obt.net_profit")
+            # Fix inner GROUP BY
+            sql_text = sql_text.replace(
+                "GROUP BY\n    obt.sale_id,\n    obt.ship_customer_sk,\n    obt.ship_addr_sk",
+                "GROUP BY\n    sub_obt.sale_id,\n    sub_obt.ship_customer_sk,\n    sub_obt.ship_addr_sk",
+            )
+            # Add join condition between outer obt and subquery ms
+            sql_text = sql_text.replace(
+                ") AS ms\nWHERE",
+                ") AS ms\nWHERE\n  obt.sale_id = ms.ms_sale_id AND obt.ship_customer_sk = ms.ms_ship_customer_sk AND",
+            )
+            # Disambiguate outer SELECT/ORDER BY references
             sql_text = sql_text.replace("  sale_id,\n  amt", "  obt.sale_id,\n  amt")
             sql_text = sql_text.replace("SUBSTRING(store_s_city", "SUBSTRING(obt.store_s_city")
             sql_text = re.sub(r"(?<![a-z_\.])bill_customer_c_", "obt.bill_customer_c_", sql_text)
             sql_text = sql_text.replace("obt.obt.bill_customer_c_", "obt.bill_customer_c_")
-            sql_text = re.sub(r"(?<![a-z_\.])ship_customer_sk\b", "obt.ship_customer_sk", sql_text)
-            sql_text = sql_text.replace("obt.obt.ship_customer_sk", "obt.ship_customer_sk")
+            # Disambiguate bare ship_customer_sk in outer WHERE
+            sql_text = sql_text.replace(
+                "ship_customer_sk = obt.bill_customer_c_customer_sk",
+                "obt.ship_customer_sk = obt.bill_customer_c_customer_sk",
+            )
 
         # Q40: Interval syntax - fix "- 30 AS days"
         if query_id == 40:

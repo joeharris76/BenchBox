@@ -302,22 +302,30 @@ class TestCuDFAdapterDataLoading:
     @patch("benchbox.platforms.cudf.cudf")
     def test_load_data_parquet(self, mock_cudf, tmp_path):
         """Should load parquet files."""
-        # Create test parquet file
         import pandas as pd
 
         test_df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
         parquet_path = tmp_path / "test.parquet"
         test_df.to_parquet(parquet_path)
 
+        # Mock cudf.read_parquet to return a mock DataFrame
+        mock_df = MagicMock()
+        mock_df.__len__ = MagicMock(return_value=3)
+        mock_cudf.read_parquet.return_value = mock_df
+
         adapter = CuDFAdapter()
         benchmark = MagicMock()
         connection = CuDFConnectionWrapper(adapter)
 
-        # The load_data attempts to read files - we verify it doesn't error
-        # and returns expected types (actual loading depends on cudf install)
-        table_stats, loading_time, timing_details = adapter.load_data(benchmark, connection, tmp_path)
+        # Mock DataSourceResolver to return our test file
+        mock_data_source = MagicMock()
+        mock_data_source.tables = {"test_table": [str(parquet_path)]}
+        mock_data_source.source_type = "benchmark_tables"
 
-        # Should return valid types even if no data loaded (no cudf)
+        with patch("benchbox.platforms.base.data_loading.DataSourceResolver") as mock_resolver_cls:
+            mock_resolver_cls.return_value.resolve.return_value = mock_data_source
+            table_stats, loading_time, timing_details = adapter.load_data(benchmark, connection, tmp_path)
+
         assert isinstance(table_stats, dict)
         assert isinstance(loading_time, float)
         assert loading_time >= 0
@@ -326,18 +334,27 @@ class TestCuDFAdapterDataLoading:
     @patch("benchbox.platforms.cudf.cudf")
     def test_load_data_csv(self, mock_cudf, tmp_path):
         """Should load CSV files."""
-        # Create test CSV file
         csv_path = tmp_path / "test.csv"
         csv_path.write_text("a,b\n1,x\n2,y\n")
+
+        # Mock cudf.read_csv to return a mock DataFrame
+        mock_df = MagicMock()
+        mock_df.__len__ = MagicMock(return_value=2)
+        mock_cudf.read_csv.return_value = mock_df
 
         adapter = CuDFAdapter()
         benchmark = MagicMock()
         connection = CuDFConnectionWrapper(adapter)
 
-        # The load_data attempts to read files - we verify it doesn't error
-        table_stats, loading_time, timing_details = adapter.load_data(benchmark, connection, tmp_path)
+        # Mock DataSourceResolver to return our test file
+        mock_data_source = MagicMock()
+        mock_data_source.tables = {"test_table": [str(csv_path)]}
+        mock_data_source.source_type = "benchmark_tables"
 
-        # Should return valid types
+        with patch("benchbox.platforms.base.data_loading.DataSourceResolver") as mock_resolver_cls:
+            mock_resolver_cls.return_value.resolve.return_value = mock_data_source
+            table_stats, loading_time, timing_details = adapter.load_data(benchmark, connection, tmp_path)
+
         assert isinstance(table_stats, dict)
         assert isinstance(loading_time, float)
         assert loading_time >= 0

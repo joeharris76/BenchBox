@@ -81,7 +81,7 @@ class JoinOrder(BaseBenchmark):
         Returns:
             DDL statements for creating all tables
         """
-        return self._impl.get_schema(dialect)
+        return self._impl.get_create_tables_sql(dialect=dialect)
 
     def get_create_tables_sql(self, dialect: str = "standard", tuning_config: Any = None) -> str:
         """Get SQL to create all Join Order Benchmark tables.

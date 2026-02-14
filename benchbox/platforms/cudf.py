@@ -10,7 +10,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ from benchbox.core.gpu import (
     GPUMetricsCollector,
     detect_gpu,
 )
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 from .base import PlatformAdapter
 
@@ -380,10 +380,10 @@ class CuDFAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: CuDFConnectionWrapper) -> float:
         """Create schema (no-op for cuDF - schema is inferred from data)."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", "cuDF (schema inferred from data)")
         # cuDF infers schema from data, no explicit schema creation needed
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         self.log_operation_complete("Schema creation", duration, "schema inferred from data")
         return duration
 
@@ -412,7 +412,7 @@ class CuDFAdapter(PlatformAdapter):
         from benchbox.platforms.base.utils import detect_file_format
 
         self.log_operation_start("Data loading", f"directory: {data_dir}")
-        start_time = time.time()
+        start_time = mono_time()
         table_stats: dict[str, int] = {}
         timing_details: dict[str, Any] = {}
 
@@ -427,7 +427,7 @@ class CuDFAdapter(PlatformAdapter):
 
         # Load each table
         for table_name, file_paths in data_source.tables.items():
-            table_start = time.time()
+            table_start = mono_time()
 
             # Normalize and filter to valid files using base class helper
             valid_files = self._normalize_and_validate_file_paths(file_paths)
@@ -460,12 +460,7 @@ class CuDFAdapter(PlatformAdapter):
                             sep=format_info.delimiter,
                             header=None,
                         )
-                        # Handle trailing delimiter (creates extra null column)
-                        if format_info.has_trailing_delimiter and len(df.columns) > 0:
-                            # Check if last column is all null/empty
-                            last_col = df.columns[-1]
-                            if df[last_col].isna().all() or (df[last_col] == "").all():
-                                df = df.drop(columns=[last_col])
+                        # Trailing delimiter handling is done via shared utility in cudf_df.py
                     else:
                         # Standard CSV
                         df = cudf.read_csv(file_path, sep=format_info.delimiter)
@@ -480,7 +475,7 @@ class CuDFAdapter(PlatformAdapter):
                 connection.register_table(table_name_lower, final_df)
                 table_stats[table_name_lower] = len(final_df)
 
-                table_duration = time.time() - table_start
+                table_duration = elapsed_seconds(table_start)
                 timing_details[table_name_lower] = {"total_ms": table_duration * 1000}
 
                 self.log_verbose(
@@ -492,7 +487,7 @@ class CuDFAdapter(PlatformAdapter):
                 logger.error(f"Failed to load {table_name}: {e}")
                 table_stats[table_name.lower()] = 0
 
-        loading_time = time.time() - start_time
+        loading_time = elapsed_seconds(start_time)
         total_rows = sum(table_stats.values())
 
         self.log_operation_complete(
@@ -522,11 +517,11 @@ class CuDFAdapter(PlatformAdapter):
             self.capture_sql(query, "query", None)
             return self._build_dry_run_result(query_id)
 
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             result = connection.execute(query)
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             # Get row count without full data transfer
             actual_row_count = result.rowcount

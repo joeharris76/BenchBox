@@ -33,6 +33,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 # Configure logging for this module
 logger = logging.getLogger(__name__)
 
@@ -464,9 +466,8 @@ class TPCCompiler:
         Returns:
             CompilationResult with status and details
         """
-        import time
 
-        start_time = time.time()
+        start_time = mono_time()
 
         # Check if compilation is disabled
         if not self.auto_compile:
@@ -529,7 +530,7 @@ class TPCCompiler:
                 result = self._compile_tpc_ds_binary(binary_name, binary_info)
 
             # Add timing information
-            result.compilation_time = time.time() - start_time
+            result.compilation_time = elapsed_seconds(start_time)
 
             if result.status == CompilationStatus.SUCCESS:
                 logger.info(f"Successfully compiled {binary_name} in {result.compilation_time:.2f}s")
@@ -543,7 +544,7 @@ class TPCCompiler:
                 binary_name=binary_name,
                 status=CompilationStatus.FAILED,
                 error_message=f"Compilation failed with exception: {str(e)}",
-                compilation_time=time.time() - start_time,
+                compilation_time=elapsed_seconds(start_time),
             )
 
     def _compile_tpc_h_binary(self, binary_name: str, binary_info: BinaryInfo) -> CompilationResult:

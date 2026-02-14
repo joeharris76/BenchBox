@@ -14,7 +14,6 @@ import multiprocessing
 import multiprocessing as mp
 import re
 import threading
-import time
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Iterator
@@ -24,6 +23,8 @@ from typing import Any, Callable, Optional, cast
 
 import pandas as pd
 import psutil
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -150,9 +151,9 @@ class DataTypeTransformation(TransformationRule):
                 try:
                     target_type = self.type_mappings[col].upper()
                     if target_type == "DATE":
-                        result[col] = pd.to_datetime(result[col], errors="coerce", infer_datetime_format=True).dt.date
+                        result[col] = pd.to_datetime(result[col], errors="coerce").dt.date
                     else:
-                        result[col] = pd.to_datetime(result[col], errors="coerce", infer_datetime_format=True)
+                        result[col] = pd.to_datetime(result[col], errors="coerce")
                 except Exception as e:
                     logger.warning(f"Vectorized datetime conversion failed for {col}: {e}")
                     result[col] = self._convert_column(result[col], self.type_mappings[col], col)
@@ -232,7 +233,7 @@ class DataTypeTransformation(TransformationRule):
                 return pd.to_datetime(str(value), format=date_format).date()
             except (ValueError, TypeError):
                 try:
-                    return pd.to_datetime(str(value), infer_datetime_format=True).date()
+                    return pd.to_datetime(str(value)).date()
                 except Exception:
                     logger.warning(f"Could not convert '{value}' to date in column {column_name}")
                     return pd.NaT
@@ -252,7 +253,7 @@ class DataTypeTransformation(TransformationRule):
                 return pd.to_datetime(str(value), format=datetime_format)
             except (ValueError, TypeError):
                 try:
-                    return pd.to_datetime(str(value), infer_datetime_format=True)
+                    return pd.to_datetime(str(value))
                 except Exception:
                     logger.warning(f"Could not convert '{value}' to datetime in column {column_name}")
                     return pd.NaT
@@ -651,7 +652,7 @@ class StreamingChunkProcessor:
         Returns:
             Tuple of (transformed_chunk, processing_stats)
         """
-        start_time = time.time()
+        start_time = mono_time()
         start_memory = self.get_current_memory_usage()
 
         # Check memory before processing
@@ -664,17 +665,17 @@ class StreamingChunkProcessor:
         transformation_times = []
 
         for _i, rule in enumerate(transformations):
-            rule_start = time.time()
+            rule_start = mono_time()
             try:
                 transformed_chunk = rule.apply(transformed_chunk)
-                transformation_times.append(time.time() - rule_start)
+                transformation_times.append(elapsed_seconds(rule_start))
             except Exception as e:
                 logger.error(f"Transformation {type(rule).__name__} failed on chunk {chunk_id}: {e}")
                 # Continue with other transformations
-                transformation_times.append(time.time() - rule_start)
+                transformation_times.append(elapsed_seconds(rule_start))
 
         # Calculate processing stats
-        end_time = time.time()
+        end_time = mono_time()
         end_memory = self.get_current_memory_usage()
 
         stats = {
@@ -1715,7 +1716,7 @@ class TransformationEngine:
             Dictionary of transformed dataframes ready for loading
         """
         self.batch_id = batch_id
-        start_time = time.time()
+        start_time = mono_time()
         self.logger.info(f"Starting optimized batch transformation for batch {batch_id}")
         self.logger.info(
             f"Performance settings: chunk_size={self.chunk_size}, workers={self.max_workers}, parallel={self.enable_parallel}"
@@ -1732,7 +1733,7 @@ class TransformationEngine:
 
             for table_name in processing_order:
                 if table_name in source_data:
-                    table_start = time.time()
+                    table_start = mono_time()
                     data_size = len(source_data[table_name])
                     self.logger.info(f"Transforming table: {table_name} ({data_size:,} rows)")
 
@@ -1757,7 +1758,7 @@ class TransformationEngine:
                         dim_type = table_name.lower().replace("dim", "")
                         self.dimension_data[dim_type] = transformed_data[table_name]
 
-                    table_time = time.time() - table_start
+                    table_time = elapsed_seconds(table_start)
                     self.performance_stats["processing_times"][table_name] = table_time
                     self.logger.info(f"  Completed {table_name} in {table_time:.2f}s")
 
@@ -1767,7 +1768,7 @@ class TransformationEngine:
             # Generate audit metrics
             self.quality_metrics = self.generate_audit_metrics(source_data, transformed_data)
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             self.logger.info(f"Completed batch transformation for batch {batch_id} in {total_time:.2f}s")
             self._log_performance_summary()
 
@@ -2450,7 +2451,7 @@ class TransformationEngine:
 
         self.logger.info(f"Starting parallel batch transformation with {self.parallel_config.max_workers} workers")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         # Separate tables by type for parallel processing strategy
         dimension_tables = {k: v for k, v in source_data.items() if k.startswith("Dim")}
@@ -2479,7 +2480,7 @@ class TransformationEngine:
             transformed_data[table_name] = self._apply_general_transformations(df, table_name, batch_id)
 
         # Calculate processing efficiency
-        total_time = time.time() - start_time
+        total_time = elapsed_seconds(start_time)
         total_records = sum(len(df) for df in source_data.values())
         if total_records > 0:
             efficiency = total_records / total_time if total_time > 0 else 0
@@ -2593,7 +2594,7 @@ class TransformationEngine:
         self, table_name: str, df: pd.DataFrame, batch_id: int, worker_id: str
     ) -> dict[str, Any]:
         """Transform a dimension table in an enhanced worker."""
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             self.logger.debug(f"Worker {worker_id} processing dimension {table_name}")
@@ -2601,7 +2602,7 @@ class TransformationEngine:
             # Transform dimension with SCD processing
             transformed_data = self._transform_dimension_table_enhanced(df, table_name, batch_id)
 
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
 
             return {
                 "success": True,
@@ -2612,7 +2613,7 @@ class TransformationEngine:
             }
 
         except Exception as e:
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
             self.logger.error(f"Worker {worker_id} failed processing dimension {table_name}: {str(e)}")
 
             return {

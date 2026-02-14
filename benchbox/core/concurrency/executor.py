@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from benchbox.core.concurrency.patterns import SteadyPattern, WorkloadPattern
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +261,7 @@ class ConcurrentLoadExecutor:
             phase_streams: dict[str, int] = {}
 
             for phase in pattern.iter_phases():
-                phase_start = time.time()
+                phase_start = mono_time()
                 phase_streams[phase.phase_name] = 0
 
                 logger.debug(
@@ -269,7 +270,7 @@ class ConcurrentLoadExecutor:
                 )
 
                 # Launch streams for this phase
-                while time.time() - phase_start < phase.duration_seconds:
+                while elapsed_seconds(phase_start) < phase.duration_seconds:
                     # Maintain target concurrency
                     with self._lock:
                         current_active = self._active_streams
@@ -343,7 +344,7 @@ class ConcurrentLoadExecutor:
 
     def _execute_stream(self, stream_id: int, enqueue_time: float) -> StreamResult:
         """Execute a single stream of queries."""
-        stream_start = time.time()
+        stream_start = mono_time()
         queue_wait = stream_start - enqueue_time if enqueue_time > 0 else 0
 
         # Remove from queue
@@ -412,7 +413,7 @@ class ConcurrentLoadExecutor:
                 queries_executed=len(executions),
                 queries_succeeded=queries_succeeded,
                 queries_failed=queries_failed,
-                total_time_seconds=time.time() - stream_start,
+                total_time_seconds=elapsed_seconds(stream_start),
                 query_executions=executions,
                 error=f"Stream error: {e}",
             )
@@ -422,7 +423,7 @@ class ConcurrentLoadExecutor:
             queries_executed=len(executions),
             queries_succeeded=queries_succeeded,
             queries_failed=queries_failed,
-            total_time_seconds=time.time() - stream_start,
+            total_time_seconds=elapsed_seconds(stream_start),
             query_executions=executions,
         )
 

@@ -95,7 +95,7 @@ operations:
       SELECT 9000100 + n, 1, 1, 1, 10.0 * n, 1000.0 * n, 0.05, 0.02, 'N', 'O',
              DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20',
              'DELIVER IN PERSON', 'TRUCK', 'batch_' || CAST(n AS VARCHAR)
-      FROM (SELECT unnest(generate_series(1, 100)) AS n) t
+      FROM (SELECT unnest(generate_series(0, 99)) AS n) t
     validation_queries:
       - id: verify_batch_100
         sql: SELECT COUNT(*) as cnt FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9000100 AND 9000199
@@ -112,7 +112,7 @@ operations:
       SELECT 9001000 + n, 1, 1, 1, 10.0 * n, 1000.0 * n, 0.05, 0.02, 'N', 'O',
              DATE '1998-01-01', DATE '1998-01-15', DATE '1998-01-20',
              'DELIVER IN PERSON', 'TRUCK', 'large_batch_' || CAST(n AS VARCHAR)
-      FROM (SELECT unnest(generate_series(1, 1000)) AS n) t
+      FROM (SELECT unnest(generate_series(0, 999)) AS n) t
     validation_queries:
       - id: verify_batch_1000
         sql: SELECT COUNT(*) as cnt FROM insert_ops_lineitem WHERE l_orderkey BETWEEN 9001000 AND 9001999
@@ -252,6 +252,7 @@ operations:
       sqlite: |
         INSERT OR IGNORE INTO insert_ops_orders
         SELECT * FROM orders WHERE o_orderkey BETWEEN 1 AND 10
+      datafusion: null
 
   - id: insert_returning_clause
     category: insert
@@ -275,6 +276,7 @@ operations:
     platform_overrides:
       mysql: null  # MySQL doesn't support RETURNING
       bigquery: null  # BigQuery doesn't support RETURNING in same way
+      datafusion: null
 
   # ============================================================================
   # UPDATE OPERATIONS (15 operations)
@@ -301,6 +303,8 @@ operations:
           o_comment = ''
       WHERE o_comment = 'updated_single'
     expected_rows_affected: 1
+    platform_overrides:
+      datafusion: null
 
   - id: update_selective_10pct
     category: update
@@ -320,6 +324,8 @@ operations:
       SET o_comment = ''
       WHERE o_comment = 'selective_10pct'
     expected_rows_affected: null  # Varies
+    platform_overrides:
+      datafusion: null
 
   - id: update_with_subquery
     category: update
@@ -351,6 +357,8 @@ operations:
       )
       WHERE o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_bulk_50pct
     category: update
@@ -368,6 +376,8 @@ operations:
     cleanup_sql: |
       UPDATE update_ops_orders SET o_comment = '' WHERE o_comment = 'bulk_50pct_update'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_bulk_all
     category: update
@@ -381,6 +391,8 @@ operations:
     cleanup_sql: |
       UPDATE update_ops_orders SET o_comment = ''
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_with_join
     category: update
@@ -406,6 +418,7 @@ operations:
         SET update_ops_orders.o_comment = 'joined_update'
         WHERE customer.c_mktsegment = 'BUILDING'
           AND update_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 100 FROM update_ops_orders)
+      datafusion: null
 
   - id: update_from_select
     category: update
@@ -426,6 +439,8 @@ operations:
     cleanup_sql: |
       UPDATE update_ops_orders SET o_comment = '' WHERE o_comment = 'exists_update'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_set_multiple_columns
     category: update
@@ -454,6 +469,8 @@ operations:
           o_clerk = 'Clerk#000000000'
       WHERE o_comment = 'multi_col_update'
     expected_rows_affected: 1
+    platform_overrides:
+      datafusion: null
 
   - id: update_with_case_expression
     category: update
@@ -476,6 +493,8 @@ operations:
     cleanup_sql: |
       UPDATE update_ops_orders SET o_orderpriority = '5-LOW', o_comment = '' WHERE o_comment = 'case_update'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_computed_column
     category: update
@@ -495,6 +514,8 @@ operations:
           o_comment = ''
       WHERE o_comment = 'computed_update'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_string_manipulation
     category: update
@@ -513,6 +534,8 @@ operations:
     cleanup_sql: |
       UPDATE update_ops_orders SET o_comment = '' WHERE o_comment LIKE 'Updated:%'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_date_arithmetic
     category: update
@@ -532,6 +555,8 @@ operations:
           o_comment = ''
       WHERE o_comment = 'date_update'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_conditional_multi_column
     category: update
@@ -564,6 +589,8 @@ operations:
         o_comment = ''
       WHERE o_comment = 'complex_conditional'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_with_aggregate
     category: update
@@ -592,6 +619,8 @@ operations:
       o_comment = ''
       WHERE o_comment = 'agg_update'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: update_returning
     category: update
@@ -618,6 +647,7 @@ operations:
     platform_overrides:
       mysql: null  # MySQL doesn't support RETURNING
       bigquery: null  # BigQuery doesn't support RETURNING
+      datafusion: null
 
   # ============================================================================
   # DELETE OPERATIONS (14 operations)
@@ -642,6 +672,8 @@ operations:
         expected_rows_max: 1  # LIMIT 1, so at most 1 row
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: 1
+    platform_overrides:
+      datafusion: null
 
   - id: delete_selective_10pct
     category: delete
@@ -664,6 +696,8 @@ operations:
         expected_rows_max: 1  # COUNT always returns 1 row
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_with_subquery
     category: delete
@@ -683,6 +717,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_with_join
     category: delete
@@ -708,6 +744,7 @@ operations:
         JOIN customer ON customer.c_custkey = delete_ops_orders.o_custkey
         WHERE customer.c_mktsegment = 'AUTOMOBILE'
           AND delete_ops_orders.o_orderkey <= (SELECT MIN(o_orderkey) + 20 FROM delete_ops_orders)
+      datafusion: null
 
   - id: delete_bulk_25pct
     category: delete
@@ -725,6 +762,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_bulk_50pct
     category: delete
@@ -742,6 +781,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_bulk_75pct
     category: delete
@@ -759,6 +800,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_with_not_exists
     category: delete
@@ -777,6 +820,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_with_aggregation
     category: delete
@@ -794,6 +839,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_returning
     category: delete
@@ -812,6 +859,7 @@ operations:
     platform_overrides:
       mysql: null  # MySQL doesn't support RETURNING
       bigquery: null  # BigQuery doesn't support RETURNING
+      datafusion: null
 
   - id: delete_cascade_simulation
     category: delete
@@ -837,6 +885,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback for cleanup
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_all_truncate_comparison
     category: delete
@@ -849,6 +899,8 @@ operations:
         expected_rows: 1
     cleanup_sql: null  # Data gone, will be regenerated via reset
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   # ============================================================================
   # BULK_LOAD OPERATIONS (36 operations)
@@ -1418,6 +1470,7 @@ operations:
         TRUNCATE TABLE bulk_load_ops_target;
         COPY bulk_load_ops_target FROM '{file_path}/csv_with_errors.csv'
         (FORMAT CSV, HEADER true, IGNORE_ERRORS true)
+      datafusion: null
 
   - id: bulk_load_parallel_multi_file
     category: bulk_load
@@ -1471,6 +1524,8 @@ operations:
     cleanup_sql: |
       TRUNCATE TABLE bulk_load_ops_target
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: bulk_load_append_mode
     category: bulk_load
@@ -1664,6 +1719,8 @@ operations:
     cleanup_sql: |
       DELETE FROM merge_ops_target WHERE o_orderkey BETWEEN 1 AND 10
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_upsert_with_delete
     category: merge
@@ -1688,6 +1745,8 @@ operations:
         expected_rows_min: 1
     cleanup_sql: null  # Uses transaction rollback
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_overlap_10pct
     category: merge
@@ -1710,6 +1769,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_overlap_50pct
     category: merge
@@ -1732,6 +1793,8 @@ operations:
         expected_rows_min: 0
     cleanup_sql: null  # Uses transaction rollback
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_overlap_90pct
     category: merge
@@ -1754,6 +1817,8 @@ operations:
         expected_rows_min: 1
     cleanup_sql: null  # Uses transaction rollback
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_no_overlap_all_insert
     category: merge
@@ -1777,6 +1842,8 @@ operations:
     cleanup_sql: |
       DELETE FROM merge_ops_source WHERE o_orderkey BETWEEN 1 AND 100
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_full_overlap_all_update
     category: merge
@@ -1803,6 +1870,8 @@ operations:
           o_comment = ''
       WHERE o_comment = 'merge_all_update'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_with_join_condition
     category: merge
@@ -1834,6 +1903,8 @@ operations:
     cleanup_sql: |
       DELETE FROM merge_ops_lineitem_target WHERE l_orderkey BETWEEN 1 AND 10
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_from_subquery_aggregated
     category: merge
@@ -1860,6 +1931,8 @@ operations:
     cleanup_sql: |
       DELETE FROM merge_ops_summary_target
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_conditional_update
     category: merge
@@ -1887,6 +1960,8 @@ operations:
       UPDATE merge_ops_target SET o_comment = '', o_orderpriority = '5-LOW'
       WHERE o_comment LIKE 'merge_%'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_conditional_insert
     category: merge
@@ -1913,6 +1988,8 @@ operations:
     cleanup_sql: |
       DELETE FROM merge_ops_source WHERE o_orderkey BETWEEN 1 AND 100
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_multi_column_update
     category: merge
@@ -1952,6 +2029,8 @@ operations:
           o_comment = ''
       WHERE o_comment = 'merge_multi_col'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_computed_values
     category: merge
@@ -1990,6 +2069,8 @@ operations:
           o_comment = ''
       WHERE o_comment = 'merge_computed'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_string_operations
     category: merge
@@ -2016,6 +2097,8 @@ operations:
     cleanup_sql: |
       UPDATE merge_ops_target SET o_comment = '' WHERE o_comment LIKE 'ORDER-%'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_date_arithmetic
     category: merge
@@ -2045,6 +2128,8 @@ operations:
           o_comment = ''
       WHERE o_comment = 'merge_date_shift'
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_with_cte_source
     category: merge
@@ -2078,6 +2163,8 @@ operations:
     cleanup_sql: |
       DELETE FROM merge_ops_summary_target WHERE o_orderkey BETWEEN 1 AND 50
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: merge_returning_clause
     category: merge
@@ -2105,6 +2192,7 @@ operations:
     platform_overrides:
       mysql: null  # MySQL doesn't support MERGE
       bigquery: null  # BigQuery MERGE doesn't support RETURNING
+      datafusion: null
 
   - id: merge_error_handling
     category: merge
@@ -2130,6 +2218,8 @@ operations:
     cleanup_sql: |
       DELETE FROM merge_ops_target WHERE o_orderkey BETWEEN 1 AND 55
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: delete_gdpr_suppliers_1pct
     category: delete
@@ -2158,6 +2248,8 @@ operations:
       SELECT * FROM lineitem
       WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.01 FROM lineitem)
     expected_rows_affected: null  # Data-dependent: varies by scale factor (~1% of suppliers)
+    platform_overrides:
+      datafusion: null
 
   - id: delete_gdpr_suppliers_5pct
     category: delete
@@ -2186,6 +2278,8 @@ operations:
       SELECT * FROM lineitem
       WHERE l_suppkey <= (SELECT MAX(l_suppkey) * 0.05 FROM lineitem)
     expected_rows_affected: null  # Data-dependent: varies by scale factor (~5% of suppliers)
+    platform_overrides:
+      datafusion: null
 
   - id: merge_etl_aggregation_pattern
     category: merge
@@ -2232,6 +2326,8 @@ operations:
       DELETE FROM merge_ops_target
       WHERE o_comment LIKE 'etl_agg%' OR o_comment = 'etl_new'
     expected_rows_affected: null  # Data-dependent: varies by overlap between orderkeys 1-1000 and existing data
+    platform_overrides:
+      datafusion: null
 
   - id: merge_deduplication_window_function
     category: merge
@@ -2294,6 +2390,8 @@ operations:
       DELETE FROM merge_ops_target
       WHERE o_comment IN ('dedup_update', 'dedup_insert')
     expected_rows_affected: null  # Data-dependent: varies by overlap between orderkeys 1-500 and existing data
+    platform_overrides:
+      datafusion: null
 
   # ============================================================================
   # DDL OPERATIONS (12 operations)
@@ -2350,6 +2448,8 @@ operations:
         expected_rows: 0
     cleanup_sql: null  # Data is gone, will be regenerated
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: ddl_create_table_as_select_simple
     category: ddl
@@ -2393,6 +2493,8 @@ operations:
     cleanup_sql: |
       DROP TABLE IF EXISTS test_constrained
     expected_rows_affected: 0
+    platform_overrides:
+      datafusion: null
 
   - id: ddl_create_table_with_index
     category: ddl
@@ -2415,6 +2517,8 @@ operations:
     cleanup_sql: |
       DROP TABLE IF EXISTS test_indexed
     expected_rows_affected: 0
+    platform_overrides:
+      datafusion: null
 
   - id: ddl_alter_table_add_column
     category: ddl
@@ -2436,6 +2540,8 @@ operations:
     cleanup_sql: |
       DROP TABLE IF EXISTS test_alter
     expected_rows_affected: 0
+    platform_overrides:
+      datafusion: null
 
   - id: ddl_alter_table_drop_column
     category: ddl
@@ -2458,6 +2564,8 @@ operations:
     cleanup_sql: |
       DROP TABLE IF EXISTS test_drop_col
     expected_rows_affected: 0
+    platform_overrides:
+      datafusion: null
 
   - id: ddl_alter_table_rename_column
     category: ddl
@@ -2486,6 +2594,7 @@ operations:
           old_name VARCHAR(100)
         );
         ALTER TABLE test_rename_col CHANGE old_name new_name VARCHAR(100)
+      datafusion: null
 
   - id: ddl_create_index_on_existing
     category: ddl
@@ -2502,6 +2611,8 @@ operations:
     cleanup_sql: |
       DROP TABLE IF EXISTS test_idx_existing
     expected_rows_affected: null
+    platform_overrides:
+      datafusion: null
 
   - id: ddl_drop_index
     category: ddl
@@ -2526,6 +2637,7 @@ operations:
         CREATE TABLE test_drop_idx (id INTEGER, value DECIMAL(15,2));
         CREATE INDEX idx_test_drop ON test_drop_idx(value);
         DROP INDEX idx_test_drop ON test_drop_idx
+      datafusion: null
 
   - id: ddl_create_view_simple
     category: ddl
@@ -2563,4 +2675,3 @@ operations:
         expected_rows: 1
     cleanup_sql: null  # Table is already dropped
     expected_rows_affected: null
-

@@ -258,22 +258,42 @@ total_duration_ms,45230
 
 ## HTML Format
 
-HTML export generates a standalone report with embedded visualizations.
+HTML export generates a standalone report with formatted tables.
 
 ```bash
 # Generate HTML report
 benchbox run --platform duckdb --benchmark tpch --format html
 
-# Open in browser
-open benchmark_runs/results/tpch_duckdb_sf0.01_*.html
+# Or export an existing result
+benchbox export benchmark_runs/results/tpch_duckdb_sf0.01_20251212_143021.json --format html
 ```
 
 The HTML report includes:
 - Summary metrics card
-- Query timing bar chart
+- Query results table with timing data
 - Phase duration breakdown
 - Validation status table
 - Platform and configuration details
+
+## Visualizing Results
+
+Use `benchbox visualize` to generate ASCII charts from any result file:
+
+```bash
+# Auto-detect latest result and render all applicable charts
+benchbox visualize
+
+# Visualize a specific result file
+benchbox visualize benchmark_runs/results/tpch_duckdb_sf0.01_20251212_143021.json
+
+# Specific chart type
+benchbox visualize benchmark_runs/results/*.json --chart-type performance_bar
+
+# Save plain-text output to file
+benchbox visualize benchmark_runs/results/*.json --no-color > charts.txt
+```
+
+See the [Visualization Guide](../visualization/overview.md) for chart types, templates, and customization options.
 
 ## Loading Results in Python
 
@@ -332,60 +352,43 @@ print(f"Slowest query: {df.loc[df['execution_time_ms'].idxmax(), 'query_id']}")
 
 ## Visualization Examples
 
-### Query Timing Chart
+### CLI Visualization
 
-```python
-import matplotlib.pyplot as plt
-import json
+```bash
+# Render all applicable charts for a result file
+benchbox visualize benchmark_runs/results/tpch_duckdb_sf0.01_*.json
 
-# Load results
-with open("results.json") as f:
-    results = json.load(f)
+# Compare multiple platforms
+benchbox visualize duckdb_result.json sqlite_result.json --template head_to_head
 
-queries = results['phases']['power_test']['query_executions']
-df = pd.DataFrame(queries)
-
-# Create bar chart
-plt.figure(figsize=(12, 6))
-plt.bar(df['query_id'], df['execution_time_ms'])
-plt.xlabel('Query')
-plt.ylabel('Execution Time (ms)')
-plt.title(f"TPC-H Power Test - {results['platform']['name']}")
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.savefig('query_timing.png')
+# Per-query histogram (auto-splits for large benchmarks)
+benchbox visualize tpcds_result.json --chart-type query_histogram
 ```
 
-### Platform Comparison
+### Python API Visualization
 
 ```python
-import json
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
+from benchbox.core.visualization import ResultPlotter
+from benchbox.core.visualization.ascii import ASCIIBarChart
+from benchbox.core.visualization.ascii.bar_chart import BarData
 
-# Load multiple results
-results_dir = Path("benchmark_runs/results")
-all_results = []
+# Load results from JSON files
+plotter = ResultPlotter.from_sources(["results/duckdb.json", "results/sqlite.json"])
 
-for result_file in results_dir.glob("tpch_*_sf0.01_*.json"):
-    with result_file.open() as f:
-        data = json.load(f)
-        all_results.append({
-            'platform': data['platform']['name'],
-            'power_at_size': data['metrics']['power_at_size'],
-            'geometric_mean': data['metrics']['geometric_mean_time']
-        })
+# Render a bar chart
+bar_data = [BarData(label=r.platform, value=r.total_time_ms or 0) for r in plotter.results]
+chart = ASCIIBarChart(data=bar_data, title="Platform Comparison")
+print(chart.render())
 
-df = pd.DataFrame(all_results)
+# Export to plain-text file
+from benchbox.core.visualization.exporters import export_ascii
 
-# Compare platforms
-plt.figure(figsize=(10, 6))
-plt.barh(df['platform'], df['power_at_size'])
-plt.xlabel('Power@Size')
-plt.title('TPC-H Power Metric by Platform')
-plt.tight_layout()
-plt.savefig('platform_comparison.png')
+export_ascii(
+    ascii_content=chart.render(),
+    output_dir="./charts",
+    base_name="platform_comparison",
+    format="txt",
+)
 ```
 
 ## Schema Versioning

@@ -18,7 +18,7 @@ import pytest
 
 # Import TPC-H components
 from benchbox.core.tpch.benchmark import TPCHBenchmark
-from benchbox.core.tpch.queries import TPCHQueries, TPCHQueryManager
+from benchbox.core.tpch.queries import TPCHQueries
 
 # Mark all tests in this file appropriately
 pytestmark = [pytest.mark.tpch, pytest.mark.integration]
@@ -120,16 +120,9 @@ class TestTPCHQueryGeneration:
             assert isinstance(all_queries[query_id], str)
             assert len(all_queries[query_id]) > 50
 
-    def test_tpchquerymanager_alias(self):
-        """Test backward compatibility alias."""
-        # TPCHQueryManager should be an alias for TPCHQueries
-        assert TPCHQueryManager is TPCHQueries
-
-        # Should be able to instantiate with alias
-        manager = TPCHQueryManager()
-        assert isinstance(manager, TPCHQueries)
-
-        # Should have same functionality
+    def test_tpchqueries_instantiation(self):
+        """Test TPCHQueries can be instantiated and used directly."""
+        manager = TPCHQueries()
         sql = manager.get_query(1)
         assert isinstance(sql, str)
         assert len(sql) > 50

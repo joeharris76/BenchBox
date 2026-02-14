@@ -16,6 +16,7 @@ from datetime import datetime
 from statistics import mean, median, stdev
 from typing import Any, Callable, Optional
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.resource_limits import (
     ResourceLimitExceeded,
     ResourceLimitMonitor,
@@ -214,7 +215,7 @@ class PowerRunExecutor:
         Returns:
             Aggregated power run results
         """
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result = PowerRunResult(
@@ -324,7 +325,7 @@ class PowerRunExecutor:
             # Count timed-out iterations
             result.iterations_timed_out = sum(1 for ir in result.iteration_results if ir.timed_out)
 
-            result.total_duration = time.time() - start_time
+            result.total_duration = elapsed_seconds(start_time)
             result.end_time = datetime.now().isoformat()
 
             # Log resource usage summary
@@ -384,7 +385,7 @@ class PowerRunExecutor:
         Returns:
             Single iteration result
         """
-        start_time = time.time()
+        start_time = mono_time()
         timeout_seconds = self.config["timeout_per_iteration_minutes"] * 60
 
         iteration_result = PowerRunIteration(
@@ -450,7 +451,7 @@ class PowerRunExecutor:
             self.logger.error(f"Power run iteration {iteration_id} failed: {e}")
 
         finally:
-            iteration_result.end_time = time.time()
+            iteration_result.end_time = mono_time()
             iteration_result.duration = iteration_result.end_time - iteration_result.start_time
 
         return iteration_result
@@ -535,7 +536,7 @@ class ConcurrentQueryExecutor:
             raise ValueError("Concurrent queries are not enabled in configuration")
 
         num_streams = num_streams or self.config["max_concurrent"]
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result = ConcurrentQueryResult(
@@ -618,7 +619,7 @@ class ConcurrentQueryExecutor:
             # Count timed-out streams
             result.streams_timed_out = sum(1 for sr in result.stream_results if sr.get("timed_out", False))
 
-            result.total_duration = time.time() - start_time
+            result.total_duration = elapsed_seconds(start_time)
             result.end_time = datetime.now().isoformat()
 
             # Calculate throughput with actual total duration

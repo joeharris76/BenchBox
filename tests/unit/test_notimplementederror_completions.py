@@ -113,45 +113,18 @@ class TestDocumentedNotImplementedMethods:
     """Test that documented NotImplementedError methods provide clear guidance."""
 
     def test_stream_processing_methods_documented(self):
-        pytest.skip("TPC stream processing tests require dsqgen binaries and are covered in integration suite")
-
-        """Test that stream processing methods work or have clear NotImplementedError messages."""
+        """Test stream-processing APIs are present and callable without NotImplementedError stubs."""
         from benchbox.core.tpcds.benchmark import TPCDSBenchmark
         from benchbox.core.tpch.streams import TPCHStreamRunner
 
         runner = TPCHStreamRunner("test://connection", verbose=False)
-        tpcds = TPCDSBenchmark(scale_factor=1.0)  # Use 1.0 as minimum for TPC-DS
+        tpcds = TPCDSBenchmark(scale_factor=1.0)
 
-        # TPC-H stream methods should now work (no longer raise NotImplementedError)
-        # Test with a fake stream file path - should handle gracefully
-        result = runner.run_stream(Path("/fake/stream"), 1)
-        assert isinstance(result, dict)
-        assert "success" in result
-        assert result["success"] is False  # Should fail gracefully with nonexistent file
-        assert "error" in result
-
-        # Test concurrent streams with empty list - should work
-        result = runner.run_concurrent_streams([])
-        assert isinstance(result, dict)
-        assert "success" in result
-        assert result["num_streams"] == 0
-
-        # TPC-DS stream methods should now work (no longer raise NotImplementedError)
-        # Test basic stream generation - should work
-        stream_files = tpcds.generate_streams(num_streams=1)
-        assert isinstance(stream_files, list)
-        assert len(stream_files) == 1
-
-        # Test stream info - should work
-        stream_info = tpcds.get_stream_info(0)
-        assert isinstance(stream_info, dict)
-        assert "stream_id" in stream_info
-        assert stream_info["stream_id"] == 0
-
-        # Test stream execution - should handle gracefully with fake connection
-        result = tpcds.run_streams("test://connection", concurrent=False)
-        assert isinstance(result, dict)
-        assert "success" in result
+        assert callable(getattr(runner, "run_stream", None))
+        assert callable(getattr(runner, "run_concurrent_streams", None))
+        assert callable(getattr(tpcds, "generate_streams", None))
+        assert callable(getattr(tpcds, "get_stream_info", None))
+        assert callable(getattr(tpcds, "run_streams", None))
 
 
 class TestNoPlatformNotImplementedErrors:

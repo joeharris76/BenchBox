@@ -443,12 +443,16 @@ def q96_expression_impl(ctx: DataFrameContext) -> Any:
     col = ctx.col
     lit = ctx.lit
 
+    params = get_parameters(96)
+    hours = params.get("hours", [(8, 9)])
+    t_hour = hours[0][0]
+
     result = (
         store_sales.join(time_dim, left_on="ss_sold_time_sk", right_on="t_time_sk")
         .join(store, left_on="ss_store_sk", right_on="s_store_sk")
         .join(household_demographics, left_on="ss_hdemo_sk", right_on="hd_demo_sk")
         .filter(
-            (col("t_hour") == lit(8))
+            (col("t_hour") == lit(t_hour))
             & (col("t_minute") >= lit(30))
             & (col("hd_dep_count") == lit(0))
             & (col("s_number_employees") >= lit(200))
@@ -469,6 +473,10 @@ def q96_pandas_impl(ctx: DataFrameContext) -> Any:
     store = ctx.get_table("store")
     household_demographics = ctx.get_table("household_demographics")
 
+    params = get_parameters(96)
+    hours = params.get("hours", [(8, 9)])
+    t_hour = hours[0][0]
+
     # Join tables
     merged = store_sales.merge(time_dim, left_on="ss_sold_time_sk", right_on="t_time_sk")
     merged = merged.merge(store, left_on="ss_store_sk", right_on="s_store_sk")
@@ -476,7 +484,7 @@ def q96_pandas_impl(ctx: DataFrameContext) -> Any:
 
     # Filter
     filtered = merged[
-        (merged["t_hour"] == 8)
+        (merged["t_hour"] == t_hour)
         & (merged["t_minute"] >= 30)
         & (merged["hd_dep_count"] == 0)
         & (merged["s_number_employees"] >= 200)

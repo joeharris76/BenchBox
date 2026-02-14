@@ -23,7 +23,6 @@ class TestCompressionCLI:
         """Set up test fixtures."""
         self.runner = CliRunner()
 
-    @pytest.mark.skip(reason="Test has mocking issues - mocks not intercepting CLI execution correctly")
     @patch("benchbox.cli.main.get_config_manager")
     @patch("benchbox.cli.commands.run.BenchmarkOrchestrator")
     @patch("benchbox.cli.commands.run.DatabaseManager")
@@ -35,7 +34,7 @@ class TestCompressionCLI:
         """Test CLI compression options are properly parsed and used."""
         # Mock config manager
         cfg = MagicMock()
-        cfg.get.return_value = ["json"]
+        cfg.get.side_effect = lambda key, default=None: {"export_formats": ["json"]}.get(key, default)
         cfg.config_path = "test.toml"
         cfg.validate_config.return_value = True
         mock_get_cfg.return_value = cfg
@@ -77,10 +76,8 @@ class TestCompressionCLI:
                 "ssb",
                 "--scale",
                 "0.01",
-                "--compression-type",
-                "zstd",
-                "--compression-level",
-                "5",
+                "--compression",
+                "zstd:5",
             ],
         )
 
@@ -96,12 +93,10 @@ class TestCompressionCLI:
 
         # Verify compression settings were passed through
         assert isinstance(benchmark_config, BenchmarkConfig)
-        # When compression is enabled by default, compress_data might be True or not set
-        assert benchmark_config.compress_data is not False  # Allow True or None (default enabled)
+        assert benchmark_config.compress_data is True
         assert benchmark_config.compression_type == "zstd"
         assert benchmark_config.compression_level == 5
 
-    @pytest.mark.skip(reason="Test has mocking issues - mocks not intercepting CLI execution correctly")
     @patch("benchbox.cli.main.get_config_manager")
     @patch("benchbox.cli.commands.run.BenchmarkOrchestrator")
     @patch("benchbox.cli.commands.run.DatabaseManager")
@@ -113,7 +108,7 @@ class TestCompressionCLI:
         """Test CLI compression defaults."""
         # Mock config manager
         cfg = MagicMock()
-        cfg.get.return_value = ["json"]
+        cfg.get.side_effect = lambda key, default=None: {"export_formats": ["json"]}.get(key, default)
         cfg.config_path = "test.toml"
         cfg.validate_config.return_value = True
         mock_get_cfg.return_value = cfg
@@ -157,10 +152,10 @@ class TestCompressionCLI:
         call_args = mock_orchestrator_instance.execute_benchmark.call_args
         benchmark_config = call_args[0][0]
 
-        # Verify new default compression settings (compression enabled by default)
-        assert benchmark_config.compress_data is True
-        assert benchmark_config.compression_type == "zstd"  # Default type
-        assert benchmark_config.compression_level is None  # Default level
+        # Verify current default compression settings.
+        assert benchmark_config.compress_data is False
+        assert benchmark_config.compression_type == "none"
+        assert benchmark_config.compression_level is None
 
     def test_cli_help_includes_compression_options(self):
         """Test that CLI --help-topic all includes compression options."""
@@ -197,7 +192,6 @@ class TestCompressionCLI:
         assert result.exit_code != 0
         assert "Invalid compression" in result.output or "error" in result.output.lower()
 
-    @pytest.mark.skip(reason="Test has mocking issues - mocks not intercepting CLI execution correctly")
     @patch("benchbox.cli.main.get_config_manager")
     @patch("benchbox.cli.dryrun.DryRunExecutor")
     @patch("benchbox.cli.commands.run.DatabaseManager")
@@ -209,7 +203,7 @@ class TestCompressionCLI:
         """Test that dry run mode includes compression parameters."""
         # Mock config manager
         cfg = MagicMock()
-        cfg.get.return_value = ["json"]
+        cfg.get.side_effect = lambda key, default=None: {"export_formats": ["json"]}.get(key, default)
         cfg.config_path = "test.toml"
         cfg.validate_config.return_value = True
         mock_get_cfg.return_value = cfg
@@ -249,10 +243,8 @@ class TestCompressionCLI:
                 "ssb",
                 "--scale",
                 "0.01",
-                "--compression-type",
-                "gzip",
-                "--compression-level",
-                "9",
+                "--compression",
+                "gzip:9",
                 "--dry-run",
                 "/tmp/test",
             ],
@@ -268,9 +260,9 @@ class TestCompressionCLI:
         call_args = mock_dry_run_instance.execute_dry_run.call_args
         benchmark_config = call_args[0][0]  # First positional argument
 
-        # Verify compression settings in dry run (compression enabled by default now)
+        # Verify compression settings in dry run.
         assert isinstance(benchmark_config, BenchmarkConfig)
-        assert benchmark_config.compress_data is True  # Should be True by default now
+        assert benchmark_config.compress_data is True
         assert benchmark_config.compression_type == "gzip"
         assert benchmark_config.compression_level == 9
 

@@ -37,6 +37,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
         UnifiedTuningConfiguration,
@@ -359,9 +361,9 @@ class AthenaSparkAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdapte
             ConfigurationError: If session fails or times out.
         """
         client = self._get_athena_client()
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             response = client.get_session_status(SessionId=self._session_id)
             state = response["Status"]["State"]
 
@@ -461,9 +463,9 @@ result.show(100, truncate=False)
         """
         client = self._get_athena_client()
         timeout = timeout_seconds or self.timeout_minutes * 60
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout:
+        while elapsed_seconds(start_time) < timeout:
             response = client.get_calculation_execution_status(CalculationExecutionId=calculation_id)
             state = response["Status"]["State"]
 
@@ -608,11 +610,11 @@ result.show(100, truncate=False)
         Returns:
             Query results as list of dicts.
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         calculation_id, state = self._submit_calculation(query, code_type="SQL", wait_for_completion=True)
 
-        elapsed = time.time() - start_time
+        elapsed = elapsed_seconds(start_time)
         self._query_count += 1
         self._total_execution_time_seconds += elapsed
 

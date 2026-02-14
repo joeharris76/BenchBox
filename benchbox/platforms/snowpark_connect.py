@@ -41,9 +41,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -396,11 +397,11 @@ class SnowparkConnectAdapter(SparkTuningMixin, PlatformAdapter):
         if self._session is None:
             raise ConfigurationError("No active session. Call create_connection() first.")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             result = self._session.sql(query).collect()
-            elapsed = time.time() - start_time
+            elapsed = elapsed_seconds(start_time)
 
             self._query_count += 1
             self._total_execution_time_seconds += elapsed
@@ -442,11 +443,11 @@ class SnowparkConnectAdapter(SparkTuningMixin, PlatformAdapter):
         if self._session is None:
             raise ConfigurationError("No active session. Call create_connection() first.")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             result = df_operation.collect()
-            elapsed = time.time() - start_time
+            elapsed = elapsed_seconds(start_time)
 
             self._query_count += 1
             self._total_execution_time_seconds += elapsed

@@ -232,7 +232,7 @@ class TestReadPrimitivesBenchmarkExtended:
 
         with patch.object(primitives_benchmark, "execute_query") as mock_execute:
             mock_execute.return_value = [("result1",), ("result2",), ("result3",)]
-            with patch("time.time") as mock_time:
+            with patch("time.perf_counter") as mock_time:
                 mock_time.side_effect = [0.0, 0.5, 1.0, 1.3]  # Two iterations
 
                 result = primitives_benchmark.run_benchmark(

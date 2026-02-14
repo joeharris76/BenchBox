@@ -146,8 +146,8 @@ class TestDuckDBPlanCapture:
             # Core results should be the same
             assert result_with["status"] == result_without["status"]
             assert result_with["rows_returned"] == result_without["rows_returned"]
-            assert result_with["execution_time"] >= 0
-            assert result_without["execution_time"] >= 0
+            assert result_with["execution_time_seconds"] >= 0
+            assert result_without["execution_time_seconds"] >= 0
 
         finally:
             adapter_with_capture.close_connection(conn_with)

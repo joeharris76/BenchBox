@@ -261,6 +261,10 @@ class TPCDSDataGenerator(
                 print("🔄 Force regeneration requested")
             print("   Generating TPC-DS data...")
 
+        removed_stale = self._prune_stale_table_artifacts(target_dir)
+        if removed_stale and self.verbose:
+            print(f"🧹 Removed {len(removed_stale)} stale TPC-DS table artifacts before regeneration")
+
         sample_dir = self._get_sample_data_dir()
         if sample_dir is not None:
             if self.verbose:

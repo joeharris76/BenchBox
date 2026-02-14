@@ -26,7 +26,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
@@ -43,6 +42,7 @@ from benchbox.core.dataframe.tuning import DataFrameTuningConfiguration
 from benchbox.platforms.dataframe.benchmark_mixin import BenchmarkExecutionMixin
 from benchbox.platforms.dataframe.tuning_mixin import TuningConfigurableMixin
 from benchbox.platforms.dataframe.unified_frame import UnifiedExpr, UnifiedLazyFrame, UnifiedWhen
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.file_format import detect_data_format
 
 if TYPE_CHECKING:
@@ -125,6 +125,13 @@ class ExpressionFamilyContext(DataFrameContextImpl[DF], Generic[DF, Expr]):
         # Track if this is a string literal for PySpark concat detection
         is_string = isinstance(value, str)
         return UnifiedExpr(self._adapter.lit(value), _is_string_literal=is_string)
+
+    def element(self) -> UnifiedExpr:
+        """Create a list element expression for use inside list.eval().
+
+        Delegates to the adapter's element() method.
+        """
+        return UnifiedExpr(self._adapter.element())
 
     def date_sub(self, column: Expr, days: int) -> Expr:
         """Subtract days from a date column.
@@ -239,6 +246,51 @@ class ExpressionFamilyContext(DataFrameContextImpl[DF], Generic[DF, Expr]):
         """Delegate window max to the adapter."""
         return self._adapter.window_max(column, partition_by)
 
+    def window_lag(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> Expr:
+        """Delegate window lag to the adapter."""
+        return self._adapter.window_lag(column, offset, partition_by, order_by)
+
+    def window_lead(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> Expr:
+        """Delegate window lead to the adapter."""
+        return self._adapter.window_lead(column, offset, partition_by, order_by)
+
+    def window_ntile(
+        self,
+        n: int,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> Expr:
+        """Delegate window ntile to the adapter."""
+        return self._adapter.window_ntile(n, order_by, partition_by)
+
+    def window_percent_rank(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> Expr:
+        """Delegate window percent_rank to the adapter."""
+        return self._adapter.window_percent_rank(order_by, partition_by)
+
+    def window_cume_dist(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> Expr:
+        """Delegate window cume_dist to the adapter."""
+        return self._adapter.window_cume_dist(order_by, partition_by)
+
     def union_all(self, *dataframes: LazyDF) -> LazyDF:
         """Delegate union_all to the adapter."""
         return cast(LazyDF, self._adapter.union_all(*dataframes))
@@ -303,6 +355,90 @@ class ExpressionFamilyContext(DataFrameContextImpl[DF], Generic[DF, Expr]):
         # Use adapter's concat_dataframes method
         result = self._adapter.concat_dataframes(native_dfs)
         return UnifiedLazyFrame(result, self._adapter)
+
+    def struct(self, *columns: Any) -> UnifiedExpr:
+        """Create a struct expression from multiple columns.
+
+        Combines multiple columns into a single struct/row value.
+
+        Args:
+            *columns: Column expressions (may be UnifiedExpr or column names)
+
+        Returns:
+            UnifiedExpr wrapping a struct expression
+        """
+        platform = self._adapter.platform_name
+
+        # Unwrap UnifiedExpr objects to native expressions
+        native_cols = []
+        for c in columns:
+            if isinstance(c, UnifiedExpr):
+                native_cols.append(c._expr)
+            elif isinstance(c, str):
+                native_cols.append(self._adapter.col(c))
+            else:
+                native_cols.append(c)
+
+        if platform == "PySpark":
+            from pyspark.sql import functions as F  # noqa: N812
+
+            return UnifiedExpr(F.struct(*native_cols))
+
+        if platform == "DataFusion":
+            from datafusion import functions as df_f
+
+            # Use named_struct to preserve field names from aliases
+            # df_f.struct() creates generic c0, c1 field names
+            name_pairs = []
+            for c in native_cols:
+                field_name = c.schema_name()
+                # Strip the alias wrapper to get the underlying expression
+                if c.variant_name() == "Alias":
+                    inner = c.rex_call_operands()[0]
+                    name_pairs.append((field_name, inner))
+                else:
+                    name_pairs.append((field_name, c))
+            return UnifiedExpr(df_f.named_struct(name_pairs))
+
+        import polars as pl
+
+        return UnifiedExpr(pl.struct(*native_cols))
+
+    def map_from_entries(self, column: Any) -> UnifiedExpr:
+        """Create a map from a list of key-value struct entries.
+
+        Converts a list of {key, value} structs into a map/dict.
+
+        Note: Polars doesn't have a native Map dtype, so this raises
+        NotImplementedError on Polars.
+
+        Args:
+            column: Column name or expression containing list of structs
+
+        Returns:
+            UnifiedExpr wrapping a map expression
+        """
+        platform = self._adapter.platform_name
+
+        # Unwrap to native expression
+        if isinstance(column, UnifiedExpr):
+            native_col = column._expr
+        elif isinstance(column, str):
+            native_col = self._adapter.col(column)
+        else:
+            native_col = column
+
+        if platform == "PySpark":
+            from pyspark.sql import functions as F  # noqa: N812
+
+            return UnifiedExpr(F.map_from_entries(native_col))
+
+        if platform == "DataFusion":
+            from datafusion import functions as df_f
+
+            return UnifiedExpr(df_f.map_from_entries(native_col))
+
+        raise NotImplementedError("map_from_entries not supported on Polars (no native Map dtype)")
 
     def scalar(self, df: LazyDF, column: str | None = None) -> Any:
         """Extract a single scalar value from a DataFrame.
@@ -718,6 +854,13 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
             Platform-specific literal expression
         """
 
+    def element(self) -> Expr:
+        """Create a list element expression for use inside list.eval().
+
+        Override in subclasses that support list.eval() (e.g., Polars).
+        """
+        raise NotImplementedError(f"element() not supported on {self.platform_name}")
+
     @abstractmethod
     def date_sub(self, column: Expr, days: int) -> Expr:
         """Subtract days from a date column.
@@ -937,6 +1080,51 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
     ) -> Expr:
         """Create a MAX() OVER expression for the expression family."""
 
+    def window_lag(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> Expr:
+        """Create a LAG() window function expression."""
+        raise NotImplementedError(f"{type(self).__name__} does not implement window_lag")
+
+    def window_lead(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> Expr:
+        """Create a LEAD() window function expression."""
+        raise NotImplementedError(f"{type(self).__name__} does not implement window_lead")
+
+    def window_ntile(
+        self,
+        n: int,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> Expr:
+        """Create a NTILE() window function expression."""
+        raise NotImplementedError(f"{type(self).__name__} does not implement window_ntile")
+
+    def window_percent_rank(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> Expr:
+        """Create a PERCENT_RANK() window function expression."""
+        raise NotImplementedError(f"{type(self).__name__} does not implement window_percent_rank")
+
+    def window_cume_dist(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> Expr:
+        """Create a CUME_DIST() window function expression."""
+        raise NotImplementedError(f"{type(self).__name__} does not implement window_cume_dist")
+
     # =========================================================================
     # Union Helpers
     # =========================================================================
@@ -980,6 +1168,7 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
         table_name: str,
         file_paths: list[Path],
         column_names: list[str] | None = None,
+        delimiter: str | None = None,
     ) -> int:
         """Load a table from data files.
 
@@ -991,6 +1180,7 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
             table_name: Name for the table
             file_paths: List of file paths to load
             column_names: Optional column names for headerless files
+            delimiter: Optional CSV delimiter override (e.g. "|" for pipe-delimited CSV)
 
         Returns:
             Number of rows loaded
@@ -1007,12 +1197,12 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
         if format_type == "parquet":
             df = self._load_parquet_files(file_paths)
         else:
-            # CSV or TBL
-            delimiter = "|" if format_type == "tbl" else ","
-            has_header = format_type == "csv"
+            # CSV or TBL — use explicit delimiter if provided, else infer from format
+            effective_delimiter = delimiter or ("|" if format_type == "tbl" else ",")
+            has_header = format_type == "csv" and delimiter is None
             df = self._load_csv_files(
                 file_paths,
-                delimiter=delimiter,
+                delimiter=effective_delimiter,
                 has_header=has_header,
                 column_names=column_names,
             )
@@ -1104,7 +1294,7 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
         qid = query_id or query.query_id
         self._log_verbose(f"Executing query {qid}: {query.query_name}")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Get the expression implementation
@@ -1129,27 +1319,27 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
             # Get first row if available
             first_row = self._get_first_row(result_df)
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             self._log_verbose(f"Query {qid} completed in {execution_time:.3f}s, returned {row_count} rows")
 
             return {
                 "query_id": qid,
                 "status": "SUCCESS",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": row_count,
                 "first_row": first_row,
             }
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             error_msg = str(e)
             logger.error(f"Query {qid} failed: {error_msg}")
 
             return {
                 "query_id": qid,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "error": error_msg,
             }
 
@@ -1195,7 +1385,7 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
 
         # Create profile context
         profile_ctx = QueryProfileContext(qid, self.platform_name)
-        profile_ctx._start_time = time.perf_counter()
+        profile_ctx._start_time = mono_time()
 
         # Start memory tracking if enabled
         memory_tracker: MemoryTracker | None = None

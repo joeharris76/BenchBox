@@ -28,7 +28,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from pathlib import Path
@@ -45,6 +44,7 @@ from benchbox.core.dataframe.tuning import DataFrameTuningConfiguration
 from benchbox.platforms.dataframe.benchmark_mixin import BenchmarkExecutionMixin
 from benchbox.platforms.dataframe.tuning_mixin import TuningConfigurableMixin
 from benchbox.platforms.dataframe.unified_pandas_frame import UnifiedPandasFrame
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.file_format import detect_data_format
 
 if TYPE_CHECKING:
@@ -1043,7 +1043,7 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
         qid = query_id or query.query_id
         self._log_verbose(f"Executing query {qid}: {query.query_name}")
 
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Get the pandas implementation
@@ -1064,27 +1064,27 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
             # Get first row if available
             first_row = self._get_first_row(result_df)
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             self._log_verbose(f"Query {qid} completed in {execution_time:.3f}s, returned {row_count} rows")
 
             return {
                 "query_id": qid,
                 "status": "SUCCESS",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": row_count,
                 "first_row": first_row,
             }
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             error_msg = str(e)
             logger.error(f"Query {qid} failed: {error_msg}")
 
             return {
                 "query_id": qid,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "error": error_msg,
             }
 
@@ -1129,7 +1129,7 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
 
         # Create profile context
         profile_ctx = QueryProfileContext(qid, self.platform_name)
-        profile_ctx._start_time = time.perf_counter()
+        profile_ctx._start_time = mono_time()
 
         # Start memory tracking if enabled
         memory_tracker: MemoryTracker | None = None
@@ -1183,7 +1183,7 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
             result_dict = {
                 "query_id": qid,
                 "status": "SUCCESS",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": row_count,
                 "first_row": first_row,
             }
@@ -1204,7 +1204,7 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
             result_dict = {
                 "query_id": qid,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "error": error_msg,
             }
 

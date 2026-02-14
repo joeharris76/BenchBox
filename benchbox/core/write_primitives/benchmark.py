@@ -9,6 +9,7 @@ This implementation is derived from TPC Benchmark™ H (TPC-H) - Copyright © Tr
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,10 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 if TYPE_CHECKING:
     from cloudpathlib import CloudPath
 
+    from benchbox.core.write_primitives.dataframe_operations import (
+        DataFrameWriteCapabilities,
+        DataFrameWriteOperationsManager,
+    )
     from benchbox.utils.cloud_storage import DatabricksPath
 
 from benchbox.base import BaseBenchmark
@@ -24,7 +29,13 @@ from benchbox.core.connection import DatabaseConnection
 from benchbox.core.operations import OperationExecutor
 from benchbox.core.write_primitives.generator import WritePrimitivesDataGenerator
 from benchbox.core.write_primitives.operations import WriteOperationsManager
-from benchbox.core.write_primitives.schema import STAGING_TABLES, get_all_staging_tables_sql, get_create_table_sql
+from benchbox.core.write_primitives.schema import (
+    STAGING_TABLES,
+    TABLES,
+    get_all_staging_tables_sql,
+    get_create_table_sql,
+)
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.cloud_storage import create_path_handler
 from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
 
@@ -59,6 +70,7 @@ class OperationResult:
     validation_results: list[dict[str, Any]]
     cleanup_duration_ms: float
     cleanup_success: bool
+    status: str = "SUCCESS"
     error: Optional[str] = None
     cleanup_warning: Optional[str] = None
 
@@ -205,7 +217,9 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         else:
             self.log_verbose("✅ Bulk load files already exist")
 
-    def _acquire_setup_lock(self, connection: DatabaseConnection, timeout_seconds: int = 300) -> bool:
+    def _acquire_setup_lock(
+        self, connection: DatabaseConnection, timeout_seconds: int = 300, dialect: str = "standard"
+    ) -> bool:
         """Acquire an exclusive lock for staging table setup to prevent concurrent populations.
 
         Uses a dedicated lock table to prevent multiple processes from simultaneously
@@ -214,6 +228,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         Args:
             connection: Database connection
             timeout_seconds: Maximum seconds to wait for lock (default: 300)
+            dialect: SQL dialect (e.g. 'datafusion', 'standard')
 
         Returns:
             True if lock acquired, False if timeout
@@ -222,7 +237,10 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
             Caller must call _release_setup_lock() when done, preferably in a finally block.
             Lock is automatically released on connection close/crash.
         """
-        import time
+        # DataFusion does not support PRIMARY KEY constraints in CREATE TABLE.
+        # Skip SQL-table lock there; setup runs on a single benchmark connection.
+        if dialect == "datafusion":
+            return True
 
         # Create lock table if it doesn't exist (atomic operation)
         try:
@@ -239,9 +257,9 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
 
         # Try to acquire lock with timeout
         lock_name = "staging_table_setup"
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             try:
                 # Attempt to insert lock row (fails if already exists)
                 import os
@@ -256,7 +274,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
                     f"INSERT INTO write_primitives_setup_lock (lock_name, holder_info) "
                     f"VALUES ('{escaped_lock_name}', '{escaped_holder_info}')"
                 )
-                self.log_verbose(f"Acquired setup lock (waited {time.time() - start_time:.1f}s)")
+                self.log_verbose(f"Acquired setup lock (waited {elapsed_seconds(start_time):.1f}s)")
                 return True
             except Exception as e:
                 error_msg = str(e).lower()
@@ -282,12 +300,16 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
 
         return False
 
-    def _release_setup_lock(self, connection: DatabaseConnection) -> None:
+    def _release_setup_lock(self, connection: DatabaseConnection, dialect: str = "standard") -> None:
         """Release the staging table setup lock.
 
         Args:
             connection: Database connection
+            dialect: SQL dialect (e.g. 'datafusion', 'standard')
         """
+        if dialect == "datafusion":
+            return
+
         try:
             lock_name = "staging_table_setup"
             # Escape lock name for DELETE query
@@ -319,8 +341,6 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         """
         # Validate identifier contains only safe characters
         # Allow: alphanumeric, underscore (standard SQL identifier characters)
-        import re
-
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", identifier):
             raise ValueError(
                 f"Invalid SQL identifier: {identifier}. "
@@ -332,6 +352,37 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
 
         # Return quoted identifier
         return f'"{escaped}"'
+
+    def _get_effective_write_sql(
+        self,
+        operation: Any,
+        platform_key: str | None = None,
+        sql_override: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        """Resolve effective write SQL (including platform overrides) or return skip reason.
+
+        Args:
+            operation: WriteOperation with write_sql and platform_overrides
+            platform_key: Platform dialect key (e.g. 'datafusion', 'duckdb') passed by adapter
+            sql_override: Pre-processed SQL from adapter (e.g. bulk_load rewrite)
+
+        Returns:
+            Tuple of (effective_sql, skip_reason). If skip_reason is not None,
+            the operation should be skipped.
+        """
+        # Adapter-preprocessed SQL takes priority
+        if sql_override is not None:
+            return sql_override, None
+
+        effective_sql = operation.write_sql
+
+        if platform_key and operation.platform_overrides and platform_key in operation.platform_overrides:
+            override = operation.platform_overrides[platform_key]
+            if override is None:
+                return None, f"Operation '{operation.id}' is unsupported on platform '{platform_key}'."
+            effective_sql = override
+
+        return effective_sql, None
 
     def _table_exists(self, connection: DatabaseConnection, table_name: str) -> bool:
         """Check if a table exists in the database.
@@ -383,26 +434,118 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
                 self.log_verbose(f"Unexpected error checking table '{table_name}': {type(e).__name__}: {e}")
                 return False
 
-    def _populate_staging_table(self, connection: DatabaseConnection, staging_table: str, source_table: str) -> None:
-        """Populate staging table from TPC-H source table.
+    def _get_population_sql(self, table_name: str, source_table: str) -> str:
+        """Get the INSERT SQL to populate a staging table from its source.
+
+        Uses table-specific logic for subset/projection population.
+
+        Args:
+            table_name: Staging table name
+            source_table: Source TPC-H table name
+
+        Returns:
+            SQL INSERT statement
+        """
+        quoted_table = self._quote_identifier(table_name)
+        quoted_source = self._quote_identifier(source_table)
+
+        if table_name == "merge_ops_target":
+            # Take first 50% of orders for merge target
+            return (
+                f"INSERT INTO {quoted_table} SELECT * FROM {quoted_source} "
+                f"WHERE o_orderkey <= (SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM {quoted_source})"
+            )
+        elif table_name == "merge_ops_source":
+            # Take second 50% of orders for merge source
+            return (
+                f"INSERT INTO {quoted_table} SELECT * FROM {quoted_source} "
+                f"WHERE o_orderkey > (SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM {quoted_source})"
+            )
+        elif table_name == "merge_ops_lineitem_target":
+            # Take first 50% of lineitems
+            return (
+                f"INSERT INTO {quoted_table} SELECT * FROM {quoted_source} "
+                f"WHERE l_orderkey <= (SELECT CAST(MAX(l_orderkey) * 0.5 AS INTEGER) FROM {quoted_source})"
+            )
+        elif table_name == "ddl_truncate_target":
+            # Take all rows but only 3 columns for truncate testing
+            return f"INSERT INTO {quoted_table} SELECT o_orderkey, o_custkey, o_orderdate FROM {quoted_source}"
+        else:
+            # Full copy for other tables
+            return f"INSERT INTO {quoted_table} SELECT * FROM {quoted_source}"
+
+    def _populate_staging_tables(self, connection: DatabaseConnection, tables: dict[str, str]) -> dict[str, int]:
+        """Populate staging tables from source tables.
 
         Args:
             connection: Database connection
-            staging_table: Name of staging table to populate
-            source_table: Name of source TPC-H table
+            tables: Mapping of staging_table_name -> source_table_name
+
+        Returns:
+            Mapping of table_name -> row_count
         """
-        self.log_verbose(f"Populating {staging_table} from {source_table}...")
+        status: dict[str, int] = {}
 
-        # Use INSERT...SELECT to copy data
-        populate_sql = f"""
-        INSERT INTO {staging_table}
-        SELECT * FROM {source_table}
-        """
+        for table_name, source_table in tables.items():
+            quoted_table = self._quote_identifier(table_name)
 
-        connection.execute(populate_sql)
-        self.log_verbose(f"{staging_table} populated successfully")
+            # Check if table needs population
+            try:
+                result = connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
+                current_count = result[0] if result else 0
+            except Exception:
+                current_count = 0
 
-    def setup(self, connection: DatabaseConnection, force: bool = False) -> dict[str, Any]:
+            if current_count == 0:
+                # Validate source table exists and has data before copying
+                try:
+                    quoted_source = self._quote_identifier(source_table)
+                    source_result = connection.execute(f"SELECT COUNT(*) FROM {quoted_source}").fetchone()
+                    source_count = source_result[0] if source_result else 0
+                except Exception as e:
+                    # Source table doesn't exist - skip population for optional tables like supplier
+                    if table_name == "delete_ops_supplier":
+                        self.log_verbose(
+                            f"Skipping {table_name} population - source table '{source_table}' does not exist. "
+                            f"GDPR deletion operations will not be available."
+                        )
+                        status[table_name] = 0
+                        continue
+                    else:
+                        raise RuntimeError(
+                            f"Cannot validate source table '{source_table}' before populating '{table_name}': {e}"
+                        )
+
+                if source_count == 0:
+                    # Required tables (orders, lineitem) must have data
+                    if table_name in ["update_ops_orders", "delete_ops_orders", "delete_ops_lineitem"]:
+                        raise RuntimeError(
+                            f"Source table '{source_table}' is empty (0 rows). "
+                            f"Cannot populate staging table '{table_name}'. "
+                            f"Please ensure TPC-H data is loaded before running setup()."
+                        )
+                    else:
+                        # Optional tables can be skipped if source is empty
+                        self.log_verbose(f"Skipping {table_name} population - source table '{source_table}' is empty.")
+                        status[table_name] = 0
+                        continue
+
+                # Table is empty - populate it
+                self.log_verbose(f"Populating {table_name} from {source_table} ({source_count} rows)...")
+                populate_sql = self._get_population_sql(table_name, source_table)
+                connection.execute(populate_sql)
+
+                result = connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
+                status[table_name] = result[0] if result else 0
+                self.log_verbose(f"Populated {table_name} with {status[table_name]} rows")
+            else:
+                # Table already has data
+                status[table_name] = current_count
+                self.log_verbose(f"Table {table_name} already populated ({current_count} rows)")
+
+        return status
+
+    def setup(self, connection: DatabaseConnection, force: bool = False, dialect: str = "standard") -> dict[str, Any]:
         """Setup benchmark for execution.
 
         Creates and populates staging tables from TPC-H base tables.
@@ -413,6 +556,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         Args:
             connection: Database connection
             force: If True, drop existing staging tables first
+            dialect: SQL dialect (e.g. 'datafusion', 'standard')
 
         Returns:
             Dictionary with setup status and details
@@ -436,7 +580,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
 
         # Acquire exclusive lock to prevent concurrent setup operations
         # This eliminates race conditions during staging table population
-        if not self._acquire_setup_lock(connection, timeout_seconds=300):
+        if not self._acquire_setup_lock(connection, timeout_seconds=300, dialect=dialect):
             raise RuntimeError(
                 "Could not acquire setup lock after 5 minutes. "
                 "Another process may be running setup, or a previous setup crashed. "
@@ -448,137 +592,48 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
             if force:
                 for table_name in STAGING_TABLES:
                     try:
-                        connection.execute(f"DROP TABLE IF EXISTS {table_name}")
+                        quoted = self._quote_identifier(table_name)
+                        connection.execute(f"DROP TABLE IF EXISTS {quoted}")
                         self.log_verbose(f"Dropped existing {table_name} (force mode)")
                     except Exception as e:
                         self.log_verbose(f"Warning: Could not drop {table_name}: {e}")
 
-            # Create staging tables and populate from TPC-H base tables
-            # Lock is held - no concurrent setup can interfere
+            # Create staging tables
             created_tables = []
-            status = {}
-
-            for table_name, table_def in STAGING_TABLES.items():
-                # Check if table exists before creating
+            for table_name in STAGING_TABLES:
                 table_existed = self._table_exists(connection, table_name)
-
-                # Create table if not exists (atomic operation)
-                create_sql = get_create_table_sql(table_name, if_not_exists=True)
+                create_sql = get_create_table_sql(table_name, dialect=dialect, if_not_exists=True)
                 try:
                     connection.execute(create_sql)
-
-                    # Track newly created tables (didn't exist before)
                     if not table_existed:
                         created_tables.append(table_name)
-                        self.log_verbose(f"✅ Created {table_name}")
+                        self.log_verbose(f"Created {table_name}")
                     else:
                         self.log_verbose(f"Table {table_name} already exists")
                 except Exception as e:
                     raise RuntimeError(f"Failed to create {table_name}: {e}")
 
-                # Populate staging tables that need data from TPC-H base tables
-                # Map staging tables to their source tables
-                table_population_map = {
-                    "update_ops_orders": "orders",
-                    "delete_ops_orders": "orders",
-                    "delete_ops_lineitem": "lineitem",
-                    "delete_ops_supplier": "supplier",
-                    "merge_ops_target": "orders",
-                    "merge_ops_source": "orders",
-                    "merge_ops_lineitem_target": "lineitem",
-                    "ddl_truncate_target": "orders",  # Just needs some data for TRUNCATE testing
-                }
+            # Populate staging tables from TPC-H base tables
+            table_population_map = {
+                "update_ops_orders": "orders",
+                "delete_ops_orders": "orders",
+                "delete_ops_lineitem": "lineitem",
+                "delete_ops_supplier": "supplier",
+                "merge_ops_target": "orders",
+                "merge_ops_source": "orders",
+                "merge_ops_lineitem_target": "lineitem",
+                "ddl_truncate_target": "orders",
+            }
 
-                if table_name in table_population_map:
-                    source_table = table_population_map[table_name]
+            population_status = self._populate_staging_tables(connection, table_population_map)
 
-                    # Check if table needs population
+            # Count rows in non-populated staging tables
+            status: dict[str, int] = dict(population_status)
+            for table_name in STAGING_TABLES:
+                if table_name not in status:
                     try:
-                        quoted_table = self._quote_identifier(table_name)
-                        result = connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
-                        current_count = result[0] if result else 0
-                    except Exception:
-                        current_count = 0
-
-                    if current_count == 0:
-                        # Validate source table exists and has data before copying
-                        try:
-                            quoted_source = self._quote_identifier(source_table)
-                            source_result = connection.execute(f"SELECT COUNT(*) FROM {quoted_source}").fetchone()
-                            source_count = source_result[0] if source_result else 0
-                        except Exception as e:
-                            # Source table doesn't exist - skip population for optional tables like supplier
-                            if table_name == "delete_ops_supplier":
-                                self.log_verbose(
-                                    f"Skipping {table_name} population - source table '{source_table}' does not exist. "
-                                    f"GDPR deletion operations will not be available."
-                                )
-                                status[table_name] = 0
-                                continue
-                            else:
-                                raise RuntimeError(
-                                    f"Cannot validate source table '{source_table}' before populating '{table_name}': {e}"
-                                )
-
-                        if source_count == 0:
-                            # Required tables (orders, lineitem) must have data
-                            if table_name in ["update_ops_orders", "delete_ops_orders", "delete_ops_lineitem"]:
-                                raise RuntimeError(
-                                    f"Source table '{source_table}' is empty (0 rows). "
-                                    f"Cannot populate staging table '{table_name}'. "
-                                    f"Please ensure TPC-H data is loaded before running setup()."
-                                )
-                            else:
-                                # Optional tables can be skipped if source is empty
-                                self.log_verbose(
-                                    f"Skipping {table_name} population - source table '{source_table}' is empty."
-                                )
-                                status[table_name] = 0
-                                continue
-
-                        # Table is empty - populate it (lock prevents concurrent population)
-                        self.log_verbose(f"Populating {table_name} from {source_table} ({source_count} rows)...")
-
-                        # For merge and ddl tables, only copy a subset of data
-                        # Use dynamic queries that work with any data size
-                        if table_name == "merge_ops_target":
-                            # Take first 50% of orders for merge target
-                            connection.execute(
-                                f"INSERT INTO {table_name} SELECT * FROM {source_table} "
-                                f"WHERE o_orderkey <= (SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM {source_table})"
-                            )
-                        elif table_name == "merge_ops_source":
-                            # Take second 50% of orders for merge source
-                            connection.execute(
-                                f"INSERT INTO {table_name} SELECT * FROM {source_table} "
-                                f"WHERE o_orderkey > (SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM {source_table})"
-                            )
-                        elif table_name == "merge_ops_lineitem_target":
-                            # Take first 50% of lineitems
-                            connection.execute(
-                                f"INSERT INTO {table_name} SELECT * FROM {source_table} "
-                                f"WHERE l_orderkey <= (SELECT CAST(MAX(l_orderkey) * 0.5 AS INTEGER) FROM {source_table})"
-                            )
-                        elif table_name == "ddl_truncate_target":
-                            # Take all rows but only 3 columns for truncate testing
-                            connection.execute(
-                                f"INSERT INTO {table_name} SELECT o_orderkey, o_custkey, o_orderdate FROM {source_table}"
-                            )
-                        else:
-                            # Full copy for other tables
-                            self._populate_staging_table(connection, table_name, source_table)
-
-                        result = connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
-                        status[table_name] = result[0] if result else 0
-                        self.log_verbose(f"✅ Populated {table_name} with {status[table_name]} rows")
-                    else:
-                        # Table already has data
-                        status[table_name] = current_count
-                        self.log_verbose(f"Table {table_name} already populated ({current_count} rows)")
-                else:
-                    # Other staging tables start empty - just count rows
-                    try:
-                        result = connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+                        quoted = self._quote_identifier(table_name)
+                        result = connection.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()
                         status[table_name] = result[0] if result else 0
                     except Exception:
                         status[table_name] = 0
@@ -592,7 +647,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
             }
         finally:
             # Always release lock, even if setup fails
-            self._release_setup_lock(connection)
+            self._release_setup_lock(connection, dialect=dialect)
 
     def teardown(self, connection: DatabaseConnection) -> None:
         """Clean up all staging tables.
@@ -604,7 +659,8 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
 
         for table_name in STAGING_TABLES:
             try:
-                connection.execute(f"DROP TABLE IF EXISTS {table_name}")
+                quoted = self._quote_identifier(table_name)
+                connection.execute(f"DROP TABLE IF EXISTS {quoted}")
                 self.log_verbose(f"Dropped {table_name}")
             except Exception as e:
                 self.log_verbose(f"Warning: Could not drop {table_name}: {e}")
@@ -657,8 +713,6 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         """
         self.log_verbose("Resetting Write Primitives staging tables...")
 
-        # Define tables to reset and their source tables
-        # Use the same dynamic population logic as setup()
         reset_map = {
             "update_ops_orders": "orders",
             "delete_ops_orders": "orders",
@@ -670,46 +724,16 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
             "ddl_truncate_target": "orders",
         }
 
-        for table_name, source_table in reset_map.items():
+        for table_name in reset_map:
             try:
-                # Truncate table
-                connection.execute(f"TRUNCATE TABLE {table_name}")
+                quoted = self._quote_identifier(table_name)
+                connection.execute(f"TRUNCATE TABLE {quoted}")
                 self.log_verbose(f"Truncated {table_name}")
-
-                # Repopulate with same logic as setup()
-                if table_name == "merge_ops_target":
-                    connection.execute(
-                        f"INSERT INTO {table_name} SELECT * FROM {source_table} "
-                        f"WHERE o_orderkey <= (SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM {source_table})"
-                    )
-                elif table_name == "merge_ops_source":
-                    connection.execute(
-                        f"INSERT INTO {table_name} SELECT * FROM {source_table} "
-                        f"WHERE o_orderkey > (SELECT CAST(MAX(o_orderkey) * 0.5 AS INTEGER) FROM {source_table})"
-                    )
-                elif table_name == "merge_ops_lineitem_target":
-                    connection.execute(
-                        f"INSERT INTO {table_name} SELECT * FROM {source_table} "
-                        f"WHERE l_orderkey <= (SELECT CAST(MAX(l_orderkey) * 0.5 AS INTEGER) FROM {source_table})"
-                    )
-                elif table_name == "ddl_truncate_target":
-                    connection.execute(
-                        f"INSERT INTO {table_name} SELECT o_orderkey, o_custkey, o_orderdate FROM {source_table}"
-                    )
-                elif table_name == "delete_ops_supplier":
-                    # Skip if supplier table doesn't exist
-                    try:
-                        self._populate_staging_table(connection, table_name, source_table)
-                    except Exception:
-                        self.log_verbose(f"Skipping {table_name} - supplier table not available")
-                else:
-                    # Full table copy
-                    self._populate_staging_table(connection, table_name, source_table)
-
-                self.log_verbose(f"Repopulated {table_name}")
             except Exception as e:
-                self.log_verbose(f"Warning: Could not reset {table_name}: {e}")
+                self.log_verbose(f"Warning: Could not truncate {table_name}: {e}")
 
+        # Repopulate all tables using the shared method
+        self._populate_staging_tables(connection, reset_map)
         self.log_verbose("Reset complete")
 
     def is_setup(self, connection: DatabaseConnection) -> bool:
@@ -735,7 +759,8 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
             ]
 
             for table_name in required_tables:
-                result = connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+                quoted = self._quote_identifier(table_name)
+                result = connection.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()
                 if not result or result[0] == 0:
                     return False
             return True
@@ -772,8 +797,6 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
 
             # Validate path doesn't contain other dangerous characters
             # Allow common path characters: alphanumeric, /, \, ., -, _, :, space
-            import re
-
             if re.search(r"[^\w\s/\\\.\-:]", file_path.replace("''", "'")):
                 # Contains unusual characters - log warning
                 self.log_verbose(f"Warning: File path contains unusual characters: {file_path}")
@@ -831,7 +854,34 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         Returns:
             Dictionary mapping table names to their schema definitions
         """
-        return STAGING_TABLES
+        normalized: dict[str, dict[str, Any]] = {}
+
+        for table_name, table_def in TABLES.items():
+            # Write Primitives staging tables are already dict-shaped.
+            if isinstance(table_def, dict) and "columns" in table_def:
+                normalized[table_name] = table_def
+                continue
+
+            # TPC-H base tables are Table objects from benchbox.core.tpch.schema.
+            if hasattr(table_def, "columns"):
+                columns = []
+                for col in getattr(table_def, "columns", []):
+                    col_type = col.get_sql_type() if hasattr(col, "get_sql_type") else "VARCHAR"
+                    columns.append(
+                        {
+                            "name": col.name,
+                            "type": col_type,
+                            "nullable": getattr(col, "nullable", False),
+                            "primary_key": getattr(col, "primary_key", False),
+                        }
+                    )
+
+                normalized[table_name] = {
+                    "name": getattr(table_def, "name", table_name),
+                    "columns": columns,
+                }
+
+        return normalized
 
     def get_create_tables_sql(self, dialect: str = "standard", tuning_config=None) -> str:
         """Get CREATE TABLE SQL for all required tables.
@@ -943,7 +993,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         self,
         operation_id: str,
         connection: DatabaseConnection,
-        use_transaction: bool = False,
+        **kwargs: Any,
     ) -> OperationResult:
         """Execute a write operation and validate results.
 
@@ -953,7 +1003,9 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         Args:
             operation_id: ID of operation to execute
             connection: Database connection
-            use_transaction: Deprecated parameter (kept for backward compatibility, ignored)
+            **kwargs: Optional keyword arguments:
+                platform_key: Platform dialect key (e.g. 'datafusion', 'duckdb')
+                sql_override: Pre-processed SQL from adapter preprocessing
 
         Returns:
             OperationResult with execution metrics
@@ -968,6 +1020,9 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         if not hasattr(connection, "execute"):
             raise ValueError(f"Invalid connection type: {type(connection).__name__}")
 
+        platform_key = kwargs.get("platform_key")
+        sql_override = kwargs.get("sql_override")
+
         # Get operation to check if it requires setup
         operation = self.operations_manager.get_operation(operation_id)
 
@@ -975,15 +1030,37 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         if operation.requires_setup and not self.is_setup(connection):
             self.log_verbose("Staging tables not initialized - running setup() automatically...")
             try:
-                self.setup(connection, force=False)
+                dialect = platform_key if platform_key else "standard"
+                self.setup(connection, force=False, dialect=dialect)
                 self.log_verbose("Setup completed successfully")
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize staging tables before executing '{operation_id}': {e}") from e
 
         try:
+            effective_sql, skip_reason = self._get_effective_write_sql(
+                operation, platform_key=platform_key, sql_override=sql_override
+            )
+            if skip_reason is not None:
+                self.log_verbose(f"Skipping operation {operation_id}: {skip_reason}")
+                return OperationResult(
+                    operation_id=operation_id,
+                    success=True,
+                    write_duration_ms=0.0,
+                    rows_affected=0,
+                    validation_duration_ms=0.0,
+                    validation_passed=True,
+                    validation_results=[],
+                    cleanup_duration_ms=0.0,
+                    cleanup_success=True,
+                    status="SKIPPED",
+                    error=skip_reason,
+                )
+
             # Execute write SQL (with placeholder replacement)
             self.log_verbose(f"Executing write operation: {operation_id}")
-            write_sql = self._replace_placeholders(operation.write_sql)
+            if effective_sql is None:
+                raise RuntimeError(f"No executable SQL resolved for operation '{operation_id}'")
+            write_sql = self._replace_placeholders(effective_sql)
             write_start = time.perf_counter()
             write_result = connection.execute(write_sql)
             write_duration_ms = (time.perf_counter() - write_start) * 1000
@@ -1071,6 +1148,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
                 validation_results=validation_results,
                 cleanup_duration_ms=cleanup_duration_ms,
                 cleanup_success=cleanup_success,
+                status="SUCCESS",
                 cleanup_warning=cleanup_warning,
             )
 
@@ -1088,6 +1166,7 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
                 validation_results=[],
                 cleanup_duration_ms=0.0,
                 cleanup_success=False,
+                status="FAILED",
                 error=error_msg,
                 cleanup_warning="Write operation failed during execution. Run reset() to ensure clean state.",
             )
@@ -1150,6 +1229,10 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
         """
         return True
 
+    def skip_dataframe_data_loading(self) -> bool:
+        """Write Primitives DataFrame execution manages SQL-parity loading internally."""
+        return True
+
     def get_dataframe_operations(self, platform_name: str) -> "DataFrameWriteOperationsManager | None":
         """Get DataFrame write operations manager for a platform.
 
@@ -1191,15 +1274,118 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
             return None
         return manager.get_capabilities()
 
+    def execute_dataframe_workload(
+        self,
+        *,
+        ctx: Any,
+        adapter: Any,
+        benchmark_config: Any,
+        query_filter: set[str] | None = None,
+        monitor: Any | None = None,
+        run_options: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Execute Write Primitives with SQL-equivalent behavior in DataFrame mode.
 
-# Import for type hints
-from typing import TYPE_CHECKING
+        This path intentionally routes DataFrame-mode execution through the same
+        SQL operation catalog and benchmark logic used by SQL adapters so each
+        operation ID performs equivalent work.
+        """
+        _ = (ctx, adapter, monitor, run_options)
+        config_options = getattr(benchmark_config, "options", {}) or {}
+        warmup_iterations = int(config_options.get("power_warmup_iterations", 1) or 1)
+        measurement_iterations = int(config_options.get("power_iterations", 3) or 3)
 
-if TYPE_CHECKING:
-    from benchbox.core.write_primitives.dataframe_operations import (
-        DataFrameWriteCapabilities,
-        DataFrameWriteOperationsManager,
-    )
+        try:
+            results: list[dict[str, Any]] = []
+
+            # Keep iteration semantics aligned with SQL runners:
+            # warmup iteration index=0, measurement iterations index=1..N.
+            for _warmup_idx in range(max(warmup_iterations, 0)):
+                warmup_rows = self._execute_dataframe_sql_parity_workload(query_filter=query_filter)
+                for row in warmup_rows:
+                    warmup_row = dict(row)
+                    warmup_row["run_type"] = "warmup"
+                    warmup_row["iteration"] = 0
+                    warmup_row["stream_id"] = 0
+                    results.append(warmup_row)
+
+            for measurement_idx in range(1, measurement_iterations + 1):
+                measurement_rows = self._execute_dataframe_sql_parity_workload(query_filter=query_filter)
+                for row in measurement_rows:
+                    measurement_row = dict(row)
+                    measurement_row["run_type"] = "measurement"
+                    measurement_row["iteration"] = measurement_idx
+                    measurement_row["stream_id"] = 0
+                    results.append(measurement_row)
+
+            return results
+        except Exception as e:
+            return [
+                {
+                    "query_id": "WR_PARITY_EXECUTION",
+                    "status": "FAILED",
+                    "execution_time_seconds": 0.0,
+                    "rows_returned": 0,
+                    "error": f"DataFrame SQL-parity execution failed: {e}",
+                }
+            ]
+
+    def _execute_dataframe_sql_parity_workload(
+        self,
+        *,
+        query_filter: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run write primitive operations through DuckDB for SQL/dataframe parity."""
+        from benchbox.platforms.duckdb import DuckDBAdapter
+
+        data_dir = Path(self.output_dir)
+        parity_db_path = data_dir / "_write_primitives_df_parity.duckdb"
+
+        adapter = DuckDBAdapter(database_path=str(parity_db_path))
+        connection = adapter.create_connection(database_path=str(parity_db_path), force_recreate=True)
+        try:
+            adapter.create_schema(self, connection)
+            adapter.load_data(self, connection, data_dir)
+
+            results: list[dict[str, Any]] = []
+            for op_id in self._select_dataframe_operation_ids(query_filter=query_filter):
+                op_result = self.execute_operation(op_id, connection)
+                status = "SUCCESS" if op_result.success and op_result.validation_passed else "FAILED"
+                error = op_result.error
+                if status == "FAILED" and not error and not op_result.validation_passed:
+                    error = f"Validation failed for operation '{op_id}'"
+
+                results.append(
+                    {
+                        "query_id": op_id,
+                        "status": status,
+                        "execution_time_seconds": op_result.write_duration_ms / 1000.0,
+                        "rows_returned": op_result.rows_affected,
+                        **({"error": error} if error else {}),
+                    }
+                )
+            return results
+        finally:
+            try:
+                adapter.close_connection(connection)
+            finally:
+                try:
+                    parity_db_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def _select_dataframe_operation_ids(self, query_filter: set[str] | None = None) -> list[str]:
+        """Select operation IDs honoring DataFrame query filters."""
+        operation_ids = list(self.operations_manager.get_all_operations().keys())
+        if not query_filter:
+            return operation_ids
+
+        normalized_filter = {str(query_id).strip().upper() for query_id in query_filter}
+        return [
+            op_id
+            for op_id in operation_ids
+            if op_id.upper() in normalized_filter or f"Q{op_id}".upper() in normalized_filter
+        ]
 
 
 __all__ = ["WritePrimitivesBenchmark", "OperationResult"]

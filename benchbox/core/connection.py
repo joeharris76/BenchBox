@@ -77,7 +77,7 @@ class DatabaseConnection:
 
             raise ValueError("Connection object has neither 'execute' nor 'cursor' method")
         except Exception as e:
-            # Compose error message consistent with tests
+            # Compose a stable, diagnostic-rich error message.
             base = "Error executing query"
             if self.dialect:
                 base += f" (dialect: {self.dialect})"

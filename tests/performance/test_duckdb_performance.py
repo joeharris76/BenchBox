@@ -10,7 +10,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -90,53 +89,6 @@ def performance_config():
 @pytest.mark.duckdb
 class TestDuckDBQueryPerformance:
     """Test DuckDB query execution performance."""
-
-    @pytest.mark.skip(reason="Flaky: timing thresholds are system-dependent and fail under load")
-    def test_tpch_query_scaling(
-        self,
-        benchmark,
-        duckdb_with_extensions,
-        performance_config,
-        memory_monitor,
-        tmp_path,
-    ):
-        """Test how TPC-H queries scale with different data sizes."""
-        scale_factors = performance_config["scale_factors"]
-        results = {}
-
-        for scale_factor in scale_factors:
-            # Create benchmark instance
-            tpch = TPCH(
-                scale_factor=scale_factor,
-                output_dir=tmp_path / f"tpch_sf_{scale_factor}",
-                verbose=False,
-            )
-
-            # Mock data generation for testing
-            with patch.object(tpch, "generate_data") as mock_gen:
-                mock_gen.return_value = self._create_mock_data_files(tmp_path, scale_factor)
-
-                # Setup test tables
-                self._setup_tpch_tables(duckdb_with_extensions, scale_factor)
-
-                # Test simple select query
-                query = "SELECT COUNT(*) FROM lineitem"
-
-                memory_monitor.start()
-                # Use manual timing instead of benchmark fixture
-                start_time = time.time()
-                self._execute_query(duckdb_with_extensions, query)
-                end_time = time.time()
-                exec_time = end_time - start_time
-                memory_stats = memory_monitor.stop()
-
-                results[scale_factor] = {
-                    "execution_time": exec_time,
-                    "memory_stats": memory_stats,
-                }
-
-        # Verify scaling behavior
-        self._verify_scaling_behavior(results)
 
     def test_tpch_complex_query_performance(self, duckdb_with_extensions, tmp_path, memory_monitor):
         """Test performance of complex TPC-H queries."""
@@ -254,45 +206,6 @@ class TestDuckDBQueryPerformance:
             # Note: Memory threshold accounts for entire process memory (Python + DuckDB + test framework)
             assert exec_time < 5.0, f"TPC-DS query too slow: {exec_time}s"
             assert memory_stats["peak_mb"] < 2500, f"TPC-DS memory usage too high: {memory_stats['peak_mb']}MB"
-
-    @pytest.mark.skip(reason="Flaky: parallel timing thresholds are system-dependent and fail under load")
-    def test_parallel_query_execution(self, benchmark, duckdb_with_extensions, tmp_path, performance_config):
-        """Test parallel execution of multiple queries."""
-        # Setup test data
-        self._setup_tpch_tables(duckdb_with_extensions, 0.01)
-
-        # Test queries for parallel execution
-        queries = [
-            "SELECT COUNT(*) FROM lineitem",
-            "SELECT COUNT(*) FROM orders",
-            "SELECT COUNT(*) FROM customer",
-            "SELECT COUNT(*) FROM supplier",
-        ]
-
-        # Sequential execution
-        start_time = time.time()
-        sequential_results = []
-        for query in queries:
-            result = self._execute_query(duckdb_with_extensions, query)
-            sequential_results.append(result)
-        sequential_time = time.time() - start_time
-
-        # Parallel execution
-        def parallel_execution():
-            with ThreadPoolExecutor(max_workers=performance_config["max_concurrent_queries"]) as executor:
-                futures = [executor.submit(self._execute_query, duckdb_with_extensions, query) for query in queries]
-                return [future.result() for future in as_completed(futures)]
-
-        # Use manual timing instead of benchmark fixture
-        start_time = time.time()
-        parallel_execution()
-        end_time = time.time()
-        parallel_time = end_time - start_time
-
-        # Verify parallel execution is reasonable (with generous tolerance for mocked tests)
-        assert parallel_time < sequential_time * 3, (
-            f"Parallel execution too slow: {parallel_time}s vs {sequential_time}s"
-        )
 
     def test_query_cache_performance(self, duckdb_with_extensions, tmp_path):
         """Test query performance with and without caching."""
@@ -536,28 +449,6 @@ class TestDuckDBQueryPerformance:
                 )
         except Exception as e:
             print(f"Warning: Could not setup TPC-DS tables: {e}")
-
-    def _verify_scaling_behavior(self, results: dict[float, dict[str, Any]]):
-        """Verify that performance scales appropriately with data size."""
-        scale_factors = sorted(results.keys())
-
-        if len(scale_factors) < 2:
-            return
-
-        # Check that execution time increases with scale factor
-        for i in range(1, len(scale_factors)):
-            current_sf = scale_factors[i]
-            prev_sf = scale_factors[i - 1]
-
-            current_time = results[current_sf]["execution_time"]
-            prev_time = results[prev_sf]["execution_time"]
-
-            # Allow for some variance but expect general increase
-            max_expected_time = prev_time * (current_sf / prev_sf) * 2  # 2x tolerance
-
-            assert current_time < max_expected_time, (
-                f"Performance degradation too severe: {current_time}s vs expected max {max_expected_time}s"
-            )
 
 
 @pytest.mark.performance

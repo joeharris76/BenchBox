@@ -26,7 +26,7 @@ class TestGetTemplate:
         template = get_template("flagship")
         assert template.name == "flagship"
         assert "cost_scatter" in template.chart_types
-        assert "html" in template.formats
+        assert "ascii" in template.formats
 
     def test_head_to_head_template(self):
         template = get_template("head_to_head")
@@ -89,4 +89,4 @@ class TestChartTemplate:
             description="Test",
             chart_types=("performance_bar",),
         )
-        assert template.formats == ("html",)
+        assert template.formats == ("ascii",)

@@ -865,7 +865,7 @@ class BenchmarkValidator:
                 "failed_checks": report.failed_checks,
                 "warnings": report.warnings,
                 "success_rate": report.success_rate,
-                "execution_time": report.execution_time,
+                "execution_time_seconds": report.execution_time,
                 "validation_details": report.validation_details,
                 "errors": [
                     {

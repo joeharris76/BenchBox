@@ -108,8 +108,8 @@ def _normalize_query_result(qr: Any) -> dict[str, Any]:
         "query_id",
         "id",
         "status",
+        "execution_time_seconds",
         "execution_time_ms",
-        "execution_time",
         "rows_returned",
         "iteration",
         "stream_id",
@@ -119,6 +119,7 @@ def _normalize_query_result(qr: Any) -> dict[str, Any]:
         "error_type",
         "query_plan",
         "plan_fingerprint",
+        "dataframe_skip_summary",
     ):
         if hasattr(qr, attr):
             val = getattr(qr, attr)
@@ -243,11 +244,11 @@ def build_result_payload(result: BenchmarkResults) -> dict[str, Any]:
         query_id = normalize_query_id(raw_id)
         status = qr.get("status", "UNKNOWN")
 
-        # Get execution time in ms
+        # Get execution time in ms, preferring canonical seconds key.
         exec_time_ms = qr.get("execution_time_ms")
-        exec_time = qr.get("execution_time")
-        if exec_time_ms is None and exec_time is not None:
-            exec_time_ms = exec_time * 1000
+        exec_time_seconds = qr.get("execution_time_seconds")
+        if exec_time_ms is None and exec_time_seconds is not None:
+            exec_time_ms = float(exec_time_seconds) * 1000.0
 
         rows = qr.get("rows_returned") or qr.get("rows") or qr.get("result_count")
         iteration = int(qr.get("iteration", 1))

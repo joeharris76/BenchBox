@@ -237,6 +237,16 @@ class TPCDSOBTBenchmark(BaseBenchmark):
         # Convert int keys to str for consistency with other benchmarks
         return {str(k): v for k, v in self.query_manager.get_queries().items()}
 
+    def supports_dataframe_mode(self) -> bool:
+        """TPC-DS-OBT supports DataFrame execution mode."""
+        return True
+
+    def get_dataframe_queries(self) -> list[Any]:
+        """Get DataFrame query implementations for TPC-DS-OBT."""
+        from benchbox.core.tpcds_obt.dataframe_queries import get_dataframe_queries
+
+        return get_dataframe_queries()
+
     def execute_query(
         self,
         query_id: Union[int, str],

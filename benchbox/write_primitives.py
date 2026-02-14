@@ -255,18 +255,19 @@ class WritePrimitives(BaseBenchmark, OperationExecutor):
         """
         return self._impl.is_setup(connection)
 
-    def execute_operation(self, operation_id: str, connection: Any, use_transaction: bool = True) -> Any:
+    def execute_operation(self, operation_id: str, connection: Any, **kwargs: Any) -> Any:
         """Execute a write operation and validate results.
 
         Args:
             operation_id: ID of operation to execute
             connection: Database connection
-            use_transaction: If True, wrap in transaction and rollback after validation
+            **kwargs: Optional keyword arguments forwarded to implementation
+                (platform_key, sql_override, etc.)
 
         Returns:
             OperationResult with execution metrics
         """
-        return self._impl.execute_operation(operation_id, connection, use_transaction)
+        return self._impl.execute_operation(operation_id, connection, **kwargs)
 
     def run_benchmark(
         self,

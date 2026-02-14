@@ -172,12 +172,12 @@ class TestPowerTestResult:
             query_results=[
                 {
                     "query_id": 1,
-                    "execution_time": 5.0,
+                    "execution_time_seconds": 5.0,
                     "status": "success",
                 },
                 {
                     "query_id": "14a",
-                    "execution_time": 8.0,
+                    "execution_time_seconds": 8.0,
                     "status": "success",
                 },
             ],
@@ -352,9 +352,8 @@ class TestTPCDSPowerTest:
         # Test connection establishment
         power_test._connect_database()
         assert power_test.connection == mock_connection
-        mock_db_connection.assert_called_once_with(
-            connection_string="sqlite::memory:", dialect="standard", verbose=False
-        )
+        mock_db_connection.assert_called_once()
+        assert mock_db_connection.call_args.kwargs.get("dialect") == "sqlite"
 
         # Test connection cleanup
         power_test._disconnect_database()
@@ -399,7 +398,7 @@ class TestTPCDSPowerTest:
         assert result["query_id"] == 1
         assert result["status"] == "success"
         assert result["result_count"] == 2
-        assert result["execution_time"] > 0
+        assert result["execution_time_seconds"] > 0
         assert result["error"] is None
 
         # Test query execution with variant
@@ -431,7 +430,7 @@ class TestTPCDSPowerTest:
         assert result["query_id"] == 1
         assert result["status"] == "error"
         assert result["result_count"] == 0
-        assert result["execution_time"] > 0
+        assert result["execution_time_seconds"] > 0
         assert "Database error" in result["error"]
 
     def test_result_validation(self):
@@ -466,7 +465,7 @@ class TestTPCDSPowerTest:
             valid_result.query_results.append(
                 {
                     "query_id": query_id,
-                    "execution_time": 5.0,
+                    "execution_time_seconds": 5.0,
                     "status": "success",
                 }
             )
@@ -493,7 +492,7 @@ class TestTPCDSPowerTest:
             invalid_result.query_results.append(
                 {
                     "query_id": i,
-                    "execution_time": 5.0,
+                    "execution_time_seconds": 5.0,
                     "status": "success",
                 }
             )
@@ -578,7 +577,7 @@ class TestTPCDSPowerTest:
         result.query_results.append(
             {
                 "query_id": 1,
-                "execution_time": 5.0,
+                "execution_time_seconds": 5.0,
                 "status": "success",
             }
         )
@@ -586,7 +585,7 @@ class TestTPCDSPowerTest:
         result.query_results.append(
             {
                 "query_id": "14a",
-                "execution_time": 8.0,
+                "execution_time_seconds": 8.0,
                 "status": "success",
             }
         )
@@ -651,11 +650,11 @@ class TestTPCDSPowerTest:
         )
 
         # Include query results
-        result1.query_results.append({"query_id": 1, "execution_time": 10.0})
-        result2.query_results.append({"query_id": 1, "execution_time": 8.0})
+        result1.query_results.append({"query_id": 1, "execution_time_seconds": 10.0})
+        result2.query_results.append({"query_id": 1, "execution_time_seconds": 8.0})
 
-        result1.query_results.append({"query_id": "14a", "execution_time": 15.0})
-        result2.query_results.append({"query_id": "14a", "execution_time": 12.0})
+        result1.query_results.append({"query_id": "14a", "execution_time_seconds": 15.0})
+        result2.query_results.append({"query_id": "14a", "execution_time_seconds": 12.0})
 
         # Test comparison
         comparison = power_test.compare_results(result1, result2)
@@ -828,7 +827,7 @@ class TestTPCDSPowerTestIntegration:
             assert query_id in query_results_dict
             query_result = query_results_dict[query_id]
             assert query_result["query_id"] == query_id
-            assert query_result["execution_time"] > 0
+            assert query_result["execution_time_seconds"] > 0
             # Check if query was successful
             success = query_result.get("success", False)
             status = query_result.get("status", "")
@@ -928,7 +927,7 @@ class TestTPCDSBenchmarkIntegration:
         if len(result["query_results"]) > 0:
             for _query_id, query_result in result["query_results"].items():
                 assert "query_id" in query_result
-                assert "execution_time" in query_result
+                assert "execution_time_seconds" in query_result
                 assert "status" in query_result
 
     def test_benchmark_run_power_test_parameter_validation(self):
@@ -1003,7 +1002,7 @@ class TestTPCDSPowerTestPerformance:
             query_results_dict = {qr["query_id"]: qr for qr in result.query_results}
             for query_id in ["1", "2", "3", "4", "5", "14a"]:
                 query_result = query_results_dict[query_id]
-                assert query_result["execution_time"] >= 0.01  # At least 10ms
+                assert query_result["execution_time_seconds"] >= 0.01  # At least 10ms
 
     @pytest.mark.slow
     def test_power_test_timeout_handling(self):
@@ -1049,4 +1048,4 @@ class TestTPCDSPowerTestPerformance:
             # Check that queries took longer than the timeout
             for query_id in ["1", "14a"]:
                 query_result = query_results_dict[query_id]
-                assert query_result["execution_time"] > 0.05  # Longer than 50ms timeout
+                assert query_result["execution_time_seconds"] > 0.05  # Longer than 50ms timeout

@@ -278,4 +278,4 @@ Engine-specific caching can skew comparisons. BenchBox uses cold cache between r
 - [Table Format Guides](index.md): Overview of all formats
 - [Format Conversion Reference](../../advanced/format-conversion.md): CLI commands for format conversion
 - [Delta Lake Guide](delta-lake-guide.md): Alternative table format
-- [Parquet Deep Dive](parquet-deep-dive.md): Foundation format for Iceberg
+- [Parquet Deep Dive](parquet-deep-dive.md): Foundation format for Iceberg <!-- content-ok: cliche -->

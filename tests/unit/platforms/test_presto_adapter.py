@@ -457,7 +457,7 @@ class TestPrestoAdapter:
         assert result["query_id"] == "q1"
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
         mock_cursor.execute.assert_called_once_with("SELECT * FROM test")
 
     def test_execute_query_failure(self, presto_stubs):

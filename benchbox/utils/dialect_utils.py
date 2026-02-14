@@ -4,7 +4,24 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import re
 from typing import Callable
+
+
+def _query_has_group_or_order_by_all(query: str) -> bool:
+    """Return True when the original query explicitly uses GROUP BY ALL or ORDER BY ALL."""
+
+    return bool(re.search(r"(?i)\b(?:GROUP|ORDER)\s+BY\s+ALL\b", query))
+
+
+def _restore_group_order_by_all_keyword(query: str) -> str:
+    """Restore ALL keyword when SQLGlot quoted it as an identifier."""
+
+    return re.sub(
+        r"(?i)\b((?:GROUP|ORDER)\s+BY)\s+(\"ALL\"|`ALL`|\[ALL\])",
+        r"\1 ALL",
+        query,
+    )
 
 
 def normalize_dialect_for_sqlglot(dialect: str) -> str:
@@ -42,6 +59,7 @@ def normalize_dialect_for_sqlglot(dialect: str) -> str:
         "netezza": "postgres",  # Netezza is based on PostgreSQL
         "greenplum": "postgres",  # Greenplum is PostgreSQL-based
         "vertica": "postgres",  # Vertica uses PostgreSQL-compatible SQL
+        "datafusion": "postgres",  # DataFusion uses PostgreSQL-compatible SQL
         "ansi": "postgres",  # ANSI SQL → PostgreSQL (defensive mapping, should not be used)
         "standard": "postgres",  # Standard SQL → PostgreSQL (defensive mapping, should not be used)
         # DuckDB, ClickHouse, BigQuery, Snowflake, Redshift already supported directly
@@ -119,6 +137,12 @@ def translate_sql_query(
         # Quoting preserves case which causes mismatches with lowercase schemas.
         should_identify = identify and (tgt not in ("clickhouse", "postgres"))
         translated = sqlglot.transpile(processed_query, read=src, write=tgt, identify=should_identify)[0]
+
+        # Built-in optional post-fix:
+        # SQLGlot + identify=True can emit ORDER/GROUP BY "ALL" for DuckDB,
+        # but DuckDB expects ALL as a keyword in these clauses.
+        if tgt == "duckdb" and _query_has_group_or_order_by_all(query):
+            translated = _restore_group_order_by_all_keyword(translated)
 
         # Apply post-processors (e.g., TPC-DS Query 58 ambiguity fix)
         if post_processors:

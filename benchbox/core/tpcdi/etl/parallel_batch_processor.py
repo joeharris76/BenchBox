@@ -50,6 +50,8 @@ from typing import Any, Optional
 
 import psutil
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 logger = logging.getLogger(__name__)
 
 
@@ -656,8 +658,8 @@ class ParallelBatchProcessor:
                 "active_tasks": len(self.active_tasks),
             }
 
-            # Include execution_time for compatibility with tests
-            stats["execution_time"] = stats["total_execution_time"]
+            # Canonical execution duration key used across benchmark result payloads.
+            stats["execution_time_seconds"] = stats["total_execution_time"]
 
             logger.info(
                 f"Parallel batch execution completed: "
@@ -676,12 +678,12 @@ class ParallelBatchProcessor:
     def _process_tasks_with_dependencies(self, timeout_seconds: Optional[int]) -> None:
         """Process tasks with dependency resolution."""
 
-        start_time = time.time()
+        start_time = mono_time()
         processed_tasks = set()
 
         while not self.task_queue.empty():
             # Check timeout
-            if timeout_seconds and (time.time() - start_time) > timeout_seconds:
+            if timeout_seconds and (elapsed_seconds(start_time)) > timeout_seconds:
                 logger.warning("Parallel batch execution timeout reached")
                 break
 

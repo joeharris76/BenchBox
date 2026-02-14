@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from pathlib import Path
 from typing import Any, cast
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 try:
     import polars as pl
@@ -278,7 +279,7 @@ class PolarsAdapter(PlatformAdapter):
         Note: For Polars, actual table registration happens during load_data().
         This method validates and extracts schema information.
         """
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
 
         # Get constraint settings from tuning configuration
@@ -295,7 +296,7 @@ class PolarsAdapter(PlatformAdapter):
         # Get structured schema directly from benchmark
         self._table_schemas = self._get_benchmark_schema(benchmark)
 
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         self.log_operation_complete(
             "Schema creation",
             duration,
@@ -362,7 +363,7 @@ class PolarsAdapter(PlatformAdapter):
         """
         from benchbox.platforms.base.data_loading import DataSourceResolver
 
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Data loading", f"mode: {self.execution_mode}")
 
         # Resolve data source
@@ -377,7 +378,7 @@ class PolarsAdapter(PlatformAdapter):
 
         # Load each table
         for table_name, file_paths in data_source.tables.items():
-            table_start = time.time()
+            table_start = mono_time()
 
             # Normalize and filter to valid files using base class helper
             valid_files = self._normalize_and_validate_file_paths(file_paths)
@@ -392,13 +393,13 @@ class PolarsAdapter(PlatformAdapter):
             # Load the table data
             row_count = self._load_table(connection, table_name_lower, valid_files, data_dir)
 
-            table_duration = time.time() - table_start
+            table_duration = elapsed_seconds(table_start)
             table_stats[table_name_lower] = row_count
             per_table_timings[table_name_lower] = {"total_ms": table_duration * 1000}
 
             self.log_verbose(f"Loaded table {table_name_lower}: {row_count:,} rows in {table_duration:.2f}s")
 
-        total_duration = time.time() - start_time
+        total_duration = elapsed_seconds(start_time)
         total_rows = sum(table_stats.values())
 
         self.log_operation_complete(
@@ -409,21 +410,20 @@ class PolarsAdapter(PlatformAdapter):
 
         return table_stats, total_duration, per_table_timings
 
-    def _detect_file_format(self, file_paths: list[Path]) -> tuple[str, str, bool]:
+    def _detect_file_format(self, file_paths: list[Path]) -> tuple[str, str]:
         """Detect file format and delimiter from file paths.
 
-        This is a wrapper around the shared detect_file_format utility
-        for backwards compatibility.
+        This is a wrapper around the shared detect_file_format utility.
 
         Returns:
-            Tuple of (format, delimiter, has_trailing_delimiter)
+            Tuple of (format, delimiter)
         """
         from benchbox.platforms.base.utils import detect_file_format
 
         format_info = detect_file_format(file_paths)
         # Map format_type to the expected format string
         format_type = "parquet" if format_info.format_type == "parquet" else "csv"
-        return format_type, format_info.delimiter, format_info.has_trailing_delimiter
+        return format_type, format_info.delimiter
 
     def _load_table(
         self, connection: PolarsDataFrameContext, table_name: str, file_paths: list[Path], data_dir: Path
@@ -439,7 +439,7 @@ class PolarsAdapter(PlatformAdapter):
         Returns:
             Number of rows loaded
         """
-        format_type, delimiter, has_trailing_delimiter = self._detect_file_format(file_paths)
+        format_type, delimiter = self._detect_file_format(file_paths)
 
         # Get schema information for column names
         schema_info = self._table_schemas.get(table_name, {})
@@ -453,7 +453,7 @@ class PolarsAdapter(PlatformAdapter):
             lf = self._load_parquet(file_paths)
         else:
             # Load CSV/TBL files
-            lf = self._load_csv(file_paths, delimiter, column_names, has_trailing_delimiter)
+            lf = self._load_csv(file_paths, delimiter, column_names)
 
         # Register table in context
         connection.register_table(table_name, lf)
@@ -485,7 +485,6 @@ class PolarsAdapter(PlatformAdapter):
         file_paths: list[Path],
         delimiter: str,
         column_names: list[str] | None,
-        has_trailing_delimiter: bool,
     ) -> pl.LazyFrame:
         """Load CSV/TBL files into LazyFrame.
 
@@ -493,11 +492,19 @@ class PolarsAdapter(PlatformAdapter):
             file_paths: List of file paths
             delimiter: Field delimiter
             column_names: Optional column names from schema
-            has_trailing_delimiter: Whether files have trailing delimiter
 
         Returns:
             Polars LazyFrame
         """
+        from benchbox.utils.file_format import (
+            TRAILING_DUMMY_COLUMN,
+            has_trailing_delimiter,
+        )
+
+        has_trailing = (
+            bool(column_names) and bool(file_paths) and has_trailing_delimiter(file_paths[0], delimiter, column_names)
+        )
+
         # Build scan options
         scan_kwargs: dict[str, Any] = {
             "separator": delimiter,
@@ -512,10 +519,9 @@ class PolarsAdapter(PlatformAdapter):
 
         # Handle column names
         if column_names:
-            # For TPC files with trailing delimiter, we need to handle the extra empty column
-            if has_trailing_delimiter:
+            if has_trailing:
                 # Add a dummy column name for the trailing delimiter
-                extended_names = column_names + ["_trailing_"]
+                extended_names = column_names + [TRAILING_DUMMY_COLUMN]
                 scan_kwargs["new_columns"] = extended_names
             else:
                 scan_kwargs["new_columns"] = column_names
@@ -542,8 +548,8 @@ class PolarsAdapter(PlatformAdapter):
                 lf = pl.concat(lfs)
 
         # Drop trailing column if present
-        if has_trailing_delimiter and column_names:
-            lf = lf.drop("_trailing_")
+        if has_trailing and column_names:
+            lf = lf.drop(TRAILING_DUMMY_COLUMN)
 
         return cast(pl.LazyFrame, lf)
 

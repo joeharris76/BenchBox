@@ -13,9 +13,10 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -529,7 +530,7 @@ class DatabricksAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using Databricks Delta Lake tables."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
 
         # Get constraint settings from tuning configuration
@@ -594,7 +595,7 @@ class DatabricksAdapter(PlatformAdapter):
                 statements, cursor, platform_transform_fn=self._convert_to_delta_table
             )
 
-            duration = time.time() - start_time
+            duration = elapsed_seconds(start_time)
             self.log_operation_complete("Schema creation", duration, f"{tables_created} Delta Lake tables created")
 
             return duration
@@ -606,7 +607,7 @@ class DatabricksAdapter(PlatformAdapter):
             if "cursor" in locals():
                 cursor.close()
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def _ensure_uc_volume_exists(self, uc_volume_path: str, connection: Any) -> None:
         """Ensure UC Volume exists, creating it if necessary.
@@ -632,11 +633,10 @@ class DatabricksAdapter(PlatformAdapter):
         # path_parts = ['', 'Volumes', 'catalog', 'schema', 'volume', ...]
 
         if len(path_parts) < 5:
-            # Be lenient in unit-test or minimal paths: skip ensure when volume parts are incomplete
-            self.logger.warning(
-                f"UC Volume path '{uc_volume_path}' missing components (expected dbfs:/Volumes/catalog/schema/volume). Skipping ensure."
+            raise ValueError(
+                f"Invalid UC Volume path: {uc_volume_path}. "
+                "Expected dbfs:/Volumes/catalog/schema/volume (optionally with a subpath)."
             )
-            return
 
         catalog = path_parts[2]
         schema = path_parts[3]
@@ -1013,7 +1013,7 @@ class DatabricksAdapter(PlatformAdapter):
 
         This implementation avoids temporary views and uses COPY INTO for robust ingestion.
         """
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Data loading", f"benchmark: {benchmark.__class__.__name__}")
         self.log_very_verbose(f"Data directory: {data_dir}")
 
@@ -1132,7 +1132,7 @@ class DatabricksAdapter(PlatformAdapter):
             # Load data for each table using COPY INTO
             for table_name, file_path in data_files.items():
                 try:
-                    load_start = time.time()
+                    load_start = mono_time()
                     table_name_upper = table_name.upper()
 
                     # Verify table exists before COPY INTO
@@ -1218,9 +1218,9 @@ class DatabricksAdapter(PlatformAdapter):
                         self.log_verbose(f"Loading {table_name_upper} from wildcard pattern: {file_uri}")
 
                     # Time COPY INTO
-                    copy_start = time.time()
+                    copy_start = mono_time()
                     cursor.execute(copy_sql)
-                    copy_time = time.time() - copy_start
+                    copy_time = elapsed_seconds(copy_start)
 
                     # Row count
                     cursor.execute(f"SELECT COUNT(*) FROM {table_name_upper}")
@@ -1230,12 +1230,12 @@ class DatabricksAdapter(PlatformAdapter):
                     # Optional optimize - track timing separately
                     optimize_time = 0.0
                     if self.enable_delta_optimization:
-                        optimize_start = time.time()
+                        optimize_start = mono_time()
                         with contextlib.suppress(Exception):
                             cursor.execute(f"OPTIMIZE {table_name_upper}")
-                        optimize_time = time.time() - optimize_start
+                        optimize_time = elapsed_seconds(optimize_start)
 
-                    load_time = time.time() - load_start
+                    load_time = elapsed_seconds(load_start)
 
                     # Store detailed timings
                     per_table_timings[table_name_upper] = {
@@ -1258,7 +1258,7 @@ class DatabricksAdapter(PlatformAdapter):
                         "rows": 0,
                     }
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.log_operation_complete(
                 "Data loading", total_time, f"{total_rows:,} total rows, {len(table_stats)} tables"
@@ -1310,7 +1310,7 @@ class DatabricksAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute query with detailed timing and profiling."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_verbose(f"Executing query {query_id}")
         self.log_very_verbose(f"Query SQL (first 200 chars): {query[:200]}{'...' if len(query) > 200 else ''}")
 
@@ -1326,7 +1326,7 @@ class DatabricksAdapter(PlatformAdapter):
             cursor.execute(query)
             result = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Validate row count if enabled and benchmark type is provided
@@ -1374,12 +1374,12 @@ class DatabricksAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

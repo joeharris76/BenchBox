@@ -36,25 +36,18 @@ Unlike Power and Throughput tests that only **read** data, Maintenance tests **w
 
 ### Use Maintenance Tests When You Need To:
 
-✅ **Complete official TPC benchmark compliance** - TPC specifications require all three test types (Power, Throughput, Maintenance) for valid results
-
-✅ **Test data warehouse ETL performance** - Measure how well your database handles incremental updates, bulk inserts, and data purging
-
-✅ **Evaluate write performance under analytical workloads** - Understand the cost of data modifications in OLAP systems
-
-✅ **Simulate mixed read/write workloads** - Test realistic scenarios where queries run while data is being updated
-
-✅ **Benchmark data maintenance windows** - Measure how long it takes to process daily, weekly, or monthly data refreshes
+* ✅ **Complete official TPC benchmark compliance** - TPC specifications require all three test types (Power, Throughput, Maintenance) for valid results
+* ✅ **Test data warehouse ETL performance** - Measure how well your database handles incremental updates, bulk inserts, and data purging
+* ✅ **Evaluate write performance under analytical workloads** - Understand the cost of data modifications in OLAP systems
+* ✅ **Simulate mixed read/write workloads** - Test realistic scenarios where queries run while data is being updated
+* ✅ **Benchmark data maintenance windows** - Measure how long it takes to process daily, weekly, or monthly data refreshes
 
 ### Skip Maintenance Tests When:
 
-❌ **Only measuring query performance** - Power and Throughput tests are sufficient for read-only benchmarks
-
-❌ **Running quick exploratory tests** - Maintenance tests require database reload, adding operational overhead
-
-❌ **Comparing read-only OLAP systems** - Some analytical databases are immutable and don't support data modifications
-
-❌ **Working in production environments** - Never run Maintenance tests against production data (they permanently modify it!)
+* ❌ **Only measuring query performance** - Power and Throughput tests are sufficient for read-only benchmarks
+* ❌ **Running quick exploratory tests** - Maintenance tests require database reload, adding operational overhead
+* ❌ **Comparing read-only OLAP systems** - Some analytical databases are immutable and don't support data modifications
+* ❌ **Working in production environments** - Never run Maintenance tests against production data (they permanently modify it!)
 
 ## TPC-H Maintenance Test
 

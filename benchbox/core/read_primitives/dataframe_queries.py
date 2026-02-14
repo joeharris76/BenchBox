@@ -90,6 +90,31 @@ SKIP_FOR_DATAFRAME = [
 # - Timeseries/ASOF: Use pd.merge_asof() or window-based approximation
 # - Optimizer probes: DataFrames are declarative, Catalyst optimizes plans
 
+# Queries skipped for expression-family platforms (Polars, PySpark, DataFusion).
+#
+# Most list/array, struct, and string-split queries are now supported through
+# the unified expression API (UnifiedListExpr, UnifiedMapExpr, UnifiedStrExpr).
+#
+# Only map queries remain skipped because Polars has no native Map dtype.
+# PySpark and DataFusion support these via F.map_from_entries() and
+# f.map_from_entries() respectively, but the expression_impl functions call
+# ctx.map_from_entries() which raises NotImplementedError on Polars.
+SKIP_FOR_EXPRESSION_FAMILY = [
+    # --- Map operations: Polars has no native Map dtype ---
+    "map_construction",  # ctx.struct() + ctx.map_from_entries()
+    "map_access",  # ctx.struct() + ctx.map_from_entries() + .map.get()
+    "map_keys_values",  # ctx.struct() + ctx.map_from_entries() + .map.keys/values()
+]
+
+# Queries skipped specifically for DataFusion DataFrame mode.
+# These use Polars-only features or DataFusion v50 missing functions.
+SKIP_FOR_DATAFUSION = [
+    "list_filter",  # .list.eval() is Polars-only — no DataFusion equivalent
+    "list_transform",  # .list.eval() is Polars-only — no DataFusion equivalent
+    "list_reduce",  # array_sum() not in DataFusion v50 Python bindings
+    "array_distinct",  # DataFusion array_distinct returns Dictionary(Int32,Utf8) causing Arrow type mismatch
+]
+
 
 # =============================================================================
 # Expression Family Implementations (Polars, PySpark, DataFusion)
@@ -2766,17 +2791,19 @@ def max_by_with_ties_expression_impl(ctx: DataFrameContext) -> Any:
     supplier = ctx.get_table("supplier")
     col = ctx.col
 
+    # Note: Polars drops right join keys, so after join(left_on="ps_partkey", right_on="p_partkey")
+    # the result has ps_partkey (not p_partkey). Use ps_partkey throughout.
     merged = partsupp.join(part, left_on="ps_partkey", right_on="p_partkey").join(
         supplier, left_on="ps_suppkey", right_on="s_suppkey"
     )
 
-    max_costs = merged.group_by("p_partkey", "p_name").agg(col("ps_supplycost").max().alias("max_supply_cost"))
+    max_costs = merged.group_by("ps_partkey", "p_name").agg(col("ps_supplycost").max().alias("max_supply_cost"))
 
     result = (
-        merged.join(max_costs, on=["p_partkey", "p_name"])
+        merged.join(max_costs, on=["ps_partkey", "p_name"])
         .filter(col("ps_supplycost") == col("max_supply_cost"))
-        .select("p_partkey", "p_name", "s_name", "max_supply_cost")
-        .unique(subset=["p_partkey"])
+        .select("ps_partkey", "p_name", "s_name", "max_supply_cost")
+        .unique(subset=["ps_partkey"])
         .sort("max_supply_cost", descending=True)
         .limit(100)
     )
@@ -2809,17 +2836,19 @@ def min_by_with_ties_expression_impl(ctx: DataFrameContext) -> Any:
     supplier = ctx.get_table("supplier")
     col = ctx.col
 
+    # Note: Polars drops right join keys, so after join(left_on="ps_partkey", right_on="p_partkey")
+    # the result has ps_partkey (not p_partkey). Use ps_partkey throughout.
     merged = partsupp.join(part, left_on="ps_partkey", right_on="p_partkey").join(
         supplier, left_on="ps_suppkey", right_on="s_suppkey"
     )
 
-    min_costs = merged.group_by("p_partkey", "p_name").agg(col("ps_supplycost").min().alias("min_supply_cost"))
+    min_costs = merged.group_by("ps_partkey", "p_name").agg(col("ps_supplycost").min().alias("min_supply_cost"))
 
     result = (
-        merged.join(min_costs, on=["p_partkey", "p_name"])
+        merged.join(min_costs, on=["ps_partkey", "p_name"])
         .filter(col("ps_supplycost") == col("min_supply_cost"))
-        .select("p_partkey", "p_name", "s_name", "min_supply_cost")
-        .unique(subset=["p_partkey"])
+        .select("ps_partkey", "p_name", "s_name", "min_supply_cost")
+        .unique(subset=["ps_partkey"])
         .sort("min_supply_cost")
         .limit(100)
     )
@@ -3112,7 +3141,7 @@ def window_moving_frame_expression_impl(ctx: DataFrameContext) -> Any:
         orders.filter((col("o_orderdate") >= lit(date(1995, 1, 1))) & (col("o_orderdate") < lit(date(1996, 1, 1))))
         .sort("o_orderdate")
         .with_columns(
-            ctx.window_mean(
+            ctx.window_avg(
                 "o_totalprice",
                 order_by=[("o_orderdate", True)],
             ).alias("moving_avg")
@@ -3651,10 +3680,7 @@ def optimizer_common_subexpression_expression_impl(ctx: DataFrameContext) -> Any
                 "revenue_copy"
             ),
         )
-        .filter(
-            col("l_quantity") * col("l_extendedprice") * (lit(1) - col("l_discount")) * (lit(1) + col("l_tax"))
-            > lit(1000)
-        )
+        .filter(col("revenue_with_tax") > lit(1000))
         .limit(100)
     )
 
@@ -4019,20 +4045,20 @@ def qualify_row_number_expression_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     col = ctx.col
     lit = ctx.lit
-    row_number = ctx.row_number
-    window = ctx.window
 
     # Join orders with customers
     joined = orders.join(customer, col("o_custkey") == col("c_custkey")).filter(
         col("o_orderdate") >= lit(date(1995, 1, 1))
     )
 
-    # Define window: partition by customer, order by total price descending
-    w = window().partition_by("c_custkey").order_by(col("o_totalprice").desc())
-
     # Add row number and filter (QUALIFY equivalent)
     result = (
-        joined.with_columns(row_number().over(w).alias("order_rank"))
+        joined.with_columns(
+            ctx.window_row_number(
+                order_by=[("o_totalprice", False)],
+                partition_by=["c_custkey"],
+            ).alias("order_rank")
+        )
         .filter(col("order_rank") <= lit(3))
         .select("c_custkey", "c_name", "o_orderkey", "o_orderdate", "o_totalprice", "order_rank")
         .sort("c_custkey", "order_rank")
@@ -4068,15 +4094,15 @@ def qualify_dense_rank_expression_impl(ctx: DataFrameContext) -> Any:
     part = ctx.get_table("part")
     col = ctx.col
     lit = ctx.lit
-    dense_rank = ctx.dense_rank
-    window = ctx.window
-
-    # Define window: partition by type, order by price descending
-    w = window().partition_by("p_type").order_by(col("p_retailprice").desc())
 
     # Add dense rank and filter (QUALIFY equivalent)
     result = (
-        part.with_columns(dense_rank().over(w).alias("price_rank"))
+        part.with_columns(
+            ctx.window_dense_rank(
+                order_by=[("p_retailprice", False)],
+                partition_by=["p_type"],
+            ).alias("price_rank")
+        )
         .filter(col("price_rank") <= lit(2))
         .select("p_type", "p_name", "p_retailprice", "price_rank")
         .sort("p_type", "price_rank")
@@ -4113,20 +4139,21 @@ def qualify_ntile_expression_impl(ctx: DataFrameContext) -> Any:
     customer = ctx.get_table("customer")
     col = ctx.col
     lit = ctx.lit
-    ntile = ctx.ntile
-    window = ctx.window
 
     # Join orders with customers and filter
     joined = orders.join(customer, col("o_custkey") == col("c_custkey")).filter(
         col("o_orderdate") >= lit(date(1995, 1, 1))
     )
 
-    # Define window: partition by segment, order by price
-    w = window().partition_by("c_mktsegment").order_by("o_totalprice")
-
     # Add ntile(4) and filter for quartile 4 (top 25%)
     result = (
-        joined.with_columns(ntile(4).over(w).alias("quartile"))
+        joined.with_columns(
+            ctx.window_ntile(
+                4,
+                order_by=[("o_totalprice", True)],
+                partition_by=["c_mktsegment"],
+            ).alias("quartile")
+        )
         .filter(col("quartile") == lit(4))
         .select("c_mktsegment", "o_orderkey", "o_totalprice", "quartile")
         .sort(col("c_mktsegment"), col("o_totalprice").desc())
@@ -4177,18 +4204,18 @@ def qualify_percentile_expression_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     col = ctx.col
     lit = ctx.lit
-    percent_rank = ctx.percent_rank
-    window = ctx.window
 
     # Filter orders
     filtered = orders.filter(col("o_orderdate") >= lit(date(1995, 1, 1)))
 
-    # Define window: partition by priority, order by price
-    w = window().partition_by("o_orderpriority").order_by("o_totalprice")
-
     # Add percent_rank and filter for top 10%
     result = (
-        filtered.with_columns(percent_rank().over(w).alias("price_percentile"))
+        filtered.with_columns(
+            ctx.window_percent_rank(
+                order_by=[("o_totalprice", True)],
+                partition_by=["o_orderpriority"],
+            ).alias("price_percentile")
+        )
         .filter(col("price_percentile") >= lit(0.9))
         .select("o_orderpriority", "o_orderkey", "o_totalprice", "price_percentile")
         .sort(col("o_orderpriority"), col("o_totalprice").desc())
@@ -4227,20 +4254,20 @@ def qualify_cume_dist_expression_impl(ctx: DataFrameContext) -> Any:
     lineitem = ctx.get_table("lineitem")
     col = ctx.col
     lit = ctx.lit
-    cume_dist = ctx.cume_dist
-    window = ctx.window
 
     # Filter lineitems
     filtered = lineitem.filter(
         (col("l_shipdate") >= lit(date(1995, 1, 1))) & (col("l_shipdate") < lit(date(1996, 1, 1)))
     )
 
-    # Define window: partition by shipdate, order by quantity
-    w = window().partition_by("l_shipdate").order_by("l_quantity")
-
     # Add cume_dist and filter for top 5%
     result = (
-        filtered.with_columns(cume_dist().over(w).alias("quantity_cumulative_dist"))
+        filtered.with_columns(
+            ctx.window_cume_dist(
+                order_by=[("l_quantity", True)],
+                partition_by=["l_shipdate"],
+            ).alias("quantity_cumulative_dist")
+        )
         .filter(col("quantity_cumulative_dist") >= lit(0.95))
         .select("l_shipdate", "l_orderkey", "l_linenumber", "l_quantity", "quantity_cumulative_dist")
         .sort(col("l_shipdate"), col("l_quantity").desc())
@@ -4289,20 +4316,22 @@ def qualify_lag_lead_expression_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     col = ctx.col
     lit = ctx.lit
-    lag = ctx.lag
-    window = ctx.window
 
     # Join orders with customers and filter
     joined = orders.join(customer, col("o_custkey") == col("c_custkey")).filter(
         col("o_orderdate") >= lit(date(1995, 1, 1))
     )
 
-    # Define window: partition by customer, order by date
-    w = window().partition_by("c_custkey").order_by("o_orderdate")
-
     # Add lag and filter where price increased
     result = (
-        joined.with_columns(lag("o_totalprice", 1).over(w).alias("prev_order_price"))
+        joined.with_columns(
+            ctx.window_lag(
+                "o_totalprice",
+                offset=1,
+                partition_by=["c_custkey"],
+                order_by=[("o_orderdate", True)],
+            ).alias("prev_order_price")
+        )
         .filter(col("o_totalprice") > col("prev_order_price"))
         .select("c_custkey", "c_name", "o_orderkey", "o_orderdate", "o_totalprice", "prev_order_price")
         .sort("c_custkey", "o_orderdate")
@@ -4908,13 +4937,14 @@ def list_filter_expression_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     col = ctx.col
     lit = ctx.lit
+    elem = ctx.element()
 
     # Aggregate prices per customer
     order_prices = orders.group_by("o_custkey").agg(col("o_totalprice").list().alias("prices"))
 
     # Filter to keep only large orders (> 100000)
     result = order_prices.with_columns(
-        col("prices").list.eval(col("element").filter(col("element") > lit(100000))).alias("large_orders")
+        col("prices").list.eval(elem.filter(elem > lit(100000))).alias("large_orders")
     ).limit(100)
 
     return result
@@ -4944,14 +4974,13 @@ def list_transform_expression_impl(ctx: DataFrameContext) -> Any:
     part = ctx.get_table("part")
     col = ctx.col
     lit = ctx.lit
+    elem = ctx.element()
 
     # Aggregate prices per brand
     part_prices = part.group_by("p_brand").agg(col("p_retailprice").list().alias("prices"))
 
     # Transform to apply 10% markup
-    result = part_prices.with_columns(
-        col("prices").list.eval(col("element") * lit(1.1)).alias("prices_with_tax")
-    ).limit(50)
+    result = part_prices.with_columns(col("prices").list.eval(elem * lit(1.1)).alias("prices_with_tax")).limit(50)
 
     return result
 
@@ -5150,27 +5179,23 @@ def timeseries_trend_analysis_expression_impl(ctx: DataFrameContext) -> Any:
     orders = ctx.get_table("orders")
     col = ctx.col
     lit = ctx.lit
-    sum_ = ctx.sum
-    count = ctx.count
-    avg = ctx.avg
-    lag = ctx.lag
-    window = ctx.window
 
     # Truncate to month and aggregate
     monthly = (
         orders.with_columns(col("o_orderdate").dt.truncate("1mo").alias("order_month"))
         .group_by("order_month")
         .agg(
-            count("o_orderkey").alias("order_count"),
-            sum_("o_totalprice").alias("monthly_revenue"),
-            avg("o_totalprice").alias("avg_order_value"),
+            col("o_orderkey").count().alias("order_count"),
+            col("o_totalprice").sum().alias("monthly_revenue"),
+            col("o_totalprice").mean().alias("avg_order_value"),
         )
     )
 
-    # Add month-over-month metrics
-    w = window().order_by("order_month")
+    # Add month-over-month metrics using ctx.window_lag
     result = (
-        monthly.with_columns(lag("monthly_revenue", 1).over(w).alias("prev_month_revenue"))
+        monthly.with_columns(
+            ctx.window_lag("monthly_revenue", offset=1, order_by=[("order_month", True)]).alias("prev_month_revenue")
+        )
         .with_columns(
             ((col("monthly_revenue") - col("prev_month_revenue")) / col("prev_month_revenue") * lit(100)).alias(
                 "mom_growth_pct"
@@ -5225,10 +5250,10 @@ def asof_join_basic_expression_impl(ctx: DataFrameContext) -> Any:
         (col("l_shipdate") >= lit(date(1995, 1, 1))) & (col("l_shipdate") < lit(date(1995, 2, 1)))
     )
 
-    # Join with orders - approximate ASOF with regular equi-join on orderkey
+    # Join with orders using equi-join on orderkey (left_on/right_on, not expression join)
     # True ASOF would find the closest prior order by date
     result = (
-        filtered_lineitem.join(orders, col("l_orderkey") == col("o_orderkey"))
+        filtered_lineitem.join(orders, left_on="l_orderkey", right_on="o_orderkey")
         .filter(col("l_shipdate") >= col("o_orderdate"))
         .with_columns((col("l_shipdate") - col("o_orderdate")).dt.total_days().alias("days_to_ship"))
         .select("l_orderkey", "l_shipdate", "o_orderdate", "o_totalprice", "days_to_ship")
@@ -5416,6 +5441,14 @@ _QUERIES = [
         categories=[QueryCategory.SCAN],
         expression_impl=limit_expression_impl,
         pandas_impl=limit_pandas_impl,
+    ),
+    DataFrameQuery(
+        query_id="limit_ordered",
+        query_name="Ordered Limit",
+        description="LIMIT clause with ordering on large result set",
+        categories=[QueryCategory.SORT],
+        expression_impl=limit_ordered_expression_impl,
+        pandas_impl=limit_ordered_pandas_impl,
     ),
     # String queries
     DataFrameQuery(
@@ -6527,21 +6560,26 @@ def get_skip_for_dataframe() -> list[str]:
     return SKIP_FOR_DATAFRAME.copy()
 
 
-def get_expression_family_only() -> list[str]:
-    """Get query IDs that only support expression-family platforms.
+def get_skip_for_expression_family() -> list[str]:
+    """Get query IDs that should be skipped for expression-family platforms.
 
-    DEPRECATED: This function now returns an empty list.
-
-    All queries now support both expression-family (Polars, PySpark, DataFusion)
-    and pandas-family (Pandas, Modin, cuDF, Dask) implementations. Queries that
-    were previously expression-family-only (QUALIFY, higher-order functions,
-    arrays, structs, maps, timeseries) all have valid pandas-family
-    implementations.
-
-    This function is retained for backwards compatibility but will be removed
-    in a future version.
+    Currently only map queries are skipped because Polars has no native Map
+    dtype. All list/array, struct, and string-split queries are now supported
+    through the unified expression API.
 
     Returns:
-        Empty list (all queries support both families)
+        List of query IDs to skip for expression-family platforms (map queries only)
     """
-    return []
+    return SKIP_FOR_EXPRESSION_FAMILY.copy()
+
+
+def get_skip_for_datafusion() -> list[str]:
+    """Get query IDs that should be skipped for DataFusion DataFrame mode.
+
+    These use Polars-only features (.list.eval()) or DataFusion v50 functions
+    that are missing from Python bindings (array_sum, array_distinct type bug).
+
+    Returns:
+        List of query IDs to skip for DataFusion
+    """
+    return SKIP_FOR_DATAFUSION.copy()

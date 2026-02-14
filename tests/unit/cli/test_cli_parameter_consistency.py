@@ -268,16 +268,15 @@ class TestCLIParameterConsistency:
         # Order should be preserved as specified
         assert phases_to_run == ["throughput", "generate", "power"]
 
-    @pytest.mark.skip(reason="Orchestrator harmonization incomplete - test temporarily disabled")
-    def test_orchestrator_phase_integration_disabled(self, mock_dependencies):
+    def test_orchestrator_phase_integration(self, mock_dependencies):
         """Test that orchestrator correctly handles phases_to_run parameter."""
         from benchbox.cli.orchestrator import BenchmarkOrchestrator
         from benchbox.core.config import BenchmarkConfig
 
         orchestrator = BenchmarkOrchestrator()
 
-        # Mock the core lifecycle runner
-        with patch("benchbox.core.runner.runner.run_benchmark_lifecycle") as mock_lifecycle:
+        # Mock the orchestrator-local lifecycle import used by execute_benchmark().
+        with patch("benchbox.cli.orchestrator.run_benchmark_lifecycle") as mock_lifecycle:
             mock_result = MagicMock()
             mock_lifecycle.return_value = mock_result
 
@@ -328,13 +327,14 @@ class TestCLIParameterConsistency:
                 assert phases.execute is True
 
 
-@pytest.mark.skipif(IMPORTS_AVAILABLE, reason="Only test when imports unavailable")
 class TestCLIParameterConsistencyUnavailable:
     """Test graceful handling when CLI modules are unavailable."""
 
     def test_import_unavailable(self):
         """Test that we handle import failures gracefully."""
-        assert not IMPORTS_AVAILABLE
+        if IMPORTS_AVAILABLE:
+            assert skip_reason is None
+            return
         assert "not available" in skip_reason
 
 

@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 
 @dataclass
 class TPCHMaintenanceTestConfig:
@@ -134,7 +136,7 @@ class TPCHMaintenanceTest:
             output_dir=self.output_dir,
         )
 
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result = TPCHMaintenanceTestResult(
@@ -193,7 +195,7 @@ class TPCHMaintenanceTest:
                     time.sleep(rf2_interval)
 
             # Calculate metrics
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             result.total_time = total_time
             result.end_time = datetime.now().isoformat()
 
@@ -210,7 +212,7 @@ class TPCHMaintenanceTest:
             return result
 
         except Exception as e:
-            result.total_time = time.time() - start_time
+            result.total_time = elapsed_seconds(start_time)
             result.end_time = datetime.now().isoformat()
             result.success = False
             result.errors.append(f"Maintenance Test execution failed: {e}")
@@ -578,7 +580,7 @@ class TPCHMaintenanceTest:
         Returns:
             RF1 operation result
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         operation = TPCHMaintenanceOperation(
             operation_type="RF1",
@@ -706,7 +708,7 @@ class TPCHMaintenanceTest:
         Returns:
             RF2 operation result
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         operation = TPCHMaintenanceOperation(
             operation_type="RF2",

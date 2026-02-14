@@ -13,7 +13,7 @@ import pytest
 from benchbox.core.nyctaxi.benchmark import NYCTaxiBenchmark
 from benchbox.core.nyctaxi.schema import NYC_TAXI_SCHEMA
 
-pytestmark = pytest.mark.medium  # Data generation tests take 4-5s
+pytestmark = [pytest.mark.medium, pytest.mark.fast, pytest.mark.unit]  # Include in fast coverage pass
 
 
 class TestBenchmarkInitialization:

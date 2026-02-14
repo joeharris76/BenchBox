@@ -13,6 +13,7 @@ import pytest
 
 from benchbox.utils.path_utils import (
     ensure_directory,
+    get_benchmark_runs_databases_path,
     get_benchmark_runs_datagen_path,
     get_default_data_directory,
     get_results_path,
@@ -351,3 +352,18 @@ class TestPathUtilsIntegration:
         assert isinstance(path2, Path)
         assert path1.exists()
         assert path2.exists()
+
+
+class TestGetBenchmarkRunsDatabasesPath:
+    """Test get_benchmark_runs_databases_path function."""
+
+    def test_default_databases_path(self):
+        """Default path should use benchmark_runs/databases under cwd."""
+        with patch("benchbox.utils.path_utils.Path.cwd", return_value=Path("/repo")):
+            result = get_benchmark_runs_databases_path("tpch", 1.0)
+        assert result == Path("/repo/benchmark_runs/databases/tpch_sf1")
+
+    def test_custom_base_dir(self):
+        """Custom base dir should be used directly."""
+        result = get_benchmark_runs_databases_path("tpcds", 0.01, "/tmp/base")
+        assert result == Path("/tmp/base/tpcds_sf001")

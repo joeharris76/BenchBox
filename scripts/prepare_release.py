@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from benchbox.release.workflow import calculate_most_recent_saturday_midnight, prepare_public_release
+from benchbox.release.workflow import calculate_release_timestamp, prepare_public_release
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Unix timestamp for normalizing file modification times. "
-            "If not provided, uses the most recent Saturday at midnight UTC."
+            "If not provided, uses the most recent whole hour UTC."
         ),
     )
     return parser.parse_args()
@@ -67,8 +67,8 @@ def main() -> None:
     # Calculate timestamp if not provided
     timestamp = args.timestamp
     if timestamp is None:
-        timestamp, iso_fmt, _ = calculate_most_recent_saturday_midnight()
-        print(f"Using most recent Saturday midnight: {iso_fmt} (timestamp: {timestamp})")
+        timestamp, iso_fmt, _ = calculate_release_timestamp()
+        print(f"Using most recent whole hour: {iso_fmt} (timestamp: {timestamp})")
     else:
         print(f"Using provided timestamp: {timestamp}")
 

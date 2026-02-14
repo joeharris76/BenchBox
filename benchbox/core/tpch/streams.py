@@ -403,7 +403,7 @@ class TPCHStreamRunner(VerbosityMixin):
         """
         import time
 
-        from benchbox.core.tpch.queries import TPCHQueryManager
+        from benchbox.core.tpch.queries import TPCHQueries
 
         self.log_verbose(f"Executing TPC-H stream {stream_id} from {stream_file}")
 
@@ -426,7 +426,7 @@ class TPCHStreamRunner(VerbosityMixin):
 
         try:
             # Get the query manager for TPC-H
-            TPCHQueryManager()
+            TPCHQueries()
 
             # For now, this is a basic implementation that executes the stream queries
             # In a full implementation, this would use the actual database connection

@@ -13,33 +13,33 @@ Looking ahead? See the [Development Roadmap](../development/roadmap.md) for plan
 
 ### SQL Platforms
 
-| Platform | Status | Description | Installation |
-|----------|--------|-------------|--------------|
-| **DuckDB** | ✅ Built-in | In-process analytical database | `uv add duckdb` |
-| **DataFusion** | ✅ Available | In-memory query engine (Apache Arrow) | `uv add datafusion` |
-| **ClickHouse** | ✅ Available | Column-oriented OLAP database | `uv add clickhouse-driver` |
-| **Databricks** | ✅ Available | Data Intelligence Platform (lakehouse) | `uv add databricks-sql-connector` |
-| **BigQuery** | ✅ Available | Serverless data warehouse (Google Cloud) | `uv add google-cloud-bigquery google-cloud-storage` |
-| **Redshift** | ✅ Available | Cloud data warehouse (AWS) | `uv add redshift-connector boto3` |
-| **Snowflake** | ✅ Available | Data Cloud / Multi-cloud data warehouse | `uv add snowflake-connector-python` |
-| **Trino** | ✅ Available | Distributed SQL (Trino/Starburst) | `uv add benchbox[trino]` |
-| **PrestoDB** | ✅ Available | Distributed SQL (Meta's Presto) | `uv add benchbox[presto]` |
-| **SQLite** | ✅ Built-in | Embedded transactional database | (built-in) |
-| **Azure Platforms** | ✅ Available | Microsoft Fabric, Azure Synapse, Fabric Spark, Synapse Spark | See [Azure Platforms](azure-platforms.md) |
+| Platform            | Status    | Description                                                  | Installation                                        |
+| ------------------- | --------- | ------------------------------------------------------------ | --------------------------------------------------- |
+| **DuckDB**          | Built-in  | In-process analytical database                               | `uv add duckdb`                                     |
+| **DataFusion**      | Available | In-memory query engine (Apache Arrow)                        | `uv add datafusion`                                 |
+| **ClickHouse**      | Available | Column-oriented OLAP database                                | `uv add clickhouse-driver`                          |
+| **Databricks**      | Available | Data Intelligence Platform (lakehouse)                       | `uv add databricks-sql-connector`                   |
+| **BigQuery**        | Available | Serverless data warehouse (Google Cloud)                     | `uv add google-cloud-bigquery google-cloud-storage` |
+| **Redshift**        | Available | Cloud data warehouse (AWS)                                   | `uv add redshift-connector boto3`                   |
+| **Snowflake**       | Available | Data Cloud / Multi-cloud data warehouse                      | `uv add snowflake-connector-python`                 |
+| **Trino**           | Available | Distributed SQL (Trino/Starburst)                            | `uv add benchbox[trino]`                            |
+| **PrestoDB**        | Available | Distributed SQL (Meta's Presto)                              | `uv add benchbox[presto]`                           |
+| **SQLite**          | Built-in  | Embedded transactional database                              | (built-in)                                          |
+| **Azure Platforms** | Available | Microsoft Fabric, Azure Synapse, Fabric Spark, Synapse Spark | See [Azure Platforms](azure-platforms.md)           |
 
 ### DataFrame Platforms (Native API)
 
 BenchBox supports benchmarking DataFrame libraries using their native APIs instead of SQL. This enables direct performance comparison between SQL and DataFrame paradigms on identical workloads. See [DataFrame Platforms](dataframe.md) for full details.
 
-| Platform | CLI Name | Status | Family | Description | Installation |
-|----------|----------|--------|--------|-------------|--------------|
-| **Polars** | `polars-df` | ✅ Production | Expression | Fast Rust-based DataFrame library with lazy evaluation | (core dependency) |
-| **Pandas** | `pandas-df` | ✅ Production | Pandas | Reference Pandas implementation | `uv add benchbox --extra dataframe-pandas` |
-| **PySpark** | `pyspark-df` | ✅ Production | Expression | Apache Spark DataFrame API (distributed) | `uv add benchbox --extra dataframe-pyspark` |
-| **DataFusion** | `datafusion-df` | ✅ Production | Expression | Arrow-native query engine | `uv add benchbox --extra dataframe-datafusion` |
-| Modin | `modin-df` | ✅ Production | Pandas | Distributed Pandas replacement | `uv add benchbox --extra dataframe-modin` |
-| Dask | `dask-df` | ✅ Production | Pandas | Parallel computing DataFrames | `uv add benchbox --extra dataframe-dask` |
-| cuDF | `cudf-df` | ✅ Production | Pandas | NVIDIA GPU-accelerated DataFrames | `uv add benchbox --extra dataframe-cudf` |
+| Platform       | CLI Name        | Status    | Family     | Description                                            | Installation                                   |
+| -------------- | --------------- | --------- | ---------- | ------------------------------------------------------ | ---------------------------------------------- |
+| **Polars**     | `polars-df`     | Available | Expression | Fast Rust-based DataFrame library with lazy evaluation | (core dependency)                              |
+| **Pandas**     | `pandas-df`     | Available | Pandas     | Reference Pandas implementation                        | `uv add benchbox --extra dataframe-pandas`     |
+| **PySpark**    | `pyspark-df`    | Available | Expression | Apache Spark DataFrame API (distributed)               | `uv add benchbox --extra dataframe-pyspark`    |
+| **DataFusion** | `datafusion-df` | Available | Expression | Arrow-native query engine                              | `uv add benchbox --extra dataframe-datafusion` |
+| Modin          | `modin-df`      | Available | Pandas     | Distributed Pandas replacement                         | `uv add benchbox --extra dataframe-modin`      |
+| Dask           | `dask-df`       | Available | Pandas     | Parallel computing DataFrames                          | `uv add benchbox --extra dataframe-dask`       |
+| cuDF           | `cudf-df`       | Available | Pandas     | NVIDIA GPU-accelerated DataFrames                      | `uv add benchbox --extra dataframe-cudf`       |
 
 **Quick Start:**
 ```bash
@@ -112,11 +112,11 @@ platforms = ["duckdb", "clickhouse"]
 
 for platform_name in platforms:
     print(f"Running on {platform_name}...")
-    
+
     try:
         adapter = get_platform_adapter(platform_name)
         results = adapter.run_benchmark(benchmark)
-        
+
         print(f"Completed in {results.duration_seconds:.2f}s")
         print(f"Average query time: {results.average_query_time:.3f}s")
     except Exception as e:
@@ -128,7 +128,7 @@ for platform_name in platforms:
 ## DuckDB
 
 **Type**: In-process analytical database
-**Common Use Cases**: Development, testing, small to medium-scale analytics workloads  
+**Common Use Cases**: Development, testing, small to medium-scale analytics workloads
 
 ### Configuration
 
@@ -195,7 +195,7 @@ adapter = ClickHouseAdapter(
 ## Databricks
 
 **Type**: Data Intelligence Platform (lakehouse architecture)
-**Common Use Cases**: SQL analytics, ML/data science workflows, lakehouse deployments  
+**Common Use Cases**: SQL analytics, ML/data science workflows, lakehouse deployments
 
 ### Configuration
 
@@ -216,7 +216,7 @@ adapter = DatabricksAdapter(
 ## BigQuery
 
 **Type**: Serverless data warehouse (Google Cloud)
-**Common Use Cases**: Large-scale analytics, petabyte-scale datasets, GCP-native applications  
+**Common Use Cases**: Large-scale analytics, petabyte-scale datasets, GCP-native applications
 
 ### Configuration
 
@@ -236,7 +236,7 @@ adapter = BigQueryAdapter(
 ## Redshift
 
 **Type**: Cloud data warehouse (AWS)
-**Common Use Cases**: AWS-native analytics, variable workloads, serverless or provisioned deployments  
+**Common Use Cases**: AWS-native analytics, variable workloads, serverless or provisioned deployments
 
 ### Configuration
 
@@ -259,7 +259,7 @@ adapter = RedshiftAdapter(
 ## Snowflake
 
 **Type**: Data Cloud (multi-cloud data warehouse)
-**Common Use Cases**: Enterprise analytics, multi-cloud deployments, elastic scaling workloads  
+**Common Use Cases**: Enterprise analytics, multi-cloud deployments, elastic scaling workloads
 
 ### Configuration
 

@@ -36,21 +36,27 @@ def normalize_query_id(query_id: str | int) -> str:
     if isinstance(query_id, int):
         return str(query_id)
 
-    # Convert to string and uppercase for consistent processing
-    normalized = str(query_id).upper().strip()
+    normalized = str(query_id).strip()
 
-    # Remove common prefixes
-    for prefix in ("QUERY_", "QUERY", "Q"):
-        if normalized.startswith(prefix):
-            normalized = normalized[len(prefix) :]
-            break
+    # Remove common prefixes (case-insensitive)
+    upper = normalized.upper()
+    if upper.startswith("QUERY_"):
+        normalized = normalized[6:]
+    elif upper.startswith("QUERY"):
+        normalized = normalized[5:]
+    elif upper.startswith("Q") and len(normalized) > 1 and (normalized[1].isdigit() or normalized[1].islower()):
+        normalized = normalized[1:]
 
     normalized = normalized.strip()
 
-    # Extract numeric portion to ensure stable numeric IDs
-    digits = "".join(re.findall(r"\d+", normalized))
-    if digits:
-        return digits
+    # Remove common file suffix (e.g., ".sql")
+    normalized = normalized.split(".", 1)[0].strip()
+
+    # Preserve variant suffixes for multi-part templates (e.g., "14a", "39b")
+    match = re.fullmatch(r"(\d+)([A-Za-z]+)?", normalized)
+    if match:
+        digits, suffix = match.groups()
+        return f"{digits}{suffix.lower() if suffix else ''}"
 
     return normalized
 
@@ -90,6 +96,7 @@ class QueryResultInput:
     # Optional extended metadata
     cost: float | None = None  # Cloud platform cost estimation
     row_count_validation: dict[str, Any] | None = None  # Validation results
+    dataframe_skip_summary: dict[str, Any] | None = None  # DataFrame skip metadata
 
 
 def normalize_query_result(
@@ -114,12 +121,9 @@ def normalize_query_result(
     query_id = raw_result.get("query_id") or raw_result.get("id") or raw_result.get("query") or ""
     query_id = normalize_query_id(query_id)
 
-    # Extract execution time - handle both seconds and milliseconds
+    # Extract execution time from canonical seconds key, then explicit ms keys.
     time_seconds = raw_result.get("execution_time_seconds")
     if time_seconds is None:
-        time_seconds = raw_result.get("execution_time")
-    if time_seconds is None:
-        # Check for millisecond values
         time_ms = raw_result.get("execution_time_ms") or raw_result.get("ms") or 0
         time_seconds = time_ms / 1000.0
 
@@ -170,6 +174,7 @@ def normalize_query_result(
         error_message=str(error_message) if error_message else None,
         cost=raw_result.get("cost"),
         row_count_validation=raw_result.get("row_count_validation"),
+        dataframe_skip_summary=raw_result.get("dataframe_skip_summary"),
     )
 
 

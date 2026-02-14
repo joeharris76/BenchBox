@@ -11,9 +11,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 try:
     import duckdb
@@ -41,7 +42,7 @@ class DuckDBConnectionWrapper:
         if self._platform_adapter.dry_run_mode:
             # Capture SQL instead of executing
             self._platform_adapter.capture_sql(query, "query", None)
-            # Return mock cursor-like object
+            # Return a lightweight cursor wrapper for dry-run flows.
             return DuckDBCursorWrapper([], self._platform_adapter)
         else:
             # Normal execution
@@ -63,7 +64,7 @@ class DuckDBConnectionWrapper:
 
 
 class DuckDBCursorWrapper:
-    """Mock cursor for dry-run mode."""
+    """Cursor wrapper used in dry-run mode."""
 
     def __init__(self, rows, platform_adapter):
         self._rows = rows
@@ -99,7 +100,6 @@ class DuckDBAdapter(PlatformAdapter):
         from pathlib import Path
 
         from benchbox.utils.database_naming import generate_database_filename
-        from benchbox.utils.scale_factor import format_benchmark_name
 
         # Extract DuckDB-specific configuration
         adapter_config = {}
@@ -109,15 +109,17 @@ class DuckDBAdapter(PlatformAdapter):
             adapter_config["database_path"] = config["database_path"]
         else:
             # Generate database path using naming utilities
-            from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
+            from benchbox.utils.path_utils import get_benchmark_runs_databases_path
 
-            # Use output_dir if provided, otherwise use canonical benchmark_runs/datagen path
+            # Place local database artifacts in canonical benchmark_runs/databases.
             if config.get("output_dir"):
-                data_dir = Path(config["output_dir"]) / format_benchmark_name(
-                    config["benchmark"], config["scale_factor"]
+                data_dir = get_benchmark_runs_databases_path(
+                    config["benchmark"],
+                    config["scale_factor"],
+                    base_dir=Path(config["output_dir"]) / "databases",
                 )
             else:
-                data_dir = get_benchmark_runs_datagen_path(config["benchmark"], config["scale_factor"])
+                data_dir = get_benchmark_runs_databases_path(config["benchmark"], config["scale_factor"])
 
             db_filename = generate_database_filename(
                 benchmark_name=config["benchmark"],
@@ -255,7 +257,7 @@ class DuckDBAdapter(PlatformAdapter):
 
     def create_schema(self, benchmark, connection: Any) -> float:
         """Create schema using benchmark's SQL definitions."""
-        start_time = time.time()
+        start_time = mono_time()
         self.log_operation_start("Schema creation", f"benchmark: {benchmark.__class__.__name__}")
 
         # Get constraint settings from tuning configuration
@@ -321,7 +323,7 @@ class DuckDBAdapter(PlatformAdapter):
                     except Exception as e:
                         raise Exception(f"Failed to create table {table_name}: {e}")
 
-        duration = time.time() - start_time
+        duration = elapsed_seconds(start_time)
         self.log_operation_complete("Schema creation", duration, f"{tables_created} tables created")
         return duration
 
@@ -401,18 +403,18 @@ class DuckDBAdapter(PlatformAdapter):
             self.capture_sql(query, "query", None)
             self.log_very_verbose(f"Captured query {query_id} for dry-run")
 
-            # Return mock result for dry-run
+            # Return a synthetic result payload for dry-run execution.
             return {
                 "query_id": query_id,
                 "status": "DRY_RUN",
-                "execution_time": 0.0,
+                "execution_time_seconds": 0.0,
                 "rows_returned": 0,
                 "first_row": None,
                 "error": None,
                 "dry_run": True,
             }
 
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             # Enable profiling only if query plans are requested
@@ -424,7 +426,7 @@ class DuckDBAdapter(PlatformAdapter):
             result = connection.execute(query)
             rows = result.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(rows)
             logger.debug(f"Query {query_id} completed in {execution_time:.3f}s, returned {actual_row_count} rows")
 
@@ -486,7 +488,7 @@ class DuckDBAdapter(PlatformAdapter):
         except PlanCaptureError:
             raise
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             logger.error(
                 f"Query {query_id} failed after {execution_time:.3f}s: {e}",
                 exc_info=True,
@@ -495,7 +497,7 @@ class DuckDBAdapter(PlatformAdapter):
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

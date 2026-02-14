@@ -255,6 +255,7 @@ class TestBuildPlatformAdapterConfig:
         assert result["memory_limit"] == "8GB"
         assert result["force_recreate"] is True
         assert "database_path" in result
+        assert "benchmark_runs/databases" in result["database_path"]
         assert "tpch_sf1" in result["database_path"]
 
     def test_build_databricks_config_from_namespace(self):

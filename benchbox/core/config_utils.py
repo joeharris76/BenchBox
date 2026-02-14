@@ -209,11 +209,11 @@ def build_platform_adapter_config(
         # Database path: use provided or generate
         db_path = get_value("duckdb_database_path")
         if not db_path:
-            from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
+            from benchbox.utils.path_utils import get_benchmark_runs_databases_path
 
             bname = benchmark_name or get_value("benchmark", "bench")
             sf = scale_factor if scale_factor is not None else get_value("scale", 0.01)
-            data_dir = get_benchmark_runs_datagen_path(bname, sf)
+            data_dir = get_benchmark_runs_databases_path(bname, sf)
             db_filename = generate_database_filename(
                 benchmark_name=bname, scale_factor=sf, platform="duckdb", tuning_config=None
             )

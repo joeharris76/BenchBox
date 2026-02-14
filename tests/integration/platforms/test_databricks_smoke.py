@@ -19,7 +19,7 @@ def test_databricks_smoke_run(monkeypatch, tmp_path):
         access_token="token",
         catalog=state.catalog,
         schema=state.schema,
-        staging_root="dbfs:/Volumes/benchbox/smoke",
+        staging_root="dbfs:/Volumes/main/benchbox/smoke",
         enable_delta_optimization=False,
     )
 

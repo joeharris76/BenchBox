@@ -16,40 +16,46 @@ class ChartTemplate:
     name: str
     description: str
     chart_types: Sequence[str]
-    formats: Sequence[str] = field(default_factory=lambda: ("html",))
+    formats: Sequence[str] = field(default_factory=lambda: ("ascii",))
     options: dict[str, Any] = field(default_factory=dict)
 
 
 _TEMPLATES: dict[str, ChartTemplate] = {
     "default": ChartTemplate(
         name="default",
-        description="Baseline set for a single benchmark run (bar + box + heatmap when available).",
-        chart_types=("performance_bar", "distribution_box", "query_heatmap"),
-        formats=("html",),
+        description="Baseline set for a single benchmark run (bar + box + histogram + heatmap when available).",
+        chart_types=("performance_bar", "distribution_box", "query_histogram", "query_heatmap"),
+        formats=("ascii",),
     ),
     "flagship": ChartTemplate(
         name="flagship",
-        description="Eight-platform flagship comparison with heatmap and cost frontier.",
-        chart_types=("performance_bar", "query_heatmap", "cost_scatter", "distribution_box"),
-        formats=("html",),
+        description="Eight-platform flagship comparison with heatmap, histogram, and cost frontier.",
+        chart_types=("performance_bar", "query_heatmap", "query_histogram", "cost_scatter", "distribution_box"),
+        formats=("ascii",),
     ),
     "head_to_head": ChartTemplate(
         name="head_to_head",
         description="Two-platform comparison with win/loss emphasis.",
-        chart_types=("performance_bar", "distribution_box", "query_heatmap"),
-        formats=("html",),
+        chart_types=("performance_bar", "distribution_box", "query_histogram", "query_heatmap"),
+        formats=("ascii",),
     ),
     "trends": ChartTemplate(
         name="trends",
         description="Multi-period performance trend lines with regression overlay.",
         chart_types=("time_series", "performance_bar"),
-        formats=("html",),
+        formats=("ascii",),
     ),
     "cost_optimization": ChartTemplate(
         name="cost_optimization",
         description="Cost breakdown and price/performance frontier.",
         chart_types=("cost_scatter", "performance_bar"),
-        formats=("html",),
+        formats=("ascii",),
+    ),
+    "comparison": ChartTemplate(
+        name="comparison",
+        description="Two-run comparison report with paired bars, diverging distribution, and summary box.",
+        chart_types=("comparison_bar", "diverging_bar", "summary_box"),
+        formats=("ascii",),
     ),
 }
 

@@ -10,7 +10,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import pytest
 
-from benchbox.core.tpcds.queries import TPCDSQueries, TPCDSQueryManager
+from benchbox.core.tpcds.queries import TPCDSQueryManager
 
 
 @pytest.fixture(autouse=True)
@@ -202,17 +202,10 @@ class TestTPCDSQueryManagerMinimal:
         assert query2_q1 == query2_q2
         assert query1_q1 != query2_q1
 
-    def test_backward_compatibility_alias(self):
-        """Test backward compatibility alias."""
-        # Test that the old name still works
-        old_queries = TPCDSQueries()
-        new_queries = TPCDSQueryManager()
+    def test_multiple_instances_match_behavior(self):
+        """Independent manager instances should behave consistently."""
+        queries_a = TPCDSQueryManager()
+        queries_b = TPCDSQueryManager()
 
-        # Both should be the same class
-        assert type(old_queries) == type(new_queries)
-
-        # Both should produce the same results
-        query_old = old_queries.get_query(1)
-        query_new = new_queries.get_query(1)
-
-        assert query_old == query_new
+        assert type(queries_a) == type(queries_b)
+        assert queries_a.get_query(1) == queries_b.get_query(1)

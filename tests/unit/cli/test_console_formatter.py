@@ -323,12 +323,14 @@ class TestConsoleResultFormatter:
         assert "Performance Characteristics" in all_calls
 
 
-@pytest.mark.skipif(IMPORTS_AVAILABLE, reason="Only run when imports are not available")
 class TestConsoleFormatterMocked:
     """Test ConsoleResultFormatter functionality using mocked classes."""
 
     def test_mock_result_creation(self):
         """Test that our mock classes work properly."""
+        if IMPORTS_AVAILABLE:
+            assert ConsoleResultFormatter is not None
+            return
         result = MockBenchmarkResult(benchmark_name="Test", scale_factor=1.0, duration_seconds=10.0)
 
         assert result.benchmark_name == "Test"
@@ -338,6 +340,9 @@ class TestConsoleFormatterMocked:
 
     def test_mock_platform_result(self):
         """Test mock platform result creation."""
+        if IMPORTS_AVAILABLE:
+            assert ConsoleResultFormatter is not None
+            return
         result = MockBenchmarkResults(platform="MockDB", successful_queries=3, total_queries=5)
 
         assert result.platform == "MockDB"

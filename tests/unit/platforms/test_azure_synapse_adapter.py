@@ -242,7 +242,7 @@ class TestAzureSynapseAdapter:
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["first_row"] == (1, "test")
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
     def test_execute_query_failure(self, synapse_stubs):
         """Query execution failure should return error info."""

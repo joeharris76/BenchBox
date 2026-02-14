@@ -24,7 +24,7 @@ from benchbox.utils.cloud_storage import (
     validate_cloud_path_support,
 )
 
-pytestmark = pytest.mark.medium  # Cloud storage tests have network-like operations (~1s)
+pytestmark = [pytest.mark.medium, pytest.mark.fast, pytest.mark.unit]  # Include in CI fast coverage pass
 
 
 class TestCloudPathDetection:

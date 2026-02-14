@@ -126,9 +126,9 @@ class TestCompletenessValidator:
             "test_start_time": "2023-01-01T10:00:00Z",
             "test_end_time": "2023-01-01T11:00:00Z",
             "query_results": {
-                "1": {"status": "success", "execution_time": 1.0, "row_count": 100},
-                "2": {"status": "success", "execution_time": 2.0, "row_count": 200},
-                "3": {"status": "success", "execution_time": 3.0, "row_count": 300},
+                "1": {"status": "success", "execution_time_seconds": 1.0, "row_count": 100},
+                "2": {"status": "success", "execution_time_seconds": 2.0, "row_count": 200},
+                "3": {"status": "success", "execution_time_seconds": 3.0, "row_count": 300},
             },
             "data_generation": {"generated_tables": ["customer", "orders", "lineitem"]},
             "metrics": {},
@@ -157,8 +157,8 @@ class TestCompletenessValidator:
             "test_start_time": "2023-01-01T10:00:00Z",
             "test_end_time": "2023-01-01T11:00:00Z",
             "query_results": {
-                "1": {"status": "success", "execution_time": 1.0, "row_count": 100},
-                "2": {"status": "success", "execution_time": 2.0, "row_count": 200},
+                "1": {"status": "success", "execution_time_seconds": 1.0, "row_count": 100},
+                "2": {"status": "success", "execution_time_seconds": 2.0, "row_count": 200},
                 # Missing queries 3 and 4
             },
             "data_generation": {"generated_tables": []},
@@ -221,13 +221,13 @@ class TestQueryResultValidator:
             "query_results": {
                 "1": {
                     "status": "success",
-                    "execution_time": 5.2,
+                    "execution_time_seconds": 5.2,
                     "row_count": 100,
                     "results": [{"col1": "value1", "col2": "value2"}],
                 },
                 "2": {
                     "status": "success",
-                    "execution_time": 3.1,
+                    "execution_time_seconds": 3.1,
                     "row_count": 50,
                     "results": [{"col1": "value3", "col2": "value4"}],
                 },
@@ -248,7 +248,7 @@ class TestQueryResultValidator:
             "query_results": {
                 "1": {
                     "status": "failed",
-                    "execution_time": 5.2,
+                    "execution_time_seconds": 5.2,
                     "row_count": 0,
                     "error": "SQL syntax error",
                 }
@@ -272,7 +272,7 @@ class TestQueryResultValidator:
             "query_results": {
                 "1": {
                     "status": "success",
-                    "execution_time": 15.0,  # Exceeds max_execution_time
+                    "execution_time_seconds": 15.0,  # Exceeds max_execution_time
                     "row_count": 100,
                     "results": [],
                 }
@@ -298,8 +298,8 @@ class TestTimingValidator:
             "test_start_time": "2023-01-01T10:00:00Z",
             "test_end_time": "2023-01-01T11:00:00Z",
             "query_results": {
-                "1": {"execution_time": 4.1},
-                "2": {"execution_time": 4.2},
+                "1": {"execution_time_seconds": 4.1},
+                "2": {"execution_time_seconds": 4.2},
             },
             "data_generation": {
                 "generation_time": 120.5,
@@ -432,8 +432,8 @@ class TestMetricsValidator:
                 "queries_per_second": 0.0005555555555555556,
             },
             "query_results": {
-                "1": {"execution_time": 4.15},
-                "2": {"execution_time": 4.15},
+                "1": {"execution_time_seconds": 4.15},
+                "2": {"execution_time_seconds": 4.15},
             },
             "test_start_time": "2023-01-01T10:00:00Z",
             "test_end_time": "2023-01-01T11:00:00Z",
@@ -846,7 +846,7 @@ class TestCreateSampleTestResults:
         query_results = sample_results["query_results"]
         assert len(query_results) == 2
         assert all("status" in qr for qr in query_results.values())
-        assert all("execution_time" in qr for qr in query_results.values())
+        assert all("execution_time_seconds" in qr for qr in query_results.values())
         assert all("row_count" in qr for qr in query_results.values())
 
         # Check data generation structure

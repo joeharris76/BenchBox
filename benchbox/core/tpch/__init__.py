@@ -20,7 +20,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from .benchmark import TPCHBenchmark
 from .generator import TPCHDataGenerator
-from .queries import TPCHQueryManager
+from .queries import TPCHQueries
 from .schema import (
     CUSTOMER,
     LINEITEM,
@@ -36,7 +36,7 @@ from .schema import (
 __all__ = [
     "TPCHBenchmark",
     "TPCHDataGenerator",
-    "TPCHQueryManager",
+    "TPCHQueries",
     "CUSTOMER",
     "LINEITEM",
     "NATION",

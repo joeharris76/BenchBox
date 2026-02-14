@@ -603,7 +603,7 @@ class TestParallelBatchProcessor:
         results = parallel_processor.execute_parallel_batch()
 
         assert "resource_usage" in results
-        assert "execution_time" in results
+        assert "execution_time_seconds" in results
 
 
 class TestIncrementalDataLoader:

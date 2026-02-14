@@ -112,10 +112,10 @@ class TestDependencyValidation:
         assert PlatformAdapter._get_install_command("psutil") == "uv add psutil"
         assert PlatformAdapter._get_install_command("unknown_dependency") is None
 
+    @patch("benchbox.platforms.base.adapter.quiet_console")
     @patch("benchbox.platforms.base.PlatformAdapter.validate_platform_dependencies")
     @patch("sys.exit")
-    @patch("builtins.print")
-    def test_require_dependencies_all_available(self, mock_print, mock_exit, mock_validate):
+    def test_require_dependencies_all_available(self, mock_exit, mock_validate, mock_console):
         """Test require_dependencies when all dependencies are available."""
         # Mock all required dependencies as available
         mock_validate.return_value = {"duckdb": True, "cloudpathlib": True}
@@ -127,13 +127,15 @@ class TestDependencyValidation:
         assert result == {"duckdb": True, "cloudpathlib": True}
 
         # Should print success message
-        mock_print.assert_called_with("✅ All required dependencies are available")
+        assert any(
+            "✅ All required dependencies are available" in str(call) for call in mock_console.print.call_args_list
+        )
 
+    @patch("benchbox.platforms.base.adapter.quiet_console")
     @patch("benchbox.platforms.base.PlatformAdapter.validate_platform_dependencies")
     @patch("benchbox.platforms.base.PlatformAdapter._get_install_command")
     @patch("sys.exit")
-    @patch("builtins.print")
-    def test_require_dependencies_missing_with_exit(self, mock_print, mock_exit, mock_get_install, mock_validate):
+    def test_require_dependencies_missing_with_exit(self, mock_exit, mock_get_install, mock_validate, mock_console):
         """Test require_dependencies with missing dependencies and exit enabled."""
         # Mock some dependencies as missing
         mock_validate.return_value = {"duckdb": False, "cloudpathlib": True}
@@ -145,13 +147,14 @@ class TestDependencyValidation:
         mock_exit.assert_called_once_with(1)
 
         # Should print error message
-        assert any("❌ Missing required dependencies:" in str(call) for call in mock_print.call_args_list)
-        assert any("duckdb" in str(call) for call in mock_print.call_args_list)
+        console_calls = [str(call) for call in mock_console.print.call_args_list]
+        assert any("❌ Missing required dependencies:" in call for call in console_calls)
+        assert any("duckdb" in call for call in console_calls)
 
+    @patch("benchbox.platforms.base.adapter.quiet_console")
     @patch("benchbox.platforms.base.PlatformAdapter.validate_platform_dependencies")
     @patch("sys.exit")
-    @patch("builtins.print")
-    def test_require_dependencies_missing_no_exit(self, mock_print, mock_exit, mock_validate):
+    def test_require_dependencies_missing_no_exit(self, mock_exit, mock_validate, mock_console):
         """Test require_dependencies with missing dependencies and exit disabled."""
         # Mock some dependencies as missing
         mock_validate.return_value = {"duckdb": False, "cloudpathlib": True}
@@ -163,18 +166,21 @@ class TestDependencyValidation:
         assert result == {"duckdb": False, "cloudpathlib": True}
 
         # Should still print error message
-        assert any("❌ Missing required dependencies:" in str(call) for call in mock_print.call_args_list)
+        console_calls = [str(call) for call in mock_console.print.call_args_list]
+        assert any("❌ Missing required dependencies:" in call for call in console_calls)
 
     def test_require_dependencies_empty_list(self):
         """Test require_dependencies with empty requirements list."""
         with patch("benchbox.platforms.base.PlatformAdapter.validate_platform_dependencies") as mock_validate:
             mock_validate.return_value = {}
 
-            with patch("builtins.print") as mock_print:
+            with patch("benchbox.platforms.base.adapter.quiet_console") as mock_console:
                 result = PlatformAdapter.require_dependencies([])
 
             # Should succeed and print success message
-            mock_print.assert_called_with("✅ All required dependencies are available")
+            assert any(
+                "✅ All required dependencies are available" in str(call) for call in mock_console.print.call_args_list
+            )
             assert result == {}
 
 

@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 
 @dataclass
 class TPCHThroughputTestConfig:
@@ -123,7 +125,7 @@ class TPCHThroughputTest:
         # Per TPC-H specification, Total Test Time (TTT) must be measured from when
         # the first stream begins execution until the last stream completes execution.
         # This excludes setup overhead (executor creation, future submission, etc.).
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result = TPCHThroughputTestResult(
@@ -208,7 +210,7 @@ class TPCHThroughputTest:
                 total_time = last_stream_end - first_stream_start
             else:
                 # Fallback if no streams executed (shouldn't happen in normal operation)
-                total_time = time.time() - start_time
+                total_time = elapsed_seconds(start_time)
 
             result.total_time = total_time
 
@@ -243,7 +245,7 @@ class TPCHThroughputTest:
             return result
 
         except Exception as e:
-            result.total_time = time.time() - start_time
+            result.total_time = elapsed_seconds(start_time)
             result.end_time = datetime.now().isoformat()
             result.success = False
             result.errors.append(f"Throughput Test execution failed: {e}")
@@ -266,7 +268,7 @@ class TPCHThroughputTest:
         Returns:
             Stream execution result
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         stream_result = TPCHThroughputStreamResult(
             stream_id=stream_id,
@@ -296,12 +298,12 @@ class TPCHThroughputTest:
                 self.logger.info(f"Stream {stream_id} using TPC-H permutation: {query_permutation}")
 
             for position, query_id in enumerate(query_permutation):
-                query_start = time.time()
+                query_start = mono_time()
                 query_result = {
                     "query_id": query_id,
                     "position": position + 1,
                     "stream_id": stream_id,
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "success": False,
                     "error": None,
                     "result_count": 0,
@@ -344,11 +346,11 @@ class TPCHThroughputTest:
                         if hasattr(self, "captured_items"):
                             self.captured_items.append((label, query_text))
 
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
 
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": True,
                             "result_count": len(rows),
                         }
@@ -357,10 +359,10 @@ class TPCHThroughputTest:
                     stream_result.queries_successful += 1
 
                 except Exception as e:
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": False,
                             "error": str(e),
                         }

@@ -606,3 +606,37 @@ def test_no_regenerate_respects_alias_manifest(tmp_path):
     assert isinstance(result, BenchmarkResults)
     benchmark.generate_data.assert_not_called()
     assert "orders" in benchmark.tables
+
+
+@pytest.mark.unit
+def test_base_benchmark_run_benchmark_avoids_wall_clock_elapsed_arithmetic():
+    class DummyBenchmark(BaseBenchmark):
+        def generate_data(self):
+            return []
+
+        def get_queries(self, dialect: str | None = None):
+            return {"Q1": "SELECT 1"}
+
+        def get_query(self, query_id, *, params=None):
+            return self.get_queries()[str(query_id)]
+
+    class DummyConnection:
+        def execute(self, _):
+            return object()
+
+        def fetchall(self, _):
+            return []
+
+    benchmark = DummyBenchmark(scale_factor=1.0)
+    conn = DummyConnection()
+
+    mock_clock = Mock(side_effect=[10.0, 10.1, 10.4, 10.8])
+    with (
+        patch("benchbox.base.mono_time", mock_clock),
+        patch("benchbox.utils.clock.mono_time", mock_clock),
+    ):
+        result = benchmark.run_benchmark(conn, query_ids=["Q1"], setup_database=False)
+
+    assert result["successful_queries"] == 1
+    assert result["total_execution_time"] == pytest.approx(0.8)
+    assert result["query_results"][0]["execution_time_seconds"] == pytest.approx(0.3)

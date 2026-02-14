@@ -8,13 +8,14 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 class TPCBenchmarkType(Enum):
@@ -70,7 +71,7 @@ class TPCQueryResult:
     result_count: int = 0
     error: Optional[str] = None
 
-    # Additional fields expected by tests
+    # Extended execution metadata used by reporting and interoperability layers.
     stream_id: int = 0
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
@@ -96,7 +97,7 @@ class TPCQueryResult:
         return {
             "query_id": self.query_id,
             "stream_id": self.stream_id,
-            "execution_time": self.execution_time,
+            "execution_time_seconds": self.execution_time,
             "status": self.status.value if self.status else "unknown",
             "result_rows": self.result_rows,
             "success": self.success,
@@ -166,7 +167,7 @@ class TPCTestResult:
     query_results: list[TPCQueryResult] = field(default_factory=list)  # Changed to List
     metadata: Optional[dict[str, Any]] = field(default_factory=dict)
 
-    # Additional fields expected by tests
+    # Extended summary metadata used by reporting and interoperability layers.
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     total_time: Optional[float] = None
@@ -223,7 +224,7 @@ class TPCTestResult:
             "benchmark_name": self.benchmark_name,
             "test_phase": self.test_phase or self.test_type,
             "scale_factor": self.scale_factor,
-            "execution_time": self.execution_time or self.duration,
+            "execution_time_seconds": self.execution_time or self.duration,
             "success": self.success,
             "query_results": [qr.to_dict() if hasattr(qr, "to_dict") else str(qr) for qr in self.query_results]
             if self.query_results
@@ -317,7 +318,7 @@ class TPCTimer:
 
     def start(self, timer_name: str = "default"):
         """Start a named timer."""
-        self.timers[timer_name] = {"start_time": time.time(), "end_time": None}
+        self.timers[timer_name] = {"start_time": mono_time(), "end_time": None}
 
     def stop(self, timer_name: str = "default") -> float:
         """Stop a named timer and return elapsed time."""
@@ -325,7 +326,7 @@ class TPCTimer:
             raise ValueError(f"Timer '{timer_name}' was not started")
 
         timer = self.timers[timer_name]
-        timer["end_time"] = time.time()
+        timer["end_time"] = mono_time()
         return timer["end_time"] - timer["start_time"]
 
     def elapsed(self, timer_name: str = "default") -> float:
@@ -335,7 +336,7 @@ class TPCTimer:
 
         timer = self.timers[timer_name]
         if timer["end_time"] is None:
-            return time.time() - timer["start_time"]
+            return elapsed_seconds(timer["start_time"])
         return timer["end_time"] - timer["start_time"]
 
     def measure(self, timer_name: str):

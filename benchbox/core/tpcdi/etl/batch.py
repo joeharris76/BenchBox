@@ -94,7 +94,6 @@ import logging
 import multiprocessing
 import queue
 import threading
-import time
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterator
@@ -111,6 +110,8 @@ from typing import (
 )
 
 import pandas as pd
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -132,14 +133,14 @@ class SimpleProgressTracker:
     """Simple progress tracker placeholder."""
 
     def __init__(self):
-        self.start_time = time.time()
+        self.start_time = mono_time()
 
     def update_progress(self, processed: int, count: int, description: str = "") -> None:
         """Update progress."""
 
     def get_elapsed_time(self) -> float:
         """Get elapsed time."""
-        return time.time() - self.start_time
+        return elapsed_seconds(self.start_time)
 
 
 class BatchType(Enum):
@@ -354,7 +355,7 @@ class ExtractOperation(BatchOperation):
         Returns:
             Dictionary containing extraction results
         """
-        start_time = time.time()
+        start_time = mono_time()
         results: dict[str, Any] = {
             "operation": "extract",
             "batch_id": batch_id,
@@ -394,7 +395,7 @@ class ExtractOperation(BatchOperation):
                     results["errors"].append(error_msg)
                     logger.error(error_msg)
 
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
             results["processing_time"] = processing_time
             results["success"] = len(results["errors"]) == 0
 
@@ -605,7 +606,7 @@ class TransformOperation(BatchOperation):
         Returns:
             Dictionary containing transformation results
         """
-        start_time = time.time()
+        start_time = mono_time()
         results: dict[str, Any] = {
             "operation": "transform",
             "batch_id": batch_id,
@@ -656,7 +657,7 @@ class TransformOperation(BatchOperation):
                     results["errors"].append(error_msg)
                     logger.error(error_msg)
 
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
             results["processing_time"] = processing_time
             results["success"] = len(results["errors"]) == 0
 
@@ -891,7 +892,7 @@ class LoadOperation(BatchOperation):
         Returns:
             Dictionary containing load results
         """
-        start_time = time.time()
+        start_time = mono_time()
         results: dict[str, Any] = {
             "operation": "load",
             "batch_id": batch_id,
@@ -944,7 +945,7 @@ class LoadOperation(BatchOperation):
             if self.connection:
                 self.connection.commit()
 
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
             results["processing_time"] = processing_time
             results["success"] = len(results["errors"]) == 0
 
@@ -1113,7 +1114,7 @@ class LoadOperation(BatchOperation):
                     continue
 
                 logger.info(f"Starting streaming load for table {table_name}")
-                table_start_time = time.time()
+                table_start_time = mono_time()
                 table_chunks_processed = 0
                 table_records_loaded = 0
 
@@ -1122,7 +1123,7 @@ class LoadOperation(BatchOperation):
                 # Process chunks for this table
                 for chunk_idx, chunk_df in enumerate(source_data_chunks[table_name]):
                     try:
-                        chunk_start_time = time.time()
+                        chunk_start_time = mono_time()
 
                         # Memory check before processing
                         if memory_monitor.check_memory_usage():
@@ -1149,7 +1150,7 @@ class LoadOperation(BatchOperation):
                             )
                             context.setdefault("lineage", []).append(lineage)
 
-                        chunk_time = time.time() - chunk_start_time
+                        chunk_time = elapsed_seconds(chunk_start_time)
                         table_chunks_processed += 1
                         total_chunks_processed += 1
 
@@ -1193,7 +1194,7 @@ class LoadOperation(BatchOperation):
                         }
                         # Continue with next chunk
 
-                table_time = time.time() - table_start_time
+                table_time = elapsed_seconds(table_start_time)
                 logger.info(
                     f"Completed streaming load for {table_name}: {table_chunks_processed} chunks, "
                     f"{table_records_loaded} records in {table_time:.2f}s"
@@ -1317,7 +1318,7 @@ class ValidationOperation(BatchOperation):
         Returns:
             Dictionary containing validation results
         """
-        start_time = time.time()
+        start_time = mono_time()
         results: dict[str, Any] = {
             "operation": "validate",
             "batch_id": batch_id,
@@ -1372,7 +1373,7 @@ class ValidationOperation(BatchOperation):
             # Generate validation summary
             results["summary"] = self._generate_validation_summary(results)
 
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
             results["processing_time"] = processing_time
             results["success"] = len(results["errors"]) == 0 and len(results["failed_validations"]) == 0
 
@@ -1578,7 +1579,7 @@ class ValidationOperation(BatchOperation):
 
             for table_name, data_chunks in source_data_chunks.items():
                 logger.info(f"Starting streaming validation for table {table_name}")
-                table_start_time = time.time()
+                table_start_time = mono_time()
                 table_chunks_processed = 0
                 table_records_validated = 0
                 chunk_validations = []
@@ -1586,7 +1587,7 @@ class ValidationOperation(BatchOperation):
                 # Process chunks for this table
                 for chunk_idx, chunk_df in enumerate(data_chunks):
                     try:
-                        chunk_start_time = time.time()
+                        chunk_start_time = mono_time()
 
                         # Memory check before processing
                         if memory_monitor.check_memory_usage():
@@ -1629,7 +1630,7 @@ class ValidationOperation(BatchOperation):
                             }
                             chunk_quality_score = 0.0
 
-                        chunk_time = time.time() - chunk_start_time
+                        chunk_time = elapsed_seconds(chunk_start_time)
                         table_chunks_processed += 1
                         total_chunks_processed += 1
 
@@ -1684,7 +1685,7 @@ class ValidationOperation(BatchOperation):
                     table_quality_scores[table_name] = self._calculate_overall_quality_score(table_validation_summary)
                     table_validation_summaries[table_name] = table_validation_summary
 
-                table_time = time.time() - table_start_time
+                table_time = elapsed_seconds(table_start_time)
                 logger.info(
                     f"Completed streaming validation for {table_name}: {table_chunks_processed} chunks, "
                     f"{table_records_validated} records in {table_time:.2f}s"
@@ -2073,6 +2074,7 @@ class BatchProcessor:
             BatchStatus object with processing results
         """
         start_time = datetime.now()
+        start_mono = mono_time()
         batch_status = BatchStatus(batch_id, batch_type, start_time)
 
         with self._lock:
@@ -2105,7 +2107,7 @@ class BatchProcessor:
             end_time = datetime.now()
             if success:
                 batch_status.mark_completed(end_time)
-                self.logger.info(f"Batch {batch_id} completed in {(end_time - start_time).total_seconds():.2f}s")
+                self.logger.info(f"Batch {batch_id} completed in {elapsed_seconds(start_mono):.2f}s")
             else:
                 batch_status.mark_failed(end_time, "Pipeline execution failed")
 
@@ -2307,9 +2309,9 @@ class BatchProcessor:
                 operation_name = type(operation).__name__
                 logger.info(f"Executing {operation_name}")
 
-                start_time = time.time()
+                start_time = mono_time()
                 result = operation.execute(batch_data, batch_status.batch_id, context)
-                processing_time = time.time() - start_time
+                processing_time = elapsed_seconds(start_time)
 
                 # Track performance metrics
                 if isinstance(operation, ExtractOperation):
@@ -2530,7 +2532,7 @@ class BatchProcessor:
         worker_id: str,
     ) -> dict[str, Any]:
         """Execute operation with performance monitoring."""
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             self.logger.debug(f"Worker {worker_id} starting {type(operation).__name__}")
@@ -2539,7 +2541,7 @@ class BatchProcessor:
             result = operation.execute(batch_data, batch_id, context)
 
             # Add timing information
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
             result["processing_time"] = processing_time
             result["worker_id"] = worker_id
 
@@ -2548,7 +2550,7 @@ class BatchProcessor:
             return result
 
         except Exception as e:
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
             self.logger.error(
                 f"Worker {worker_id} failed {type(operation).__name__} after {processing_time:.2f}s: {str(e)}"
             )
@@ -2571,9 +2573,9 @@ class BatchProcessor:
         operation_name = type(operation).__name__
 
         try:
-            start_time = time.time()
+            start_time = mono_time()
             result = operation.execute(batch_data, batch_status.batch_id, context)
-            processing_time = time.time() - start_time
+            processing_time = elapsed_seconds(start_time)
 
             if result.get("success", False):
                 batch_status.metrics.add_processing_time(operation_name, processing_time)

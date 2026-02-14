@@ -151,7 +151,7 @@ def test_tpcds_compliance():
 
     try:
         from benchbox.core.tpcds.benchmark import TPCDSBenchmark
-        from benchbox.core.tpcds.maintenance_test import MaintenanceTestConfig
+        from benchbox.core.tpcds.maintenance_test import TPCDSMaintenanceTestConfig
         from benchbox.core.tpcds.power_test import TPCDSPowerTest
         from benchbox.core.tpcds.throughput_test import TPCDSThroughputTest
 
@@ -199,7 +199,7 @@ def test_tpcds_compliance():
             return False
 
         # Test maintenance test configuration
-        config = MaintenanceTestConfig(maintenance_operations=2, operation_interval=30.0, scale_factor=0.01)
+        config = TPCDSMaintenanceTestConfig(maintenance_operations=2, operation_interval=30.0, scale_factor=0.01)
 
         if config.maintenance_operations == 2 and config.operation_interval == 30.0:
             print("✅ TPC-DS Maintenance Test configuration is correct")

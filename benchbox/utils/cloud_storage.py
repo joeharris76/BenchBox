@@ -672,7 +672,7 @@ def get_cloud_path_info(path: Union[str, Path]) -> dict[str, Any]:
     bucket = parsed.netloc
     cloud_path = parsed.path.lstrip("/")
 
-    # Use scheme directly as provider name for consistency with test expectations
+    # Use scheme directly so provider identity matches the URI protocol.
     provider = scheme
 
     credential_check = validate_cloud_credentials(path)

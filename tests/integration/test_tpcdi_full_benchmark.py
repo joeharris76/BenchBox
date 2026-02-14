@@ -146,7 +146,7 @@ class TestTPCDIFullBenchmarkIntegration:
             execution_time = time.time() - start_time
 
             results[scale_factor] = {
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "data_files_count": len(data_files),
                 "etl_success": etl_results["success"],
                 "records_processed": etl_results["total_records_processed"],
@@ -439,7 +439,7 @@ class TestTPCDIFullBenchmarkIntegration:
             execution_time = time.time() - start_time
 
             results[workers] = {
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "etl_success": etl_results["success"],
                 "parallel_batches": etl_results["phases"]
                 .get("parallel_batch_processing", {})
@@ -453,8 +453,8 @@ class TestTPCDIFullBenchmarkIntegration:
         # With more workers, parallel batches should be processed
         if results[max(worker_counts)]["parallel_batches"] > 0:
             # More workers should not significantly increase execution time (within reason)
-            single_worker_time = results[1]["execution_time"]
-            multi_worker_time = results[max(worker_counts)]["execution_time"]
+            single_worker_time = results[1]["execution_time_seconds"]
+            multi_worker_time = results[max(worker_counts)]["execution_time_seconds"]
 
             # Allow some overhead but expect parallel processing benefits or at least no major regression
             assert multi_worker_time <= single_worker_time * 1.5, "Parallel processing shows significant regression"
@@ -974,7 +974,7 @@ class TestTPCDIPerformanceAndScalability:
                 execution_time = time.time() - start_time
 
                 query_performance[query_id] = {
-                    "execution_time": execution_time,
+                    "execution_time_seconds": execution_time,
                     "row_count": len(results),
                     "success": True,
                     "rows_per_second": len(results) / max(execution_time, 0.001),
@@ -982,7 +982,7 @@ class TestTPCDIPerformanceAndScalability:
 
             except Exception as e:
                 query_performance[query_id] = {
-                    "execution_time": float("inf"),
+                    "execution_time_seconds": float("inf"),
                     "error": str(e),
                     "success": False,
                 }
@@ -992,14 +992,14 @@ class TestTPCDIPerformanceAndScalability:
         assert len(successful_queries) >= len(test_queries) // 2, "Too many query performance failures"
 
         # Identify slow queries (threshold: 10 seconds)
-        slow_queries = [q for q in successful_queries if query_performance[q]["execution_time"] > 10.0]
+        slow_queries = [q for q in successful_queries if query_performance[q]["execution_time_seconds"] > 10.0]
 
         # For now, just log slow queries (in real implementation, you might fail or warn)
         if slow_queries:
             print(f"Slow queries detected: {slow_queries}")
 
         # Ensure at least some queries execute reasonably fast
-        fast_queries = [q for q in successful_queries if query_performance[q]["execution_time"] < 5.0]
+        fast_queries = [q for q in successful_queries if query_performance[q]["execution_time_seconds"] < 5.0]
         assert len(fast_queries) >= len(successful_queries) // 2, "Too many slow queries"
 
     def test_memory_usage_resource_consumption_patterns(self, temp_dir, test_database):

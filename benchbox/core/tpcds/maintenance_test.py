@@ -23,6 +23,7 @@ from benchbox.core.tpcds.maintenance_operations import (
     MaintenanceOperations,
     MaintenanceOperationType,
 )
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 @dataclass
@@ -131,7 +132,7 @@ class TPCDSMaintenanceTest:
                 output_dir=self.output_dir,
             )
 
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result: dict[str, Any] = {
@@ -202,7 +203,7 @@ class TPCDSMaintenanceTest:
                     time.sleep(config.operation_interval)
 
             # Calculate metrics
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             result["total_time"] = total_time
             result["end_time"] = datetime.now().isoformat()
 
@@ -227,7 +228,7 @@ class TPCDSMaintenanceTest:
             return result
 
         except Exception as e:
-            result["total_time"] = time.time() - start_time
+            result["total_time"] = elapsed_seconds(start_time)
             result["end_time"] = datetime.now().isoformat()
             result["success"] = False
             result["errors"].append(f"Maintenance Test execution failed: {e}")
@@ -293,7 +294,7 @@ class TPCDSMaintenanceTest:
         Returns:
             Maintenance operation result
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         operation = TPCDSMaintenanceOperation(
             operation_type=operation_type,
@@ -319,7 +320,7 @@ class TPCDSMaintenanceTest:
             maint_op_type = self._map_to_maintenance_operation_type(operation_type, table_name)
 
             # Execute the actual maintenance operation with estimated rows
-            # Use small row count for test (10 rows per operation)
+            # Use conservative dry-run row estimate (10 rows per operation).
             estimated_rows = 10
             result = self.maintenance_ops.execute_operation(connection, maint_op_type, estimated_rows)
 
@@ -529,8 +530,8 @@ class TPCDSMaintenanceTest:
         update_rows = max(5, int(self.scale_factor * 50))
         delete_rows = max(2, int(self.scale_factor * 20))
 
-        # Initialize maintenance_ops with mock dimension ranges for dry-run
-        # (actual execution would query these from the database)
+        # Initialize maintenance_ops with estimated dimension ranges for dry-run.
+        # Actual execution queries these ranges from the database.
         self._init_maintenance_ops_for_dryrun()
 
         # DM1: INSERT operations for fact tables - uses SAME row generation as actual execution
@@ -552,7 +553,7 @@ class TPCDSMaintenanceTest:
         return result
 
     def _init_maintenance_ops_for_dryrun(self) -> None:
-        """Initialize MaintenanceOperations with mock dimension ranges for dry-run.
+        """Initialize MaintenanceOperations with estimated dimension ranges for dry-run.
 
         Sets up dimension key ranges based on scale factor estimates, allowing
         row generation to work without database queries.
@@ -785,32 +786,3 @@ class TPCDSMaintenanceTest:
         )
 
         return statements
-
-
-# Aliases for backward compatibility
-MaintenanceTest = TPCDSMaintenanceTest
-MaintenanceTestConfig = TPCDSMaintenanceTestConfig
-MaintenanceTestResult = TPCDSMaintenanceTestResult
-
-
-# Mock DatabaseConnection for test compatibility
-class DatabaseConnection:
-    """Mock database connection for test compatibility."""
-
-    def __init__(self, connection_string: str = ""):
-        self.connection_string = connection_string
-
-    def cursor(self):
-        """Return a mock cursor."""
-        return MockCursor()
-
-    def close(self):
-        """Close the connection."""
-
-
-class MockCursor:
-    """Mock cursor for test compatibility."""
-
-    def fetchall(self):
-        """Return mock results."""
-        return [("result1",), ("result2",)]

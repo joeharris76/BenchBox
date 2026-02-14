@@ -446,6 +446,16 @@ class DataVaultBenchmark(BaseBenchmark):
         """
         return len(TABLES)
 
+    def supports_dataframe_mode(self) -> bool:
+        """Data Vault supports DataFrame execution mode."""
+        return True
+
+    def get_dataframe_queries(self) -> list[Any]:
+        """Get DataFrame query implementations for Data Vault."""
+        from benchbox.core.datavault.dataframe_queries import DATAVAULT_DATAFRAME_QUERIES
+
+        return DATAVAULT_DATAFRAME_QUERIES.get_all_queries()
+
     def _get_benchmark_name(self) -> str:
         """Override base naming to use datavault identifier for paths."""
         return "datavault"

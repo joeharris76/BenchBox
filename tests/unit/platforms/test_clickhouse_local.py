@@ -251,7 +251,7 @@ class TestClickHouseEmbeddedIntegration:
         assert result["status"] == "SUCCESS"
         assert result["query_id"] == "test_query"
         assert result["rows_returned"] == 1
-        assert result["execution_time"] > 0
+        assert result["execution_time_seconds"] > 0
 
     def test_query_execution_error_handling(self):
         """Test query execution error handling."""

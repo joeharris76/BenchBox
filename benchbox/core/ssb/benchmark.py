@@ -18,6 +18,7 @@ from benchbox.core.connection import DatabaseConnection
 from benchbox.core.ssb.generator import SSBDataGenerator
 from benchbox.core.ssb.queries import SSBQueryManager
 from benchbox.core.ssb.schema import TABLES, get_all_create_table_sql
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
@@ -310,8 +311,6 @@ class SSBBenchmark(BaseBenchmark):
         Returns:
             Dictionary containing benchmark results
         """
-        import time
-
         if queries is None:
             queries = list(self.query_manager.get_all_queries().keys())
 
@@ -332,11 +331,10 @@ class SSBBenchmark(BaseBenchmark):
             last_error = None
 
             for i in range(iterations):
-                start_time = time.time()
+                start_time = mono_time()
                 try:
                     result = self.execute_query(query_id, connection)
-                    end_time = time.time()
-                    execution_time = end_time - start_time
+                    execution_time = elapsed_seconds(start_time)
                     rows_returned = len(result) if result else 0
 
                     query_iterations.append(
@@ -372,7 +370,7 @@ class SSBBenchmark(BaseBenchmark):
 
             query_result = {
                 "query_id": query_id,
-                "execution_time": avg_time,
+                "execution_time_seconds": avg_time,
                 "success": successful_count > 0,
                 "rows_returned": avg_rows,
                 "iterations": query_iterations,

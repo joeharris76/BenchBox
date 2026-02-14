@@ -22,14 +22,14 @@ if TYPE_CHECKING:
 from benchbox.base import BaseBenchmark
 from benchbox.core.tpch.generator import TPCHDataGenerator
 from benchbox.core.tpch.maintenance_test import TPCHMaintenanceTest
-from benchbox.core.tpch.queries import TPCHQueryManager
+from benchbox.core.tpch.queries import TPCHQueries
 from benchbox.core.tpch.schema import TABLES
 from benchbox.core.tpch.streams import TPCHStreams
 
 # TPC-H Reference Seeds for Validation
-# The official TPC-H answer files at SF=1.0 were generated using seed 0o0101000000 (16843008 decimal)
+# The official TPC-H answer files at SF=1.0 were generated using seed 0o0101000000 (17039360 decimal)
 # This seed must be used when performing exact validation against official answer files
-TPCH_SF1_REFERENCE_SEED = 0o0101000000  # 16843008 decimal
+TPCH_SF1_REFERENCE_SEED = 0o0101000000  # 17039360 decimal
 
 
 def get_reference_seed(scale_factor: float) -> int | None:
@@ -146,7 +146,7 @@ class TPCHBenchmark(BaseBenchmark):
         super().__init__(scale_factor=scale_factor, output_dir=output_dir, verbose=verbose, quiet=quiet, **kwargs)
         self._name = "TPC-H Benchmark"
         self.parallel = parallel
-        self.query_manager = TPCHQueryManager()
+        self.query_manager = TPCHQueries()
         self.data_generator = TPCHDataGenerator(
             scale_factor=scale_factor,
             parallel=parallel,

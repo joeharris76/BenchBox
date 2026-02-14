@@ -102,6 +102,7 @@ except ImportError:
     DATAFUSION_DF_AVAILABLE = False
     DataFusionDataFrameAdapter = None  # type: ignore[assignment,misc]
 
+
 # PySpark adapter (optional - requires pyspark)
 try:
     from benchbox.platforms.dataframe.pyspark_df import (

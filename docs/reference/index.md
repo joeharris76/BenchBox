@@ -31,6 +31,7 @@ Complete reference documentation for BenchBox APIs, CLI, and data formats.
 
 - [Result Export Formats](result-formats.md) - Comprehensive guide to JSON, CSV, HTML exports
 - [Result Schema v1.0](result-schema-v1.md) - Benchmark result JSON schema specification
+- [Backward Compatibility Registry](backward-compatibility.md) - Track and manage compatibility shims
 
 ## Related Documentation
 
@@ -47,6 +48,7 @@ api-reference
 mcp
 result-formats
 result-schema-v1
+backward-compatibility
 python-api/index
 python-api/platforms
 ```

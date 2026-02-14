@@ -19,14 +19,14 @@ The TPC-DS official benchmark implementation provides a complete, certification-
 
 ### Key Features
 
-- ✅ **TPC-DS Compliant**: Follows official TPC-DS specification
-- ✅ **Complete Implementation**: Power, Throughput, and Maintenance Tests
-- ✅ **Official Metrics**: QphDS@Size calculation with geometric mean
-- ✅ **Multi-format Reporting**: Text, JSON, CSV, HTML reports
-- ✅ **Validation Framework**: Comprehensive result validation
-- ✅ **Error Handling**: Robust error handling and recovery
-- ✅ **Scalable**: Supports any scale factor
-- ✅ **Database Agnostic**: Works with multiple database systems
+- **TPC-DS Compliant**: Follows official TPC-DS specification
+- **Complete Implementation**: Power, Throughput, and Maintenance Tests
+- **Official Metrics**: QphDS@Size calculation with geometric mean
+- **Multi-format Reporting**: Text, JSON, CSV, HTML reports
+- **Validation Framework**: Comprehensive result validation
+- **Error Handling**: Robust error handling and recovery
+- **Scalable**: Supports any scale factor
+- **Database Agnostic**: Works with multiple database systems
 
 ## Quick Start
 
@@ -184,27 +184,27 @@ result = benchmark.run_official_benchmark(
 
 ### Benchmark Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `scale_factor` | float | 1.0 | Scale factor (1.0 ≈ 1GB) |
-| `output_dir` | str/Path | current dir | Output directory |
-| `verbose` | bool | False | Enable verbose logging |
-| `parallel` | int | 1 | Parallel data generation |
+| Parameter      | Type     | Default     | Description              |
+| -------------- | -------- | ----------- | ------------------------ |
+| `scale_factor` | float    | 1.0         | Scale factor (1.0 ≈ 1GB) |
+| `output_dir`   | str/Path | current dir | Output directory         |
+| `verbose`      | bool     | False       | Enable verbose logging   |
+| `parallel`     | int      | 1           | Parallel data generation |
 
 ### Official Benchmark Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `connection_string` | str | Required | Database connection |
-| `num_streams` | int | 2 | Concurrent streams |
-| `power_test` | bool | True | Run Power Test |
-| `throughput_test` | bool | True | Run Throughput Test |
-| `maintenance_test` | bool | True | Run Maintenance Test |
-| `refresh_functions` | list | ["RF1", "RF2"] | Refresh functions |
-| `data_maintenance` | bool | True | Data maintenance ops |
-| `result_validation` | bool | True | Result validation |
-| `dialect` | str | "standard" | SQL dialect |
-| `output_dir` | str/Path | None | Custom output path |
+| Parameter           | Type     | Default        | Description          |
+| ------------------- | -------- | -------------- | -------------------- |
+| `connection_string` | str      | Required       | Database connection  |
+| `num_streams`       | int      | 2              | Concurrent streams   |
+| `power_test`        | bool     | True           | Run Power Test       |
+| `throughput_test`   | bool     | True           | Run Throughput Test  |
+| `maintenance_test`  | bool     | True           | Run Maintenance Test |
+| `refresh_functions` | list     | ["RF1", "RF2"] | Refresh functions    |
+| `data_maintenance`  | bool     | True           | Data maintenance ops |
+| `result_validation` | bool     | True           | Result validation    |
+| `dialect`           | str      | "standard"     | SQL dialect          |
+| `output_dir`        | str/Path | None           | Custom output path   |
 
 ## Benchmark Phases
 
@@ -275,15 +275,15 @@ The test executes a series of data modification operations across multiple table
 
 The Maintenance Test targets the following sales and inventory tables:
 
-| Table              | Purpose                          | Operation Types        |
-|--------------------|----------------------------------|------------------------|
-| `catalog_sales`    | Catalog channel sales            | INSERT, UPDATE, DELETE |
-| `catalog_returns`  | Catalog channel returns          | INSERT, UPDATE, DELETE |
-| `web_sales`        | Web channel sales                | INSERT, UPDATE, DELETE |
-| `web_returns`      | Web channel returns              | INSERT, UPDATE, DELETE |
-| `store_sales`      | Store channel sales              | INSERT, UPDATE, DELETE |
-| `store_returns`    | Store channel returns            | INSERT, UPDATE, DELETE |
-| `inventory`        | Product inventory levels         | INSERT, UPDATE, DELETE |
+| Table             | Purpose                  | Operation Types        |
+| ----------------- | ------------------------ | ---------------------- |
+| `catalog_sales`   | Catalog channel sales    | INSERT, UPDATE, DELETE |
+| `catalog_returns` | Catalog channel returns  | INSERT, UPDATE, DELETE |
+| `web_sales`       | Web channel sales        | INSERT, UPDATE, DELETE |
+| `web_returns`     | Web channel returns      | INSERT, UPDATE, DELETE |
+| `store_sales`     | Store channel sales      | INSERT, UPDATE, DELETE |
+| `store_returns`   | Store channel returns    | INSERT, UPDATE, DELETE |
+| `inventory`       | Product inventory levels | INSERT, UPDATE, DELETE |
 
 #### Data Volumes Modified
 
@@ -292,7 +292,7 @@ The amount of data modified depends on the scale factor and number of operations
 **Per-Operation Row Counts:**
 
 | Operation Type | Rows Modified per SF | Example at SF=1 | Example at SF=10 |
-|----------------|----------------------|-----------------|------------------|
+| -------------- | -------------------- | --------------- | ---------------- |
 | INSERT         | ~1,000               | ~1,000 rows     | ~10,000 rows     |
 | UPDATE         | ~500                 | ~500 rows       | ~5,000 rows      |
 | DELETE         | ~200                 | ~200 rows       | ~2,000 rows      |
@@ -300,7 +300,7 @@ The amount of data modified depends on the scale factor and number of operations
 **Default Configuration (4 operations):**
 
 | Scale Factor | Total Rows Modified | INSERT Ops | UPDATE Ops | DELETE Ops |
-|--------------|---------------------|------------|------------|------------|
+| ------------ | ------------------- | ---------- | ---------- | ---------- |
 | 0.1          | ~340 rows           | 2 ops      | 1 op       | 1 op       |
 | 1.0          | ~3,400 rows         | 2 ops      | 1 op       | 1 op       |
 | 10.0         | ~34,000 rows        | 2 ops      | 1 op       | 1 op       |
@@ -503,8 +503,8 @@ The benchmark generates systematic reports in multiple formats automatically:
    - Statistical analysis ready
 
 6. **HTML Report** (`benchmark_report.html`)
-   - Web-based visualization
-   - Interactive charts
+   - Standalone report with formatted tables
+   - Summary metrics and system information
    - Presentation ready
 
 7. **Compliance Report** (`compliance_report.txt`)
@@ -575,14 +575,14 @@ if validation['issues']:
 
 The validation framework checks:
 
-- ✅ All 99 queries executed in Power Test
-- ✅ Multi-stream execution in Throughput Test
-- ✅ Refresh functions executed in Maintenance Test
-- ✅ No query failures or errors
-- ✅ Proper parameter generation
-- ✅ Correct metric calculations
-- ✅ Result data integrity
-- ✅ Timing measurements accuracy
+- All 99 queries executed in Power Test
+- Multi-stream execution in Throughput Test
+- Refresh functions executed in Maintenance Test
+- No query failures or errors
+- Proper parameter generation
+- Correct metric calculations
+- Result data integrity
+- Timing measurements accuracy
 
 ### Manual Validation
 
@@ -608,13 +608,13 @@ class CustomDatabaseBenchmark(TPCDSBenchmark):
     def run_official_benchmark(self, **kwargs):
         # Custom pre-processing
         self.setup_custom_database()
-        
+
         # Run benchmark
         result = super().run_official_benchmark(**kwargs)
-        
+
         # Custom post-processing
         self.cleanup_custom_database()
-        
+
         return result
 ```
 
@@ -646,22 +646,22 @@ import sys
 # CI/CD integration
 def run_benchmark_ci():
     benchmark = TPCDSBenchmark(scale_factor=0.1, verbose=False)
-    
+
     try:
         result = benchmark.run_official_benchmark(
             connection_string=os.getenv("DATABASE_URL"),
             num_streams=2,
             result_validation=True
         )
-        
+
         # Check minimum performance threshold
         if result.qphds_size < 100:  # Example threshold
             print("Performance regression detected!")
             sys.exit(1)
-        
+
         print(f"Benchmark passed: QphDS@Size = {result.qphds_size:.2f}")
         return True
-        
+
     except Exception as e:
         print(f"Benchmark failed: {e}")
         sys.exit(1)
@@ -729,7 +729,7 @@ benchmark.timeout_seconds = 7200  # 2 hours
 # Check for partial results
 if not result.power_test or not result.throughput_test:
     print("Warning: Incomplete benchmark results")
-    
+
 # Check validation results
 if result.validation_results.get('issues'):
     print("Validation issues found:")
@@ -794,7 +794,7 @@ with tempfile.TemporaryDirectory() as temp_dir:
         output_dir=temp_dir,
         verbose=True
     )
-    
+
     try:
         result = benchmark.run_official_benchmark(connection_string)
         # Process results
@@ -838,7 +838,7 @@ def archive_results(result):
         "scale_factor": result.scale_factor,
         "configuration": result.configuration
     }
-    
+
     with open(f"benchmark_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w") as f:
         json.dump(archive_data, f, indent=2)
 ```
@@ -849,16 +849,16 @@ def archive_results(result):
 # Set up continuous benchmarking
 def continuous_benchmark():
     benchmark = TPCDSBenchmark(scale_factor=1.0, verbose=False)
-    
+
     baseline_qphds = 500.0  # Your baseline
-    
+
     while True:
         result = benchmark.run_official_benchmark(connection_string)
-        
+
         # Check for performance regression
         if result.qphds_size < baseline_qphds * 0.95:  # 5% tolerance
             alert_performance_regression(result)
-        
+
         time.sleep(3600)  # Run every hour
 ```
 

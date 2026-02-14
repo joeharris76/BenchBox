@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from benchbox.utils.clock import mono_time
+
 from .performance import PerformanceMonitor
 
 
@@ -265,7 +267,7 @@ class EnhancedResourceProfiler:
         self._stop_event = threading.Event()
         self._samples = []
         self._start_time = time.time()
-        self._prev_sample_time = self._start_time
+        self._prev_sample_time = mono_time()
 
         # Initialize baseline counters
         self._init_baselines()
@@ -320,7 +322,8 @@ class EnhancedResourceProfiler:
     def _collect_sample(self) -> ResourceSample:
         """Collect a single resource sample."""
         now = time.time()
-        elapsed = now - self._prev_sample_time
+        now_mono = mono_time()
+        elapsed = now_mono - self._prev_sample_time
         if elapsed <= 0:
             elapsed = self.sample_interval
 
@@ -373,7 +376,7 @@ class EnhancedResourceProfiler:
             except (AttributeError, self._psutil.AccessDenied):
                 pass
 
-        self._prev_sample_time = now
+        self._prev_sample_time = now_mono
         return sample
 
     def _update_monitor(self, sample: ResourceSample) -> None:

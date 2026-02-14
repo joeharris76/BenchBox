@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from benchbox.release.workflow import HOLD_BACK_PATHS, prepare_public_release
+from benchbox.release.workflow import HOLD_BACK_PATHS, compute_source_fingerprint, prepare_public_release
 
 pytestmark = pytest.mark.fast
 
@@ -123,3 +123,100 @@ def test_prepare_public_release_init_git(temp_source: Path, tmp_path: Path) -> N
     assert (target / ".git").exists()
     head = (target / ".git" / "HEAD").read_text(encoding="utf-8").strip()
     assert head.startswith("ref: refs/heads/")
+
+
+class TestComputeSourceFingerprint:
+    """Tests for compute_source_fingerprint()."""
+
+    def test_same_directory_produces_same_hash(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+        (pkg / "module.py").write_text("def f(): pass\n", encoding="utf-8")
+
+        fp1 = compute_source_fingerprint(pkg)
+        fp2 = compute_source_fingerprint(pkg)
+        assert fp1 == fp2
+        assert len(fp1) == 64  # SHA256 hex length
+
+    def test_modified_file_changes_hash(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        mod = pkg / "module.py"
+        mod.write_text("x = 1\n", encoding="utf-8")
+
+        fp_before = compute_source_fingerprint(pkg)
+        mod.write_text("x = 2\n", encoding="utf-8")
+        fp_after = compute_source_fingerprint(pkg)
+
+        assert fp_before != fp_after
+
+    def test_added_file_changes_hash(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+
+        fp_before = compute_source_fingerprint(pkg)
+        (pkg / "new_module.py").write_text("y = 2\n", encoding="utf-8")
+        fp_after = compute_source_fingerprint(pkg)
+
+        assert fp_before != fp_after
+
+    def test_non_py_files_ignored(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+
+        fp_before = compute_source_fingerprint(pkg)
+        (pkg / "data.txt").write_text("not python\n", encoding="utf-8")
+        (pkg / "config.json").write_text("{}\n", encoding="utf-8")
+        fp_after = compute_source_fingerprint(pkg)
+
+        assert fp_before == fp_after
+
+    def test_empty_directory_produces_consistent_hash(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+
+        fp1 = compute_source_fingerprint(pkg)
+        fp2 = compute_source_fingerprint(pkg)
+        assert fp1 == fp2
+
+    def test_subdirectory_files_included(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        sub = pkg / "sub"
+        sub.mkdir(parents=True)
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+        (sub / "__init__.py").write_text("", encoding="utf-8")
+
+        fp_before = compute_source_fingerprint(pkg)
+        (sub / "deep.py").write_text("z = 3\n", encoding="utf-8")
+        fp_after = compute_source_fingerprint(pkg)
+
+        assert fp_before != fp_after
+
+    def test_deleted_file_changes_hash(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+        target = pkg / "to_delete.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+
+        fp_before = compute_source_fingerprint(pkg)
+        target.unlink()
+        fp_after = compute_source_fingerprint(pkg)
+
+        assert fp_before != fp_after
+
+    def test_renamed_file_changes_hash(self, tmp_path: Path) -> None:
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+        original = pkg / "old_name.py"
+        original.write_text("x = 1\n", encoding="utf-8")
+
+        fp_before = compute_source_fingerprint(pkg)
+        original.rename(pkg / "new_name.py")
+        fp_after = compute_source_fingerprint(pkg)
+
+        assert fp_before != fp_after

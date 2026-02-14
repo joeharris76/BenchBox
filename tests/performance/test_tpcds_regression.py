@@ -251,11 +251,6 @@ class TestTPCDSRegression:
                 assert query_1.query_id == query_2.query_id, f"Stream {stream_id}, query {i}: ID mismatch"
                 assert query_1.sql == query_2.sql, f"Stream {stream_id}, query {i}: SQL mismatch"
 
-    def test_validation_framework_stability(self, benchmark_instance):
-        """Test that validation framework produces consistent results."""
-        # Skip this test since TPCDSValidator was removed
-        pytest.skip("TPCDSValidator functionality removed")
-
     def test_performance_regression_detection(self, benchmark_instance):
         """Test for performance regressions."""
         # Define baseline performance thresholds

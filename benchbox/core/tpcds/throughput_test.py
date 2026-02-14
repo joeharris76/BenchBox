@@ -14,10 +14,14 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import concurrent.futures
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Optional
+
+from benchbox.core.connection import DatabaseConnection
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 @dataclass
@@ -103,14 +107,13 @@ class TPCDSThroughputTest:
 
         # Handle legacy connection_string parameter
         if connection_string is not None:
-            # Create a simple connection factory that returns a mock connection
             conn_str = connection_string  # Type narrowing for lambda
-            self.connection_factory = lambda: DatabaseConnection(conn_str)
+            self.connection_factory = lambda: self._create_connection_from_string(conn_str)
         elif connection_factory is not None:
             self.connection_factory = connection_factory
         else:
-            # Default to mock connection factory
-            self.connection_factory = lambda: DatabaseConnection()
+            # Default to local in-memory SQLite when no explicit connection source is provided.
+            self.connection_factory = lambda: DatabaseConnection(sqlite3.connect(":memory:"), dialect="sqlite")
 
         self.config = TPCDSThroughputTestConfig(scale_factor=scale_factor, num_streams=num_streams, verbose=verbose)
 
@@ -126,6 +129,19 @@ class TPCDSThroughputTest:
         import threading
 
         self._capture_lock = threading.Lock()
+
+    def _create_connection_from_string(self, connection_string: str) -> DatabaseConnection:
+        """Create a connection wrapper from a supported connection string."""
+        if connection_string in {"sqlite::memory:", ":memory:", "sqlite://:memory:"}:
+            return DatabaseConnection(sqlite3.connect(":memory:"), dialect="sqlite")
+
+        if connection_string.startswith("sqlite:///"):
+            db_path = connection_string.replace("sqlite:///", "", 1)
+            return DatabaseConnection(sqlite3.connect(db_path), dialect="sqlite")
+
+        raise ValueError(
+            "Unsupported connection_string for TPCDSThroughputTest. Provide connection_factory for non-SQLite backends."
+        )
 
     def run(self, config: Optional[TPCDSThroughputTestConfig] = None) -> TPCDSThroughputTestResult:
         """Execute the TPC-DS Throughput Test.
@@ -146,7 +162,7 @@ class TPCDSThroughputTest:
         # Per TPC-DS specification, Total Test Time (TTT) must be measured from when
         # the first stream begins execution until the last stream completes execution.
         # This excludes setup overhead (executor creation, future submission, preflight, etc.).
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result = TPCDSThroughputTestResult(
@@ -245,7 +261,7 @@ class TPCDSThroughputTest:
                 total_time = last_stream_end - first_stream_start
             else:
                 # Fallback if no streams executed (shouldn't happen in normal operation)
-                total_time = time.time() - start_time
+                total_time = elapsed_seconds(start_time)
 
             result.total_time = total_time
 
@@ -272,7 +288,7 @@ class TPCDSThroughputTest:
             return result
 
         except Exception as e:
-            result.total_time = time.time() - start_time
+            result.total_time = elapsed_seconds(start_time)
             result.end_time = datetime.now().isoformat()
             result.success = False
             result.errors.append(f"Throughput Test execution failed: {e}")
@@ -336,7 +352,7 @@ class TPCDSThroughputTest:
         Returns:
             Stream execution result
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         stream_result = TPCDSThroughputStreamResult(
             stream_id=stream_id,
@@ -421,12 +437,12 @@ class TPCDSThroughputTest:
                 variant = stream_query.variant
                 # Display ID includes variant suffix (e.g., "14a", "23b")
                 query_display_id = f"{query_id}{variant}" if variant else str(query_id)
-                query_start = time.time()
+                query_start = mono_time()
                 query_result = {
                     "query_id": query_display_id,
                     "position": position + 1,
                     "stream_id": stream_id,
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "success": False,
                     "error": None,
                     "result_count": 0,
@@ -467,11 +483,11 @@ class TPCDSThroughputTest:
                         with self._capture_lock:
                             self.captured_items.append((label, query_text))
 
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
 
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": True,
                             "result_count": 0,
                         }
@@ -480,10 +496,10 @@ class TPCDSThroughputTest:
                     stream_result.queries_successful += 1
 
                 except Exception as e:
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": False,
                             "error": str(e),
                         }
@@ -556,40 +572,3 @@ class TPCDSThroughputTest:
                 return False
 
         return not result.throughput_at_size <= 0
-
-
-# Aliases for backward compatibility
-ThroughputTestConfig = TPCDSThroughputTestConfig
-ThroughputTestResult = TPCDSThroughputTestResult
-StreamResult = TPCDSThroughputStreamResult
-
-
-# Mock QueryResult for test compatibility
-@dataclass
-class QueryResult:
-    query_id: int = 1
-    execution_time: float = 1.0
-    success: bool = True
-
-
-# Mock DatabaseConnection for test compatibility
-class DatabaseConnection:
-    """Mock database connection for test compatibility."""
-
-    def __init__(self, connection_string: str = ""):
-        self.connection_string = connection_string
-
-    def cursor(self):
-        """Return a mock cursor."""
-        return MockCursor()
-
-    def close(self):
-        """Close the connection."""
-
-
-class MockCursor:
-    """Mock cursor for test compatibility."""
-
-    def fetchall(self):
-        """Return mock results."""
-        return [("result1",), ("result2",)]

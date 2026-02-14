@@ -39,10 +39,11 @@ import contextlib
 import json
 import re
 import struct
-import time
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -554,7 +555,7 @@ class FabricWarehouseAdapter(PlatformAdapter):
             Time taken for schema creation in seconds.
         """
         self.log_operation_start("Fabric Warehouse schema creation")
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -609,7 +610,7 @@ class FabricWarehouseAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        elapsed = time.time() - start_time
+        elapsed = elapsed_seconds(start_time)
         self.log_operation_complete(f"Schema creation completed in {elapsed:.2f}s")
         return elapsed
 
@@ -665,7 +666,7 @@ class FabricWarehouseAdapter(PlatformAdapter):
             Dict with execution results.
         """
         cursor = connection.cursor()
-        start_time = time.time()
+        start_time = mono_time()
 
         try:
             cursor.execute(query)
@@ -674,25 +675,25 @@ class FabricWarehouseAdapter(PlatformAdapter):
             rows = cursor.fetchall()
             row_count = len(rows)
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             return {
                 "query_id": query_id,
                 "stream_id": stream_id,
                 "iteration": iteration,
                 "status": "SUCCESS",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": row_count,
             }
 
         except pyodbc.Error as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             return {
                 "query_id": query_id,
                 "stream_id": stream_id,
                 "iteration": iteration,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,
@@ -825,7 +826,7 @@ class FabricWarehouseAdapter(PlatformAdapter):
             Tuple of (table_stats, elapsed_time, metadata).
         """
         self.log_operation_start("Fabric Warehouse data loading")
-        start_time = time.time()
+        start_time = mono_time()
         table_stats: dict[str, int] = {}
         tables_to_load = []
 
@@ -894,7 +895,7 @@ class FabricWarehouseAdapter(PlatformAdapter):
                 self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
                 table_stats[table_name] = 0
 
-        elapsed = time.time() - start_time
+        elapsed = elapsed_seconds(start_time)
         self.log_operation_complete(f"Data loading completed in {elapsed:.2f}s")
 
         # Return tuple matching abstract method signature
@@ -961,9 +962,9 @@ class FabricWarehouseAdapter(PlatformAdapter):
                         )
                     """
 
-                start_time = time.time()
+                start_time = mono_time()
                 cursor.execute(copy_sql)
-                load_time = time.time() - start_time
+                load_time = elapsed_seconds(start_time)
 
                 # Get row count
                 cursor.execute(f"SELECT COUNT(*) FROM {qualified_table}")
@@ -1233,9 +1234,6 @@ class FabricWarehouseAdapter(PlatformAdapter):
         )
         return match.group(1) if match else None
 
-
-# Backward compatibility alias
-MicrosoftFabricAdapter = FabricWarehouseAdapter
 
 # Note: Adapter registration is handled centrally in benchbox/core/platform_registry.py
 # The canonical platform name is "fabric-warehouse"

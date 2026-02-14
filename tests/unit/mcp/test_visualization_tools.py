@@ -7,37 +7,11 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Skip all tests if Python < 3.10
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+")
-
-
-class TestCheckVisualizationDependencies:
-    """Tests for _check_visualization_dependencies helper."""
-
-    def test_returns_true_when_plotly_available(self):
-        """Test that function returns True when plotly is installed."""
-        from benchbox.mcp.tools.visualization import _check_visualization_dependencies
-
-        # Plotly should be available in test environment
-        available, error = _check_visualization_dependencies()
-        assert available is True
-        assert error is None
-
-    def test_returns_false_when_plotly_missing(self):
-        """Test that function returns False with helpful message when plotly is missing."""
-        from benchbox.mcp.tools.visualization import _check_visualization_dependencies
-
-        with patch.dict(sys.modules, {"plotly": None}):
-            # Force ImportError by making plotly unavailable
-            with patch("builtins.__import__", side_effect=ImportError("No module named 'plotly'")):
-                available, error = _check_visualization_dependencies()
-                assert available is False
-                assert error is not None
-                assert "plotly" in error.lower()
 
 
 class TestResolveResultPath:
@@ -144,8 +118,12 @@ class TestChartTypeDescriptions:
             "performance_bar",
             "distribution_box",
             "query_heatmap",
+            "query_histogram",
             "cost_scatter",
             "time_series",
+            "comparison_bar",
+            "diverging_bar",
+            "summary_box",
         }
 
         assert set(CHART_TYPE_DESCRIPTIONS.keys()) == expected_types
@@ -173,7 +151,17 @@ class TestGenerateChartValidation:
         """Test that valid chart types are recognized."""
         from benchbox.mcp.tools.visualization import CHART_TYPE_DESCRIPTIONS
 
-        valid_types = {"performance_bar", "distribution_box", "query_heatmap", "cost_scatter", "time_series"}
+        valid_types = {
+            "performance_bar",
+            "distribution_box",
+            "query_heatmap",
+            "query_histogram",
+            "cost_scatter",
+            "time_series",
+            "comparison_bar",
+            "diverging_bar",
+            "summary_box",
+        }
         assert valid_types == set(CHART_TYPE_DESCRIPTIONS.keys())
 
 
@@ -467,66 +455,6 @@ class TestDefaultPaths:
         assert Path("benchmark_runs/results") == DEFAULT_RESULTS_DIR
 
 
-class TestValidateOutputDir:
-    """Tests for _validate_output_dir security helper."""
-
-    def test_none_returns_default(self):
-        """Test that None input returns default charts directory."""
-        from benchbox.mcp.tools.visualization import DEFAULT_CHARTS_DIR, _validate_output_dir
-
-        path, error = _validate_output_dir(None)
-        assert error is None
-        assert path == DEFAULT_CHARTS_DIR
-
-    def test_rejects_path_traversal_dotdot(self):
-        """Test that path traversal with .. is rejected."""
-        from benchbox.mcp.tools.visualization import _validate_output_dir
-
-        path, error = _validate_output_dir("../../../tmp")
-        assert error is not None
-        assert error["error"] is True
-        assert "VALIDATION_ERROR" in error["error_code"]
-
-        path, error = _validate_output_dir("subdir/../../../etc")
-        assert error is not None
-
-    def test_rejects_absolute_paths(self):
-        """Test that absolute paths are rejected."""
-        from benchbox.mcp.tools.visualization import _validate_output_dir
-
-        path, error = _validate_output_dir("/tmp/charts")
-        assert error is not None
-        assert "VALIDATION_ERROR" in error["error_code"]
-
-        path, error = _validate_output_dir("\\Windows\\Temp")
-        assert error is not None
-
-    def test_allows_relative_subdirectory(self, tmp_path, monkeypatch):
-        """Test that relative subdirectories within charts dir are allowed."""
-        from benchbox.mcp.tools import visualization
-
-        # Patch DEFAULT_CHARTS_DIR to tmp_path
-        charts_dir = tmp_path / "benchmark_runs" / "charts"
-        charts_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_CHARTS_DIR", charts_dir)
-
-        path, error = visualization._validate_output_dir("my_run")
-        assert error is None
-        assert path == charts_dir / "my_run"
-
-    def test_allows_nested_subdirectory(self, tmp_path, monkeypatch):
-        """Test that nested relative subdirectories are allowed."""
-        from benchbox.mcp.tools import visualization
-
-        charts_dir = tmp_path / "benchmark_runs" / "charts"
-        charts_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_CHARTS_DIR", charts_dir)
-
-        path, error = visualization._validate_output_dir("run1/comparison")
-        assert error is None
-        assert path == charts_dir / "run1" / "comparison"
-
-
 def _get_viz_tool_functions():
     """Create a fresh MCP server and extract visualization tool functions."""
     from benchbox.mcp import create_server
@@ -541,55 +469,40 @@ def _get_viz_tool_functions():
 
 
 class TestGenerateChartIntegration:
-    """Integration-style tests for generate_chart tool with mocked plotter."""
+    """Integration-style tests for generate_chart tool (ASCII-only)."""
 
-    def test_generates_chart_with_valid_inputs(self, tmp_path, monkeypatch):
-        """Test chart generation with valid inputs and mocked plotter."""
+    def test_generates_ascii_chart_with_valid_inputs(self, tmp_path, monkeypatch):
+        """Test ASCII chart generation with valid inputs."""
         from benchbox.mcp.tools import visualization
 
-        # Set up mock directories
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        charts_dir = tmp_path / "benchmark_runs" / "charts"
-        charts_dir.mkdir(parents=True)
-
         monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
-        monkeypatch.setattr(visualization, "DEFAULT_CHARTS_DIR", charts_dir)
 
-        # Create a mock result file
         result_file = results_dir / "test_result.json"
-        result_file.write_text('{"platform": {"name": "duckdb"}, "benchmark": {"id": "tpch"}}')
-
-        # Create expected output file
-        expected_output = charts_dir / "performance_bar.html"
-
-        # Mock the ResultPlotter
-        mock_plotter = MagicMock()
-        mock_plotter.generate_all_charts.return_value = {"performance_bar": {"html": expected_output}}
-
-        mock_plotter_class = MagicMock()
-        mock_plotter_class.from_sources.return_value = mock_plotter
+        result_file.write_text("""{
+            "benchmark": {"name": "TPC-H", "scale_factor": 1},
+            "platform": {"name": "DuckDB"},
+            "config": {"mode": "sql"},
+            "results": {
+                "queries": {"details": [{"id": "Q1", "execution_time_ms": 100}]},
+                "timing": {"total_ms": 1000, "avg_ms": 100}
+            }
+        }""")
 
         tools = _get_viz_tool_functions()
         generate_chart = tools.get("generate_chart")
         assert generate_chart is not None
 
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            with patch(
-                "benchbox.core.visualization.result_plotter.ResultPlotter",
-                mock_plotter_class,
-            ):
-                # Create the expected output file (since plotter is mocked)
-                expected_output.write_text("<html></html>")
+        result = generate_chart(
+            result_files="test_result.json",
+            chart_type="performance_bar",
+        )
 
-                result = generate_chart(
-                    result_files="test_result.json",
-                    chart_type="performance_bar",
-                )
-
-                assert result["status"] == "generated"
-                assert result["chart_type"] == "performance_bar"
-                assert result["format"] == "html"
+        assert result["status"] == "generated"
+        assert result["chart_type"] == "performance_bar"
+        assert result["format"] == "ascii"
+        assert "content" in result
 
     def test_rejects_invalid_chart_type(self, tmp_path, monkeypatch):
         """Test that invalid chart type is rejected."""
@@ -606,39 +519,13 @@ class TestGenerateChartIntegration:
         generate_chart = tools.get("generate_chart")
         assert generate_chart is not None
 
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            result = generate_chart(
-                result_files="test_result.json",
-                chart_type="invalid_chart_type",
-            )
+        result = generate_chart(
+            result_files="test_result.json",
+            chart_type="invalid_chart_type",
+        )
 
-            assert result["error"] is True
-            assert "VALIDATION_ERROR" in result["error_code"]
-
-    def test_rejects_path_traversal_in_output_dir(self, tmp_path, monkeypatch):
-        """Test that path traversal in output_dir is rejected."""
-        from benchbox.mcp.tools import visualization
-
-        results_dir = tmp_path / "benchmark_runs" / "results"
-        results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
-
-        result_file = results_dir / "test_result.json"
-        result_file.write_text("{}")
-
-        tools = _get_viz_tool_functions()
-        generate_chart = tools.get("generate_chart")
-        assert generate_chart is not None
-
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            result = generate_chart(
-                result_files="test_result.json",
-                chart_type="performance_bar",
-                output_dir="../../../tmp/evil",
-            )
-
-            assert result["error"] is True
-            assert "VALIDATION_ERROR" in result["error_code"]
+        assert result["error"] is True
+        assert "VALIDATION_ERROR" in result["error_code"]
 
     def test_generates_chart_with_multiple_files(self, tmp_path, monkeypatch):
         """Test chart generation with multiple result files."""
@@ -646,45 +533,41 @@ class TestGenerateChartIntegration:
 
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        charts_dir = tmp_path / "benchmark_runs" / "charts"
-        charts_dir.mkdir(parents=True)
-
         monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
-        monkeypatch.setattr(visualization, "DEFAULT_CHARTS_DIR", charts_dir)
 
-        # Create mock result files
         result_file1 = results_dir / "result1.json"
-        result_file1.write_text('{"platform": {"name": "duckdb"}, "benchmark": {"id": "tpch"}}')
+        result_file1.write_text("""{
+            "benchmark": {"name": "TPC-H", "scale_factor": 1},
+            "platform": {"name": "DuckDB"},
+            "config": {"mode": "sql"},
+            "results": {
+                "queries": {"details": [{"id": "Q1", "execution_time_ms": 100}]},
+                "timing": {"total_ms": 1000, "avg_ms": 100}
+            }
+        }""")
         result_file2 = results_dir / "result2.json"
-        result_file2.write_text('{"platform": {"name": "postgres"}, "benchmark": {"id": "tpch"}}')
-
-        expected_output = charts_dir / "query_heatmap.html"
-
-        mock_plotter = MagicMock()
-        mock_plotter.generate_all_charts.return_value = {"query_heatmap": {"html": expected_output}}
-        mock_plotter.results = [MagicMock(platform="duckdb"), MagicMock(platform="postgres")]
-
-        mock_plotter_class = MagicMock()
-        mock_plotter_class.from_sources.return_value = mock_plotter
+        result_file2.write_text("""{
+            "benchmark": {"name": "TPC-H", "scale_factor": 1},
+            "platform": {"name": "Postgres"},
+            "config": {"mode": "sql"},
+            "results": {
+                "queries": {"details": [{"id": "Q1", "execution_time_ms": 150}]},
+                "timing": {"total_ms": 1500, "avg_ms": 150}
+            }
+        }""")
 
         tools = _get_viz_tool_functions()
         generate_chart = tools.get("generate_chart")
 
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            with patch(
-                "benchbox.core.visualization.result_plotter.ResultPlotter",
-                mock_plotter_class,
-            ):
-                expected_output.write_text("<html></html>")
+        result = generate_chart(
+            result_files="result1.json,result2.json",
+            chart_type="performance_bar",
+        )
 
-                result = generate_chart(
-                    result_files="result1.json,result2.json",
-                    chart_type="query_heatmap",
-                )
-
-                assert result["status"] == "generated"
-                assert result["chart_type"] == "query_heatmap"
-                assert len(result["source_files"]) == 2
+        assert result["status"] == "generated"
+        assert result["chart_type"] == "performance_bar"
+        assert result["format"] == "ascii"
+        assert len(result["source_files"]) == 2
 
     def test_generates_chart_set_with_template(self, tmp_path, monkeypatch):
         """Test chart set generation using template parameter."""
@@ -692,47 +575,32 @@ class TestGenerateChartIntegration:
 
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        charts_dir = tmp_path / "benchmark_runs" / "charts"
-        charts_dir.mkdir(parents=True)
-
         monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
-        monkeypatch.setattr(visualization, "DEFAULT_CHARTS_DIR", charts_dir)
 
         result_file = results_dir / "test_result.json"
-        result_file.write_text('{"platform": {"name": "duckdb"}, "benchmark": {"id": "tpch"}}')
-
-        chart1 = charts_dir / "performance_bar.html"
-        chart2 = charts_dir / "distribution_box.html"
-
-        mock_plotter = MagicMock()
-        mock_plotter.generate_all_charts.return_value = {
-            "performance_bar": {"html": chart1},
-            "distribution_box": {"html": chart2},
-        }
-
-        mock_plotter_class = MagicMock()
-        mock_plotter_class.from_sources.return_value = mock_plotter
+        result_file.write_text("""{
+            "benchmark": {"name": "TPC-H", "scale_factor": 1},
+            "platform": {"name": "DuckDB"},
+            "config": {"mode": "sql"},
+            "results": {
+                "queries": {"details": [{"id": "Q1", "execution_time_ms": 100}]},
+                "timing": {"total_ms": 1000, "avg_ms": 100}
+            }
+        }""")
 
         tools = _get_viz_tool_functions()
         generate_chart = tools.get("generate_chart")
 
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            with patch(
-                "benchbox.core.visualization.result_plotter.ResultPlotter",
-                mock_plotter_class,
-            ):
-                chart1.write_text("<html></html>")
-                chart2.write_text("<html></html>")
+        result = generate_chart(
+            result_files="test_result.json",
+            template="default",
+        )
 
-                result = generate_chart(
-                    result_files="test_result.json",
-                    template="default",
-                )
-
-                assert result["status"] == "generated"
-                assert result["template"] == "default"
-                assert "charts" in result
-                assert result["chart_count"] >= 1
+        assert result["status"] == "generated"
+        assert result["template"] == "default"
+        assert result["chart_count"] >= 1
+        assert result["format"] == "ascii"
+        assert "content" in result
 
 
 class TestGenerateChartErrorHandling:
@@ -750,14 +618,13 @@ class TestGenerateChartErrorHandling:
         generate_chart = tools.get("generate_chart")
         assert generate_chart is not None
 
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            result = generate_chart(
-                result_files="nonexistent_file.json",
-                chart_type="performance_bar",
-            )
+        result = generate_chart(
+            result_files="nonexistent_file.json",
+            chart_type="performance_bar",
+        )
 
-            assert result["error"] is True
-            assert "RESOURCE_NOT_FOUND" in result["error_code"]
+        assert result["error"] is True
+        assert "RESOURCE_NOT_FOUND" in result["error_code"]
 
     def test_returns_error_for_empty_result_files(self):
         """Test that generate_chart returns error for empty result_files."""
@@ -765,14 +632,13 @@ class TestGenerateChartErrorHandling:
         generate_chart = tools.get("generate_chart")
         assert generate_chart is not None
 
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            result = generate_chart(
-                result_files="",
-                chart_type="performance_bar",
-            )
+        result = generate_chart(
+            result_files="",
+            chart_type="performance_bar",
+        )
 
-            assert result["error"] is True
-            assert "VALIDATION_ERROR" in result["error_code"]
+        assert result["error"] is True
+        assert "VALIDATION_ERROR" in result["error_code"]
 
     def test_returns_error_for_invalid_template(self, tmp_path, monkeypatch):
         """Test that generate_chart returns error for invalid template."""
@@ -788,11 +654,10 @@ class TestGenerateChartErrorHandling:
         tools = _get_viz_tool_functions()
         generate_chart = tools.get("generate_chart")
 
-        with patch("benchbox.mcp.tools.visualization._check_visualization_dependencies", return_value=(True, None)):
-            result = generate_chart(
-                result_files="test_result.json",
-                template="nonexistent_template",
-            )
+        result = generate_chart(
+            result_files="test_result.json",
+            template="nonexistent_template",
+        )
 
-            assert result["error"] is True
-            assert "VALIDATION_ERROR" in result["error_code"]
+        assert result["error"] is True
+        assert "VALIDATION_ERROR" in result["error_code"]

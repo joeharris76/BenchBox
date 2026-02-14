@@ -15,7 +15,6 @@ class FileFormatInfo(NamedTuple):
 
     format_type: str  # "parquet", "csv", "tpc"
     delimiter: str  # "" for parquet, "," for csv, "|" for tpc
-    has_trailing_delimiter: bool  # False for BenchBox-generated TPC files
 
 
 def detect_file_format(file_paths: list[Path] | Path) -> FileFormatInfo:
@@ -28,29 +27,26 @@ def detect_file_format(file_paths: list[Path] | Path) -> FileFormatInfo:
         file_paths: Single Path or list of file paths
 
     Returns:
-        FileFormatInfo with format_type, delimiter, and has_trailing_delimiter
+        FileFormatInfo with format_type and delimiter
     """
     if isinstance(file_paths, Path):
         file_paths = [file_paths]
 
     if not file_paths:
-        return FileFormatInfo(format_type="csv", delimiter=",", has_trailing_delimiter=False)
+        return FileFormatInfo(format_type="csv", delimiter=",")
 
     first_file = file_paths[0]
 
     # Check for Parquet (handles compression like .parquet.zst)
     if is_parquet_format(first_file):
-        return FileFormatInfo(format_type="parquet", delimiter="", has_trailing_delimiter=False)
+        return FileFormatInfo(format_type="parquet", delimiter="")
 
     # Check for TPC benchmark format (.tbl, .dat)
-    # BenchBox generators produce TPC files WITHOUT trailing delimiters:
-    # - TPC-H: dbgen binary doesn't add trailing delimiters
-    # - TPC-DS: dsdgen uses -terminate n flag to disable trailing delimiters
     if is_tpc_format(first_file):
-        return FileFormatInfo(format_type="tpc", delimiter="|", has_trailing_delimiter=False)
+        return FileFormatInfo(format_type="tpc", delimiter="|")
 
     # Default to standard CSV
-    return FileFormatInfo(format_type="csv", delimiter=",", has_trailing_delimiter=False)
+    return FileFormatInfo(format_type="csv", delimiter=",")
 
 
 def is_non_interactive() -> bool:

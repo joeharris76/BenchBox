@@ -95,7 +95,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 1.0,
         "complexity": "Medium",
         "estimated_time_range": (5, 20),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "tpcdi": {
         "display_name": "TPC-DI",
@@ -109,7 +109,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "High",
         "estimated_time_range": (5, 30),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "ssb": {
         "display_name": "SSB",
@@ -123,7 +123,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Low",
         "estimated_time_range": (1, 5),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "clickbench": {
         "display_name": "ClickBench",
@@ -137,7 +137,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 1.0,
         "complexity": "Medium",
         "estimated_time_range": (5, 15),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "h2odb": {
         "display_name": "H2ODB",
@@ -151,7 +151,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Medium",
         "estimated_time_range": (3, 15),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "amplab": {
         "display_name": "AMPLab",
@@ -165,7 +165,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Medium",
         "estimated_time_range": (3, 15),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "read_primitives": {
         "display_name": "Read Primitives",
@@ -179,7 +179,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Low",
         "estimated_time_range": (1, 3),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "write_primitives": {
         "display_name": "Write Primitives",
@@ -193,7 +193,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Medium",
         "estimated_time_range": (2, 5),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "metadata_primitives": {
         "display_name": "Metadata",
@@ -249,7 +249,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.001,
         "complexity": "Medium",
         "estimated_time_range": (3, 12),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "tpchavoc": {
         "display_name": "TPC-Havoc",
@@ -277,7 +277,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Medium",
         "estimated_time_range": (2, 15),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "tsbs_devops": {
         "display_name": "TSBS DevOps",
@@ -291,7 +291,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Medium",
         "estimated_time_range": (2, 10),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "nyctaxi": {
         "display_name": "NYC Taxi",
@@ -305,7 +305,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "Medium",
         "estimated_time_range": (5, 30),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
     "datavault": {
         "display_name": "TPC-H Data Vault",
@@ -319,7 +319,7 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "min_scale": 0.01,
         "complexity": "High",
         "estimated_time_range": (5, 30),
-        "supports_dataframe": False,
+        "supports_dataframe": True,
     },
 }
 

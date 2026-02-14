@@ -428,6 +428,67 @@ Automatically detect performance regressions across recent runs.
 
 ---
 
+### Visualization Tools
+
+#### `suggest_charts`
+
+Analyze results and suggest appropriate chart types.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `result_files` | string | Yes | Comma-separated list of result filenames |
+
+**Returns:**
+- `suggestions`: List of chart recommendations with priority and reasoning
+- `primary`: Best chart type recommendation with reason
+- `data_profile`: Analysis of result data (result_count, platforms, has_cost_data, etc.)
+- `source_files`: Input files used
+
+---
+
+#### `generate_chart`
+
+Generate charts from benchmark results.
+
+**Parameters:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `result_files` | string | Yes | - | Comma-separated list of result filenames |
+| `chart_type` | string | No | "performance_bar" | Chart type: performance_bar, distribution_box, query_heatmap, query_histogram, cost_scatter, time_series, comparison_bar, diverging_bar, summary_box |
+| `template` | string | No | None | Template: default, flagship, head_to_head, trends, cost_optimization, comparison |
+| `output_dir` | string | No | None | Output directory (relative to charts dir) |
+| `format` | string | No | "ascii" | Output format: 'ascii' for terminal-friendly text output |
+
+**Returns:**
+- `status`: "generated"
+- `chart_type`: Generated chart type (or `template` if using template)
+- `format`: "ascii"
+- `content`: ASCII chart rendered inline
+- `source_files`: Input files used
+- `note`: Usage instructions
+
+**Examples:**
+
+```bash
+# Single chart
+generate_chart(result_files="run1.json", chart_type="performance_bar")
+
+# Template (multiple charts combined with separators)
+generate_chart(result_files="run1.json,run2.json", template="head_to_head")
+
+# Platform comparison
+generate_chart(result_files="duckdb.json,polars.json", chart_type="query_heatmap")
+```
+
+**Output Features:**
+- ANSI colors for terminal display (copy-paste preserves formatting)
+- Unicode box-drawing characters for clean visualization
+- Best/worst highlighting, legends, and scale indicators
+- Template output combines multiple charts with `────────` separators
+
+---
+
 ### Historical Analysis Tools
 
 #### `get_performance_trends`

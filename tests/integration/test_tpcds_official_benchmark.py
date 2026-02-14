@@ -21,18 +21,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from benchbox.core.tpcds.benchmark import TPCDSBenchmark
+from benchbox.core.tpcds.benchmark import BenchmarkPhase, QueryResult, TPCDSBenchmark
 from benchbox.core.tpcds.official_benchmark import (
-    BenchmarkPhase,
-    QueryResult,
     TPCDSOfficialBenchmark,
     TPCDSOfficialBenchmarkConfig,
     TPCDSOfficialBenchmarkResult,
 )
-
-# Aliases for backward compatibility with existing tests
-BenchmarkResult = TPCDSOfficialBenchmarkResult
-PhaseResult = TPCDSOfficialBenchmarkResult
 
 
 class TestTPCDSOfficialBenchmark:
@@ -76,7 +70,7 @@ class TestTPCDSOfficialBenchmark:
     def test_benchmark_result_initialization(self):
         """Test BenchmarkResult initialization."""
         config = TPCDSOfficialBenchmarkConfig(scale_factor=1.0)
-        result = BenchmarkResult(
+        result = TPCDSOfficialBenchmarkResult(
             config=config,
             start_time="2023-01-01T00:00:00",
             end_time="2023-01-01T01:00:00",
@@ -329,9 +323,9 @@ class TestTPCDSOfficialBenchmark:
 
     def test_benchmark_phases_enum(self):
         """Test BenchmarkPhase enum."""
-        assert BenchmarkPhase.POWER == "power"
-        assert BenchmarkPhase.THROUGHPUT == "throughput"
-        assert BenchmarkPhase.MAINTENANCE == "maintenance"
+        assert BenchmarkPhase.POWER_TEST == "power_test"
+        assert BenchmarkPhase.THROUGHPUT_TEST == "throughput_test"
+        assert BenchmarkPhase.MAINTENANCE_TEST == "maintenance_test"
 
 
 # Integration test with actual components

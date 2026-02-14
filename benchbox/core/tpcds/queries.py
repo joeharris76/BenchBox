@@ -174,7 +174,3 @@ class TPCDSQueryManager:
         self._ensure_available()
 
         return self.dsqgen.generate_with_parameters(query_id, parameters, scale_factor=scale_factor, dialect=dialect)
-
-
-# Backward compatibility aliases
-TPCDSQueries = TPCDSQueryManager

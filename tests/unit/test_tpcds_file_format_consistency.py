@@ -59,3 +59,61 @@ def test_uncompressed_streams_only_dat_files(temp_dir: Path):
     # Validate helper considers non-empty dat files valid
     dat_files = list(temp_dir.glob("*.dat"))
     assert dat_files
+
+
+def test_prune_stale_table_artifacts_removes_conflicting_variants_only(temp_dir: Path):
+    generator = _make_generator(compression_enabled=True)
+    generator._known_table_names = lambda: ["store_sales"]  # type: ignore[method-assign]
+    generator.parallel = 1
+
+    stale_files = [
+        temp_dir / "store_sales.dat",
+        temp_dir / "store_sales.dat.zst",
+        temp_dir / "store_sales_1_2.dat",
+        temp_dir / "store_sales_1_2.dat.zst",
+    ]
+    for path in stale_files:
+        path.write_text("stale")
+    keep_file = temp_dir / "_datagen_manifest.json"
+    keep_file.write_text("{}")
+
+    removed = generator._prune_stale_table_artifacts(temp_dir)
+
+    assert "store_sales.dat" in {p.name for p in removed}
+    assert "store_sales_1_2.dat" in {p.name for p in removed}
+    assert "store_sales_1_2.dat.zst" in {p.name for p in removed}
+    assert not (temp_dir / "store_sales.dat").exists()
+    assert not (temp_dir / "store_sales_1_2.dat").exists()
+    assert not (temp_dir / "store_sales_1_2.dat.zst").exists()
+    assert (temp_dir / "store_sales.dat.zst").exists()
+    assert keep_file.exists()
+
+
+def test_prune_stale_table_artifacts_keeps_prefix_neighbor_table_shards(temp_dir: Path):
+    generator = _make_generator(compression_enabled=True)
+    generator._known_table_names = lambda: ["customer", "customer_address"]  # type: ignore[method-assign]
+    generator.parallel = 2
+
+    # customer and customer_address shards coexist; pruning customer must not delete customer_address
+    (temp_dir / "customer_1_2.dat").write_text("stale")
+    keep_neighbor = temp_dir / "customer_address_1_2.dat.zst"
+    keep_neighbor.write_text("valid")
+
+    removed = generator._prune_stale_table_artifacts(temp_dir)
+
+    assert "customer_1_2.dat" in {p.name for p in removed}
+    assert keep_neighbor.exists()
+
+
+def test_prune_stale_table_artifacts_removes_compressed_when_uncompressed_mode(temp_dir: Path):
+    generator = _make_generator(compression_enabled=False)
+    generator._known_table_names = lambda: ["store_sales"]  # type: ignore[method-assign]
+    generator.parallel = 1
+
+    stale_compressed = temp_dir / "store_sales.dat.zst"
+    stale_compressed.write_text("stale")
+
+    removed = generator._prune_stale_table_artifacts(temp_dir)
+
+    assert "store_sales.dat.zst" in {p.name for p in removed}
+    assert not stale_compressed.exists()

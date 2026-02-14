@@ -3,6 +3,7 @@ import re
 import pytest
 
 from benchbox.core.tpcds_obt.queries import CONVERTIBLE_QUERY_IDS, TPCDSOBTQueryManager
+from benchbox.core.tpcds_obt.query_conversion import QueryConverter
 from benchbox.core.tpcds_obt.schema import OBT_TABLE_NAME, get_obt_columns
 
 pytestmark = pytest.mark.medium  # OBT query tests parse SQL in DuckDB (~1-2s)
@@ -285,3 +286,19 @@ def test_queries_parse_in_duckdb() -> None:
     conn.close()
 
     assert not parse_errors, f"Queries failed to parse: {parse_errors}"
+
+
+def test_q8_has_diverse_zip_codes() -> None:
+    """Q8 ulist(random(10000,99999,uniform),400) should produce 400 diverse values."""
+    converter = QueryConverter()
+    result = converter.convert(8)
+    # Count distinct 5-digit numbers in the IN clause
+    numbers = re.findall(r"'(\d{5})'", result.default_sql)
+    assert len(set(numbers)) > 100  # Should have many distinct values, not all '10000'
+
+
+def test_ulist_expansion_is_deterministic() -> None:
+    """Same query_id should always produce the same ulist values."""
+    c1 = QueryConverter().convert(8)
+    c2 = QueryConverter().convert(8)
+    assert c1.default_sql == c2.default_sql

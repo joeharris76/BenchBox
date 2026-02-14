@@ -528,13 +528,13 @@ class FinWireProcessor:
         """
         logger.debug(f"Processing company record: {record.company_name}")
 
-        # Implementation would insert/update DimCompany table
-        # For now, return a dict with the key fields for testing
+        # The current processor returns a normalized outcome payload; storage is handled elsewhere.
         return {
             "company_name": record.company_name,
             "industry": record.industry,
             "sp_rating": record.sp_rating,
             "ceo_name": record.ceo,
+            "batch_id": batch_id,
             "processed": True,
         }
 
@@ -550,13 +550,13 @@ class FinWireProcessor:
         """
         logger.debug(f"Processing security record: {record.symbol}")
 
-        # Implementation would insert/update DimSecurity table
-        # For now, return a dict with the key fields for testing
+        # The current processor returns a normalized outcome payload; storage is handled elsewhere.
         return {
             "symbol": record.symbol,
             "issue": record.security_name,
             "exchange": record.exchange,
             "shares_outstanding": record.shares_outstanding,
+            "batch_id": batch_id,
             "processed": True,
         }
 

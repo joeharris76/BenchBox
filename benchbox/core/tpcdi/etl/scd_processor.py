@@ -25,6 +25,8 @@ from typing import Any, Optional, Union
 import pandas as pd
 import sqlglot
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,18 +34,18 @@ logger = logging.getLogger(__name__)
 class SCDChangeRecord:
     """Record representing an SCD Type 2 change event."""
 
-    table_name: str = "TestTable"
+    table_name: str = "dimension"
     business_key: Union[dict[str, Any], Any] = field(default_factory=dict)
     surrogate_key: Optional[int] = None
     change_type: str = "INSERT"  # 'INSERT', 'UPDATE', 'DELETE', 'NO_CHANGE'
     changed_columns: list[Union[str, dict[str, Any]]] = field(default_factory=list)
     effective_date: datetime = field(default_factory=datetime.now)
     end_date: Optional[datetime] = None
-    batch_id: int = 1
+    batch_id: int = 0
     source_record: Optional[dict[str, Any]] = None
     target_record: Optional[dict[str, Any]] = None
 
-    # Compatibility fields for tests
+    # Optional value snapshots for auditing/debugging.
     old_values: Optional[dict[str, Any]] = field(default=None)
     new_values: Optional[dict[str, Any]] = field(default=None)
 
@@ -338,7 +340,7 @@ class EnhancedSCDType2Processor:
     ) -> dict[str, pd.DataFrame]:
         """Perform comprehensive analysis of dimension changes."""
 
-        analysis_start = datetime.now()
+        analysis_start = mono_time()
         logger.debug("Starting comprehensive change analysis")
 
         # Handle empty current data case
@@ -395,7 +397,7 @@ class EnhancedSCDType2Processor:
                 no_change_mask = ~scd_change_mask & ~non_scd_change_mask
                 unchanged_records = merged[no_change_mask].copy() if no_change_mask.any() else pd.DataFrame()
 
-        analysis_time = (datetime.now() - analysis_start).total_seconds()
+        analysis_time = elapsed_seconds(analysis_start)
         logger.debug(
             f"Change analysis completed in {analysis_time:.3f}s: "
             f"{len(new_records)} new, {len(scd_changes)} SCD changes, "
@@ -804,7 +806,7 @@ class EnhancedSCDType2Processor:
     def detect_changes(
         self, current_data: pd.DataFrame, new_data: pd.DataFrame, scd_columns: list[str]
     ) -> list[SCDChangeRecord]:
-        """Detect changes between current and new data for testing compatibility.
+        """Detect row-level changes between current and new dimension snapshots.
 
         Args:
             current_data: Current dimension data
@@ -817,18 +819,18 @@ class EnhancedSCDType2Processor:
         changes = []
 
         if len(current_data) == 0:
-            # All new data records are changes
+            # All incoming rows are inserts when no current snapshot exists.
             for idx, _row in new_data.iterrows():
                 change = SCDChangeRecord(
-                    table_name="TestTable",
+                    table_name="dimension",
                     business_key={"key": idx},
                     surrogate_key=None,
                     change_type="INSERT",
-                    batch_id=1,
+                    batch_id=0,
                 )
                 changes.append(change)
         else:
-            # Check for actual changes - simplified for testing
+            # Compare aligned rows and mark updates when tracked columns changed.
             for idx, new_row in new_data.iterrows():
                 if idx < len(current_data):
                     current_row = current_data.iloc[idx]
@@ -842,11 +844,11 @@ class EnhancedSCDType2Processor:
 
                     if has_changes:
                         change = SCDChangeRecord(
-                            table_name="TestTable",
+                            table_name="dimension",
                             business_key={"key": idx},
                             surrogate_key=None,
                             change_type="UPDATE",
-                            batch_id=1,
+                            batch_id=0,
                         )
                         changes.append(change)
 
@@ -877,18 +879,18 @@ class EnhancedSCDType2Processor:
                 customer_id = new_row.get("CustomerID", idx + 1001)
 
                 change = SCDChangeRecord(
-                    table_name="TestTable",
+                    table_name="dimension",
                     business_key=customer_id,
                     surrogate_key=None,
                     change_type="UPDATE",
-                    batch_id=1,
+                    batch_id=0,
                 )
                 changes.append(change)
 
         return changes
 
     def _process_scd_change(self, change_record: SCDChangeRecord) -> dict[str, Any]:
-        """Process a single SCD change record for testing.
+        """Process a single SCD change record.
 
         Args:
             change_record: The change record to process
@@ -937,9 +939,13 @@ class EnhancedSCDType2Processor:
         }
 
     def _extract_current_data(self, dimension_name: str) -> pd.DataFrame:
-        """Extract current data for testing compatibility."""
-        return pd.DataFrame()
+        """Extract current dimension state from the target table."""
+        return self._load_current_dimension_data(dimension_name)
 
     def _extract_new_data(self, dimension_name: str) -> pd.DataFrame:
-        """Extract new data for testing compatibility."""
+        """Extract staged source data for a dimension.
+
+        This base implementation returns an empty frame when no staging source
+        is configured.
+        """
         return pd.DataFrame()

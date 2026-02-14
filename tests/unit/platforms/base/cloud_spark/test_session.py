@@ -104,21 +104,41 @@ class TestSessionMetrics:
         assert metrics.duration_seconds == 0.0
 
     def test_duration_in_progress(self):
-        """Test duration while session is running."""
-        metrics = SessionMetrics(start_time=time.time() - 10)
+        """Test duration while session is running (monotonic)."""
+        from benchbox.utils.clock import mono_time
+
+        metrics = SessionMetrics(start_time=mono_time() - 10)
 
         # Should be approximately 10 seconds
         assert 9.5 <= metrics.duration_seconds <= 11.0
 
     def test_duration_completed(self):
-        """Test duration after session completed."""
-        start = time.time() - 60
-        end = time.time() - 30
+        """Test duration after session completed (monotonic)."""
+        from benchbox.utils.clock import mono_time
+
+        now = mono_time()
+        metrics = SessionMetrics(start_time=now - 60, end_time=now - 30)
+
+        # Should be exactly 30 seconds (both endpoints are monotonic)
+        assert metrics.duration_seconds == pytest.approx(30.0)
+
+    def test_duration_fallback_for_legacy_wall_clock_values(self):
+        """Test backward-compat fallback when start/end are legacy wall-clock values.
+
+        Legacy code stored time.time() epoch values. The fallback path detects
+        negative elapsed (mono - wall_clock domain mismatch) and falls back to
+        wall-clock arithmetic.
+        """
+        start = time.time() - 45.0
+        end = time.time() - 15.0
 
         metrics = SessionMetrics(start_time=start, end_time=end)
 
-        # Should be approximately 30 seconds
-        assert 29.5 <= metrics.duration_seconds <= 30.5
+        # The primary path (elapsed_seconds) may return a large garbage value
+        # because start/end are wall-clock (~1.7B) while mono_time is small.
+        # BUT elapsed_seconds(wall, wall) returns wall - wall ≈ 30s which is >= 0,
+        # so the primary path actually works for wall-clock pairs too.
+        assert 29.0 <= metrics.duration_seconds <= 31.0
 
     def test_default_counters(self):
         """Test default counter values."""

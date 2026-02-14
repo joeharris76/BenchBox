@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from benchbox.utils.clock import utc_now
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,7 +78,7 @@ class QueryTiming:
             "query_id": self.query_id,
             "query_name": self.query_name,
             "execution_sequence": self.execution_sequence,
-            "execution_time": self.execution_time,
+            "execution_time_seconds": self.execution_time,
             "parse_time": self.parse_time,
             "optimization_time": self.optimization_time,
             "execution_only_time": self.execution_only_time,
@@ -124,10 +126,12 @@ class TimingCollector:
             Dictionary for collecting timing data during execution
         """
         start_time = time.perf_counter()
+        start_wall_clock = utc_now()
         timing_data = {
             "query_id": query_id,
             "query_name": query_name,
             "start_time": start_time,
+            "start_wall_clock": start_wall_clock,
             "timing_breakdown": {},
             "metrics": {},
         }
@@ -143,7 +147,7 @@ class TimingCollector:
         finally:
             end_time = time.perf_counter()
             timing_data["end_time"] = end_time
-            timing_data["execution_time"] = end_time - start_time
+            timing_data["execution_time_seconds"] = end_time - start_time
 
             # Create QueryTiming object
             query_timing = self._create_query_timing(timing_data)
@@ -191,7 +195,7 @@ class TimingCollector:
         return QueryTiming(
             query_id=timing_data["query_id"],
             query_name=timing_data.get("query_name"),
-            execution_time=timing_data["execution_time"],
+            execution_time=timing_data["execution_time_seconds"],
             parse_time=timing_data["timing_breakdown"].get("parse"),
             optimization_time=timing_data["timing_breakdown"].get("optimize"),
             execution_only_time=timing_data["timing_breakdown"].get("execute"),
@@ -200,7 +204,7 @@ class TimingCollector:
             rows_returned=timing_data["metrics"].get("rows_returned", 0),
             bytes_processed=timing_data["metrics"].get("bytes_processed"),
             tables_accessed=timing_data["metrics"].get("tables_accessed", []),
-            timestamp=datetime.fromtimestamp(timing_data["start_time"]),
+            timestamp=timing_data.get("start_wall_clock", utc_now()),
             thread_id=timing_data["metrics"].get("thread_id"),
             connection_id=timing_data["metrics"].get("connection_id"),
             cpu_time=timing_data["metrics"].get("cpu_time"),

@@ -35,8 +35,7 @@ from benchbox.utils.cloud_storage import is_databricks_path
 from benchbox.utils.printing import quiet_console
 from benchbox.utils.verbosity import VerbositySettings
 
-# Direct imports for testing compatibility
-
+# Module-level console handle used by orchestrator output paths.
 console = quiet_console
 
 

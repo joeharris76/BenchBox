@@ -195,7 +195,7 @@ The schema creates a complex web of relationships:
 ### Scale Factor Impact
 
 | Scale Factor | Data Size | title rows | cast_info rows | Query Time (avg) |
-|--------------|-----------|------------|----------------|------------------|
+| ------------ | --------- | ---------- | -------------- | ---------------- |
 | 0.001        | ~700 KB   | 2,500      | 35,000         | 1-5 ms           |
 | 0.01         | ~17 MB    | 25,000     | 350,000        | 2-10 ms          |
 | 0.1          | ~170 MB   | 250,000    | 3,500,000      | 10-100 ms        |
@@ -247,12 +247,12 @@ Join Order Benchmark complements other BenchBox benchmarks:
 
 ### Test Coverage
 
-- ✅ Schema creation across dialects
-- ✅ Data generation at multiple scale factors
-- ✅ Query execution validation
-- ✅ DuckDB integration example
-- ✅ Performance measurement
-- ✅ Error handling and edge cases
+- Schema creation across dialects
+- Data generation at multiple scale factors
+- Query execution validation
+- DuckDB integration example
+- Performance measurement
+- Error handling and edge cases
 
 ### Performance Validation
 

@@ -13,16 +13,13 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import logging
-import time
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Optional
 
-# Import the real DatabaseConnection
-try:
-    from benchbox.core.connection import DatabaseConnection as RealDatabaseConnection
-except ImportError:
-    RealDatabaseConnection = None
+from benchbox.core.connection import DatabaseConnection
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 @dataclass
@@ -105,19 +102,13 @@ class TPCDSPowerTest:
 
         # Handle legacy connection_string parameter
         if connection_string is not None:
-            # Create a simple connection factory that returns a mock connection
-            # Capture connection_string in a local variable for type narrowing
             conn_str = connection_string
-            self.connection_factory = lambda: DatabaseConnection(
-                connection_string=conn_str,
-                dialect=dialect or "standard",
-                verbose=verbose,
-            )
+            self.connection_factory = lambda: self._create_connection_from_string(conn_str, dialect)
         elif connection_factory is not None:
             self.connection_factory = connection_factory
         else:
-            # Default to mock connection factory
-            self.connection_factory = lambda: DatabaseConnection()
+            # Default to local in-memory SQLite when no explicit connection source is provided.
+            self.connection_factory = lambda: DatabaseConnection(sqlite3.connect(":memory:"), dialect="sqlite")
 
         self.config = TPCDSPowerTestConfig(
             scale_factor=scale_factor,
@@ -154,7 +145,7 @@ class TPCDSPowerTest:
         Raises:
             RuntimeError: If Power Test execution fails
         """
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result = TPCDSPowerTestResult(
@@ -240,8 +231,8 @@ class TPCDSPowerTest:
                     self.logger.info(f"Using TPC-DS stream {stream_id} with {len(queries_to_execute)} queries")
                     self.logger.info(f"Query order (first 10): {queries_to_execute[:10]}")
 
-        # Preflight: validate that all queries can be generated for this stream/seed
-        # Let preflight failures propagate as RuntimeError (tests expect this)
+        # Preflight: validate that all queries can be generated for this stream/seed.
+        # Propagate preflight failures as RuntimeError to surface invalid configurations early.
         self._preflight_validate_generation(available_query_ids)
 
         try:
@@ -266,12 +257,12 @@ class TPCDSPowerTest:
                     variant = None
                     query_display_id = str(query_id)
 
-                query_start = time.time()
+                query_start = mono_time()
                 query_result = {
                     "query_id": query_display_id,
                     "position": position + 1,
                     "stream_id": self.config.stream_id,
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "success": False,
                     "error": None,
                     "result_count": 0,
@@ -328,11 +319,11 @@ class TPCDSPowerTest:
                         # Record labeled SQL for preview
                         self.captured_items.append((label, query_text))
 
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
 
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": True,
                             "result_count": len(rows),
                         }
@@ -344,10 +335,10 @@ class TPCDSPowerTest:
                         self.logger.info(f"Query {query_id} completed in {execution_time:.3f}s")
 
                 except Exception as e:
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": False,
                             "error": str(e),
                         }
@@ -366,11 +357,11 @@ class TPCDSPowerTest:
             connection.close()
 
             # Calculate Power@Size metric (geometric mean per TPC spec)
-            total_execution_time = time.time() - start_time
+            total_execution_time = elapsed_seconds(start_time)
             exec_times = [
-                qr["execution_time"]
+                qr["execution_time_seconds"]
                 for qr in result.query_results
-                if qr.get("success", True) and qr.get("execution_time", 0) > 0
+                if qr.get("success", True) and qr.get("execution_time_seconds", 0) > 0
             ]
             if exec_times:
                 from benchbox.core.results.metrics import TPCMetricsCalculator
@@ -395,7 +386,7 @@ class TPCDSPowerTest:
 
             return result
         except Exception as e:
-            result.total_time = time.time() - start_time
+            result.total_time = elapsed_seconds(start_time)
             result.end_time = datetime.now().isoformat()
             result.success = False
             result.errors.append(f"Power Test execution failed: {e}")
@@ -407,7 +398,7 @@ class TPCDSPowerTest:
 
     def _build_query_sequence(self, available_query_ids: list[int]) -> list[tuple]:
         """Build the power test query sequence including variants when available."""
-        # Check if custom query sequence is set (for testing)
+        # Check if a custom query sequence override is set.
         if hasattr(self, "_query_sequence"):
             return [(q, None) if not isinstance(q, tuple) else q for q in self._query_sequence]
         from benchbox.core.tpcds.streams import create_standard_streams
@@ -561,6 +552,19 @@ class TPCDSPowerTest:
         """Establish database connection."""
         self.connection = self.connection_factory()
 
+    def _create_connection_from_string(self, connection_string: str, dialect: Optional[str]) -> DatabaseConnection:
+        """Create a connection wrapper from a supported connection string."""
+        if connection_string in {"sqlite::memory:", ":memory:", "sqlite://:memory:"}:
+            return DatabaseConnection(sqlite3.connect(":memory:"), dialect=dialect or "sqlite")
+
+        if connection_string.startswith("sqlite:///"):
+            db_path = connection_string.replace("sqlite:///", "", 1)
+            return DatabaseConnection(sqlite3.connect(db_path), dialect=dialect or "sqlite")
+
+        raise ValueError(
+            "Unsupported connection_string for TPCDSPowerTest. Provide connection_factory for non-SQLite backends."
+        )
+
     def _disconnect_database(self) -> None:
         """Close database connection."""
         if self.connection:
@@ -598,11 +602,11 @@ class TPCDSPowerTest:
         Returns:
             Dictionary with execution results
         """
-        start_time = time.time()
+        start_time = mono_time()
         result = {
             "query_id": query_id,
             "status": "success",
-            "execution_time": 0.0,
+            "execution_time_seconds": 0.0,
             "result_count": 0,
             "error": None,
         }
@@ -616,7 +620,7 @@ class TPCDSPowerTest:
             result["status"] = "error"
             result["error"] = str(e)
 
-        result["execution_time"] = time.time() - start_time
+        result["execution_time_seconds"] = elapsed_seconds(start_time)
         return result
 
     def _validate_results(self, result: TPCDSPowerTestResult) -> bool:
@@ -680,13 +684,23 @@ class TPCDSPowerTest:
         # Include scale_factor at top level for backward compatibility
         result_dict["scale_factor"] = result.config.scale_factor
 
-        # Convert query_results to proper format expected by tests
+        # Export query results keyed by query_id for stable lookups by downstream tooling.
         query_results_dict = {}
         for query_result in result.query_results:
+            query_result_data: dict[str, Any] | None = None
             if isinstance(query_result, dict):
-                query_id = query_result.get("query_id")
-                if query_id is not None:
-                    query_results_dict[str(query_id)] = query_result
+                query_result_data = query_result
+            elif dataclasses.is_dataclass(query_result):
+                query_result_data = dataclasses.asdict(query_result)
+            elif hasattr(query_result, "__dict__"):
+                query_result_data = dict(query_result.__dict__)
+
+            if query_result_data is None:
+                continue
+
+            query_id = query_result_data.get("query_id")
+            if query_id is not None:
+                query_results_dict[str(query_id)] = query_result_data
 
         result_dict["query_results"] = query_results_dict
 
@@ -738,8 +752,8 @@ class TPCDSPowerTest:
 
         # Compare individual queries
         for query_id in set(results1_dict.keys()).intersection(results2_dict.keys()):
-            time1 = results1_dict[query_id].get("execution_time", 0)
-            time2 = results2_dict[query_id].get("execution_time", 0)
+            time1 = results1_dict[query_id].get("execution_time_seconds", 0)
+            time2 = results2_dict[query_id].get("execution_time_seconds", 0)
 
             improvement = 0
             if time1 > 0:
@@ -756,50 +770,3 @@ class TPCDSPowerTest:
 
 # Alias for direct access to the result class
 PowerTestResult = TPCDSPowerTestResult
-
-
-# Mock DatabaseConnection for test compatibility
-class DatabaseConnection:
-    """Mock database connection for test compatibility."""
-
-    def __init__(
-        self,
-        connection_string: str = "",
-        dialect: str = "standard",
-        verbose: bool = False,
-    ):
-        self.connection_string = connection_string
-        self.dialect = dialect
-        self.verbose = verbose
-        self.cursor = None
-
-    def execute(self, query: str):
-        """Mock execute method."""
-        # Return a mock cursor
-        cursor = MockCursor()
-        self.cursor = cursor
-        return cursor
-
-    def commit(self):
-        """Mock commit method."""
-
-    def fetchall(self):
-        """Mock fetchall method."""
-        return [("mock_result",)]
-
-    def fetchone(self):
-        """Mock fetchone method."""
-        return ("mock_result",)
-
-    def close(self):
-        """Mock close method for test compatibility."""
-
-
-class MockCursor:
-    """Mock cursor for test compatibility."""
-
-    def fetchall(self):
-        return [("mock_result",)]
-
-    def fetchone(self):
-        return ("mock_result",)

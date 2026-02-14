@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.dependencies import get_package_install_message
 
 if TYPE_CHECKING:
@@ -120,8 +121,13 @@ class SessionMetrics:
         """Calculate session duration in seconds."""
         if self.start_time is None:
             return 0.0
-        end = self.end_time or time.time()
-        return end - self.start_time
+        end = self.end_time or mono_time()
+        elapsed = elapsed_seconds(self.start_time, end)
+        if elapsed >= 0:
+            return elapsed
+        # Backward-compatible fallback for legacy wall-clock start/end values.
+        wall_end = self.end_time or time.time()
+        return max(0.0, wall_end - self.start_time)
 
 
 class CloudSparkSessionManager(ABC):
@@ -313,10 +319,10 @@ class CloudSparkSessionManager(ABC):
         """
         try:
             spark = self.get_session()
-            self._metrics.start_time = time.time()
+            self._metrics.start_time = mono_time()
             yield spark
         finally:
-            self._metrics.end_time = time.time()
+            self._metrics.end_time = mono_time()
             self.close_session()
 
 
@@ -399,10 +405,10 @@ class LivySessionManager(CloudSparkSessionManager):
 
     def _wait_for_session_ready(self) -> None:
         """Wait for Livy session to reach idle state."""
-        start = time.time()
+        start = mono_time()
         timeout = self.config.session_start_timeout
 
-        while time.time() - start < timeout:
+        while elapsed_seconds(start) < timeout:
             info = self._livy_request("GET", f"/sessions/{self._session_id}")
             state = info.get("state", "unknown")
 
@@ -459,10 +465,10 @@ class LivySessionManager(CloudSparkSessionManager):
 
     def _wait_for_statement(self, statement_id: int) -> dict[str, Any]:
         """Wait for statement execution to complete."""
-        start = time.time()
+        start = mono_time()
         timeout = self.config.statement_timeout
 
-        while time.time() - start < timeout:
+        while elapsed_seconds(start) < timeout:
             response = self._livy_request(
                 "GET",
                 f"/sessions/{self._session_id}/statements/{statement_id}",
@@ -513,7 +519,7 @@ class DatabricksConnectSessionManager(CloudSparkSessionManager):
         self._spark = builder.getOrCreate()
         self._state = SessionState.IDLE
         self._metrics.session_id = "databricks-connect"
-        self._metrics.start_time = time.time()
+        self._metrics.start_time = mono_time()
 
         self._logger.info("Databricks Connect session ready")
         return self._spark
@@ -536,7 +542,7 @@ class DatabricksConnectSessionManager(CloudSparkSessionManager):
             finally:
                 self._spark = None
                 self._state = SessionState.DEAD
-                self._metrics.end_time = time.time()
+                self._metrics.end_time = mono_time()
 
     def execute_statement(self, code: str) -> dict[str, Any]:
         """Execute SQL code in Databricks Connect session.

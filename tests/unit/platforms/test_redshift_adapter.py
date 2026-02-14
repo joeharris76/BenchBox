@@ -59,9 +59,27 @@ class TestRedshiftAdapter:
 
     def test_initialization_missing_driver(self):
         """Test initialization when Redshift dependencies are missing."""
-        # Cannot mock module-level driver variables that are set at import time
-        # This test would require unloading and reloading the module with mocked imports
-        pytest.skip("Cannot mock module-level driver imports; test requires environment without drivers")
+        import benchbox.platforms.redshift as redshift_module
+
+        # Simulate environment with no Redshift drivers available.
+        with (
+            patch.object(redshift_module, "redshift_connector", None),
+            patch.object(redshift_module, "psycopg2", None, create=True),
+            patch(
+                "benchbox.platforms.redshift.check_platform_dependencies", return_value=(False, ["redshift-connector"])
+            ),
+            patch(
+                "benchbox.platforms.redshift.get_dependency_error_message",
+                return_value="Missing Redshift dependencies",
+            ),
+        ):
+            with pytest.raises(ImportError, match="Missing Redshift dependencies"):
+                RedshiftAdapter(
+                    host="test-cluster.redshift.amazonaws.com",
+                    database="test_db",
+                    username="test_user",
+                    password="test_pass",
+                )
 
     def test_initialization_missing_required_config(self):
         """Test initialization with missing required configuration."""
@@ -627,7 +645,7 @@ class TestRedshiftAdapter:
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["first_row"] == (1, "test")
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
         # Query statistics now includes execution_time_seconds for cost calculation
         assert result["query_statistics"]["query_id"] == "redshift_query_123"
         assert "execution_time_seconds" in result["query_statistics"]
@@ -660,7 +678,7 @@ class TestRedshiftAdapter:
         assert result["rows_returned"] == 0
         assert result["error"] == "Query failed"
         assert result["error_type"] == "Exception"
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
         mock_cursor.close.assert_called_once()
 

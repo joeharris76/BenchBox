@@ -11,15 +11,18 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from benchbox.base import BaseBenchmark
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 from .generator import JoinOrderGenerator
 from .queries import JoinOrderQueryManager
 from .schema import JoinOrderSchema
+
+if TYPE_CHECKING:
+    from benchbox.core.tuning import UnifiedTuningConfiguration
 
 
 class JoinOrderBenchmark(BaseBenchmark):
@@ -96,30 +99,33 @@ class JoinOrderBenchmark(BaseBenchmark):
         """
         self.log_verbose(f"Generating Join Order data at scale factor {self.scale_factor}...")
 
-        start_time = time.time()
+        start_time = mono_time()
         data_files = self._generator.generate_data()
-        generation_time = time.time() - start_time
+        generation_time = elapsed_seconds(start_time)
 
         self.log_verbose(f"Generated {len(data_files)} data files in {generation_time:.2f}s")
 
         return data_files
 
-    def get_schema(self, dialect: str = "sqlite") -> str:
-        """Get database schema DDL.
-
-        Args:
-            dialect: Target SQL dialect
+    def get_schema(self) -> dict[str, dict]:
+        """Get the Join Order Benchmark schema definitions.
 
         Returns:
-            DDL statements for creating all tables
+            Dictionary mapping table names to their schema definitions.
         """
-        return self._schema.get_create_tables_sql(dialect)
+        return self._schema._tables
 
-    def get_create_tables_sql(self, dialect: str = "sqlite") -> str:
+    def get_create_tables_sql(
+        self,
+        dialect: str = "sqlite",
+        tuning_config: UnifiedTuningConfiguration | None = None,
+    ) -> str:
         """Get CREATE TABLE statements for all tables.
 
         Args:
             dialect: Target SQL dialect
+            tuning_config: Unified tuning configuration (accepted for interface
+                compatibility; join order schema does not currently use it)
 
         Returns:
             SQL CREATE TABLE statements

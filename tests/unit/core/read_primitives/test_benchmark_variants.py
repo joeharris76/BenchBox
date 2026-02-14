@@ -304,6 +304,22 @@ class TestModernSQLFeatures:
         assert "orderby_all_desc" in queries
         assert "ORDER BY ALL" in queries["orderby_all_simple"].upper()
 
+    def test_duckdb_translation_preserves_group_order_by_all_keyword(self):
+        """Test DuckDB translation does not quote GROUP/ORDER BY ALL as identifiers."""
+        benchmark = ReadPrimitivesBenchmark()
+        queries = benchmark.get_queries(dialect="duckdb")
+
+        assert "groupby_all_simple" in queries
+        assert "orderby_all_simple" in queries
+
+        groupby_sql = queries["groupby_all_simple"].upper()
+        orderby_sql = queries["orderby_all_simple"].upper()
+
+        assert "GROUP BY ALL" in groupby_sql
+        assert 'GROUP BY "ALL"' not in groupby_sql
+        assert "ORDER BY ALL" in orderby_sql
+        assert 'ORDER BY "ALL"' not in orderby_sql
+
     def test_catalog_has_array_queries(self):
         """Test that ARRAY type operation queries exist."""
         benchmark = ReadPrimitivesBenchmark()

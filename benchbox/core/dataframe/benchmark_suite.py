@@ -1428,14 +1428,11 @@ def run_sql_vs_dataframe(
 
 
 class DataFrameComparisonPlotter:
-    """Generate visualizations for DataFrame benchmark comparisons.
-
-    Integrates with BenchBox visualization framework to create charts from
-    DataFrame benchmark results.
+    """Generate ASCII visualizations for DataFrame benchmark comparisons.
 
     Example:
         plotter = DataFrameComparisonPlotter(results, theme="light")
-        plotter.generate_charts(output_dir="charts/", formats=["png", "html"])
+        charts = plotter.generate_charts(output_dir="charts/")
     """
 
     def __init__(
@@ -1454,185 +1451,33 @@ class DataFrameComparisonPlotter:
         self.results = results
         self.theme = theme
 
-    def generate_charts(
-        self,
-        output_dir: str | Path,
-        formats: list[str] | None = None,
-        chart_types: list[str] | None = None,
-        dpi: int = 300,
-    ) -> dict[str, dict[str, Path]]:
-        """Generate all applicable charts from benchmark results.
+    def generate_charts(self, output_dir: str | Path, **kwargs: object) -> dict[str, Path]:
+        """Generate ASCII charts from DataFrame benchmark results.
+
+        Renders performance_bar, distribution_box, and query_heatmap charts
+        as ``.txt`` files in the specified output directory.
 
         Args:
-            output_dir: Directory to save charts
-            formats: Export formats (default: ["png", "html"])
-            chart_types: Chart types to generate (default: auto-select)
-            dpi: Resolution for raster formats
+            output_dir: Directory to write chart files into.
 
         Returns:
-            Dict mapping chart_type -> format -> file_path
+            Mapping of chart type name to exported file path.
         """
-        try:
-            from benchbox.core.visualization import (
-                BarDatum,
-                DistributionBoxPlot,
-                DistributionSeries,
-                PerformanceBarChart,
-                QueryHeatmap,
-                export_figure,
-                get_theme,
-            )
-        except ImportError as e:
-            logger.warning(f"Visualization dependencies not available: {e}")
-            return {}
-
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        formats = formats or ["png", "html"]
-        chart_types = chart_types or self._suggest_chart_types()
-        theme_settings = get_theme(self.theme)
-
-        exports: dict[str, dict[str, Path]] = {}
-
-        # Store imported classes as instance attributes for rendering
-        self._bar_datum_cls = BarDatum
-        self._performance_bar_cls = PerformanceBarChart
-        self._distribution_series_cls = DistributionSeries
-        self._distribution_box_cls = DistributionBoxPlot
-        self._query_heatmap_cls = QueryHeatmap
-
-        for chart_type in chart_types:
-            try:
-                if chart_type == "performance_bar":
-                    fig, name = self._render_performance_bar()
-                elif chart_type == "distribution_box":
-                    fig, name = self._render_distribution_box()
-                elif chart_type == "query_heatmap":
-                    fig, name = self._render_query_heatmap()
-                else:
-                    continue
-
-                if fig is None:
-                    continue
-
-                export_paths = export_figure(
-                    fig,
-                    output_dir=output_path,
-                    base_name=name,
-                    formats=formats,
-                    dpi=dpi,
-                    theme=theme_settings,
-                )
-                exports[chart_type] = export_paths
-
-            except Exception as e:
-                logger.warning(f"Failed to generate {chart_type} chart: {e}")
-
-        return exports
-
-    def _suggest_chart_types(self) -> list[str]:
-        """Suggest appropriate chart types based on data."""
-        types = ["performance_bar"]
-
-        # Add distribution if we have per-query data
-        if any(r.query_results for r in self.results):
-            types.append("distribution_box")
-
-        # Add heatmap if multiple platforms and queries
-        if len(self.results) > 1 and any(r.query_results for r in self.results):
-            types.append("query_heatmap")
-
-        return types
-
-    def _render_performance_bar(self):
-        """Render performance comparison bar chart."""
-        bars = []
-        for result in self.results:
-            value = result.geometric_mean_ms or result.total_time_ms or 0
-            bars.append(
-                self._bar_datum_cls(
-                    label=result.platform,
-                    value=value,
-                    platform=result.platform,
-                )
-            )
-
-        if not bars:
-            return None, None
-
-        # Mark best/worst
-        values = [b.value for b in bars if b.value > 0]
-        if values:
-            best = min(values)
-            worst = max(values)
-            for bar in bars:
-                if bar.value > 0:
-                    bar.is_best = bar.value == best
-                    bar.is_worst = bar.value == worst
-
-        chart = self._performance_bar_cls(
-            data=bars,
-            title="DataFrame Platform Performance Comparison",
-            metric_label="Geometric Mean (ms)",
-            sort_by="value",
+        from benchbox.core.visualization.chart_generator import (
+            generate_comparison_charts,
+            normalized_from_dataframe,
         )
-        return chart.figure(), "dataframe_performance"
 
-    def _render_distribution_box(self):
-        """Render query time distribution box plot."""
-        series = []
-        for result in self.results:
-            times = []
-            for qr in result.query_results:
-                if qr.status == "SUCCESS" and qr.execution_times_ms:
-                    times.extend(qr.execution_times_ms)
-            if times:
-                series.append(self._distribution_series_cls(name=result.platform, values=times))
-
-        if not series:
-            return None, None
-
-        chart = self._distribution_box_cls(
-            series=series,
-            title="DataFrame Query Time Distribution",
-            y_title="Execution Time (ms)",
-        )
-        return chart.figure(), "dataframe_distribution"
-
-    def _render_query_heatmap(self):
-        """Render query execution time heatmap."""
-        # Collect all query IDs
-        query_ids = sorted({qr.query_id for r in self.results for qr in r.query_results})
-        if not query_ids or len(self.results) < 2:
-            return None, None
-
-        platform_names = [r.platform for r in self.results]
-        matrix: list[list[float | None]] = []
-
-        for query_id in query_ids:
-            row = []
-            for result in self.results:
-                qr = next((q for q in result.query_results if q.query_id == query_id), None)
-                row.append(qr.mean_time_ms if qr and qr.status == "SUCCESS" else None)
-            matrix.append(row)
-
-        chart = self._query_heatmap_cls(
-            matrix=matrix,
-            queries=query_ids,
-            platforms=platform_names,
-            title="DataFrame Query Execution Times",
-            colorbar_title="Execution Time (ms)",
-        )
-        return chart.figure(), "dataframe_query_heatmap"
+        normalized = normalized_from_dataframe(self.results)
+        return generate_comparison_charts(normalized, output_dir, theme=self.theme)
 
 
 class SQLVsDataFramePlotter:
-    """Generate visualizations for SQL vs DataFrame comparisons.
+    """Generate ASCII visualizations for SQL vs DataFrame comparisons.
 
     Example:
         plotter = SQLVsDataFramePlotter(summary, theme="light")
-        plotter.generate_charts(output_dir="charts/")
+        charts = plotter.generate_charts(output_dir="charts/")
     """
 
     def __init__(
@@ -1649,91 +1494,22 @@ class SQLVsDataFramePlotter:
         self.summary = summary
         self.theme = theme
 
-    def generate_charts(
-        self,
-        output_dir: str | Path,
-        formats: list[str] | None = None,
-        dpi: int = 300,
-    ) -> dict[str, dict[str, Path]]:
-        """Generate comparison charts.
+    def generate_charts(self, output_dir: str | Path, **kwargs: object) -> dict[str, Path]:
+        """Generate ASCII charts from SQL vs DataFrame comparison.
+
+        Renders performance_bar, distribution_box, and query_heatmap charts
+        as ``.txt`` files in the specified output directory.
 
         Args:
-            output_dir: Directory to save charts
-            formats: Export formats (default: ["png", "html"])
-            dpi: Resolution for raster formats
+            output_dir: Directory to write chart files into.
 
         Returns:
-            Dict mapping chart_type -> format -> file_path
+            Mapping of chart type name to exported file path.
         """
-        try:
-            from benchbox.core.visualization import (
-                BarDatum,
-                PerformanceBarChart,
-                export_figure,
-                get_theme,
-            )
-        except ImportError as e:
-            logger.warning(f"Visualization dependencies not available: {e}")
-            return {}
-
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        formats = formats or ["png", "html"]
-        theme_settings = get_theme(self.theme)
-
-        exports: dict[str, dict[str, Path]] = {}
-
-        # Store imported classes as instance attributes for rendering
-        self._bar_datum_cls = BarDatum
-        self._performance_bar_cls = PerformanceBarChart
-
-        # Speedup bar chart
-        try:
-            fig, name = self._render_speedup_chart()
-            if fig is not None:
-                export_paths = export_figure(
-                    fig,
-                    output_dir=output_path,
-                    base_name=name,
-                    formats=formats,
-                    dpi=dpi,
-                    theme=theme_settings,
-                )
-                exports["speedup_bar"] = export_paths
-        except Exception as e:
-            logger.warning(f"Failed to generate speedup chart: {e}")
-
-        return exports
-
-    def _render_speedup_chart(self):
-        """Render speedup comparison bar chart."""
-        bars = []
-        for result in self.summary.query_results:
-            if result.status == "SUCCESS":
-                bars.append(
-                    self._bar_datum_cls(
-                        label=result.query_id,
-                        value=result.speedup,
-                    )
-                )
-
-        if not bars:
-            return None, None
-
-        # Mark best/worst speedup
-        values = [b.value for b in bars]
-        if values:
-            best = max(values)  # Higher speedup is better for DataFrame
-            worst = min(values)
-            for bar in bars:
-                bar.is_best = bar.value == best
-                bar.is_worst = bar.value == worst
-
-        chart = self._performance_bar_cls(
-            data=bars,
-            title=f"SQL ({self.summary.sql_platform}) vs DataFrame ({self.summary.df_platform}) Speedup",
-            metric_label="Speedup (>1 = DataFrame faster)",
-            sort_by="value",
+        from benchbox.core.visualization.chart_generator import (
+            generate_comparison_charts,
+            normalized_from_sql_vs_df,
         )
-        return chart.figure(), "sql_vs_dataframe_speedup"
+
+        normalized = normalized_from_sql_vs_df(self.summary)
+        return generate_comparison_charts(normalized, output_dir, theme=self.theme)

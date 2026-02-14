@@ -75,7 +75,6 @@ _LAZY_ADAPTERS = {
     "PrestoAdapter": ".presto",
     "AzureSynapseAdapter": ".azure_synapse",
     "FabricWarehouseAdapter": ".fabric_warehouse",
-    "MicrosoftFabricAdapter": ".fabric_warehouse",  # Backward compatibility alias
     "QuantonAdapter": ".onehouse",
     # DataFrame adapters (have their own lazy loading but need module-level deferral)
     "PolarsDataFrameAdapter": ".dataframe",
@@ -250,7 +249,6 @@ __all__ = [
     "PostgreSQLAdapter",
     "AzureSynapseAdapter",
     "FabricWarehouseAdapter",
-    "MicrosoftFabricAdapter",  # Backward compatibility alias
     "QuantonAdapter",
     # DataFrame adapters
     "PolarsDataFrameAdapter",

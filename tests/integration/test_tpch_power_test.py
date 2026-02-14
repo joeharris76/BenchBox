@@ -48,7 +48,7 @@ class TestPowerTestConfig:
     def test_defaults(self) -> None:
         config = TPCHPowerTestConfig()
         assert config.scale_factor == 1.0
-        assert config.seed == 1
+        assert config.seed is None
         assert config.stream_id == 0
         assert config.timeout is None
         assert config.warm_up is True

@@ -6,6 +6,8 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import time
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -402,6 +404,56 @@ class TestEnhancedResourceProfiler:
         """Should handle stop without start."""
         profiler = EnhancedResourceProfiler()
         profiler.stop()  # Should not raise
+
+    def test_collect_sample_uses_monotonic_elapsed_for_rates(self):
+        """Rate math should use monotonic elapsed, not wall-clock deltas."""
+        profiler = EnhancedResourceProfiler(track_disk=True, track_network=True)
+
+        class _FakeProcess:
+            def cpu_percent(self, interval=0.1):
+                return 12.5
+
+            def memory_info(self):
+                return SimpleNamespace(rss=256 * 1024 * 1024)
+
+            def memory_percent(self):
+                return 25.0
+
+            def io_counters(self):
+                return SimpleNamespace(
+                    read_bytes=1_200_000,
+                    write_bytes=700_000,
+                    read_count=112,
+                    write_count=58,
+                )
+
+        class _FakePsutil:
+            AccessDenied = PermissionError
+
+            @staticmethod
+            def net_io_counters():
+                return SimpleNamespace(bytes_sent=1_500_000, bytes_recv=2_250_000)
+
+        profiler._psutil = _FakePsutil
+        profiler._process = _FakeProcess()
+        profiler._prev_sample_time = 10.0
+        profiler._prev_disk_read_count = 100
+        profiler._prev_disk_write_count = 50
+        profiler._prev_net_send = 1_000_000
+        profiler._prev_net_recv = 2_000_000
+
+        with (
+            patch("benchbox.monitoring.profiler.time.time", return_value=1000.0),
+            patch("benchbox.monitoring.profiler.mono_time", return_value=12.0),
+        ):
+            sample = profiler._collect_sample()
+
+        # Disk IOPS: deltas over 2-second monotonic interval.
+        assert sample.disk_read_iops == 6.0
+        assert sample.disk_write_iops == 4.0
+        # Network Mbps: (bytes_delta * 8) / (elapsed * 1_000_000).
+        assert sample.network_send_rate_mbps == 2.0
+        assert sample.network_recv_rate_mbps == 1.0
 
 
 class TestResourceTimelineSingleSample:

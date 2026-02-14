@@ -33,6 +33,15 @@ PathLike = Union[str, Path, "CloudPath"]
 MANIFEST_FILENAME = "_datagen_manifest.json"
 
 
+def _is_subpath(candidate: Path, parent: Path) -> bool:
+    """Return whether candidate is inside parent."""
+    try:
+        candidate.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def _utc_now_iso() -> str:
     """Return a RFC3339/ISO-8601 timestamp with UTC timezone."""
 
@@ -72,24 +81,33 @@ def _normalise_to_root(root: Path | CloudPath, path: PathLike) -> tuple[Path | C
     """Return the resolved path object and the manifest-relative string."""
 
     resolved = _ensure_path(path)
+    local_root = root.resolve() if isinstance(root, Path) else root
 
     # For relative local paths ensure we join them with the root directory first
     if isinstance(resolved, Path) and not resolved.is_absolute():
-        resolved = (root / resolved).resolve()
+        # If the caller already passed a path prefixed with root (e.g. "out/file.tbl"
+        # when root is "out"), keep that interpretation and avoid doubling.
+        cwd_resolved = resolved.resolve()
+        if isinstance(local_root, Path) and _is_subpath(cwd_resolved, local_root):
+            resolved = cwd_resolved
+        elif isinstance(local_root, Path):
+            resolved = (local_root / resolved).resolve()
+    elif isinstance(resolved, Path):
+        resolved = resolved.resolve()
 
     if CloudPath is not None and isinstance(resolved, CloudPath):  # type: ignore
         # ``relative_to`` is supported when both share the same anchor. Nested
         # try/except keeps compatibility across providers.
         try:
-            rel = resolved.relative_to(root)
+            rel = resolved.relative_to(local_root)
             return resolved, rel.as_posix()
-        except Exception:  # pragma: no cover - provider specific edge cases
+        except (ValueError, TypeError, AttributeError):  # pragma: no cover - provider specific edge cases
             return resolved, resolved.path
 
     try:
-        rel_path = resolved.relative_to(root)
+        rel_path = resolved.relative_to(local_root)
         return resolved, rel_path.as_posix()
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         # Fall back to absolute POSIX string when the path is outside the root
         if hasattr(resolved, "as_posix"):
             return resolved, resolved.as_posix()

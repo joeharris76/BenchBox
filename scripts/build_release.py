@@ -7,9 +7,14 @@ import argparse
 import hashlib
 import os
 import subprocess
+import sys
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from benchbox.release.workflow import compute_source_fingerprint
 
 
 def calculate_sha256(file_path: Path) -> str:
@@ -136,6 +141,56 @@ def build_with_timestamp(target: Path, timestamp: int, verify: bool = True) -> t
     return wheel_path, sdist_path
 
 
+def verify_build_fingerprint(target: Path, wheel_path: Path) -> str:
+    """Verify that the built wheel matches the source tree.
+
+    Computes a source fingerprint from the source tree, extracts the wheel,
+    computes a fingerprint from the extracted package, and compares them.
+    Writes the fingerprint to dist/.source_fingerprint for downstream verification.
+
+    Args:
+        target: Directory containing the source tree (with benchbox/ subdirectory)
+        wheel_path: Path to the built wheel file
+
+    Returns:
+        The verified fingerprint string
+
+    Raises:
+        ValueError: If the source and wheel fingerprints don't match
+    """
+    print("\nVerifying source fingerprint...")
+
+    # Compute fingerprint from source tree
+    source_fp = compute_source_fingerprint(target / "benchbox")
+    print(f"  Source fingerprint: {source_fp[:16]}...")
+
+    # Extract wheel to temp dir and compute fingerprint
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(wheel_path, "r") as zf:
+            zf.extractall(tmpdir)
+        wheel_pkg_dir = Path(tmpdir) / "benchbox"
+        if not wheel_pkg_dir.is_dir():
+            raise ValueError(f"benchbox/ directory not found in wheel: {wheel_path.name}")
+        wheel_fp = compute_source_fingerprint(wheel_pkg_dir)
+
+    print(f"  Wheel fingerprint: {wheel_fp[:16]}...")
+
+    if source_fp != wheel_fp:
+        raise ValueError(
+            f"Source/wheel fingerprint mismatch!\n"
+            f"  Source: {source_fp}\n"
+            f"  Wheel:  {wheel_fp}\n"
+            f"The wheel does not match the current source tree."
+        )
+
+    # Write fingerprint for downstream verification
+    fp_file = target / "dist" / ".source_fingerprint"
+    fp_file.write_text(source_fp + "\n", encoding="utf-8")
+    print(f"✓ Fingerprint verified and written to {fp_file.relative_to(target)}")
+
+    return source_fp
+
+
 def format_bytes(num_bytes: int | float) -> str:
     """Format byte count as human-readable string."""
     value: float = float(num_bytes)
@@ -193,6 +248,9 @@ def main() -> None:
             timestamp=args.timestamp,
             verify=not args.no_verify,
         )
+
+        # Verify source fingerprint (source tree vs wheel contents)
+        verify_build_fingerprint(args.target, wheel_path)
 
         # Calculate hashes
         print("\nCalculating SHA256 hashes...")

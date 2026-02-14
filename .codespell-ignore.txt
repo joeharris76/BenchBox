@@ -39,6 +39,9 @@ stdev
 # Typos in external dependencies/specs
 Paramer
 
+# Apache Hudi terminology
+mor
+
 # TPC benchmark terminology (cannot change - per spec)
 ans
 inactivate

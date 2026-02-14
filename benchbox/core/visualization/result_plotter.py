@@ -6,30 +6,14 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import benchbox
 from benchbox.core.results.loader import find_latest_result
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.results.normalizer import normalize_result_dict
-from benchbox.core.visualization.charts import (
-    BarDatum,
-    CostPerformancePoint,
-    CostPerformanceScatterPlot,
-    DistributionBoxPlot,
-    DistributionSeries,
-    PerformanceBarChart,
-    QueryHeatmap,
-    TimeSeriesLineChart,
-    TimeSeriesPoint,
-)
 from benchbox.core.visualization.exceptions import VisualizationError
-from benchbox.core.visualization.exporters import export_figure
-from benchbox.core.visualization.styles import ThemeSettings, get_theme
-from benchbox.core.visualization.templates import ChartTemplate, get_template
-from benchbox.core.visualization.utils import slugify
 from benchbox.utils.scale_factor import format_scale_factor
 
 logger = logging.getLogger(__name__)
@@ -56,53 +40,83 @@ class NormalizedResult:
     queries: list[NormalizedQuery] = field(default_factory=list)
     source_path: Path | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+    execution_mode: str | None = None
 
 
 class ResultPlotter:
-    """Generate publication-ready charts from BenchBox results."""
+    """Load and normalize benchmark results for ASCII chart generation."""
 
-    def __init__(self, results: Sequence[NormalizedResult], theme: ThemeSettings | str = "light"):
+    # Abbreviated execution mode labels for display
+    MODE_ABBREVIATIONS: dict[str, str] = {
+        "dataframe": "df",
+        "sql": "sql",
+        "datagen": "datagen",
+        "data_only": "data_only",
+    }
+
+    def __init__(self, results: Sequence[NormalizedResult], theme: str = "light"):
         if not results:
             raise VisualizationError("No results provided for visualization.")
         self.results = list(results)
         self._disambiguate_platforms()
-        self.theme = theme if isinstance(theme, ThemeSettings) else get_theme(theme)
+        self._disambiguate_modes()
+        self.theme = theme
 
     def _disambiguate_platforms(self) -> None:
-        """Append scale factor to platform labels when needed to avoid duplicates.
-
-        Only modifies labels when multiple results share the same platform label
-        but have different scale factors. This keeps labels clean when comparing
-        different platforms at the same scale.
-        """
+        """Append scale factor to platform labels when needed to avoid duplicates."""
         from collections import Counter
 
-        # Count occurrences of each platform label
         platform_counts = Counter(r.platform for r in self.results)
-
-        # Find platforms with duplicates
         duplicated_platforms = {p for p, count in platform_counts.items() if count > 1}
         if not duplicated_platforms:
             return
 
-        # For each duplicated platform, check if scale factors differ
         for platform in duplicated_platforms:
             matching = [r for r in self.results if r.platform == platform]
             scale_factors = {r.scale_factor for r in matching}
-
-            # Only disambiguate if scale factors actually differ
             if len(scale_factors) > 1:
                 for result in matching:
                     sf_label = format_scale_factor(result.scale_factor)
-                    # Mutate the platform label to include scale factor
                     object.__setattr__(result, "platform", f"{result.platform} SF={sf_label}")
+
+    def _disambiguate_modes(self) -> None:
+        """Ensure symmetric mode suffixes when same platform appears with different modes.
+
+        When two results share the same base platform name but differ by execution mode,
+        both get their mode suffix appended. Uses abbreviated labels: "df" not "dataframe".
+        Single-result or single-mode cases keep the bare platform name.
+        """
+        from collections import Counter
+
+        platform_counts = Counter(r.platform for r in self.results)
+        duplicated_platforms = {p for p, count in platform_counts.items() if count > 1}
+        if not duplicated_platforms:
+            return
+
+        for platform in duplicated_platforms:
+            matching = [r for r in self.results if r.platform == platform]
+            # Check execution_mode differences
+            modes: dict[int, str] = {}
+            for r in matching:
+                mode = r.execution_mode or "sql"
+                modes[id(r)] = mode
+
+            unique_modes = set(modes.values())
+            if len(unique_modes) <= 1:
+                continue
+
+            # Multiple modes for same platform — append abbreviated mode to each
+            for result in matching:
+                mode = modes[id(result)]
+                abbrev = self.MODE_ABBREVIATIONS.get(mode, mode)
+                object.__setattr__(result, "platform", f"{result.platform} ({abbrev})")
 
     # ------------------------------------------------------------------ Loading
     @classmethod
     def from_sources(
         cls,
         sources: Sequence[str | Path] | None = None,
-        theme: ThemeSettings | str = "light",
+        theme: str = "light",
     ) -> ResultPlotter:
         """Create a plotter from JSON result files or directories."""
         normalized: list[NormalizedResult] = []
@@ -128,7 +142,7 @@ class ResultPlotter:
     def from_benchmark_results(
         cls,
         results: Sequence[BenchmarkResults],
-        theme: ThemeSettings | str = "light",
+        theme: str = "light",
     ) -> ResultPlotter:
         normalized = [cls._normalize_benchmark_result(res) for res in results]
         return cls(normalized, theme=theme)
@@ -152,20 +166,11 @@ class ResultPlotter:
 
     @staticmethod
     def _normalize_dict(data: dict[str, Any], source_path: Path | None) -> NormalizedResult:
-        """Convert raw JSON dict to visualization-specific NormalizedResult.
-
-        Uses the shared normalizer for schema detection and field extraction,
-        then converts to the visualization-specific format with platform label
-        decoration for execution mode differentiation.
-        """
+        """Convert raw JSON dict to NormalizedResult."""
         normalized = normalize_result_dict(data)
 
-        # Decorate platform label with execution mode for visual differentiation
         platform = normalized.platform
-        if normalized.execution_mode and normalized.execution_mode.lower() not in ("sql", "datagen", "data_only"):
-            platform = f"{platform} ({normalized.execution_mode})"
 
-        # Convert shared NormalizedQuery to visualization NormalizedQuery
         queries = [
             NormalizedQuery(
                 query_id=q.query_id,
@@ -188,6 +193,7 @@ class ResultPlotter:
             queries=queries,
             source_path=source_path,
             raw=data,
+            execution_mode=normalized.execution_mode,
         )
 
     @staticmethod
@@ -202,6 +208,8 @@ class ResultPlotter:
         queries: list[NormalizedQuery] = []
         for query in getattr(result, "query_results", []) or []:
             execution_time_ms = query.get("execution_time_ms")
+            if execution_time_ms is None and "execution_time_seconds" in query:
+                execution_time_ms = float(query["execution_time_seconds"]) * 1000.0
             if execution_time_ms is None and "execution_time" in query:
                 execution_time_ms = float(query["execution_time"]) * 1000.0
             queries.append(
@@ -226,12 +234,9 @@ class ResultPlotter:
 
         cost_summary = getattr(result, "cost_summary", None) or {}
 
-        # Build platform label, including execution mode when not default SQL
         platform = str(getattr(result, "platform", "unknown"))
         platform_info = getattr(result, "platform_info", None) or {}
         execution_mode = platform_info.get("execution_mode")
-        if execution_mode and execution_mode.lower() not in ("sql", "datagen", "data_only"):
-            platform = f"{platform} ({execution_mode})"
 
         return NormalizedResult(
             benchmark=str(getattr(result, "benchmark_name", "unknown")),
@@ -246,187 +251,8 @@ class ResultPlotter:
             queries=queries,
             source_path=None,
             raw={},
+            execution_mode=execution_mode,
         )
-
-    # ---------------------------------------------------------------- Generation
-    def generate_all_charts(
-        self,
-        output_dir: str | Path,
-        formats: Sequence[str] | None = None,
-        template_name: str | None = None,
-        chart_types: Sequence[str] | None = None,
-        smart: bool = True,
-        dpi: int = 300,
-    ) -> dict[str, dict[str, Path]]:
-        """Generate charts for the provided results."""
-        output_path = Path(output_dir)
-        template: ChartTemplate | None = None
-        if template_name:
-            template = get_template(template_name)
-
-        chosen_formats = list(formats or (template.formats if template else ("html",)))
-        chosen_chart_types = list(chart_types or (template.chart_types if template else ()))
-        if not chosen_chart_types:
-            chosen_chart_types = self._suggest_chart_types() if smart else ["performance_bar"]
-
-        available_renderers = {
-            "performance_bar": self._render_performance_bar,
-            "distribution_box": self._render_distribution_box,
-            "query_heatmap": self._render_query_heatmap,
-            "cost_scatter": self._render_cost_scatter,
-            "time_series": self._render_time_series,
-        }
-
-        exports: dict[str, dict[str, Path]] = {}
-        for chart_type in chosen_chart_types:
-            renderer = available_renderers.get(chart_type)
-            if not renderer:
-                logger.warning("Unknown chart type '%s' requested; skipping.", chart_type)
-                continue
-
-            figure_info = renderer()
-            if figure_info is None:
-                continue
-
-            fig, base_name = figure_info
-            metadata = self._export_metadata(chart_type=chart_type)
-            export_paths = export_figure(
-                fig,
-                output_dir=output_path,
-                base_name=base_name,
-                formats=chosen_formats,
-                metadata=metadata,
-                theme=self.theme,
-                dpi=dpi,
-            )
-            exports[chart_type] = export_paths
-        return exports
-
-    # ----------------------------------------------------------------- Renderers
-    def _render_performance_bar(self):
-        metric_label = "Total Runtime (s)"
-        bars: list[BarDatum] = []
-        for result in self.results:
-            value_ms = result.total_time_ms or (result.avg_time_ms or 0) * len(result.queries or [0])
-            value_seconds = (value_ms or 0) / 1000.0
-            bars.append(BarDatum(label=result.platform, value=value_seconds, platform=result.platform))
-
-        if not bars:
-            logger.info("No performance data available for bar chart.")
-            return None
-
-        # Highlight best/worst (lower is better)
-        values = [bar.value for bar in bars]
-        if values:
-            best = min(values)
-            worst = max(values)
-            for bar in bars:
-                bar.is_best = bar.value == best
-                bar.is_worst = bar.value == worst
-
-        chart = PerformanceBarChart(
-            data=bars,
-            title=f"{self._benchmark_label()} Performance",
-            metric_label=metric_label,
-            sort_by="value",
-        )
-        return chart.figure(), f"{self._slug_prefix()}performance"
-
-    def _render_distribution_box(self):
-        series: list[DistributionSeries] = []
-        for result in self.results:
-            times = [q.execution_time_ms for q in result.queries if q.execution_time_ms is not None]
-            if times:
-                series.append(DistributionSeries(name=result.platform, values=times))
-
-        if not series:
-            logger.info("No per-query timings available for distribution chart.")
-            return None
-
-        chart = DistributionBoxPlot(
-            series=series,
-            title=f"{self._benchmark_label()} Latency Distribution",
-            y_title="Execution Time (ms)",
-        )
-        return chart.figure(), f"{self._slug_prefix()}distribution"
-
-    def _render_query_heatmap(self):
-        # Build a matrix of query execution times (ms)
-        query_ids = sorted({q.query_id for result in self.results for q in result.queries}, key=self._natural_sort_key)
-        if not query_ids or len(self.results) < 2:
-            logger.info("Heatmap requires at least one query and multiple platforms.")
-            return None
-
-        platform_names = [result.platform for result in self.results]
-        matrix: list[list[float | None]] = []
-        for query_id in query_ids:
-            row = []
-            for result in self.results:
-                match = next((q for q in result.queries if q.query_id == query_id), None)
-                row.append(match.execution_time_ms if match else None)
-            matrix.append(row)
-
-        chart = QueryHeatmap(
-            matrix=matrix,
-            queries=query_ids,
-            platforms=platform_names,
-            title=f"{self._benchmark_label()} Query Execution Times",
-            colorbar_title="Execution Time (ms)",
-        )
-        return chart.figure(), f"{self._slug_prefix()}query-heatmap"
-
-    def _render_cost_scatter(self):
-        points: list[CostPerformancePoint] = []
-        for result in self.results:
-            if result.cost_total is None:
-                continue
-
-            performance = self._performance_score(result)
-            points.append(
-                CostPerformancePoint(
-                    name=result.platform,
-                    performance=performance,
-                    cost=result.cost_total,
-                    platform=result.platform,
-                    metadata={"execution_id": result.execution_id} if result.execution_id else None,
-                )
-            )
-
-        if not points:
-            logger.info("No cost data available for cost-performance scatter plot.")
-            return None
-
-        chart = CostPerformanceScatterPlot(
-            points=points,
-            title=f"{self._benchmark_label()} Cost vs Performance",
-            performance_label="Performance score (higher is better)",
-            cost_label="Total cost (USD)",
-        )
-        return chart.figure(), f"{self._slug_prefix()}cost-performance"
-
-    def _render_time_series(self):
-        if len(self.results) < 2:
-            logger.info("Time-series chart requires at least two results.")
-            return None
-
-        points: list[TimeSeriesPoint] = []
-        for result in self.results:
-            x_value = result.timestamp.isoformat() if result.timestamp else (result.execution_id or "run")
-            points.append(
-                TimeSeriesPoint(
-                    series=result.platform,
-                    x=x_value,
-                    y=(result.total_time_ms or 0) / 1000.0,
-                    label=self._format_scale(result.scale_factor) if result.scale_factor else None,
-                )
-            )
-
-        chart = TimeSeriesLineChart(
-            points=points,
-            title=f"{self._benchmark_label()} Performance Trend",
-            metric_label="Total Runtime (s)",
-        )
-        return chart.figure(), f"{self._slug_prefix()}trend"
 
     # ---------------------------------------------------------------- Utilities
     def _suggest_chart_types(self) -> list[str]:
@@ -435,6 +261,7 @@ class ResultPlotter:
             types.append("cost_scatter")
         if any(result.queries for result in self.results):
             types.append("distribution_box")
+            types.append("query_histogram")
         if len(self.results) > 1 and any(result.queries for result in self.results):
             types.append("query_heatmap")
         if len(self.results) > 2:
@@ -448,46 +275,21 @@ class ResultPlotter:
             return (len(result.queries) * 1000.0) / result.total_time_ms
         return 0.0
 
-    def _export_metadata(self, chart_type: str) -> dict[str, Any]:
-        return {
-            "chart_type": chart_type,
-            "benchmark": self._benchmark_label(),
-            "scale_factor": self._format_scale(self.results[0].scale_factor),
-            "platforms": sorted({r.platform for r in self.results}),
-            "benchbox_version": benchbox.__version__,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "sources": [str(r.source_path) for r in self.results if r.source_path],
-        }
-
     def _benchmark_label(self) -> str:
         benchmarks = {r.benchmark for r in self.results}
         if len(benchmarks) == 1:
             return next(iter(benchmarks))
         return ", ".join(sorted(benchmarks))
 
-    def _slug_prefix(self) -> str:
-        primary = self.results[0]
-        benchmark = slugify(primary.benchmark)
-        platforms = "-".join(sorted({slugify(r.platform) for r in self.results}))
-        return f"{benchmark}_{platforms}_"
-
-    def _format_scale(self, scale: str | float | int) -> str:
-        try:
-            return format_scale_factor(float(scale))
-        except Exception:
-            return str(scale)
-
     @staticmethod
     def _natural_sort_key(s: str) -> tuple[float, str]:
-        """Sort key for natural ordering of query IDs (e.g., Q1, Q2, Q10 instead of Q1, Q10, Q2)."""
+        """Sort key for natural ordering of query IDs."""
         import re
 
-        # Extract leading non-digits and trailing number
         match = re.match(r"^(\D*)(\d+)(.*)$", s)
         if match:
             prefix, num, suffix = match.groups()
             return (float(num), prefix + suffix)
-        # Fallback: no number found, sort alphabetically at the end
         return (float("inf"), s)
 
     def group_by(self, field: str) -> dict[str, ResultPlotter]:

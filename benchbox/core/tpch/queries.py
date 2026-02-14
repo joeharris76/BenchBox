@@ -35,6 +35,8 @@ class QGenBinary:
 
         if seed is not None:
             cmd.extend(["-r", str(seed)])
+        else:
+            cmd.append("-d")  # Use official TPC-H default substitution parameters
         if scale_factor != 1.0:
             cmd.extend(["-s", str(scale_factor)])
 
@@ -289,7 +291,3 @@ class TPCHQueries:
             Dictionary mapping query IDs (1-22) to SQL strings
         """
         return {i: self.get_query(i, **kwargs) for i in range(1, 23)}
-
-
-# Backward compatibility alias
-TPCHQueryManager = TPCHQueries

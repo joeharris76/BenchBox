@@ -104,8 +104,24 @@ class TestPrimitivesSchema:
         sql = get_create_table_sql("region")
         assert "CREATE TABLE region" in sql
         assert "r_regionkey INTEGER PRIMARY KEY" in sql
-        assert "r_name VARCHAR(25)" in sql
+        assert "r_name CHAR(25)" in sql
         assert "r_comment VARCHAR(152)" in sql
+
+    def test_create_table_sql_foreign_keys(self):
+        """Test that foreign key constraints are generated from per-column data."""
+        sql = get_create_table_sql("nation", enable_foreign_keys=True)
+        assert "FOREIGN KEY (n_regionkey) REFERENCES region(r_regionkey)" in sql
+
+        # Verify FKs can be disabled
+        sql_no_fk = get_create_table_sql("nation", enable_foreign_keys=False)
+        assert "FOREIGN KEY" not in sql_no_fk
+
+    def test_create_table_sql_composite_pk_with_fks(self):
+        """Test composite primary keys and foreign keys together (e.g. partsupp)."""
+        sql = get_create_table_sql("partsupp")
+        assert "PRIMARY KEY (ps_partkey, ps_suppkey)" in sql
+        assert "FOREIGN KEY (ps_partkey) REFERENCES part(p_partkey)" in sql
+        assert "FOREIGN KEY (ps_suppkey) REFERENCES supplier(s_suppkey)" in sql
 
     def test_all_create_table_sql(self):
         """Test generation of all CREATE TABLE statements."""

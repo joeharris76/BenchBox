@@ -34,6 +34,8 @@ from typing import (
     runtime_checkable,
 )
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 # Suppress specific warnings for cleaner output
 warnings.filterwarnings("ignore", category=ResourceWarning)
 
@@ -241,7 +243,7 @@ class ParameterManager:
 
     def __init__(self, base_seed: Optional[int] = None) -> None:
         """Initialize parameter manager."""
-        self.base_seed = base_seed or int(time.time() * 1000) % 2**31
+        self.base_seed = base_seed or int(mono_time() * 1000) % 2**31
         self.logger = logging.getLogger(__name__)
         self._parameter_cache: dict[str, Any] = {}
 
@@ -329,7 +331,7 @@ class TransactionManager:
                 raise RuntimeError("Transaction already active")
 
             self._transaction_active = True
-            start_time = time.time()
+            start_time = mono_time()
 
             try:
                 # Set isolation level if supported
@@ -338,7 +340,7 @@ class TransactionManager:
                 yield self.connection
 
                 # Check timeout
-                if timeout and (time.time() - start_time) > timeout:
+                if timeout and (elapsed_seconds(start_time)) > timeout:
                     raise TimeoutError(f"Transaction exceeded timeout of {timeout} seconds")
 
                 self.connection.commit()
@@ -444,7 +446,7 @@ class ProgressTracker:
         self.description = description
         self.completed_items = 0
         self.failed_items = 0
-        self.start_time = time.time()
+        self.start_time = mono_time()
         self.logger = logging.getLogger(__name__)
         self._lock = threading.Lock()
 
@@ -470,7 +472,7 @@ class ProgressTracker:
     def _log_progress(self) -> None:
         """Log current progress."""
         total_processed = self.completed_items + self.failed_items
-        elapsed_time = time.time() - self.start_time
+        elapsed_time = elapsed_seconds(self.start_time)
 
         percentage = (total_processed / self.total_items) * 100 if self.total_items > 0 else 0
         rate = total_processed / elapsed_time if elapsed_time > 0 else 0
@@ -485,7 +487,7 @@ class ProgressTracker:
 
     def get_summary(self) -> dict[str, Any]:
         """Get progress summary."""
-        total_time = time.time() - self.start_time
+        total_time = elapsed_seconds(self.start_time)
         total_processed = self.completed_items + self.failed_items
 
         return {
@@ -575,7 +577,7 @@ class ResultAggregator:
         return {
             "query_id": query_result.query_id,
             "stream_id": query_result.stream_id,
-            "execution_time": query_result.execution_time,
+            "execution_time_seconds": query_result.execution_time,
             "status": query_result.status.value,
             "error": query_result.error,
             "row_count": query_result.row_count,
@@ -663,7 +665,7 @@ class StreamExecutor:
         """Execute a single stream."""
         stream_result = StreamResult(
             stream_id=config.stream_id,
-            start_time=time.time(),
+            start_time=mono_time(),
             status=ExecutionStatus.RUNNING,
         )
 
@@ -956,7 +958,7 @@ def create_basic_query_executor(
         parameters: dict[str, Any],
     ) -> QueryResult:
         """Execute a single query."""
-        result = QueryResult(query_id=query_id, start_time=time.time())
+        result = QueryResult(query_id=query_id, start_time=mono_time())
 
         try:
             # Get query text from benchmark

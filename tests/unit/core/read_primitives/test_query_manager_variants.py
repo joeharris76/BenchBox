@@ -184,20 +184,36 @@ queries:
 class TestQueryManagerVariantIntegration:
     """Integration tests for query manager with actual catalog."""
 
-    def test_actual_catalog_has_no_variants_initially(self):
-        """Test that actual catalog currently has no variants defined."""
+    def test_actual_catalog_variant_lookup_works(self):
+        """Test that actual catalog supports dialect variant lookup."""
         manager = ReadPrimitivesQueryManager()
 
-        # Get all queries and verify none have variants
-        # This documents current state - will change when variants are added
-        all_queries = manager.get_all_queries()
+        for query_id in ["map_construction", "map_access", "map_keys_values"]:
+            query = manager.get_query(query_id, dialect="datafusion")
+            assert "MAP(" in query.upper()
+            assert "MAP_FROM_ENTRIES" not in query.upper()
 
-        # Try to get a query with dialect specified
-        # Should work and return base SQL (no variants exist yet)
-        if "aggregation_distinct" in all_queries:
-            query = manager.get_query("aggregation_distinct", dialect="duckdb")
-            # Should be base query since no variant exists
-            assert "SELECT" in query.upper()
+        distinct_query = manager.get_query("array_distinct", dialect="datafusion")
+        assert "ARRAY_AGG(DISTINCT" in distinct_query.upper()
+
+    def test_actual_catalog_datafusion_rewrites_for_known_failures(self):
+        """DataFusion should use variants for known unsupported base functions."""
+        manager = ReadPrimitivesQueryManager()
+
+        intrinsic = manager.get_query("intrinsic_to_date", dialect="datafusion")
+        assert "TO_DATE('1995-03-15')" in intrinsic.upper()
+
+        max_by = manager.get_query("max_by_simple", dialect="datafusion")
+        assert "ROW_NUMBER()" in max_by.upper()
+        assert "MAX_BY" not in max_by.upper()
+
+    def test_actual_catalog_datafusion_skips_unsupported_json_queries(self):
+        """DataFusion should explicitly skip JSON queries with no SQL-function support."""
+        manager = ReadPrimitivesQueryManager()
+
+        for query_id in ["json_extract_simple", "json_extract_nested", "json_aggregates"]:
+            with pytest.raises(ValueError, match="not supported on dialect"):
+                manager.get_query(query_id, dialect="datafusion")
 
     def test_query_manager_initialized_successfully(self):
         """Test query manager initializes with actual catalog."""

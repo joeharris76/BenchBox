@@ -28,7 +28,7 @@ Following the **primitives benchmark pattern**, this benchmark:
 - **Categories**: 7 (INSERT, UPDATE, DELETE, BULK_LOAD, MERGE, DDL, TRANSACTION)
 - **Data Formats**: CSV, Parquet (uncompressed, gzip, zstd, snappy, bzip2)
 - **Scale Factors**: Flexible (0.01 to 10.0+)
-- **Platform Support**: All platforms via dialect translation
+- **Platform Support**: All platforms via dialect translation + platform-specific overrides
 - **Status**: ✅ All operations fully implemented and tested
 
 ## Operation Categories
@@ -158,6 +158,80 @@ Each operation captures:
 - **Write Metrics**: duration, rows affected, throughput
 - **Validation Metrics**: validation duration, passed/failed status
 - **Combined Metrics**: end-to-end duration and throughput
+
+## Platform Compatibility
+
+Operations use SQLGlot dialect translation by default, with `platform_overrides` in
+`catalog/operations.yaml` for platform-specific SQL or explicit skips (`null`). When
+a platform override is `null`, `_get_effective_write_sql()` returns a skip reason and
+the operation is recorded as `SKIPPED` in results.
+
+### DataFusion (v51.0.0) — 62 Skipped Operations
+
+DataFusion is an Arrow-native query engine that operates on **immutable record batches**.
+This architecture provides excellent read/scan performance but means row-level mutation
+(UPDATE, DELETE) is not implemented — there is no write path for existing data. MERGE
+depends on UPDATE/DELETE and is therefore also unsupported.
+
+All 62 skips fall into categories dictated by this architectural constraint. None have
+viable alternative SQL syntax within DataFusion's current capability set.
+
+#### UPDATE — 15 operations (queries 13–27)
+
+`NotImplemented("Unsupported logical plan: Dml(Update)")`
+
+Row-level mutation is architecturally impossible on immutable Arrow record batches. A
+CTAS-based workaround would measure fundamentally different performance (full table
+rewrite vs. in-place update) and is therefore not substituted.
+
+#### DELETE — 14 operations (queries 28–39, 94–95)
+
+`NotImplemented("Unsupported logical plan: Dml(Delete)")`
+
+Same architectural constraint as UPDATE. Includes the 2 GDPR-pattern deletes
+(queries 94–95) which also require DELETE.
+
+#### MERGE — 20 operations (queries 76–93, 96–97)
+
+`NotImplemented("Unsupported SQL statement: MERGE INTO...")`
+
+MERGE requires UPDATE and/or DELETE capabilities, neither of which DataFusion supports.
+Covers all upsert patterns, conditional update/insert, ETL aggregation, and deduplication.
+
+#### DDL Mutations — 8 operations
+
+| Operation | Reason |
+|-----------|--------|
+| `ddl_truncate_table_small` | `NotImplemented("Unsupported SQL statement: TRUNCATE TABLE")` |
+| `ddl_create_table_with_constraints` | PK/FK constraints parse but are not enforced; benchmark would test no-op behavior |
+| `ddl_create_table_with_index` | `NotImplemented("Unsupported logical plan: CreateIndex")` |
+| `ddl_alter_table_add_column` | `NotImplemented("Unsupported SQL statement: ALTER TABLE")` |
+| `ddl_alter_table_drop_column` | No ALTER TABLE support |
+| `ddl_alter_table_rename_column` | No ALTER TABLE support |
+| `ddl_create_index_on_existing` | No indexing support |
+| `ddl_drop_index` | No indexing support |
+
+#### INSERT Edge Cases — 2 operations
+
+| Operation | Reason |
+|-----------|--------|
+| `insert_on_conflict_ignore` | `Plan("Insert-on clause not supported")` — no constraint enforcement makes ON CONFLICT meaningless |
+| `insert_returning_clause` | `Plan("Insert-returning clause not supported")` |
+
+#### BULK_LOAD Edge Cases — 3 operations
+
+| Operation | Reason |
+|-----------|--------|
+| `bulk_load_error_handling_skip_bad_rows` | DataFusion's CSV reader has no `IGNORE_ERRORS` equivalent; all rows must be valid |
+| `bulk_load_upsert_mode` | Requires MERGE INTO, which is unsupported |
+| `bulk_load_date_format_custom` | External table CSV options don't support `date_format`; non-ISO dates cause ArrowError cast failures |
+
+#### Upstream Tracking
+
+If DataFusion adds DML support in a future version
+([apache/datafusion#1885](https://github.com/apache/datafusion/issues/1885)), these
+skips should be revisited and the `datafusion: null` overrides removed for any newly
+supported operations.
 
 ## File Structure
 

@@ -14,10 +14,7 @@ from pathlib import Path
 from .benchmark import TPCDSBenchmark
 from .c_tools import DSQGenBinary, TPCDSCTools, TPCDSError
 from .generator import TPCDSGenerator
-from .queries import (
-    TPCDSQueries,
-    TPCDSQueryManager,
-)  # TPCDSQueries is backward compatibility alias
+from .queries import TPCDSQueryManager
 
 
 def _validate_c_tools() -> None:
@@ -68,7 +65,6 @@ _validate_c_tools()
 __all__ = [
     "TPCDSBenchmark",
     "TPCDSQueryManager",
-    "TPCDSQueries",
     "TPCDSGenerator",
     "DSQGenBinary",
     "TPCDSCTools",

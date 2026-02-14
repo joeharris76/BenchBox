@@ -227,5 +227,5 @@ conn.execute("SELECT * FROM read_vortex('customer.vortex')")
 
 - [Table Format Guides](index.md): Overview of all formats
 - [Format Conversion Reference](../../advanced/format-conversion.md): CLI commands for format conversion
-- [Parquet Deep Dive](parquet-deep-dive.md): The established alternative
+- [Parquet Deep Dive](parquet-deep-dive.md): The established alternative <!-- content-ok: cliche -->
 - [Compression Guide](../compression.md): Data compression strategies

@@ -78,7 +78,7 @@ class TestAdapterValidationConsistency:
         # Check standard fields
         assert result["query_id"] == "1"
         assert result["status"] == "SUCCESS"
-        assert result["execution_time"] == 1.0
+        assert result["execution_time_seconds"] == 1.0
         assert result["rows_returned"] == 100
 
         # Check validation fields (nested structure)
@@ -164,7 +164,7 @@ class TestAdapterValidationConsistency:
         # Check standard fields
         assert result["query_id"] == "1"
         assert result["status"] == "SUCCESS"
-        assert result["execution_time"] == 1.0
+        assert result["execution_time_seconds"] == 1.0
         assert result["rows_returned"] == 100
 
         # Check no validation fields present

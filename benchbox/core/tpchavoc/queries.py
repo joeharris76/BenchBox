@@ -11,7 +11,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from typing import Any, Optional
 
-from benchbox.core.tpch.queries import TPCHQueryManager
+from benchbox.core.tpch.queries import TPCHQueries
 from benchbox.core.tpchavoc.variants import (
     Q1_VARIANTS,
     Q2_VARIANTS,
@@ -39,7 +39,7 @@ from benchbox.core.tpchavoc.variants import (
 )
 
 
-class TPCHavocQueryManager(TPCHQueryManager):
+class TPCHavocQueryManager(TPCHQueries):
     """TPC-Havoc query manager extending TPC-H functionality."""
 
     def __init__(self, query_dir: Optional[str] = None) -> None:

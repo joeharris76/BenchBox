@@ -21,10 +21,10 @@ import json
 import logging
 import os
 import re
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.file_format import get_delimiter_for_file
 
 logger = logging.getLogger(__name__)
@@ -588,7 +588,7 @@ class FireboltAdapter(PlatformAdapter):
         - NUMERIC instead of DECIMAL
         - No constraint enforcement
         """
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -630,7 +630,7 @@ class FireboltAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-        return time.time() - start_time
+        return elapsed_seconds(start_time)
 
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
@@ -643,7 +643,7 @@ class FireboltAdapter(PlatformAdapter):
 
         This implementation uses INSERT batching which works for both modes.
         """
-        start_time = time.time()
+        start_time = mono_time()
         table_stats = {}
 
         cursor = connection.cursor()
@@ -702,7 +702,7 @@ class FireboltAdapter(PlatformAdapter):
                 self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
 
                 try:
-                    load_start = time.time()
+                    load_start = mono_time()
                     table_name_lower = table_name.lower()
                     table_name_quoted = self._quote_identifier(table_name_lower)
                     total_rows_loaded = 0
@@ -763,7 +763,7 @@ class FireboltAdapter(PlatformAdapter):
 
                     table_stats[table_name_lower] = total_rows_loaded
 
-                    load_time = time.time() - load_start
+                    load_time = elapsed_seconds(load_start)
                     self.logger.info(
                         f"Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
                     )
@@ -772,7 +772,7 @@ class FireboltAdapter(PlatformAdapter):
                     self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
                     table_stats[table_name.lower()] = 0
 
-            total_time = time.time() - start_time
+            total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
             self.logger.info(f"Loaded {total_rows:,} total rows in {total_time:.2f}s")
 
@@ -834,7 +834,7 @@ class FireboltAdapter(PlatformAdapter):
         stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute query with detailed timing and performance tracking."""
-        start_time = time.time()
+        start_time = mono_time()
 
         cursor = connection.cursor()
 
@@ -843,7 +843,7 @@ class FireboltAdapter(PlatformAdapter):
             cursor.execute(query)
             result = cursor.fetchall()
 
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
             actual_row_count = len(result) if result else 0
 
             # Query statistics
@@ -890,12 +890,12 @@ class FireboltAdapter(PlatformAdapter):
             return result_dict
 
         except Exception as e:
-            execution_time = time.time() - start_time
+            execution_time = elapsed_seconds(start_time)
 
             return {
                 "query_id": query_id,
                 "status": "FAILED",
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "rows_returned": 0,
                 "error": str(e),
                 "error_type": type(e).__name__,

@@ -313,7 +313,7 @@ class ConsoleResultFormatter:
                 {
                     "query_id": getattr(entry, "query_id", None),
                     "status": getattr(entry, "status", None),
-                    "execution_time": execution_time_seconds,
+                    "execution_time_seconds": execution_time_seconds,
                     "error": getattr(entry, "error_message", None),
                 }
             )
@@ -330,7 +330,7 @@ class ConsoleResultFormatter:
 
         # Query performance analysis
         if successful_queries and len(successful_queries) > 1:
-            execution_times = [q["execution_time"] for q in successful_queries]
+            execution_times = [q["execution_time_seconds"] for q in successful_queries]
             slowest_time = max(execution_times)
             fastest_time = min(execution_times)
             console.print(
@@ -338,19 +338,19 @@ class ConsoleResultFormatter:
             )
 
             # Top 3 fastest queries
-            fastest_queries = sorted(successful_queries, key=lambda x: x["execution_time"])[:3]
+            fastest_queries = sorted(successful_queries, key=lambda x: x["execution_time_seconds"])[:3]
             console.print("[green]Top 3 fastest queries:[/green]")
             for q in fastest_queries:
                 console.print(
-                    f"  [green]Query {q.get('query_id', '?')}:[/green] {format_duration(q['execution_time'])}"
+                    f"  [green]Query {q.get('query_id', '?')}:[/green] {format_duration(q['execution_time_seconds'])}"
                 )
 
             # Top 3 slowest queries
-            slowest_queries = sorted(successful_queries, key=lambda x: x["execution_time"], reverse=True)[:3]
+            slowest_queries = sorted(successful_queries, key=lambda x: x["execution_time_seconds"], reverse=True)[:3]
             console.print("[yellow]Top 3 slowest queries:[/yellow]")
             for q in slowest_queries:
                 console.print(
-                    f"  [yellow]Query {q.get('query_id', '?')}:[/yellow] {format_duration(q['execution_time'])}"
+                    f"  [yellow]Query {q.get('query_id', '?')}:[/yellow] {format_duration(q['execution_time_seconds'])}"
                 )
 
     @staticmethod
@@ -543,7 +543,7 @@ class ConsoleResultFormatter:
                             "query_id": getattr(query, "query_id", "unknown"),
                             "status": getattr(query, "status", "FAILED"),
                             "error": getattr(query, "error_message", "Unknown error"),
-                            "execution_time": getattr(query, "execution_time", None),
+                            "execution_time_seconds": getattr(query, "execution_time", None),
                         }
                     )
 

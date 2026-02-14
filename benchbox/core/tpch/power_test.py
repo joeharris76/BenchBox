@@ -13,10 +13,11 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import logging
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 
 @dataclass
@@ -24,7 +25,7 @@ class TPCHPowerTestConfig:
     """Configuration for TPC-H Power Test."""
 
     scale_factor: float = 1.0
-    seed: int = 1
+    seed: Optional[int] = None
     stream_id: int = 0  # TPC-H stream ID for query permutation (0-40)
     timeout: Optional[float] = None
     warm_up: bool = True
@@ -126,7 +127,7 @@ class TPCHPowerTest:
         # Determine seed and validation mode based on user input and reference seed availability
         reference_seed = get_reference_seed(scale_factor)
         user_provided_seed = seed is not None
-        actual_seed = seed if seed is not None else 1
+        actual_seed = seed  # None = use qgen defaults mode (-d flag)
         actual_validation_mode = validation_mode or "exact"
 
         # Seed selection and validation mode logic
@@ -153,18 +154,14 @@ class TPCHPowerTest:
                             f"   Validation will likely FAIL due to parameter mismatch."
                         )
         else:
-            # No seed provided by user - auto-select
-            if validation and reference_seed:
-                # Use reference seed for exact validation
-                actual_seed = reference_seed
-                actual_validation_mode = "exact" if validation_mode is None else validation_mode
-                if verbose:
-                    self.logger.info(f"Using reference seed {reference_seed} for SF={scale_factor} (exact validation)")
-            else:
-                # No reference seed available or validation disabled
-                actual_seed = 1
-                if validation_mode is None:
-                    actual_validation_mode = "disabled" if not validation else "loose"
+            # No seed provided - use qgen defaults mode (seed=None → -d flag)
+            # qgen -d produces the official TPC-H default substitution parameters
+            # that match the answer files, enabling exact validation
+            actual_seed = None
+            if validation_mode is None:
+                actual_validation_mode = "exact" if validation else "disabled"
+            if verbose:
+                self.logger.info("Using qgen default parameters (-d flag) for answer file parity")
 
         # Answer sets are only defined for stream 0; disable validation unless explicitly requested
         if stream_id != 0 and validation and validation_mode is None:
@@ -202,7 +199,7 @@ class TPCHPowerTest:
         Raises:
             RuntimeError: If Power Test execution fails
         """
-        start_time = time.time()
+        start_time = mono_time()
         start_time_str = datetime.now().isoformat()
 
         result = TPCHPowerTestResult(
@@ -247,18 +244,18 @@ class TPCHPowerTest:
             if self.config.verbose:
                 self.logger.info(f"Using TPC-H stream {stream_id} permutation: {query_permutation}")
 
-        # Preflight: ensure all queries can be generated for this seed/stream
-        # Let preflight failures propagate as RuntimeError (tests expect this)
+        # Preflight: ensure all queries can be generated for this seed/stream.
+        # Propagate preflight failures as RuntimeError to surface invalid configurations early.
         self._preflight_validate_generation(query_permutation)
 
         try:
             for position, query_id in enumerate(query_permutation):
-                query_start = time.time()
+                query_start = mono_time()
                 query_result = {
                     "query_id": query_id,
                     "position": position + 1,
                     "stream_id": self.config.stream_id,
-                    "execution_time": 0.0,
+                    "execution_time_seconds": 0.0,
                     "success": False,
                     "error": None,
                     "result_count": 0,
@@ -274,7 +271,8 @@ class TPCHPowerTest:
                     # Use stream-specific seed as per TPC-H specification
                     # NOTE: All queries in a stream use the SAME seed (base_seed + stream_id * 1000)
                     # The position only determines query execution ORDER via permutation matrix
-                    stream_seed = self.config.seed + self.config.stream_id * 1000
+                    # When seed is None, use qgen defaults mode (-d flag) for all streams
+                    stream_seed = None if self.config.seed is None else self.config.seed + self.config.stream_id * 1000
                     query_text = self.benchmark.get_query(
                         query_id,
                         seed=stream_seed,
@@ -310,11 +308,11 @@ class TPCHPowerTest:
                         # Capture labeled SQL for dry-run preview
                         self.captured_items.append((label, query_text))
 
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
 
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": True,
                             "result_count": len(rows),
                         }
@@ -326,10 +324,10 @@ class TPCHPowerTest:
                         self.logger.info(f"Query {query_id} completed in {execution_time:.3f}s")
 
                 except Exception as e:
-                    execution_time = time.time() - query_start
+                    execution_time = elapsed_seconds(query_start)
                     query_result.update(
                         {
-                            "execution_time": execution_time,
+                            "execution_time_seconds": execution_time,
                             "success": False,
                             "error": str(e),
                         }
@@ -344,11 +342,11 @@ class TPCHPowerTest:
                 result.queries_executed += 1
 
             # Calculate Power@Size metric (geometric mean per TPC spec)
-            total_execution_time = time.time() - start_time
+            total_execution_time = elapsed_seconds(start_time)
             exec_times = [
-                qr["execution_time"]
+                qr["execution_time_seconds"]
                 for qr in result.query_results
-                if qr.get("success", True) and qr.get("execution_time", 0) > 0
+                if qr.get("success", True) and qr.get("execution_time_seconds", 0) > 0
             ]
             if exec_times:
                 from benchbox.core.results.metrics import TPCMetricsCalculator
@@ -370,7 +368,7 @@ class TPCHPowerTest:
             return result
         except Exception as e:
             # Only capture unexpected execution errors after preflight
-            result.total_time = time.time() - start_time
+            result.total_time = elapsed_seconds(start_time)
             result.end_time = datetime.now().isoformat()
             result.success = False
             result.errors.append(f"Power Test execution failed: {e}")
@@ -387,7 +385,8 @@ class TPCHPowerTest:
 
         queries = {}
         # All queries in a stream use the SAME seed (base_seed + stream_id * 1000)
-        stream_seed = self.config.seed + self.config.stream_id * 1000
+        # When seed is None, use qgen defaults mode (-d flag)
+        stream_seed = None if self.config.seed is None else self.config.seed + self.config.stream_id * 1000
         for position, query_id in enumerate(query_permutation):
             try:
                 query_text = self.benchmark.get_query(
@@ -409,7 +408,8 @@ class TPCHPowerTest:
         """
         failures = []
         # All queries in a stream use the SAME seed (base_seed + stream_id * 1000)
-        stream_seed = self.config.seed + self.config.stream_id * 1000
+        # When seed is None, use qgen defaults mode (-d flag)
+        stream_seed = None if self.config.seed is None else self.config.seed + self.config.stream_id * 1000
         for position, query_id in enumerate(query_permutation):
             try:
                 _ = self.benchmark.get_query(

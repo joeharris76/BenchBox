@@ -10,6 +10,7 @@ from benchbox.base import BaseBenchmark
 from benchbox.core.coffeeshop.generator import CoffeeShopDataGenerator
 from benchbox.core.coffeeshop.queries import CoffeeShopQueryManager
 from benchbox.core.coffeeshop.schema import TABLES, get_all_create_table_sql
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
@@ -185,8 +186,6 @@ class CoffeeShopBenchmark(BaseBenchmark):
         queries: list[str] | None = None,
         iterations: int = 1,
     ) -> dict[str, Any]:
-        import time
-
         query_ids = queries or list(self.query_manager.get_all_queries().keys())
         results = {
             "benchmark": self._name,
@@ -205,10 +204,10 @@ class CoffeeShopBenchmark(BaseBenchmark):
             last_error: str | None = None
 
             for iteration in range(iterations):
-                start = time.time()
+                start = mono_time()
                 try:
                     rows = self.execute_query(query_id, connection)
-                    duration = time.time() - start
+                    duration = elapsed_seconds(start)
                     row_count = len(rows) if rows else 0
 
                     iteration_results.append(

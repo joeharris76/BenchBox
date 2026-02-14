@@ -90,6 +90,10 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
         """Read Primitives benchmark shares TPC-H data."""
         return "tpch"
 
+    def supports_dataframe_mode(self) -> bool:
+        """Read Primitives supports DataFrame execution mode."""
+        return True
+
     @property
     def output_dir(self) -> PathLike:
         """Get the output directory."""
@@ -209,7 +213,10 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
         """
         from benchbox.utils.dialect_utils import translate_sql_query
 
-        # Read Primitives uses modern SQL (netezza/postgres) as source dialect
+        # Read Primitives uses "netezza" as source dialect, which maps to
+        # PostgreSQL in SQLGlot.  This gives the best compatibility with modern
+        # SQL features (DATE literals, EXTRACT, window functions) while keeping
+        # the source queries platform-neutral.  See dialect_utils.py for mapping.
         return translate_sql_query(
             query=query_text,
             target_dialect=target_dialect,
@@ -439,10 +446,10 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
             }
 
             for i in range(iterations):
-                start_time = time.time()
+                start_time = time.perf_counter()
                 try:
                     result = self.execute_query(query_id, connection)
-                    end_time = time.time()
+                    end_time = time.perf_counter()
                     execution_time = end_time - start_time
 
                     query_results["iterations"].append(
@@ -786,16 +793,29 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
 
         return get_skip_for_dataframe()
 
-    def get_expression_family_only_queries(self) -> list[str]:
-        """Get query IDs that only support expression-family platforms.
+    def get_expression_family_skip_queries(self) -> list[str]:
+        """Get query IDs that should be skipped for expression-family platforms.
 
-        These queries use features like QUALIFY, lambda functions, or ASOF JOIN
-        that are only available in expression-family platforms (Polars, PySpark,
-        DataFusion) and not in pandas-family platforms.
+        Currently only map queries are skipped because Polars has no native
+        Map dtype. All list/array, struct, and string-split queries are now
+        supported through the unified expression API.
 
         Returns:
-            List of query IDs requiring expression-family platforms
+            List of query IDs to skip for expression-family platforms (map queries only)
         """
-        from benchbox.core.read_primitives.dataframe_queries import get_expression_family_only
+        from benchbox.core.read_primitives.dataframe_queries import get_skip_for_expression_family
 
-        return get_expression_family_only()
+        return get_skip_for_expression_family()
+
+    def get_datafusion_skip_queries(self) -> list[str]:
+        """Get query IDs that should be skipped for DataFusion DataFrame mode.
+
+        These use Polars-only features or DataFusion v50 functions with missing
+        Python bindings or type bugs.
+
+        Returns:
+            List of query IDs to skip for DataFusion
+        """
+        from benchbox.core.read_primitives.dataframe_queries import get_skip_for_datafusion
+
+        return get_skip_for_datafusion()

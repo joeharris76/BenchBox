@@ -48,6 +48,8 @@ from enum import Enum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 if TYPE_CHECKING:
     pass
 
@@ -830,14 +832,14 @@ class DataFrameAIOperationsManager:
 
         try:
             # Load model (cached)
-            model_load_start = time.time()
+            model_load_start = mono_time()
             _ = _get_sentence_transformer_model(model_name)
-            model_load_time = (time.time() - model_load_start) * 1000
+            model_load_time = (elapsed_seconds(model_load_start)) * 1000
 
             # Generate embeddings
-            inference_start = time.time()
+            inference_start = mono_time()
             embeddings = [generate_embedding(text, model_name) for text in texts]
-            inference_time = (time.time() - inference_start) * 1000
+            inference_time = (elapsed_seconds(inference_start)) * 1000
 
             end_time = time.time()
             return DataFrameAIResult(
@@ -887,13 +889,13 @@ class DataFrameAIOperationsManager:
             )
 
         try:
-            model_load_start = time.time()
+            model_load_start = mono_time()
             _ = _get_sentence_transformer_model(model_name)
-            model_load_time = (time.time() - model_load_start) * 1000
+            model_load_time = (elapsed_seconds(model_load_start)) * 1000
 
-            inference_start = time.time()
+            inference_start = mono_time()
             embeddings = generate_embeddings_batch(texts, model_name, batch_size)
-            inference_time = (time.time() - inference_start) * 1000
+            inference_time = (elapsed_seconds(inference_start)) * 1000
 
             end_time = time.time()
             return DataFrameAIResult(
@@ -937,9 +939,9 @@ class DataFrameAIOperationsManager:
             )
 
         try:
-            inference_start = time.time()
+            inference_start = mono_time()
             scores = [analyze_sentiment(text) for text in texts]
-            inference_time = (time.time() - inference_start) * 1000
+            inference_time = (elapsed_seconds(inference_start)) * 1000
 
             end_time = time.time()
             return DataFrameAIResult(
@@ -978,9 +980,9 @@ class DataFrameAIOperationsManager:
             )
 
         try:
-            inference_start = time.time()
+            inference_start = mono_time()
             scores = analyze_sentiment_batch(texts)
-            inference_time = (time.time() - inference_start) * 1000
+            inference_time = (elapsed_seconds(inference_start)) * 1000
 
             end_time = time.time()
             return DataFrameAIResult(
@@ -1025,14 +1027,14 @@ class DataFrameAIOperationsManager:
             )
 
         try:
-            inference_start = time.time()
+            inference_start = mono_time()
 
             if operation == AIOperationType.CLASSIFY_PRIORITY:
                 predictions = [classify_priority(text, labels) for text in texts]
             else:  # CLASSIFY_SEGMENT
                 predictions = [classify_segment(text, labels) for text in texts]
 
-            inference_time = (time.time() - inference_start) * 1000
+            inference_time = (elapsed_seconds(inference_start)) * 1000
 
             end_time = time.time()
             return DataFrameAIResult(
@@ -1079,9 +1081,9 @@ class DataFrameAIOperationsManager:
             )
 
         try:
-            inference_start = time.time()
+            inference_start = mono_time()
             extractions = [extract_entities(text, entity_types) for text in texts]
-            inference_time = (time.time() - inference_start) * 1000
+            inference_time = (elapsed_seconds(inference_start)) * 1000
 
             end_time = time.time()
             return DataFrameAIResult(

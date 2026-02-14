@@ -6,12 +6,40 @@ import json
 import shutil
 from pathlib import Path
 
-from benchbox.utils.file_format import detect_compression, strip_compression_suffix
+from benchbox.utils.file_format import COMPRESSION_EXTENSIONS, detect_compression, strip_compression_suffix
 from benchbox.utils.scale_factor import format_scale_factor
+from benchbox.utils.stale_artifact_pruning import TableArtifactPattern, prune_stale_table_artifacts
 
 
 class FileArtifactMixin:
     """Mixin handling filesystem and manifest responsibilities."""
+
+    def _prune_stale_table_artifacts(self, target_dir: Path) -> list[Path]:
+        """Remove stale per-table artifacts before regeneration.
+
+        Keeps cleanup table-aware to avoid broad recursive deletions while
+        preventing coexistence of raw/sharded/compressed variants from older runs.
+
+        Args:
+            target_dir: Directory containing generated table artifacts.
+
+        Returns:
+            List of deleted file paths.
+        """
+
+        return prune_stale_table_artifacts(
+            target_dir=target_dir,
+            table_names=self._known_table_names(),
+            pattern=TableArtifactPattern(
+                single_suffix=".dat",
+                raw_shard_glob_template="{table}_*.dat",
+                compressed_shard_glob_template="{table}_*.dat{ext}",
+                shard_regex_template=r"^{table}_\d+_\d+\.dat(?:\.[a-z0-9]+)?$",
+            ),
+            compression_extensions=COMPRESSION_EXTENSIONS,
+            use_compression=self.should_use_compression(),
+            expect_sharded=int(getattr(self, "parallel", 1) or 1) > 1,
+        )
 
     def _copy_distribution_files(self, output_dir: Path) -> None:
         """Copy required distribution files to output directory.

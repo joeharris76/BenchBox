@@ -45,6 +45,19 @@ class TestDuckDBAdapter:
             assert adapter.thread_limit is None
             assert adapter.enable_progress_bar is False
 
+    def test_from_config_with_output_dir_places_db_under_databases(self, tmp_path):
+        """Auto-generated DB path should use a databases/ subdirectory for output_dir."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            config = {
+                "benchmark": "tpch",
+                "scale_factor": 0.01,
+                "output_dir": str(tmp_path / "custom_output"),
+            }
+
+            adapter = DuckDBAdapter.from_config(config)
+            assert str(tmp_path / "custom_output" / "databases") in adapter.database_path
+            assert ".duckdb" in adapter.database_path
+
     def test_initialization_missing_driver(self):
         """Test initialization when DuckDB driver is not available."""
         with patch("benchbox.platforms.duckdb.duckdb", None):
@@ -463,7 +476,7 @@ class TestDuckDBAdapter:
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["first_row"] == (1, "test")
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
         mock_connection.execute.assert_called_with("SELECT * FROM test")
 
@@ -510,7 +523,7 @@ class TestDuckDBAdapter:
         assert result["rows_returned"] == 0
         assert result["error"] == "Query failed"
         assert result["error_type"] == "Exception"
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
     @patch("benchbox.platforms.duckdb.duckdb")
     def test_get_query_plan(self, mock_duckdb):
@@ -1034,7 +1047,7 @@ class TestDuckDBAdapter:
             mock_result.query_results = [
                 {
                     "query_id": 1,
-                    "execution_time": 0.1,
+                    "execution_time_seconds": 0.1,
                     "success": True,
                     "result_count": 1,
                     "stream_id": 0,
@@ -1055,7 +1068,7 @@ class TestDuckDBAdapter:
                 query_result = result[0]
                 required_keys = [
                     "query_id",
-                    "execution_time",
+                    "execution_time_seconds",
                     "status",
                     "rows_returned",
                     "test_type",

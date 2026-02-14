@@ -194,6 +194,10 @@ class PolarsDataFrameAdapter(ExpressionFamilyAdapter[PolarsDF, PolarsLazyDF, Pol
         """
         return pl.lit(value)
 
+    def element(self) -> PolarsExpr:
+        """Create a Polars list element expression for use inside list.eval()."""
+        return pl.element()
+
     def date_sub(self, column: PolarsExpr, days: int) -> PolarsExpr:
         """Subtract days from a date column.
 
@@ -289,6 +293,9 @@ class PolarsDataFrameAdapter(ExpressionFamilyAdapter[PolarsDF, PolarsLazyDF, Pol
     def read_parquet(self, path: Path) -> PolarsLazyDF:
         """Read a Parquet file into a Polars LazyFrame.
 
+        Dictionary-encoded columns in Parquet are read as Categorical by Polars.
+        We cast them back to String to avoid type mismatches in joins and filters.
+
         Args:
             path: Path to the Parquet file (can be glob pattern)
 
@@ -302,7 +309,16 @@ class PolarsDataFrameAdapter(ExpressionFamilyAdapter[PolarsDF, PolarsLazyDF, Pol
         if self.n_rows is not None:
             scan_kwargs["n_rows"] = self.n_rows
 
-        return pl.scan_parquet(path, **scan_kwargs)
+        lf = pl.scan_parquet(path, **scan_kwargs)
+
+        # Cast Categorical columns to String to prevent type mismatches
+        # when joining or filtering (Parquet dictionary encoding -> Polars Categorical)
+        schema = lf.collect_schema()
+        cat_cols = [name for name, dtype in schema.items() if dtype == pl.Categorical]
+        if cat_cols:
+            lf = lf.with_columns([pl.col(c).cast(pl.String) for c in cat_cols])
+
+        return lf
 
     def collect(self, df: PolarsLazyDF) -> PolarsDF:
         """Materialize a Polars LazyFrame.
@@ -732,6 +748,81 @@ class PolarsDataFrameAdapter(ExpressionFamilyAdapter[PolarsDF, PolarsLazyDF, Pol
         if partition_by:
             return max_expr.over(partition_by)
         return max_expr
+
+    def window_lag(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> PolarsExpr:
+        """Create a LAG() window function expression."""
+        order_col, ascending = order_by[0] if order_by else (column, True)
+        expr = pl.col(column).shift(offset).sort_by(order_col, descending=not ascending)
+        if partition_by:
+            return expr.over(partition_by)
+        return expr
+
+    def window_lead(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> PolarsExpr:
+        """Create a LEAD() window function expression."""
+        order_col, ascending = order_by[0] if order_by else (column, True)
+        expr = pl.col(column).shift(-offset).sort_by(order_col, descending=not ascending)
+        if partition_by:
+            return expr.over(partition_by)
+        return expr
+
+    def window_ntile(
+        self,
+        n: int,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> PolarsExpr:
+        """Create a NTILE() window function expression."""
+        order_col, ascending = order_by[0]
+        # Polars doesn't have ntile directly; use rank-based calculation
+        rank_expr = pl.col(order_col).rank(method="ordinal", descending=not ascending)
+        count_expr = pl.col(order_col).count()
+        # NTILE formula: ceil(rank * n / count)
+        ntile_expr = ((rank_expr * pl.lit(n) - pl.lit(1)) / count_expr).floor().cast(pl.Int64) + pl.lit(1)
+        if partition_by:
+            return ntile_expr.over(partition_by)
+        return ntile_expr
+
+    def window_percent_rank(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> PolarsExpr:
+        """Create a PERCENT_RANK() window function expression."""
+        order_col, ascending = order_by[0]
+        # PERCENT_RANK = (rank - 1) / (count - 1)
+        rank_expr = pl.col(order_col).rank(method="min", descending=not ascending)
+        count_expr = pl.col(order_col).count()
+        pct_expr = (rank_expr.cast(pl.Float64) - pl.lit(1.0)) / (count_expr.cast(pl.Float64) - pl.lit(1.0))
+        if partition_by:
+            return pct_expr.over(partition_by)
+        return pct_expr
+
+    def window_cume_dist(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> PolarsExpr:
+        """Create a CUME_DIST() window function expression."""
+        order_col, ascending = order_by[0]
+        # CUME_DIST = count(value <= current) / total_count
+        rank_expr = pl.col(order_col).rank(method="max", descending=not ascending)
+        count_expr = pl.col(order_col).count()
+        cd_expr = rank_expr.cast(pl.Float64) / count_expr.cast(pl.Float64)
+        if partition_by:
+            return cd_expr.over(partition_by)
+        return cd_expr
 
     # =========================================================================
     # Union Operations

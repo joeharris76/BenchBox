@@ -556,7 +556,7 @@ class TestTPCComplianceEndToEnd:
         assert result_dict["benchmark_name"] == "TPC-H"
         assert result_dict["test_phase"] == "Power"
         assert result_dict["scale_factor"] == 1.0
-        assert result_dict["execution_time"] == 120.5
+        assert result_dict["execution_time_seconds"] == 120.5
         assert result_dict["success"] is True
         assert "Q1" in result_dict["query_results"]
         assert len(result_dict["errors"]) == 1

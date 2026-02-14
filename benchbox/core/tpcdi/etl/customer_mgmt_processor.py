@@ -648,7 +648,7 @@ class CustomerManagementProcessor:
         }
 
     def process_xml_file(self, file_path: Path) -> dict[str, Any]:
-        """Process XML file and return results for testing compatibility.
+        """Process XML file and return summary metrics.
 
         Args:
             file_path: Path to the XML file
@@ -693,7 +693,7 @@ class CustomerManagementProcessor:
             }
 
     def process_csv_file(self, file_path: Path) -> dict[str, Any]:
-        """Process CSV file and return results for testing compatibility.
+        """Process CSV file and return summary metrics.
 
         Args:
             file_path: Path to the CSV file
@@ -729,7 +729,7 @@ class CustomerManagementProcessor:
             }
 
     def _process_customer_action(self, action_data: dict[str, Any]) -> dict[str, Any]:
-        """Process a customer action for testing compatibility.
+        """Process a customer action into a normalized result payload.
 
         Args:
             action_data: Dictionary containing action information
@@ -771,7 +771,7 @@ class CustomerManagementProcessor:
             }
 
     def _validate_demographic_data(self, demo_data: CustomerDemographic) -> dict[str, Any]:
-        """Validate customer demographic data for testing compatibility.
+        """Validate customer demographic data.
 
         Args:
             demo_data: CustomerDemographic object to validate
@@ -818,7 +818,7 @@ class CustomerManagementProcessor:
         }
 
     def process_batch(self, file_paths: list[Path]) -> dict[str, Any]:
-        """Process a batch of mixed XML and CSV files for testing compatibility.
+        """Process a batch of mixed XML and CSV files.
 
         Args:
             file_paths: List of file paths to process

@@ -8,7 +8,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from benchbox.release.workflow import compute_source_fingerprint
 
 
 def run_smoke_tests(wheel_path: Path, verbose: bool = False) -> bool:
@@ -125,6 +129,42 @@ def run_smoke_tests(wheel_path: Path, verbose: bool = False) -> bool:
     return True
 
 
+def verify_wheel_fingerprint(wheel_path: Path, expected_fingerprint: str) -> bool:
+    """Verify that a wheel's contents match an expected source fingerprint.
+
+    Extracts the wheel to a temporary directory, computes the fingerprint
+    over the benchbox/ package within it, and compares against the expected value.
+
+    Args:
+        wheel_path: Path to the wheel file
+        expected_fingerprint: Expected hex-encoded SHA256 fingerprint
+
+    Returns:
+        True if fingerprint matches, False otherwise
+    """
+    print(f"\nVerifying wheel fingerprint: {wheel_path.name}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(wheel_path, "r") as zf:
+            zf.extractall(tmpdir)
+
+        pkg_dir = Path(tmpdir) / "benchbox"
+        if not pkg_dir.is_dir():
+            print("❌ benchbox/ directory not found in wheel")
+            return False
+
+        actual = compute_source_fingerprint(pkg_dir)
+
+    if actual != expected_fingerprint:
+        print("❌ Fingerprint mismatch!")
+        print(f"  Expected: {expected_fingerprint}")
+        print(f"  Actual:   {actual}")
+        return False
+
+    print(f"✓ Fingerprint verified: {actual[:16]}...")
+    return True
+
+
 def verify_artifacts_exist(target: Path) -> tuple[Path | None, Path | None]:
     """Verify that wheel and sdist artifacts exist.
 
@@ -181,6 +221,12 @@ def main() -> int:
         action="store_true",
         help="Show detailed output from tests",
     )
+    parser.add_argument(
+        "--fingerprint",
+        type=str,
+        default=None,
+        help="Expected source fingerprint (hex string) to verify against wheel contents",
+    )
 
     args = parser.parse_args()
 
@@ -188,6 +234,12 @@ def main() -> int:
     wheel_path, sdist_path = verify_artifacts_exist(args.target)
     if wheel_path is None or sdist_path is None:
         return 1
+
+    # Verify fingerprint if provided
+    if args.fingerprint:
+        if not verify_wheel_fingerprint(wheel_path, args.fingerprint):
+            print("\n❌ Fingerprint verification failed")
+            return 1
 
     # Run smoke tests unless skipped
     if not args.skip_smoke_tests:

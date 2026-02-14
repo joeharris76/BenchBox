@@ -317,7 +317,7 @@ class TestSQLiteAdapter:
         assert result["status"] == "SUCCESS"
         assert result["rows_returned"] == 2
         assert result["results"] == [(1, "test"), (2, "test2")]
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
         mock_cursor.execute.assert_called_once_with("SELECT * FROM test")
         mock_cursor.fetchall.assert_called_once()
@@ -340,7 +340,7 @@ class TestSQLiteAdapter:
         assert result["status"] == "FAILED"
         assert result["rows_returned"] == 0
         assert result["error"] == "SQL syntax error"
-        assert isinstance(result["execution_time"], float)
+        assert isinstance(result["execution_time_seconds"], float)
 
     def test_apply_table_tunings(self):
         """Test table tuning application (limited support in SQLite)."""

@@ -46,6 +46,12 @@ class TestNormalizeBenchmarkId:
             ("ClickBench", "clickbench"),
             ("clickbench", "clickbench"),
             ("ClickBench Benchmark", "clickbench"),
+            # Derived benchmarks (must NOT false-match parent patterns)
+            ("tpcds_obt", "tpcds_obt"),
+            ("tpcds-obt", "tpcds_obt"),
+            ("TPC-DS One Big Table Benchmark", "tpcds_obt"),
+            ("tpch_skew", "tpch_skew"),
+            ("tpch-skew", "tpch_skew"),
             # Custom benchmarks (generic normalization)
             ("Custom Benchmark", "custom"),
             ("My-Custom-Test", "my_custom_test"),
@@ -60,6 +66,15 @@ class TestNormalizeBenchmarkId:
         """Test that double underscores are collapsed."""
         assert normalize_benchmark_id("my__test") == "my_test"
         assert normalize_benchmark_id("my - - test") == "my_test"
+
+    def test_derived_benchmarks_not_confused_with_parents(self) -> None:
+        """Derived benchmarks must resolve to their own ID, not the parent's."""
+        # tpcds_obt contains "tpcds" as substring — must NOT resolve to "tpcds"
+        assert normalize_benchmark_id("tpcds_obt") != "tpcds"
+        assert normalize_benchmark_id("tpcds_obt") == "tpcds_obt"
+        # tpch_skew contains "tpch" as substring — must NOT resolve to "tpch"
+        assert normalize_benchmark_id("tpch_skew") != "tpch"
+        assert normalize_benchmark_id("tpch_skew") == "tpch_skew"
 
 
 class TestBenchmarkInfoInput:

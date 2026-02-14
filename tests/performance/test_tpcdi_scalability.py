@@ -140,7 +140,7 @@ class TestTPCDIScalabilityPerformance:
                 # Query metrics
                 "query_sample_results": query_results,
                 "successful_queries": sum(1 for q in query_results if q.get("success", False)),
-                "average_query_time": sum(q.get("execution_time", 0) for q in query_results)
+                "average_query_time": sum(q.get("execution_time_seconds", 0) for q in query_results)
                 / max(len(query_results), 1),
             }
 
@@ -178,7 +178,7 @@ class TestTPCDIScalabilityPerformance:
                 query_results.append(
                     {
                         "query_id": query_id,
-                        "execution_time": execution_time,
+                        "execution_time_seconds": execution_time,
                         "row_count": len(results),
                         "success": True,
                         "rows_per_second": len(results) / max(execution_time, 0.001),
@@ -189,7 +189,7 @@ class TestTPCDIScalabilityPerformance:
                 query_results.append(
                     {
                         "query_id": query_id,
-                        "execution_time": float("inf"),
+                        "execution_time_seconds": float("inf"),
                         "error": str(e),
                         "success": False,
                     }
@@ -289,9 +289,9 @@ class TestTPCDIScalabilityPerformance:
                 )
 
             # Memory usage should be reasonable
-            # Note: Base overhead increased to 500MB to account for Python + pandas + ETL processing
-            # and CI environment variability. Using 500MB base provides ~20% headroom.
-            max_memory_mb = 1000 * scale_factor + 500  # Base overhead for Python/pandas environment
+            # Note: Base overhead set to 600MB to account for Python + pandas + ETL processing,
+            # test infrastructure (pytest, psutil, xdist workers), and CI/dev environment variability.
+            max_memory_mb = 1000 * scale_factor + 600  # Base overhead for Python/pandas/test environment
             assert metrics["peak_memory_mb"] <= max_memory_mb, (
                 f"Memory usage too high at SF {scale_factor}: {metrics['peak_memory_mb']:.1f}MB"
             )

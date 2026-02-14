@@ -34,10 +34,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -472,9 +473,9 @@ spark.stop()
         Returns:
             Query results as list of dicts.
         """
-        start_time = time.time()
+        start_time = mono_time()
         batch_id, state = self._submit_spark_sql_batch(query, wait_for_completion=True)
-        elapsed = time.time() - start_time
+        elapsed = elapsed_seconds(start_time)
 
         self._query_count += 1
         self._total_batch_time_seconds += elapsed

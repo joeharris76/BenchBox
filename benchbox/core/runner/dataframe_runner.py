@@ -17,8 +17,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import logging
-import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +32,7 @@ from benchbox.core.dataframe import (
     validate_scale_factor,
 )
 from benchbox.core.dataframe.data_loader import DataFrameDataLoader, get_tpch_column_names
+from benchbox.core.exceptions import InsufficientMemoryError
 from benchbox.core.results import (
     BenchmarkInfoInput,
     ResultBuilder,
@@ -45,6 +45,7 @@ from benchbox.core.results.models import (
     TableLoadingStats,
 )
 from benchbox.monitoring import PerformanceMonitor
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.printing import quiet_console
 from benchbox.utils.verbosity import VerbositySettings
 
@@ -167,8 +168,7 @@ def run_dataframe_benchmark(
             memory_check = check_sufficient_memory(benchmark_config.name, scale_factor, platform_name.lower())
             if not memory_check.is_safe:
                 warning = format_memory_warning(memory_check)
-                logger.warning(warning)
-                # Continue with warning - let the user handle OOM if it happens
+                raise InsufficientMemoryError(warning)
 
         # Scale factor validation
         is_valid, sf_warning = validate_scale_factor(scale_factor, platform_name.lower())
@@ -180,7 +180,7 @@ def run_dataframe_benchmark(
 
         # Load phase
         if phases.load:
-            load_start = time.time()
+            load_start = mono_time()
             table_stats, per_table_stats = _load_dataframe_data(
                 adapter=adapter,
                 ctx=ctx,
@@ -189,7 +189,7 @@ def run_dataframe_benchmark(
                 data_dir=data_dir,
                 options=options,
             )
-            load_time = time.time() - load_start
+            load_time = elapsed_seconds(load_start)
             logger.info(f"Data loading completed in {load_time:.2f}s")
 
             # Add table stats to builder
@@ -256,22 +256,17 @@ def _load_dataframe_data(
         force_regenerate=options.force_regenerate,
     )
 
-    # Get data paths
-    if benchmark_instance and hasattr(benchmark_instance, "tables") and benchmark_instance.tables:
-        # Use benchmark's pre-generated data
-        data_paths: dict[str, list[Path]] = {}
-        for name, path in benchmark_instance.tables.items():
-            if isinstance(path, list):
-                data_paths[name] = [Path(p) if not isinstance(p, Path) else p for p in path]
-            else:
-                data_paths[name] = [Path(path) if not isinstance(path, Path) else path]
-        logger.info(f"Using benchmark-provided data: {len(data_paths)} tables")
-    elif data_dir and data_dir.exists():
-        # Use provided data directory
-        data_paths = loader._discover_files(data_dir)
-        logger.info(f"Discovered data in {data_dir}: {len(data_paths)} tables")
-    else:
+    benchmark_ref = benchmark_instance or benchmark_config
+    if benchmark_ref is None:
         raise ValueError("No data source available. Either provide data_dir or generate data first.")
+
+    # Always run through DataFrameDataLoader so format conversion/caching rules
+    # are applied consistently (e.g., CSV/TBL -> Parquet for Polars/Pandas).
+    data_paths = loader.prepare_benchmark_data(
+        benchmark=benchmark_ref,
+        scale_factor=getattr(benchmark_config, "scale_factor", 1.0),
+        data_dir=data_dir,
+    )
 
     # Get schema info for column names
     benchmark_id = normalize_benchmark_id(benchmark_config.name)
@@ -282,11 +277,12 @@ def _load_dataframe_data(
     per_table_stats: dict[str, TableLoadingStats] = {}
 
     for table_name, file_paths in data_paths.items():
-        load_start = time.time()
+        load_start = mono_time()
         try:
             column_names = column_names_map.get(table_name.lower())
-            row_count = adapter.load_table(ctx, table_name.lower(), file_paths, column_names=column_names)
-            load_time_ms = int((time.time() - load_start) * 1000)
+            normalized_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+            row_count = adapter.load_table(ctx, table_name.lower(), normalized_paths, column_names=column_names)
+            load_time_ms = int(elapsed_seconds(load_start) * 1000)
 
             table_stats[table_name] = row_count
             per_table_stats[table_name] = TableLoadingStats(
@@ -297,7 +293,7 @@ def _load_dataframe_data(
             logger.debug(f"Loaded {table_name}: {row_count:,} rows in {load_time_ms}ms")
 
         except Exception as e:
-            load_time_ms = int((time.time() - load_start) * 1000)
+            load_time_ms = int(elapsed_seconds(load_start) * 1000)
             per_table_stats[table_name] = TableLoadingStats(
                 rows=0,
                 load_time_ms=load_time_ms,
@@ -340,6 +336,14 @@ def _execute_dataframe_queries(
         options.get("power_iterations", GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS)
         or GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS
     )
+
+    # Set up seed-based parameter overrides for DataFrame queries.
+    # When a seed is configured, extract parameters from qgen/dsqgen to match
+    # the SQL variant's substitution values exactly.
+    benchmark_id = normalize_benchmark_id(benchmark_config.name)
+    seed = options.get("seed")
+    scale_factor = getattr(benchmark_config, "scale_factor", 1.0)
+    _setup_parameter_overrides(benchmark_id, seed, scale_factor)
 
     # Get query subset filter if specified
     query_subset = getattr(benchmark_config, "queries", None)
@@ -450,7 +454,82 @@ def _execute_dataframe_queries(
             else:
                 execute_single_query()
 
+    # Clear parameter overrides after execution
+    _clear_parameter_overrides(benchmark_id)
+
     return query_results
+
+
+def _setup_parameter_overrides(
+    benchmark_id: str,
+    seed: int | None,
+    scale_factor: float,
+) -> None:
+    """Set up seed-based parameter overrides for DataFrame queries.
+
+    When a seed is provided, extracts parameters from qgen/dsqgen binaries
+    so that DataFrame queries use identical substitution values to their SQL
+    counterparts for the same seed.
+
+    If no seed is provided or extraction fails, queries fall back to static
+    default parameters (the previous behavior).
+    """
+    if seed is None:
+        return
+
+    if benchmark_id == "tpch":
+        try:
+            from benchbox.core.tpch.dataframe_queries import set_parameter_overrides
+            from benchbox.core.tpch.parameter_extractor import get_tpch_extracted_parameters
+
+            overrides = get_tpch_extracted_parameters(seed, scale_factor)
+            if overrides:
+                set_parameter_overrides(overrides)
+                logger.info(f"TPC-H parameter overrides set for seed={seed} ({len(overrides)} queries)")
+            else:
+                logger.debug(f"No TPC-H parameter overrides extracted for seed={seed}")
+        except Exception:
+            logger.warning(
+                "Failed to extract TPC-H parameters for seed=%d; using static defaults",
+                seed,
+                exc_info=True,
+            )
+
+    elif benchmark_id == "tpcds":
+        try:
+            from benchbox.core.tpcds.dataframe_queries.parameters import set_parameter_overrides
+            from benchbox.core.tpcds.parameter_extractor import get_tpcds_extracted_parameters
+
+            overrides = get_tpcds_extracted_parameters(seed, scale_factor)
+            if overrides:
+                set_parameter_overrides(overrides)
+                logger.info(f"TPC-DS parameter overrides set for seed={seed} ({len(overrides)} queries)")
+            else:
+                logger.debug(f"No TPC-DS parameter overrides extracted for seed={seed}")
+        except Exception:
+            logger.warning(
+                "Failed to extract TPC-DS parameters for seed=%d; using static defaults",
+                seed,
+                exc_info=True,
+            )
+
+
+def _clear_parameter_overrides(benchmark_id: str) -> None:
+    """Clear parameter overrides after execution."""
+    if benchmark_id == "tpch":
+        try:
+            from benchbox.core.tpch.dataframe_queries import set_parameter_overrides
+
+            set_parameter_overrides(None)
+        except Exception:
+            pass
+    elif benchmark_id == "tpcds":
+        try:
+            from benchbox.core.tpcds.dataframe_queries.parameters import set_parameter_overrides
+
+            set_parameter_overrides(None)
+        except Exception:
+            pass
 
 
 def _get_queries_for_benchmark(
@@ -500,25 +579,91 @@ def _get_queries_for_benchmark(
 
     elif benchmark_id == "tpcds":
         from benchbox.core.tpcds.dataframe_queries import TPCDS_DATAFRAME_QUERIES
-        from benchbox.core.tpcds.streams import PermutationMode, TPCDSPermutationGenerator
+        from benchbox.core.tpcds.streams import create_standard_streams
 
-        # Get available query IDs from the registry
-        available_query_ids = [int(qid[1:]) for qid in TPCDS_DATAFRAME_QUERIES.get_query_ids()]
+        options_map = getattr(benchmark_config, "options", {}) or {}
+        allow_variant_fallback = bool(options_map.get("tpcds_dataframe_variant_fallback", True))
 
-        # Generate permutation using TPC-DS standard algorithm with stream-based seed
-        generator = TPCDSPermutationGenerator(seed=42 + stream_id)
-        query_permutation = generator.generate_permutation(available_query_ids, PermutationMode.TPCDS_STANDARD)
+        available_query_ids = sorted(
+            int(qid[1:])
+            for qid in TPCDS_DATAFRAME_QUERIES.get_query_ids()
+            if qid.upper().startswith("Q") and qid[1:].isdigit()
+        )
 
-        # Return queries in permuted order
+        query_manager = None
+        if benchmark_instance and hasattr(benchmark_instance, "query_manager"):
+            query_manager = benchmark_instance.query_manager
+        elif (
+            benchmark_instance
+            and hasattr(benchmark_instance, "_impl")
+            and hasattr(benchmark_instance._impl, "query_manager")
+        ):
+            query_manager = benchmark_instance._impl.query_manager
+
+        if query_manager is None:
+            logger.warning("TPC-DS query_manager unavailable; using legacy 99-query DataFrame ordering")
+            from benchbox.core.tpcds.streams import PermutationMode, TPCDSPermutationGenerator
+
+            generator = TPCDSPermutationGenerator(seed=42 + stream_id)
+            query_permutation = generator.generate_permutation(available_query_ids, PermutationMode.TPCDS_STANDARD)
+            queries = []
+            for query_num in query_permutation:
+                query_id = f"Q{query_num}"
+                query = TPCDS_DATAFRAME_QUERIES.get(query_id)
+                if query:
+                    queries.append(query)
+            return queries
+
+        stream_manager = create_standard_streams(
+            query_manager=query_manager,
+            num_streams=1,
+            query_ids=available_query_ids,
+            query_range=(1, 99),
+            base_seed=42 + stream_id,
+        )
+        stream_queries = stream_manager.generate_streams().get(0, [])
+
         queries = []
-        for query_num in query_permutation:
-            query_id = f"Q{query_num}"
-            query = TPCDS_DATAFRAME_QUERIES.get(query_id)
-            if query:
-                queries.append(query)
-            else:
-                logger.warning(f"Query {query_id} not found in TPC-DS DataFrame registry")
+        missing_variants: list[str] = []
+        for stream_query in stream_queries:
+            base_query_id = f"Q{stream_query.query_id}"
+            base_query = TPCDS_DATAFRAME_QUERIES.get(base_query_id)
+            if base_query is None:
+                logger.warning("Query %s not found in TPC-DS DataFrame registry", base_query_id)
+                continue
+
+            if stream_query.variant is None:
+                queries.append(base_query)
+                continue
+
+            variant_id = f"{base_query_id}{stream_query.variant.lower()}"
+            variant_query = (
+                TPCDS_DATAFRAME_QUERIES.get(variant_id)
+                or TPCDS_DATAFRAME_QUERIES.get(variant_id.upper())
+                or TPCDS_DATAFRAME_QUERIES.get(variant_id.capitalize())
+            )
+            if variant_query is not None:
+                queries.append(variant_query)
+                continue
+
+            missing_variants.append(variant_id)
+            if allow_variant_fallback:
+                queries.append(replace(base_query, query_id=variant_id))
+
+        if missing_variants and not allow_variant_fallback:
+            missing = ", ".join(sorted(set(missing_variants)))
+            raise RuntimeError(
+                "TPC-DS DataFrame SQL parity check failed: missing variant DataFrame implementations "
+                f"for [{missing}]. Set option tpcds_dataframe_variant_fallback=true to allow "
+                "non-parity fallback execution."
+            )
+
         return queries
+
+    elif benchmark_id == "clickbench":
+        from benchbox.core.clickbench.dataframe_queries import CLICKBENCH_DATAFRAME_QUERIES
+
+        return CLICKBENCH_DATAFRAME_QUERIES.get_all_queries()
 
     # Try benchmark instance
     if benchmark_instance and hasattr(benchmark_instance, "get_dataframe_queries"):

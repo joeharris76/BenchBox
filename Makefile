@@ -1,20 +1,20 @@
 # BenchBox Makefile
 # This makefile provides commands for building, testing and development
 
-.PHONY: test test-unit test-integration test-tpch test-all test-fast test-medium test-slow test-pytest clean lint install develop coverage coverage-html coverage-report test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke
+.PHONY: test test-unit test-integration test-tpch test-all test-fast test-medium test-slow test-pytest clean lint install develop coverage coverage-html coverage-report test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke test-local-matrix
 
 # Primary test commands using pytest marker system
 test: test-fast
 	@echo "Default test run completed. Use 'make help' to see all test options."
 
 test-all:
-	uv run -- python -m pytest -m ""
+	uv run -- python -m pytest -m "not stress"
 
 test-unit:
 	uv run -- python -m pytest -m "unit" --tb=short
 
 test-integration:
-	uv run -- python -m pytest -m "integration and not live_integration" --tb=short
+	uv run -- python -m pytest -m "integration and not live_integration and not stress" --tb=short
 
 test-tpch:
 	uv run -- python -m pytest -m "tpch" --tb=short
@@ -29,7 +29,7 @@ test-verbose:
 
 # Enhanced pytest commands using comprehensive marker system
 test-pytest:
-	uv run -- python -m pytest
+	uv run -- python -m pytest -m "not stress"
 
 # Speed-based testing
 test-fast:
@@ -47,6 +47,11 @@ test-dev:
 
 # Smoke tests (alias for test-quick)
 test-smoke: test-quick
+
+# Real benchmark matrix across local SQL platforms x all benchmarks (heavy, opt-in)
+test-local-matrix:
+	uv run -- python -m pytest tests/integration/test_local_platform_benchmark_matrix.py -m stress -n 0 --tb=short -v
+	@echo "Tip: set BENCHBOX_SERVICE_LOCAL_MATRIX=1 to include Trino/Presto/Firebolt/PostgreSQL/TimescaleDB service-backed locals."
 
 # Database-specific testing
 test-duckdb:
@@ -85,7 +90,7 @@ test-no-cloud:
 
 # Complete test suite (nightly/full validation)
 test-full:
-	uv run -- python -m pytest -m "" --tb=short -v
+	uv run -- python -m pytest -m "not stress" --tb=short -v
 
 # Parallel testing
 test-parallel:
@@ -125,6 +130,10 @@ coverage-html:
 
 coverage-report:
 	uv run -- python -m pytest -c pytest-ci.ini --cov=benchbox --cov-report=xml:coverage.xml --cov-report=term-missing
+
+coverage-per-file:
+	uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=json --cov-report=term-missing --cov-fail-under=50
+	uv run -- python scripts/check_per_file_coverage.py --min 50 --coverage-json coverage.json
 
 # Install and development
 install:
@@ -336,6 +345,7 @@ help:
 	@echo "  make test-slow       Run slow tests (> 10 sec)"
 	@echo "  make test-dev        Fast development cycle testing"
 	@echo "  make test-smoke      Quick smoke testing"
+	@echo "  make test-local-matrix Run real local benchmark matrix (stress)"
 	@echo "  make test-ci         CI-optimized test suite"
 	@echo ""
 	@echo "Database-Specific Testing:"

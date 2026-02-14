@@ -391,10 +391,11 @@ class TestH2ODBBenchmarkDirectly:
 
         with patch.object(H2ODBBenchmark, "execute_query") as mock_execute:
             mock_execute.return_value = [("result1",), ("result2",)]
-            with patch("time.time") as mock_time:
-                # Mock time to return predictable values
-                mock_time.side_effect = [0.0, 0.5, 1.0, 1.2]  # Two iterations
-
+            mock_clock = Mock(side_effect=[0.0, 0.5, 1.0, 1.2])  # Two iterations
+            with (
+                patch("benchbox.core.h2odb.benchmark.mono_time", mock_clock),
+                patch("benchbox.utils.clock.mono_time", mock_clock),
+            ):
                 result = h2odb_benchmark.run_benchmark(mock_connection, queries=["Q1"], iterations=2)
 
                 query_result = result["queries"]["Q1"]

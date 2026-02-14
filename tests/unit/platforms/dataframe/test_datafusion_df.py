@@ -669,6 +669,222 @@ class TestDataFusionScalarExtraction:
             adapter.scalar(table)
 
 
+@pytest.mark.skipif(not DATAFUSION_DF_AVAILABLE, reason="DataFusion not installed")
+class TestDataFusionUnifiedFrameMethods:
+    """Tests for DataFusion code paths in unified_frame.py.
+
+    Validates the new methods added for DataFusion compatibility:
+    quantile, total_seconds, truncate, weekday, hour, minute, floor,
+    cast_int, and the tuple-sort path in UnifiedLazyFrame.sort().
+    """
+
+    def _collect_expr(self, adapter, table_name, expr):
+        """Helper: register table, select expr, collect result."""
+        df = adapter.session_ctx.table(table_name)
+        result_df = df.select(expr.native.alias("result"))
+        return adapter.collect(result_df)
+
+    # ----- UnifiedExpr methods -----
+
+    def test_quantile_aggregation(self):
+        """Test quantile() passes raw float to approx_percentile_cont."""
+        from benchbox.platforms.dataframe.unified_frame import UnifiedExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        adapter.register_table("nums", pa.table({"val": [10.0, 20.0, 30.0, 40.0, 50.0]}))
+
+        col_expr = adapter.col("val")
+        unified = UnifiedExpr(col_expr)
+        q_expr = unified.quantile(0.5)
+
+        df = adapter.session_ctx.table("nums")
+        result_df = df.aggregate([], [q_expr.native.alias("median")])
+        result = adapter.collect(result_df)
+
+        assert result.num_rows == 1
+        median_val = result.column("median")[0].as_py()
+        # approx_percentile_cont is approximate, so check it's in a reasonable range
+        assert 20.0 <= median_val <= 40.0
+
+    def test_floor(self):
+        """Test floor() uses DataFusion functions.floor()."""
+        from benchbox.platforms.dataframe.unified_frame import UnifiedExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        adapter.register_table("nums", pa.table({"val": [1.7, 2.3, -0.5, 3.9]}))
+
+        col_expr = adapter.col("val")
+        unified = UnifiedExpr(col_expr)
+        floor_expr = unified.floor()
+
+        result = self._collect_expr(adapter, "nums", floor_expr)
+
+        values = [v.as_py() for v in result.column("result")]
+        assert values == [1.0, 2.0, -1.0, 3.0]
+
+    def test_cast_int(self):
+        """Test cast_int() casts to int32 via DataFusion."""
+        from benchbox.platforms.dataframe.unified_frame import UnifiedExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        adapter.register_table("nums", pa.table({"val": [1.7, 2.3, 3.9]}))
+
+        col_expr = adapter.col("val")
+        unified = UnifiedExpr(col_expr)
+        int_expr = unified.cast_int()
+
+        result = self._collect_expr(adapter, "nums", int_expr)
+
+        values = [v.as_py() for v in result.column("result")]
+        assert values == [1, 2, 3]
+        assert result.schema.field("result").type == pa.int32()
+
+    # ----- UnifiedDtExpr methods -----
+
+    def test_hour(self):
+        """Test hour() extracts hour via DataFusion date_part."""
+        from datetime import datetime
+
+        from datafusion import col as df_col
+
+        from benchbox.platforms.dataframe.unified_frame import UnifiedDtExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        timestamps = [datetime(2024, 6, 15, 14, 30, 0), datetime(2024, 6, 15, 9, 15, 0)]
+        adapter.register_table("ts", pa.table({"dt": pa.array(timestamps, type=pa.timestamp("us"))}))
+
+        dt_expr = UnifiedDtExpr(df_col("dt"), is_pyspark=False, is_datafusion=True)
+        hour_expr = dt_expr.hour()
+
+        result = self._collect_expr(adapter, "ts", hour_expr)
+
+        values = [v.as_py() for v in result.column("result")]
+        assert values == [14, 9]
+
+    def test_minute(self):
+        """Test minute() extracts minute via DataFusion date_part."""
+        from datetime import datetime
+
+        from datafusion import col as df_col
+
+        from benchbox.platforms.dataframe.unified_frame import UnifiedDtExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        timestamps = [datetime(2024, 6, 15, 14, 30, 0), datetime(2024, 6, 15, 9, 45, 0)]
+        adapter.register_table("ts", pa.table({"dt": pa.array(timestamps, type=pa.timestamp("us"))}))
+
+        dt_expr = UnifiedDtExpr(df_col("dt"), is_pyspark=False, is_datafusion=True)
+        min_expr = dt_expr.minute()
+
+        result = self._collect_expr(adapter, "ts", min_expr)
+
+        values = [v.as_py() for v in result.column("result")]
+        assert values == [30, 45]
+
+    def test_weekday(self):
+        """Test weekday() returns ISO weekday (0=Mon..6=Sun) via DataFusion."""
+        from datetime import datetime
+
+        from datafusion import col as df_col
+
+        from benchbox.platforms.dataframe.unified_frame import UnifiedDtExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        # 2024-06-10 is Monday, 2024-06-15 is Saturday, 2024-06-16 is Sunday
+        timestamps = [datetime(2024, 6, 10, 12, 0, 0), datetime(2024, 6, 15, 12, 0, 0), datetime(2024, 6, 16, 12, 0, 0)]
+        adapter.register_table("ts", pa.table({"dt": pa.array(timestamps, type=pa.timestamp("us"))}))
+
+        dt_expr = UnifiedDtExpr(df_col("dt"), is_pyspark=False, is_datafusion=True)
+        wd_expr = dt_expr.weekday()
+
+        result = self._collect_expr(adapter, "ts", wd_expr)
+
+        values = [v.as_py() for v in result.column("result")]
+        # ISO weekday: Monday=0, Saturday=5, Sunday=6
+        assert values == [0, 5, 6]
+
+    def test_truncate(self):
+        """Test truncate() maps Polars interval syntax to DataFusion date_trunc."""
+        from datetime import datetime
+
+        from datafusion import col as df_col
+
+        from benchbox.platforms.dataframe.unified_frame import UnifiedDtExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        timestamps = [datetime(2024, 6, 15, 14, 35, 42)]
+        adapter.register_table("ts", pa.table({"dt": pa.array(timestamps, type=pa.timestamp("us"))}))
+
+        dt_expr = UnifiedDtExpr(df_col("dt"), is_pyspark=False, is_datafusion=True)
+        trunc_expr = dt_expr.truncate("1h")
+
+        result = self._collect_expr(adapter, "ts", trunc_expr)
+
+        val = result.column("result")[0].as_py()
+        # Truncated to hour should be 14:00:00
+        assert val.hour == 14
+        assert val.minute == 0
+        assert val.second == 0
+
+    def test_total_seconds(self):
+        """Test total_seconds() uses correct extract(lit('epoch'), expr) order."""
+        from datetime import datetime
+
+        from datafusion import col as df_col
+
+        from benchbox.platforms.dataframe.unified_frame import UnifiedDtExpr
+
+        adapter = DataFusionDataFrameAdapter()
+        timestamps = [datetime(2024, 1, 1, 0, 1, 0)]
+        adapter.register_table("ts", pa.table({"dt": pa.array(timestamps, type=pa.timestamp("s"))}))
+
+        dt_expr = UnifiedDtExpr(df_col("dt"), is_pyspark=False, is_datafusion=True)
+        secs_expr = dt_expr.total_seconds()
+
+        result = self._collect_expr(adapter, "ts", secs_expr)
+
+        val = result.column("result")[0].as_py()
+        # epoch of 2024-01-01T00:01:00 UTC should be a large positive number
+        assert isinstance(val, (int, float))
+        assert val > 0
+
+    # ----- UnifiedLazyFrame.sort() tuple path -----
+
+    def test_sort_tuple_syntax(self):
+        """Test sort() with tuple (column, direction) syntax on DataFusion."""
+        adapter = DataFusionDataFrameAdapter()
+        ctx = adapter.create_context()
+
+        test_table = pa.table({"id": [3, 1, 2], "name": ["C", "A", "B"]})
+        adapter.register_table("data", test_table)
+        ctx.register_table("data", adapter.session_ctx.table("data"))
+
+        uf = ctx.get_table("data")
+        sorted_uf = uf.sort([("id", "asc")])
+
+        result = adapter.collect(sorted_uf.native)
+
+        ids = [v.as_py() for v in result.column("id")]
+        assert ids == [1, 2, 3]
+
+    def test_sort_tuple_descending(self):
+        """Test sort() with descending tuple syntax on DataFusion."""
+        adapter = DataFusionDataFrameAdapter()
+        ctx = adapter.create_context()
+
+        test_table = pa.table({"id": [3, 1, 2], "name": ["C", "A", "B"]})
+        adapter.register_table("data", test_table)
+        ctx.register_table("data", adapter.session_ctx.table("data"))
+
+        uf = ctx.get_table("data")
+        sorted_uf = uf.sort([("id", "desc")])
+
+        result = adapter.collect(sorted_uf.native)
+
+        ids = [v.as_py() for v in result.column("id")]
+        assert ids == [3, 2, 1]
+
+
 class TestDataFusionNotAvailable:
     """Tests for behavior when DataFusion is not installed."""
 

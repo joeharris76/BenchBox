@@ -101,11 +101,6 @@ class TestTPCDSPerformance:
         print(f"Raw queries per second: {queries_per_second_raw:.2f}")
         print(f"Parameterized queries per second: {queries_per_second_param:.2f}")
 
-    def test_parameter_generation_timing(self, benchmark_instance, performance_monitor):
-        """Test parameter generation timing characteristics."""
-        # Skip this test since database-aware parameter generation is not available
-        pytest.skip("Database-aware parameter generation functionality removed")
-
     def test_memory_usage_validation(self, benchmark_instance, performance_monitor):
         """Test memory usage during intensive operations."""
         process = psutil.Process(os.getpid())
@@ -172,7 +167,7 @@ class TestTPCDSPerformance:
                 results.append(
                     {
                         "worker_id": worker_id,
-                        "execution_time": end_time - start_time,
+                        "execution_time_seconds": end_time - start_time,
                         "queries_generated": len(worker_queries),
                         "queries_per_second": len(worker_queries) / (end_time - start_time),
                     }
@@ -311,7 +306,7 @@ class TestTPCDSPerformance:
             qps = load / execution_time
 
             results[load] = {
-                "execution_time": execution_time,
+                "execution_time_seconds": execution_time,
                 "queries_per_second": qps,
             }
 

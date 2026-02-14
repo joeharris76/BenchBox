@@ -220,5 +220,5 @@ benchbox run --platform databricks --benchmark tpch --format delta \
 
 - [Table Format Guides](index.md): Overview of all formats
 - [Format Conversion Reference](../../advanced/format-conversion.md): CLI commands for format conversion
-- [Parquet Deep Dive](parquet-deep-dive.md): Foundation format for Delta Lake
+- [Parquet Deep Dive](parquet-deep-dive.md): Foundation format for Delta Lake <!-- content-ok: cliche -->
 - [Apache Iceberg Guide](iceberg-guide.md): Alternative table format

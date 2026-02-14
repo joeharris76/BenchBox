@@ -56,6 +56,24 @@ class TestNormalizeQueryId:
         assert normalize_query_id("Q1.sql") == "1"
         assert normalize_query_id("query_12.txt") == "12"
 
+    def test_normalize_preserves_variant_suffix(self) -> None:
+        """TPC-DS/TPC-H variant suffixes should remain distinct."""
+        assert normalize_query_id("14a") == "14a"
+        assert normalize_query_id("Q14A") == "14a"
+        assert normalize_query_id("query_39b") == "39b"
+
+    def test_normalize_strips_q_from_named_queries(self) -> None:
+        """Q prefix should be stripped from non-numeric query names."""
+        assert normalize_query_id("Qfilter_decimal_selective") == "filter_decimal_selective"
+        assert normalize_query_id("Qaggregation_groupby_large") == "aggregation_groupby_large"
+        assert normalize_query_id("Qempty_build_join") == "empty_build_join"
+        assert normalize_query_id("Qtopn") == "topn"
+
+    def test_normalize_preserves_bare_names_without_q(self) -> None:
+        """Names without Q prefix should pass through unchanged."""
+        assert normalize_query_id("filter_decimal_selective") == "filter_decimal_selective"
+        assert normalize_query_id("aggregation_groupby") == "aggregation_groupby"
+
 
 class TestFormatQueryId:
     """Tests for format_query_id function."""
@@ -146,7 +164,7 @@ class TestNormalizeQueryResult:
         """Test normalizing with alternative field names."""
         raw = {
             "id": "Q1",
-            "execution_time": 1.5,
+            "execution_time_ms": 1500,
             "rows": 100,
             "status": "SUCCEEDED",  # Alternative success value
         }
@@ -156,6 +174,32 @@ class TestNormalizeQueryResult:
         assert result.execution_time_seconds == 1.5
         assert result.rows_returned == 100
         assert result.status == "SUCCESS"  # Normalized
+
+    def test_normalize_prefers_execution_time_seconds_when_multiple_keys(self) -> None:
+        """Canonical execution_time_seconds should win over legacy timing keys."""
+        raw = {
+            "query_id": "Q1",
+            "execution_time_seconds": 1.25,
+            "execution_time": 9.99,
+            "execution_time_ms": 9999,
+            "rows_returned": 100,
+            "status": "SUCCESS",
+        }
+        result = normalize_query_result(raw)
+
+        assert result.execution_time_seconds == 1.25
+
+    def test_normalize_ignores_legacy_execution_time_without_explicit_units(self) -> None:
+        """Legacy execution_time is ignored to avoid unit ambiguity."""
+        raw = {
+            "query_id": "Q1",
+            "execution_time": 1.5,
+            "rows_returned": 100,
+            "status": "SUCCESS",
+        }
+        result = normalize_query_result(raw)
+
+        assert result.execution_time_seconds == 0.0
 
     def test_normalize_failed_result(self) -> None:
         """Test normalizing a failed query result."""

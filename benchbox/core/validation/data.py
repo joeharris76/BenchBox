@@ -15,6 +15,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,7 +107,7 @@ class ValidationResult:
             "skipped_tables": self.skipped_tables,
             "total_discrepancies": len(self.discrepancies),
             "significant_discrepancies": len(self.get_significant_discrepancies()),
-            "execution_time": self.execution_time,
+            "execution_time_seconds": self.execution_time,
         }
 
     def __str__(self) -> str:
@@ -156,7 +158,7 @@ class DataValidator:
         Returns:
             ValidationResult with detailed comparison results
         """
-        start_time = datetime.now()
+        start_time = mono_time()
         result = ValidationResult()
         result.total_tables = len(expected_counts)
 
@@ -186,8 +188,7 @@ class DataValidator:
             result.add_discrepancy(discrepancy)
 
         # Calculate execution time
-        end_time = datetime.now()
-        result.execution_time = (end_time - start_time).total_seconds()
+        result.execution_time = elapsed_seconds(start_time)
 
         self._log_validation_results(result)
         return result

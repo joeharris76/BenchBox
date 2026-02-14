@@ -183,14 +183,11 @@ class TestGenericPowerTest:
         assert q1_results[0]["iteration"] == 1
         assert q1_results[1]["iteration"] == 2
 
-    @patch("rich.console.Console")
+    @patch("benchbox.platforms.base.adapter.quiet_console")
     def test_console_output_displays_warmup_and_measurement(
-        self, mock_console_cls, mock_adapter, mock_benchmark, mock_connection
+        self, mock_console, mock_adapter, mock_benchmark, mock_connection
     ):
         """Test that console prints warmup and measurement run labels."""
-        mock_console = MagicMock()
-        mock_console_cls.return_value = mock_console
-
         run_config = {
             "iterations": 2,
             "warm_up_iterations": 1,

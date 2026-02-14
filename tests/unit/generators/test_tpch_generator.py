@@ -790,17 +790,19 @@ class TestTPCHDataGeneratorParallelProcessing(unittest.TestCase):
             output_dir=self.output_dir, parallel=2, compression_type="gzip", compress_data=True
         )
 
-        # Create mock chunk files in the output directory for all TPC-H tables
         self.output_dir.mkdir(parents=True, exist_ok=True)
         all_tables = ["customer", "lineitem", "nation", "orders", "part", "partsupp", "region", "supplier"]
-        for table in all_tables:
-            for chunk_id in range(1, 3):  # 2 chunks
-                chunk_file = self.output_dir / f"{table}.tbl.{chunk_id}"
-                chunk_file.write_text(f"{table} data chunk {chunk_id}\n")
+
+        def _mock_run_dbgen_native(_: Path):
+            # Create mock chunk files during generation so they exist after stale-prune.
+            for table in all_tables:
+                for chunk_id in range(1, 3):  # 2 chunks
+                    chunk_file = self.output_dir / f"{table}.tbl.{chunk_id}"
+                    chunk_file.write_text(f"{table} data chunk {chunk_id}\n")
+            return None  # file-based generation path
 
         # Mock the data generation and validation process
-        # _run_dbgen_native must return None to indicate file-based generation (not streaming)
-        with mock.patch.object(generator, "_run_dbgen_native", return_value=None):
+        with mock.patch.object(generator, "_run_dbgen_native", side_effect=_mock_run_dbgen_native):
             # Mock validator to indicate regeneration is needed (so it proceeds to _finalize_generation)
             with mock.patch.object(generator.validator, "should_regenerate_data") as mock_validate:
                 mock_validate.return_value = (True, None)  # Regeneration needed

@@ -26,6 +26,7 @@ from enum import Enum
 from typing import Any
 
 from benchbox.core.exceptions import ConfigurationError
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.dependencies import (
     check_platform_dependencies,
     get_dependency_error_message,
@@ -448,9 +449,9 @@ class OnehouseClient:
             RuntimeError: If job fails or times out
         """
         timeout_seconds = timeout_minutes * 60
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout_seconds:
+        while elapsed_seconds(start_time) < timeout_seconds:
             result = self.get_job_status(job_id)
 
             if result.state.is_terminal:

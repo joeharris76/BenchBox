@@ -63,7 +63,12 @@ from benchbox.core.dataframe.tuning import DataFrameTuningConfiguration
 from benchbox.platforms.dataframe.expression_family import (
     ExpressionFamilyAdapter,
 )
-from benchbox.utils.file_format import detect_data_format, strip_compression_suffix
+from benchbox.utils.file_format import (
+    TRAILING_DUMMY_COLUMN,
+    detect_data_format,
+    has_trailing_delimiter,
+    strip_compression_suffix,
+)
 
 if TYPE_CHECKING:
     pass
@@ -591,11 +596,11 @@ class DataFusionDataFrameAdapter(ExpressionFamilyAdapter[DataFusionDF, DataFusio
 
         has_trailing = False
         if column_names:
-            has_trailing = self._has_trailing_delimiter(path, delimiter)
+            has_trailing = has_trailing_delimiter(path, delimiter, column_names)
 
         actual_column_names = column_names
         if column_names and has_trailing:
-            actual_column_names = column_names + ["_trailing_"]
+            actual_column_names = column_names + [TRAILING_DUMMY_COLUMN]
 
         read_options = pv.ReadOptions(
             column_names=actual_column_names if actual_column_names else None,
@@ -619,30 +624,6 @@ class DataFusionDataFrameAdapter(ExpressionFamilyAdapter[DataFusionDF, DataFusio
         temp_name = f"_tbl_{uuid.uuid4().hex[:8]}"
         self.session_ctx.register_record_batches(temp_name, [table.to_batches()])
         return self.session_ctx.table(temp_name)
-
-    def _has_trailing_delimiter(self, path: Path, delimiter: str) -> bool:
-        """Check if the first data row ends with a trailing delimiter."""
-        from benchbox.utils.compression import CompressionManager
-        from benchbox.utils.file_format import detect_compression
-
-        compression = detect_compression(path)
-        try:
-            if compression:
-                manager = CompressionManager()
-                compressor = manager.get_compressor(compression)
-                with compressor.open_for_read(path, mode="rt") as handle:
-                    for line in handle:
-                        if line.strip():
-                            return line.rstrip("\n").endswith(delimiter)
-                return False
-
-            with path.open("rt", encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    if line.strip():
-                        return line.rstrip("\n").endswith(delimiter)
-        except Exception:
-            return False
-        return False
 
     def _apply_tbl_column_names(self, df: DataFusionLazyDF, column_names: list[str]) -> DataFusionLazyDF:
         """Apply TPC-H/TPC-DS column names and drop trailing delimiter column."""
@@ -974,6 +955,86 @@ class DataFusionDataFrameAdapter(ExpressionFamilyAdapter[DataFusionDF, DataFusio
             partition_by=partition_exprs if partition_exprs else None,
         )
         return f.max(col(column)).over(window)
+
+    def window_lag(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> DataFusionExpr:
+        """Create a LAG() window function expression."""
+        partition_exprs = [col(c) for c in (partition_by or [])]
+        order_exprs = self._build_order_exprs(order_by) if order_by else None
+
+        window = Window(
+            partition_by=partition_exprs if partition_exprs else None,
+            order_by=order_exprs,
+        )
+        return f.lag(col(column), offset).over(window)
+
+    def window_lead(
+        self,
+        column: str,
+        offset: int = 1,
+        partition_by: list[str] | None = None,
+        order_by: list[tuple[str, bool]] | None = None,
+    ) -> DataFusionExpr:
+        """Create a LEAD() window function expression."""
+        partition_exprs = [col(c) for c in (partition_by or [])]
+        order_exprs = self._build_order_exprs(order_by) if order_by else None
+
+        window = Window(
+            partition_by=partition_exprs if partition_exprs else None,
+            order_by=order_exprs,
+        )
+        return f.lead(col(column), offset).over(window)
+
+    def window_ntile(
+        self,
+        n: int,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> DataFusionExpr:
+        """Create a NTILE() window function expression."""
+        partition_exprs = [col(c) for c in (partition_by or [])]
+        order_exprs = self._build_order_exprs(order_by)
+
+        window = Window(
+            partition_by=partition_exprs if partition_exprs else None,
+            order_by=order_exprs if order_exprs else None,
+        )
+        return f.ntile(n).over(window)
+
+    def window_percent_rank(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> DataFusionExpr:
+        """Create a PERCENT_RANK() window function expression."""
+        partition_exprs = [col(c) for c in (partition_by or [])]
+        order_exprs = self._build_order_exprs(order_by)
+
+        window = Window(
+            partition_by=partition_exprs if partition_exprs else None,
+            order_by=order_exprs if order_exprs else None,
+        )
+        return f.percent_rank().over(window)
+
+    def window_cume_dist(
+        self,
+        order_by: list[tuple[str, bool]],
+        partition_by: list[str] | None = None,
+    ) -> DataFusionExpr:
+        """Create a CUME_DIST() window function expression."""
+        partition_exprs = [col(c) for c in (partition_by or [])]
+        order_exprs = self._build_order_exprs(order_by)
+
+        window = Window(
+            partition_by=partition_exprs if partition_exprs else None,
+            order_by=order_exprs if order_exprs else None,
+        )
+        return f.cume_dist().over(window)
 
     # =========================================================================
     # Union and Rename Operations

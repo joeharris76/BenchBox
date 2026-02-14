@@ -5,7 +5,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -457,10 +457,13 @@ class TestOnehouseClientWaitForJob:
 
     def test_wait_for_job_success(self):
         """Test waiting for a successful job."""
+        mock_clock = Mock(side_effect=[0, 5, 10])
         with (
             patch("benchbox.platforms.onehouse.onehouse_client.REQUESTS_AVAILABLE", True),
             patch("benchbox.platforms.onehouse.onehouse_client.requests") as mock_requests,
             patch("benchbox.platforms.onehouse.onehouse_client.time") as mock_time,
+            patch("benchbox.platforms.onehouse.onehouse_client.mono_time", mock_clock),
+            patch("benchbox.utils.clock.mono_time", mock_clock),
         ):
             mock_session = MagicMock()
 
@@ -482,7 +485,6 @@ class TestOnehouseClientWaitForJob:
             mock_requests.Session.return_value = mock_session
 
             # Mock time to avoid actual sleep
-            mock_time.time.side_effect = [0, 5, 10]
             mock_time.sleep = MagicMock()
 
             from benchbox.platforms.onehouse import JobState, OnehouseClient
@@ -495,10 +497,13 @@ class TestOnehouseClientWaitForJob:
 
     def test_wait_for_job_failure(self):
         """Test waiting for a failed job raises error."""
+        mock_clock = Mock(side_effect=[0, 5])
         with (
             patch("benchbox.platforms.onehouse.onehouse_client.REQUESTS_AVAILABLE", True),
             patch("benchbox.platforms.onehouse.onehouse_client.requests") as mock_requests,
-            patch("benchbox.platforms.onehouse.onehouse_client.time") as mock_time,
+            patch("benchbox.platforms.onehouse.onehouse_client.time"),
+            patch("benchbox.platforms.onehouse.onehouse_client.mono_time", mock_clock),
+            patch("benchbox.utils.clock.mono_time", mock_clock),
         ):
             mock_session = MagicMock()
 
@@ -512,7 +517,6 @@ class TestOnehouseClientWaitForJob:
 
             mock_session.request.return_value = mock_response
             mock_requests.Session.return_value = mock_session
-            mock_time.time.side_effect = [0, 5]
 
             from benchbox.platforms.onehouse import OnehouseClient
 
@@ -523,10 +527,13 @@ class TestOnehouseClientWaitForJob:
 
     def test_wait_for_job_timeout(self):
         """Test job timeout raises error."""
+        mock_clock = Mock(side_effect=[0, 3700])  # 3700 > 60*60 timeout
         with (
             patch("benchbox.platforms.onehouse.onehouse_client.REQUESTS_AVAILABLE", True),
             patch("benchbox.platforms.onehouse.onehouse_client.requests") as mock_requests,
             patch("benchbox.platforms.onehouse.onehouse_client.time") as mock_time,
+            patch("benchbox.platforms.onehouse.onehouse_client.mono_time", mock_clock),
+            patch("benchbox.utils.clock.mono_time", mock_clock),
         ):
             mock_session = MagicMock()
 
@@ -539,7 +546,6 @@ class TestOnehouseClientWaitForJob:
             mock_requests.Session.return_value = mock_session
 
             # Simulate timeout - first call at 0, loop checks exceed timeout
-            mock_time.time.side_effect = [0, 3700]  # 3700 > 60*60 timeout
             mock_time.sleep = MagicMock()
 
             from benchbox.platforms.onehouse import OnehouseClient
@@ -551,10 +557,13 @@ class TestOnehouseClientWaitForJob:
 
     def test_wait_for_job_cancelled_state(self):
         """Test waiting for a cancelled job raises error."""
+        mock_clock = Mock(side_effect=[0, 5])
         with (
             patch("benchbox.platforms.onehouse.onehouse_client.REQUESTS_AVAILABLE", True),
             patch("benchbox.platforms.onehouse.onehouse_client.requests") as mock_requests,
-            patch("benchbox.platforms.onehouse.onehouse_client.time") as mock_time,
+            patch("benchbox.platforms.onehouse.onehouse_client.time"),
+            patch("benchbox.platforms.onehouse.onehouse_client.mono_time", mock_clock),
+            patch("benchbox.utils.clock.mono_time", mock_clock),
         ):
             mock_session = MagicMock()
 
@@ -565,7 +574,6 @@ class TestOnehouseClientWaitForJob:
 
             mock_session.request.return_value = mock_response
             mock_requests.Session.return_value = mock_session
-            mock_time.time.side_effect = [0, 5]
 
             from benchbox.platforms.onehouse import OnehouseClient
 

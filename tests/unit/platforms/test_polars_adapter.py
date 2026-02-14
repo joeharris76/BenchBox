@@ -299,20 +299,17 @@ class TestPolarsAdapterDataLoading:
             adapter = PolarsAdapter(working_dir=tmpdir)
 
             # Test TBL files (TPC format)
-            # BenchBox generates TPC files WITHOUT trailing delimiters (dbgen default)
-            format_type, delim, trailing = adapter._detect_file_format([Path("orders.tbl")])
+            format_type, delim = adapter._detect_file_format([Path("orders.tbl")])
             assert format_type == "csv"
             assert delim == "|"
-            assert trailing is False  # BenchBox TPC files don't have trailing delimiters
 
             # Test CSV files
-            format_type, delim, trailing = adapter._detect_file_format([Path("data.csv")])
+            format_type, delim = adapter._detect_file_format([Path("data.csv")])
             assert format_type == "csv"
             assert delim == ","
-            assert trailing is False
 
             # Test Parquet files
-            format_type, delim, trailing = adapter._detect_file_format([Path("data.parquet")])
+            format_type, delim = adapter._detect_file_format([Path("data.parquet")])
             assert format_type == "parquet"
 
     def test_load_csv_data(self):
@@ -332,7 +329,6 @@ class TestPolarsAdapterDataLoading:
                 file_paths=[csv_file],
                 delimiter=",",
                 column_names=["id", "name", "value"],
-                has_trailing_delimiter=False,
             )
 
             df = lf.collect()

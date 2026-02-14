@@ -40,6 +40,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
         UnifiedTuningConfiguration,
@@ -582,9 +584,9 @@ spark.stop()
         """
         self._ensure_cluster_exists()
 
-        start_time = time.time()
+        start_time = mono_time()
         job_id, state = self._submit_spark_sql_job(query, wait_for_completion=True)
-        elapsed = time.time() - start_time
+        elapsed = elapsed_seconds(start_time)
 
         self._query_count += 1
         self._total_job_time_seconds += elapsed

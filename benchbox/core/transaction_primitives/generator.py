@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
+from benchbox.utils.clock import elapsed_seconds, mono_time
+
 if TYPE_CHECKING:
     import pyarrow as pa
     from cloudpathlib import CloudPath
@@ -352,9 +354,9 @@ class TransactionPrimitivesDataGenerator(CompressionMixin, CloudStorageGenerator
         self.files_dir.mkdir(parents=True, exist_ok=True)
 
         lock_file = self.files_dir / ".bulk_load_generation.lock"
-        start_time = time.time()
+        start_time = mono_time()
 
-        while time.time() - start_time < timeout:
+        while elapsed_seconds(start_time) < timeout:
             try:
                 # Try to create lock file exclusively (fails if exists)
                 fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)

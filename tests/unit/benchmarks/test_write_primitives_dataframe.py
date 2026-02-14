@@ -41,6 +41,7 @@ class TestWritePrimitivesBenchmarkDataFrameSupport:
         """Test that WritePrimitivesBenchmark reports DataFrame support."""
         benchmark = WritePrimitivesBenchmark()
         assert benchmark.supports_dataframe_mode() is True
+        assert benchmark.skip_dataframe_data_loading() is True
 
     def test_get_dataframe_operations_polars(self):
         """Test getting DataFrame operations for Polars."""
@@ -69,6 +70,39 @@ class TestWritePrimitivesBenchmarkDataFrameSupport:
             assert caps is not None
             assert isinstance(caps, DataFrameWriteCapabilities)
             assert caps.platform_name == "polars-df"
+
+    def test_execute_dataframe_workload_delegates_to_sql_parity_path(self, monkeypatch):
+        """DataFrame workload should delegate to SQL-parity operation execution."""
+        benchmark = WritePrimitivesBenchmark()
+        parity_rows = [
+            {"query_id": "insert_single_row", "status": "SUCCESS", "execution_time": 0.001, "rows_returned": 1}
+        ]
+
+        monkeypatch.setattr(
+            benchmark,
+            "_execute_dataframe_sql_parity_workload",
+            lambda **_kwargs: parity_rows,
+        )
+
+        class DummyAdapter:
+            platform_name = "polars-df"
+
+        results = benchmark.execute_dataframe_workload(
+            ctx=None,
+            adapter=DummyAdapter(),
+            benchmark_config=None,
+            query_filter={"INSERT_SINGLE_ROW"},
+            monitor=None,
+            run_options=None,
+        )
+
+        assert len(results) == 4
+        assert results[0]["run_type"] == "warmup"
+        assert results[0]["iteration"] == 0
+        assert results[1]["run_type"] == "measurement"
+        assert results[1]["iteration"] == 1
+        assert results[3]["iteration"] == 3
+        assert all(r["query_id"] == "insert_single_row" for r in results)
 
 
 class TestWriteOperationType:
@@ -793,11 +827,12 @@ class TestPySparkDeltaOperationsWithMock:
             MockDeltaTable.forPath.return_value = mock_delta_table
 
             with patch.object(ops, "is_delta_table", return_value=True):
-                result = ops._do_update(
-                    table_path="/tmp/delta_table",
-                    condition="status = 'pending'",
-                    updates={"status": "'completed'"},
-                )
+                with patch.object(ops, "_to_spark_column", side_effect=lambda value: value):
+                    result = ops._do_update(
+                        table_path="/tmp/delta_table",
+                        condition="status = 'pending'",
+                        updates={"status": "'completed'"},
+                    )
 
         # Verify DeltaTable.forPath() was called
         MockDeltaTable.forPath.assert_called_once_with(mock_spark, "/tmp/delta_table")
@@ -851,13 +886,14 @@ class TestPySparkDeltaOperationsWithMock:
 
             with patch.object(ops, "is_delta_table", return_value=True):
                 with patch.object(ops, "_convert_to_spark_df", return_value=mock_source_df):
-                    result = ops._do_merge(
-                        table_path="/tmp/delta_table",
-                        source_dataframe=mock_source_df,
-                        merge_condition="target.id = source.id",
-                        when_matched={"name": "source.name"},
-                        when_not_matched={"id": "source.id"},
-                    )
+                    with patch.object(ops, "_to_spark_column", side_effect=lambda value: value):
+                        result = ops._do_merge(
+                            table_path="/tmp/delta_table",
+                            source_dataframe=mock_source_df,
+                            merge_condition="target.id = source.id",
+                            when_matched={"name": "source.name"},
+                            when_not_matched={"id": "source.id"},
+                        )
 
         # Verify DeltaTable.forPath() was called
         MockDeltaTable.forPath.assert_called_once_with(mock_spark, "/tmp/delta_table")

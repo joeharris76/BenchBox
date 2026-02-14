@@ -26,7 +26,8 @@ class QueryResult(BaseModel):
     query_id: str
     query_name: str
     sql_text: str
-    execution_time_ms: float
+    execution_time_seconds: float | None = None
+    execution_time_ms: float | None = None
     rows_returned: int
     status: str  # "SUCCESS", "ERROR", "TIMEOUT"
     error_message: Optional[str] = None
@@ -41,13 +42,26 @@ class QueryResult(BaseModel):
             raise ValueError(f"status must be one of {allowed}, got: {v}")
         return v
 
-    @field_validator("execution_time_ms")
+    @field_validator("execution_time_seconds", "execution_time_ms")
     @classmethod
-    def validate_execution_time(cls, v: float) -> float:
+    def validate_execution_time(cls, v: float | None) -> float | None:
         """Validate execution time is non-negative."""
+        if v is None:
+            return None
         if v < 0:
-            raise ValueError(f"execution_time_ms must be non-negative, got: {v}")
-        return v
+            raise ValueError(f"execution time must be non-negative, got: {v}")
+        return float(v)
+
+    @model_validator(mode="after")
+    def normalize_execution_time_fields(self) -> "QueryResult":
+        """Use execution_time_seconds as canonical, preserving ms compatibility."""
+        if self.execution_time_seconds is None and self.execution_time_ms is None:
+            raise ValueError("either execution_time_seconds or execution_time_ms must be provided")
+        if self.execution_time_seconds is None and self.execution_time_ms is not None:
+            self.execution_time_seconds = float(self.execution_time_ms) / 1000.0
+        if self.execution_time_ms is None and self.execution_time_seconds is not None:
+            self.execution_time_ms = float(self.execution_time_seconds) * 1000.0
+        return self
 
     @field_validator("rows_returned")
     @classmethod
