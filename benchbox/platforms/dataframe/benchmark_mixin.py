@@ -10,13 +10,13 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
+import inspect
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from benchbox.core.config import BenchmarkConfig, SystemProfile
 from benchbox.core.constants import (
     GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS,
     GENERIC_POWER_DEFAULT_WARMUP_ITERATIONS,
@@ -39,6 +39,9 @@ from benchbox.core.results.models import (
     BenchmarkResults,
     TableLoadingStats,
 )
+from benchbox.core.results.schema import compute_plan_capture_stats
+from benchbox.core.schemas import BenchmarkConfig, SystemProfile
+from benchbox.platforms.base.adapter import DriverIsolationCapability
 from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.printing import quiet_console
 
@@ -99,6 +102,10 @@ class BenchmarkExecutionMixin:
     - get_platform_info() method (optional)
     """
 
+    # Default: most DataFrame adapters have no versioned driver package.
+    # Subclasses like DataFusionDataFrameAdapter override to SUPPORTED.
+    driver_isolation_capability: DriverIsolationCapability = DriverIsolationCapability.NOT_APPLICABLE
+
     # These must be provided by the adapter class
     platform_name: str
     family: str
@@ -129,6 +136,22 @@ class BenchmarkExecutionMixin:
     def get_platform_info(self) -> dict[str, Any]:
         """Get platform information. Override in subclass for details."""
         return {"platform": self.platform_name, "family": self.family}
+
+    def _enrich_with_driver_metadata(self, info: dict[str, Any]) -> None:
+        """Add driver runtime contract metadata to a platform info dict.
+
+        Call this from subclass get_platform_info() implementations to propagate
+        driver version/isolation metadata set by the adapter factory.
+        """
+        for attr in (
+            "driver_version_requested",
+            "driver_version_resolved",
+            "driver_version_actual",
+            "driver_runtime_strategy",
+        ):
+            value = getattr(self, attr, None)
+            if value:
+                info[attr] = value
 
     def run_benchmark(
         self,
@@ -296,6 +319,15 @@ class BenchmarkExecutionMixin:
                 # Add query results to builder
                 for qr in query_results:
                     builder.add_query_result(normalize_query_result(qr))
+
+                plans_captured, capture_failures, capture_errors = compute_plan_capture_stats(
+                    query_results, getattr(benchmark_config, "capture_plans", False)
+                )
+                builder.add_plan_capture_stats(
+                    plans_captured=plans_captured,
+                    capture_failures=capture_failures,
+                    capture_errors=capture_errors,
+                )
                 builder.set_phase_status("power_test", "COMPLETED")
 
             builder.mark_completed()
@@ -322,173 +354,148 @@ class BenchmarkExecutionMixin:
         display_name = getattr(benchmark, "display_name", name.upper())
         scale_factor = run_config.get("scale_factor", getattr(benchmark, "scale_factor", 1.0))
         queries = run_config.get("query_subset", run_config.get("queries"))
+        capture_plans = bool(run_config.get("capture_plans", False))
 
         return BenchmarkConfig(
             name=name,
             display_name=display_name,
             scale_factor=scale_factor,
             queries=queries,
+            capture_plans=capture_plans,
         )
 
-    def _load_data_phase(
+    @staticmethod
+    def _normalize_table_paths(tables: dict[str, Any]) -> dict[str, Path | list[Path]]:
+        """Normalize table paths to Path objects."""
+        normalized: dict[str, Path | list[Path]] = {}
+        for name, path in tables.items():
+            if isinstance(path, list):
+                normalized[name] = [Path(p) if not isinstance(p, Path) else p for p in path]
+            elif isinstance(path, Path):
+                normalized[name] = path
+            else:
+                normalized[name] = Path(path)
+        return normalized
+
+    @staticmethod
+    def _find_missing_paths(paths: dict[str, Path | list[Path]]) -> dict[str, list[Path]]:
+        """Find data paths that don't exist on disk."""
+        missing: dict[str, list[Path]] = {}
+        for table_name, file_path in paths.items():
+            file_list = file_path if isinstance(file_path, list) else [file_path]
+            for entry in file_list:
+                entry_path = entry if isinstance(entry, Path) else Path(entry)
+                if not entry_path.exists():
+                    missing.setdefault(table_name, []).append(entry_path)
+        return missing
+
+    @staticmethod
+    def _raise_missing_paths_error(missing_paths: dict[str, list[Path]]) -> None:
+        """Raise DataLoadingError with per-table stats for missing files."""
+        per_table_stats: dict[str, TableLoadingStats] = {}
+        for table_name, paths in missing_paths.items():
+            missing_list = ", ".join(str(p) for p in paths[:5])
+            more = "..." if len(paths) > 5 else ""
+            per_table_stats[table_name] = TableLoadingStats(
+                rows=0,
+                load_time_ms=0,
+                status="FAILED",
+                error_type="MissingDataError",
+                error_message=f"Missing data files: {missing_list}{more}",
+            )
+        missing_summary = "; ".join(f"{t}: {len(p)} file(s)" for t, p in missing_paths.items())
+        raise DataLoadingError(
+            "Data files not found. Missing: "
+            f"{missing_summary}. Run with --phases generate,load or --force-regenerate to recreate data.",
+            per_table_stats=per_table_stats,
+        )
+
+    def _resolve_data_paths_from_tables(
         self,
-        ctx: Any,
-        benchmark_config: BenchmarkConfig,
+        benchmark_instance: Any,
+        options: DataFrameRunOptions,
+    ) -> dict[str, Path | list[Path]]:
+        """Resolve data paths from benchmark instance tables, preferring parquet when configured."""
+        parquet_dir = None
+        if options.prefer_parquet:
+            first_path = next(iter(benchmark_instance.tables.values()))
+            if isinstance(first_path, list):
+                first_path = first_path[0]
+            first_path = Path(first_path)
+            parent_dir = first_path.parent
+            for pq_candidate in parent_dir.glob("*.parquet"):
+                if pq_candidate.is_dir():
+                    parquet_dir = pq_candidate
+                    logger.info(f"Found parquet directory: {parquet_dir}")
+                    break
+
+        if parquet_dir and parquet_dir.is_dir():
+            data_paths: dict[str, Path | list[Path]] = {}
+            for pq_file in parquet_dir.glob("*.parquet"):
+                table_name = pq_file.stem
+                data_paths[table_name] = pq_file
+            logger.info(f"Using parquet data: {len(data_paths)} tables from {parquet_dir}")
+            return data_paths
+
+        data_paths = self._normalize_table_paths(benchmark_instance.tables)
+        logger.info(f"Using benchmark-provided data: {len(data_paths)} tables")
+        return data_paths
+
+    def _resolve_data_paths(
+        self,
         benchmark_instance: Any | None,
         data_dir: Path | None,
         options: DataFrameRunOptions,
-    ) -> tuple[dict[str, int], dict[str, TableLoadingStats]]:
-        """Load benchmark data into DataFrame context.
+        loader: DataFrameDataLoader,
+    ) -> dict[str, Path | list[Path]]:
+        """Resolve data paths from available sources (tables, data_dir, or generation).
 
-        Returns:
-            Tuple of (table_stats, per_table_loading_stats)
+        Priority order (highest to lowest):
+        1. benchmark_instance.tables — authoritative if populated (even after force_regenerate,
+           since generate_data() populates .tables as a side effect)
+        2. data_dir discovery — scan filesystem for data files
+        3. benchmark_instance.generate_data() — last resort, generate from scratch
         """
-        platform_name = self.platform_name.lower()
-
-        # Create data loader
-        loader = DataFrameDataLoader(
-            platform=platform_name,
-            cache_dir=options.cache_dir,
-            prefer_parquet=options.prefer_parquet,
-            force_regenerate=options.force_regenerate,
-        )
-
-        def _normalize_table_paths(tables: dict[str, Any]) -> dict[str, Path | list[Path]]:
-            normalized: dict[str, Path | list[Path]] = {}
-            for name, path in tables.items():
-                if isinstance(path, list):
-                    normalized[name] = [Path(p) if not isinstance(p, Path) else p for p in path]
-                elif isinstance(path, Path):
-                    normalized[name] = path
-                else:
-                    normalized[name] = Path(path)
-            return normalized
-
-        def _generate_data() -> dict[str, Path | list[Path]]:
-            logger.info("Generating benchmark data...")
-            benchmark_instance.generate_data()  # type: ignore[union-attr]
-            if hasattr(benchmark_instance, "tables") and benchmark_instance.tables:
-                return _normalize_table_paths(benchmark_instance.tables)
-            return {}
-
-        def _prepare_data_or_raise() -> dict[str, Path | list[Path]]:
-            if benchmark_instance is None:
-                raise DataLoadingError("Cannot prepare Parquet data without a benchmark instance.")
-            try:
-                prepared_paths = loader.prepare_benchmark_data(
-                    benchmark_instance,
-                    scale_factor=getattr(benchmark_config, "scale_factor", 1.0),
-                    data_dir=data_dir,
-                )
-            except Exception as prep_err:
-                raise DataLoadingError(
-                    f"Data preparation failed in prefer_parquet mode: {type(prep_err).__name__}: {prep_err}"
-                ) from prep_err
-            if not prepared_paths:
-                raise DataLoadingError("Data preparation produced no table paths in prefer_parquet mode.")
-            logger.info(f"Using prepared data: {len(prepared_paths)} tables")
-            return prepared_paths
-
-        def _find_missing_paths(paths: dict[str, Path | list[Path]]) -> dict[str, list[Path]]:
-            missing: dict[str, list[Path]] = {}
-            for table_name, file_path in paths.items():
-                file_list = file_path if isinstance(file_path, list) else [file_path]
-                for entry in file_list:
-                    entry_path = entry if isinstance(entry, Path) else Path(entry)
-                    if not entry_path.exists():
-                        missing.setdefault(table_name, []).append(entry_path)
-            return missing
-
-        # Get data paths - try multiple sources in order
         data_paths: dict[str, Path | list[Path]] = {}
 
         if options.force_regenerate and benchmark_instance and hasattr(benchmark_instance, "generate_data"):
-            data_paths = _generate_data()
+            data_paths = self._generate_benchmark_data(benchmark_instance)
 
         if benchmark_instance and hasattr(benchmark_instance, "tables") and benchmark_instance.tables:
-            # Use benchmark's pre-generated data
-            # Note: tables can be dict[str, Path | list[Path]]
-            data_paths = {}
-
-            # Check for parquet directory if prefer_parquet is True
-            parquet_dir = None
-            if options.prefer_parquet:
-                # Look for parquet files in the same directory as the TBL files
-                first_path = next(iter(benchmark_instance.tables.values()))
-                if isinstance(first_path, list):
-                    first_path = first_path[0]
-                first_path = Path(first_path)
-                parent_dir = first_path.parent
-
-                # Check for parquet subdirectory (common pattern: tpch_sf001_*.parquet/)
-                for pq_candidate in parent_dir.glob("*.parquet"):
-                    if pq_candidate.is_dir():
-                        parquet_dir = pq_candidate
-                        logger.info(f"Found parquet directory: {parquet_dir}")
-                        break
-
-            if parquet_dir and parquet_dir.is_dir():
-                # Use parquet files for proper schema handling
-                for pq_file in parquet_dir.glob("*.parquet"):
-                    table_name = pq_file.stem
-                    data_paths[table_name] = pq_file
-                logger.info(f"Using parquet data: {len(data_paths)} tables from {parquet_dir}")
-            else:
-                # Fall back to benchmark's TBL files
-                data_paths = _normalize_table_paths(benchmark_instance.tables)
-                logger.info(f"Using benchmark-provided data: {len(data_paths)} tables")
+            data_paths = self._resolve_data_paths_from_tables(benchmark_instance, options)
         elif data_dir and data_dir.exists():
-            # Use provided data directory
             data_paths = loader._discover_files(data_dir)
             logger.info(f"Discovered data in {data_dir}: {len(data_paths)} tables")
             if not data_paths and benchmark_instance and hasattr(benchmark_instance, "generate_data"):
-                data_paths = _generate_data()
+                data_paths = self._generate_benchmark_data(benchmark_instance)
         elif benchmark_instance and hasattr(benchmark_instance, "generate_data"):
-            # No data available - try to generate it
             try:
-                data_paths = _generate_data()
+                data_paths = self._generate_benchmark_data(benchmark_instance)
                 if data_paths:
                     logger.info(f"Generated data: {len(data_paths)} tables")
             except Exception as gen_err:
                 logger.warning(f"Data generation failed: {gen_err}")
 
-        if not data_paths:
-            raise ValueError("No data source available. Either provide data_dir or generate data first.")
+        return data_paths
 
-        if options.prefer_parquet:
-            data_paths = _prepare_data_or_raise()
+    def _generate_benchmark_data(self, benchmark_instance: Any) -> dict[str, Path | list[Path]]:
+        """Generate benchmark data and return normalized table paths."""
+        logger.info("Generating benchmark data...")
+        benchmark_instance.generate_data()
+        if hasattr(benchmark_instance, "tables") and benchmark_instance.tables:
+            return self._normalize_table_paths(benchmark_instance.tables)
+        return {}
 
-        missing_paths = _find_missing_paths(data_paths)
-        if missing_paths and benchmark_instance and hasattr(benchmark_instance, "generate_data"):
-            logger.info("Missing data files detected, regenerating benchmark data...")
-            data_paths = _generate_data()
-            if options.prefer_parquet:
-                data_paths = _prepare_data_or_raise()
-            missing_paths = _find_missing_paths(data_paths)
+    def _resolve_column_names_and_delimiter(
+        self,
+        benchmark_config: BenchmarkConfig,
+        benchmark_instance: Any | None,
+    ) -> tuple[dict[str, list[str]], str | None]:
+        """Resolve column name mappings and CSV delimiter for the benchmark.
 
-        if missing_paths:
-            per_table_stats: dict[str, TableLoadingStats] = {}
-            for table_name, paths in missing_paths.items():
-                missing_list = ", ".join(str(p) for p in paths[:5])
-                more = "..." if len(paths) > 5 else ""
-                per_table_stats[table_name] = TableLoadingStats(
-                    rows=0,
-                    load_time_ms=0,
-                    status="FAILED",
-                    error_type="MissingDataError",
-                    error_message=f"Missing data files: {missing_list}{more}",
-                )
-            missing_summary = "; ".join(f"{t}: {len(p)} file(s)" for t, p in missing_paths.items())
-            raise DataLoadingError(
-                "Data files not found. Missing: "
-                f"{missing_summary}. Run with --phases generate,load or --force-regenerate to recreate data.",
-                per_table_stats=per_table_stats,
-            )
-
-        # Get schema info for column names.
-        # Check get_data_source_benchmark() so TPC-H-derived benchmarks (e.g.
-        # Read Primitives, Write Primitives) get proper column names for
-        # headerless .tbl files.
+        Returns:
+            Tuple of (column_names_map, csv_delimiter)
+        """
         benchmark_id = normalize_benchmark_id(benchmark_config.name)
         if benchmark_id != "tpch" and benchmark_instance is not None:
             source_benchmark = getattr(benchmark_instance, "get_data_source_benchmark", lambda: None)()
@@ -500,14 +507,29 @@ class BenchmarkExecutionMixin:
                 benchmark_id = "tpch"
         column_names_map = get_tpch_column_names() if benchmark_id == "tpch" else {}
 
-        # Get benchmark-specific CSV delimiter (e.g. ClickBench uses pipe-delimited CSV)
         csv_delimiter = getattr(benchmark_instance, "csv_delimiter", None)
         if csv_delimiter is None and benchmark_instance is not None:
             impl = getattr(benchmark_instance, "_impl", None)
             if impl is not None:
                 csv_delimiter = getattr(impl, "csv_delimiter", None)
 
-        # Load tables
+        return column_names_map, csv_delimiter
+
+    def _load_tables_into_context(
+        self,
+        ctx: Any,
+        data_paths: dict[str, Path | list[Path]],
+        column_names_map: dict[str, list[str]],
+        csv_delimiter: str | None,
+    ) -> tuple[dict[str, int], dict[str, TableLoadingStats]]:
+        """Load all tables into the execution context.
+
+        Returns:
+            Tuple of (table_stats, per_table_loading_stats)
+
+        Raises:
+            DataLoadingError: If any tables fail to load.
+        """
         table_stats: dict[str, int] = {}
         per_table_stats: dict[str, TableLoadingStats] = {}
 
@@ -515,7 +537,6 @@ class BenchmarkExecutionMixin:
             load_start = mono_time()
             try:
                 column_names = column_names_map.get(table_name.lower())
-                # Ensure file_path is a list
                 file_paths = [file_path] if not isinstance(file_path, list) else file_path
                 row_count = self.load_table(
                     ctx, table_name.lower(), file_paths, column_names=column_names, delimiter=csv_delimiter
@@ -551,6 +572,78 @@ class BenchmarkExecutionMixin:
 
         return table_stats, per_table_stats
 
+    def _load_data_phase(
+        self,
+        ctx: Any,
+        benchmark_config: BenchmarkConfig,
+        benchmark_instance: Any | None,
+        data_dir: Path | None,
+        options: DataFrameRunOptions,
+    ) -> tuple[dict[str, int], dict[str, TableLoadingStats]]:
+        """Load benchmark data into DataFrame context.
+
+        Returns:
+            Tuple of (table_stats, per_table_loading_stats)
+        """
+        platform_name = self.platform_name.lower()
+
+        loader = DataFrameDataLoader(
+            platform=platform_name,
+            cache_dir=options.cache_dir,
+            prefer_parquet=options.prefer_parquet,
+            force_regenerate=options.force_regenerate,
+        )
+
+        options_map = getattr(benchmark_config, "options", {}) or {}
+        df_tuning_config = options_map.get("df_tuning_config")
+        write_config = getattr(df_tuning_config, "write", None) if df_tuning_config else None
+
+        def _prepare_data_or_raise() -> dict[str, Path | list[Path]]:
+            if benchmark_instance is None:
+                raise DataLoadingError("Cannot prepare Parquet data without a benchmark instance.")
+            try:
+                prepared_paths = loader.prepare_benchmark_data(
+                    benchmark_instance,
+                    scale_factor=getattr(benchmark_config, "scale_factor", 1.0),
+                    data_dir=data_dir,
+                    write_config=write_config,
+                )
+            except Exception as prep_err:
+                raise DataLoadingError(
+                    f"Data preparation failed in prefer_parquet mode: {type(prep_err).__name__}: {prep_err}"
+                ) from prep_err
+            if not prepared_paths:
+                raise DataLoadingError("Data preparation produced no table paths in prefer_parquet mode.")
+            logger.info(f"Using prepared data: {len(prepared_paths)} tables")
+            return prepared_paths
+
+        # Resolve data paths from available sources
+        data_paths = self._resolve_data_paths(benchmark_instance, data_dir, options, loader)
+
+        if not data_paths:
+            raise ValueError("No data source available. Either provide data_dir or generate data first.")
+
+        if options.prefer_parquet:
+            data_paths = _prepare_data_or_raise()
+
+        # Verify paths exist, regenerate if needed
+        missing_paths = self._find_missing_paths(data_paths)
+        if missing_paths and benchmark_instance and hasattr(benchmark_instance, "generate_data"):
+            logger.info("Missing data files detected, regenerating benchmark data...")
+            data_paths = self._generate_benchmark_data(benchmark_instance)
+            if options.prefer_parquet:
+                data_paths = _prepare_data_or_raise()
+            missing_paths = self._find_missing_paths(data_paths)
+
+        if missing_paths:
+            self._raise_missing_paths_error(missing_paths)
+
+        # Resolve schema and delimiter info
+        column_names_map, csv_delimiter = self._resolve_column_names_and_delimiter(benchmark_config, benchmark_instance)
+
+        # Load tables into context
+        return self._load_tables_into_context(ctx, data_paths, column_names_map, csv_delimiter)
+
     def _execute_queries_phase(
         self,
         ctx: Any,
@@ -576,22 +669,7 @@ class BenchmarkExecutionMixin:
             or GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS
         )
 
-        # Get query subset filter if specified
-        query_subset = getattr(benchmark_config, "queries", None)
-        query_filter: set[str] | None = None
-        if query_subset:
-            # Normalize query IDs - handle both "1" and "Q1" formats
-            normalized = set()
-            for q in query_subset:
-                q_str = str(q).strip().upper()
-                # Add both forms for matching: "Q1" and "1"
-                if q_str.startswith("Q"):
-                    normalized.add(q_str)  # Q1
-                    normalized.add(q_str[1:])  # 1
-                else:
-                    normalized.add(q_str)  # 1
-                    normalized.add(f"Q{q_str}")  # Q1
-            query_filter = normalized
+        query_filter = self._build_query_filter(benchmark_config)
 
         # Benchmark-specific DataFrame workload hook for non-query style benchmarks
         if benchmark_instance and hasattr(benchmark_instance, "execute_dataframe_workload"):
@@ -604,81 +682,23 @@ class BenchmarkExecutionMixin:
                 run_options=run_options,
             )
 
-        # Benchmark-provided query skip list (e.g. SQL-only primitives)
-        skip_query_ids: set[str] = set()
-        if benchmark_instance and hasattr(benchmark_instance, "get_dataframe_skip_queries"):
-            raw_skip_ids = benchmark_instance.get_dataframe_skip_queries()  # type: ignore[no-untyped-call]
-            skip_query_ids = {str(query_id).strip().upper() for query_id in raw_skip_ids}
-
-        # Expression-family-specific skip list (queries needing unified API extensions)
-        if (
-            hasattr(self, "family")
-            and self.family == "expression"
-            and benchmark_instance
-            and hasattr(benchmark_instance, "get_expression_family_skip_queries")
-        ):
-            expr_skip_ids = benchmark_instance.get_expression_family_skip_queries()
-            skip_query_ids |= {str(query_id).strip().upper() for query_id in expr_skip_ids}
-
-        # DataFusion-specific skip list (Polars-only features, v50 missing bindings)
-        if (
-            hasattr(self, "platform_name")
-            and self.platform_name == "DataFusion"
-            and benchmark_instance
-            and hasattr(benchmark_instance, "get_datafusion_skip_queries")
-        ):
-            df_skip_ids = benchmark_instance.get_datafusion_skip_queries()
-            skip_query_ids |= {str(query_id).strip().upper() for query_id in df_skip_ids}
+        skip_query_ids = self._collect_skip_query_ids(benchmark_instance)
 
         # Get initial query set to determine total count
-        initial_queries = self._get_queries_for_benchmark(benchmark_config, benchmark_instance, stream_id=0)
-        if skip_query_ids:
-            initial_queries = [q for q in initial_queries if q.query_id.upper() not in skip_query_ids]
-        if query_filter:
-            initial_queries = [q for q in initial_queries if q.query_id.upper() in query_filter]
+        initial_queries = self._filter_queries(
+            self._get_queries_for_benchmark(benchmark_config, benchmark_instance, stream_id=0),
+            skip_query_ids,
+            query_filter,
+        )
 
         filtered_skip_query_ids = skip_query_ids
         if query_filter and skip_query_ids:
             filtered_skip_query_ids = {query_id for query_id in skip_query_ids if query_id in query_filter}
 
-        skipped_results: list[dict[str, Any]] = []
-        if filtered_skip_query_ids:
-            skipped_results = [
-                {
-                    "query_id": query_id,
-                    "status": "SKIPPED",
-                    "execution_time_seconds": 0.0,
-                    "error": "Skipped in DataFrame mode (SQL-only primitive)",
-                    "run_type": "metadata",
-                    "stream_id": 0,
-                    "iteration": 0,
-                }
-                for query_id in sorted(filtered_skip_query_ids)
-            ]
+        skipped_results = self._build_skipped_results(filtered_skip_query_ids)
 
         if not initial_queries:
-            logger.warning("No queries found for execution")
-            if skipped_results:
-                skipped_categories = self._count_query_categories(filtered_skip_query_ids)
-                skipped_results.append(
-                    {
-                        "query_id": "DF_SKIP_SUMMARY",
-                        "status": "SUCCESS",
-                        "execution_time_seconds": 0.0,
-                        "run_type": "summary",
-                        "stream_id": 0,
-                        "iteration": 0,
-                        "rows_returned": len(filtered_skip_query_ids),
-                        "dataframe_skip_summary": {
-                            "executed_total": 0,
-                            "skipped_total": len(filtered_skip_query_ids),
-                            "executed_by_category": {},
-                            "skipped_by_category": skipped_categories,
-                        },
-                    }
-                )
-                return skipped_results
-            return []
+            return self._handle_no_queries(skipped_results, filtered_skip_query_ids)
 
         total_queries = len(initial_queries)
         logger.info(f"Executing {total_queries} queries")
@@ -688,47 +708,219 @@ class BenchmarkExecutionMixin:
         executed_query_ids: list[str] = []
 
         # Execute warmup iterations (emit results)
-        if warmup_iterations > 0:
-            console.print(f"\n[yellow]Running {warmup_iterations} warmup iteration(s)...[/yellow]")
-            for warmup_iter in range(warmup_iterations):
-                warmup_queries = self._get_queries_for_benchmark(benchmark_config, benchmark_instance, stream_id=0)
-                if skip_query_ids:
-                    warmup_queries = [q for q in warmup_queries if q.query_id.upper() not in skip_query_ids]
-                if query_filter:
-                    warmup_queries = [q for q in warmup_queries if q.query_id.upper() in query_filter]
-
-                console.print(f"[dim]Warmup {warmup_iter + 1}/{warmup_iterations} (stream 0)[/dim]")
-                for query in warmup_queries:
-                    try:
-                        result = self.execute_query(ctx, query)
-                        result = dict(result)
-                    except Exception as e:
-                        logger.warning(f"Warmup query {query.query_id} failed: {e}")
-                        result = {
-                            "query_id": query.query_id,
-                            "status": "FAILED",
-                            "error": str(e),
-                            "execution_time_seconds": 0.0,
-                        }
-                    result["iteration"] = 0
-                    result["stream_id"] = 0
-                    result["run_type"] = "warmup"
-                    query_results.append(result)
+        self._run_warmup_iterations(
+            ctx=ctx,
+            warmup_iterations=warmup_iterations,
+            benchmark_config=benchmark_config,
+            benchmark_instance=benchmark_instance,
+            skip_query_ids=skip_query_ids,
+            query_filter=query_filter,
+            query_results=query_results,
+        )
 
         # Execute measurement iterations
+        self._run_measurement_iterations(
+            ctx=ctx,
+            measurement_iterations=measurement_iterations,
+            warmup_iterations=warmup_iterations,
+            total_queries=total_queries,
+            benchmark_config=benchmark_config,
+            benchmark_instance=benchmark_instance,
+            skip_query_ids=skip_query_ids,
+            query_filter=query_filter,
+            monitor=monitor,
+            run_options=run_options,
+            query_results=query_results,
+            executed_query_ids=executed_query_ids,
+        )
+
+        if filtered_skip_query_ids:
+            self._append_skip_summary(query_results, set(executed_query_ids), filtered_skip_query_ids)
+
+        return query_results
+
+    @staticmethod
+    def _build_query_filter(benchmark_config: BenchmarkConfig) -> set[str] | None:
+        """Normalize query subset into a bidirectional filter set (Q1 <-> 1)."""
+        query_subset = getattr(benchmark_config, "queries", None)
+        if not query_subset:
+            return None
+        normalized = set()
+        for q in query_subset:
+            q_str = str(q).strip().upper()
+            if q_str.startswith("Q"):
+                normalized.add(q_str)
+                normalized.add(q_str[1:])
+            else:
+                normalized.add(q_str)
+                normalized.add(f"Q{q_str}")
+        return normalized
+
+    def _collect_skip_query_ids(self, benchmark_instance: Any | None) -> set[str]:
+        """Collect all query IDs to skip from benchmark and platform-specific sources."""
+        skip_query_ids: set[str] = set()
+
+        if benchmark_instance and hasattr(benchmark_instance, "get_dataframe_skip_queries"):
+            raw_skip_ids = benchmark_instance.get_dataframe_skip_queries()  # type: ignore[no-untyped-call]
+            skip_query_ids = {str(query_id).strip().upper() for query_id in raw_skip_ids}
+
+        if (
+            hasattr(self, "family")
+            and self.family == "expression"
+            and benchmark_instance
+            and hasattr(benchmark_instance, "get_expression_family_skip_queries")
+        ):
+            expr_skip_ids = benchmark_instance.get_expression_family_skip_queries()
+            skip_query_ids |= {str(query_id).strip().upper() for query_id in expr_skip_ids}
+
+        if (
+            hasattr(self, "platform_name")
+            and self.platform_name == "DataFusion"
+            and benchmark_instance
+            and hasattr(benchmark_instance, "get_datafusion_skip_queries")
+        ):
+            df_skip_ids = benchmark_instance.get_datafusion_skip_queries()
+            skip_query_ids |= {str(query_id).strip().upper() for query_id in df_skip_ids}
+
+        return skip_query_ids
+
+    @staticmethod
+    def _filter_queries(
+        queries: list[DataFrameQuery],
+        skip_query_ids: set[str],
+        query_filter: set[str] | None,
+    ) -> list[DataFrameQuery]:
+        """Apply skip and filter sets to a query list."""
+        if skip_query_ids:
+            queries = [q for q in queries if q.query_id.upper() not in skip_query_ids]
+        if query_filter:
+            queries = [q for q in queries if q.query_id.upper() in query_filter]
+        return queries
+
+    @staticmethod
+    def _build_skipped_results(filtered_skip_query_ids: set[str]) -> list[dict[str, Any]]:
+        """Build result entries for skipped queries."""
+        if not filtered_skip_query_ids:
+            return []
+        return [
+            {
+                "query_id": query_id,
+                "status": "SKIPPED",
+                "execution_time_seconds": 0.0,
+                "error": "Skipped in DataFrame mode (SQL-only primitive)",
+                "run_type": "metadata",
+                "stream_id": 0,
+                "iteration": 0,
+            }
+            for query_id in sorted(filtered_skip_query_ids)
+        ]
+
+    def _handle_no_queries(
+        self,
+        skipped_results: list[dict[str, Any]],
+        filtered_skip_query_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        """Handle the case where no executable queries are found."""
+        logger.warning("No queries found for execution")
+        if skipped_results:
+            skipped_categories = self._count_query_categories(filtered_skip_query_ids)
+            skipped_results.append(
+                {
+                    "query_id": "DF_SKIP_SUMMARY",
+                    "status": "SUCCESS",
+                    "execution_time_seconds": 0.0,
+                    "run_type": "summary",
+                    "stream_id": 0,
+                    "iteration": 0,
+                    "rows_returned": len(filtered_skip_query_ids),
+                    "dataframe_skip_summary": {
+                        "executed_total": 0,
+                        "skipped_total": len(filtered_skip_query_ids),
+                        "executed_by_category": {},
+                        "skipped_by_category": skipped_categories,
+                    },
+                }
+            )
+            return skipped_results
+        return []
+
+    def _run_warmup_iterations(
+        self,
+        ctx: Any,
+        warmup_iterations: int,
+        benchmark_config: BenchmarkConfig,
+        benchmark_instance: Any | None,
+        skip_query_ids: set[str],
+        query_filter: set[str] | None,
+        query_results: list[dict[str, Any]],
+    ) -> None:
+        """Execute warmup iterations, appending results to query_results."""
+        if warmup_iterations <= 0:
+            return
+
+        console.print(f"\n[yellow]Running {warmup_iterations} warmup iteration(s)...[/yellow]")
+        for warmup_iter in range(warmup_iterations):
+            warmup_queries = self._filter_queries(
+                self._get_queries_for_benchmark(benchmark_config, benchmark_instance, stream_id=0),
+                skip_query_ids,
+                query_filter,
+            )
+
+            console.print(f"[dim]Warmup {warmup_iter + 1}/{warmup_iterations} (stream 0)[/dim]")
+            for query in warmup_queries:
+                try:
+                    result = self.execute_query(ctx, query)
+                    result = dict(result)
+                except Exception as e:
+                    logger.warning(f"Warmup query {query.query_id} failed: {e}")
+                    result = {
+                        "query_id": query.query_id,
+                        "status": "FAILED",
+                        "error": str(e),
+                        "execution_time_seconds": 0.0,
+                    }
+                result["iteration"] = 0
+                result["stream_id"] = 0
+                result["run_type"] = "warmup"
+                query_results.append(result)
+
+    def _run_measurement_iterations(
+        self,
+        ctx: Any,
+        measurement_iterations: int,
+        warmup_iterations: int,
+        total_queries: int,
+        benchmark_config: BenchmarkConfig,
+        benchmark_instance: Any | None,
+        skip_query_ids: set[str],
+        query_filter: set[str] | None,
+        monitor: Any | None,
+        run_options: DataFrameRunOptions | None,
+        query_results: list[dict[str, Any]],
+        executed_query_ids: list[str],
+    ) -> None:
+        """Execute measurement iterations, appending results to query_results and executed_query_ids."""
+        capture_plans = bool(getattr(benchmark_config, "capture_plans", False))
+        profiled_runner = getattr(self, "execute_query_profiled", None)
+        supports_profiled = callable(profiled_runner)
+        supports_capture_plan_kw = False
+        if supports_profiled:
+            try:
+                supports_capture_plan_kw = "capture_plan" in inspect.signature(profiled_runner).parameters
+            except (TypeError, ValueError):
+                supports_capture_plan_kw = False
+
         console.print(
             f"\n[cyan]Running {measurement_iterations} measurement iteration(s) with {total_queries} queries each...[/cyan]"
         )
 
         for iteration in range(measurement_iterations):
             measurement_stream_id = warmup_iterations + iteration
-            measurement_queries = self._get_queries_for_benchmark(
-                benchmark_config, benchmark_instance, stream_id=measurement_stream_id
+            measurement_queries = self._filter_queries(
+                self._get_queries_for_benchmark(benchmark_config, benchmark_instance, stream_id=measurement_stream_id),
+                skip_query_ids,
+                query_filter,
             )
-            if skip_query_ids:
-                measurement_queries = [q for q in measurement_queries if q.query_id.upper() not in skip_query_ids]
-            if query_filter:
-                measurement_queries = [q for q in measurement_queries if q.query_id.upper() in query_filter]
 
             console.print(
                 f"\n[green]Iteration {iteration + 1}/{measurement_iterations} (stream {measurement_stream_id})[/green]"
@@ -739,30 +931,20 @@ class BenchmarkExecutionMixin:
                 if run_options and (run_options.verbose or run_options.very_verbose):
                     console.print(f"[blue]Executing query {i}/{total_queries}: {query.query_id}[/blue]")
 
-                def execute_single_query(q=query):
-                    try:
-                        result = self.execute_query(ctx, q)
-                        result = dict(result)
-                    except Exception as e:
-                        logger.error(f"Query {q.query_id} failed: {e}")
-                        result = {
-                            "query_id": q.query_id,
-                            "status": "FAILED",
-                            "error": str(e),
-                            "execution_time_seconds": 0.0,
-                        }
-                    result["iteration"] = iteration + 1
-                    result["stream_id"] = measurement_stream_id
-                    result["run_type"] = "measurement"
-                    query_results.append(result)
-                    executed_query_ids.append(str(q.query_id).strip().upper())
-                    iteration_results.append(result)
-
-                if monitor:
-                    with monitor.time_operation(f"query_{query.query_id}_iter{iteration + 1}"):
-                        execute_single_query()
-                else:
-                    execute_single_query()
+                result = self._execute_single_measurement_query(
+                    ctx=ctx,
+                    query=query,
+                    capture_plans=capture_plans,
+                    supports_profiled=supports_profiled,
+                    supports_capture_plan_kw=supports_capture_plan_kw,
+                    profiled_runner=profiled_runner,
+                    iteration=iteration + 1,
+                    stream_id=measurement_stream_id,
+                    monitor=monitor,
+                )
+                query_results.append(result)
+                executed_query_ids.append(str(query.query_id).strip().upper())
+                iteration_results.append(result)
 
             self._print_iteration_summary(
                 iteration + 1,
@@ -771,27 +953,75 @@ class BenchmarkExecutionMixin:
                 benchmark_config,
             )
 
-        if filtered_skip_query_ids:
-            executed_unique_ids = set(executed_query_ids)
-            query_results.append(
-                {
-                    "query_id": "DF_SKIP_SUMMARY",
-                    "status": "SUCCESS",
-                    "execution_time_seconds": 0.0,
-                    "run_type": "summary",
-                    "stream_id": 0,
-                    "iteration": 0,
-                    "rows_returned": len(filtered_skip_query_ids),
-                    "dataframe_skip_summary": {
-                        "executed_total": len(executed_unique_ids),
-                        "skipped_total": len(filtered_skip_query_ids),
-                        "executed_by_category": self._count_query_categories(executed_unique_ids),
-                        "skipped_by_category": self._count_query_categories(filtered_skip_query_ids),
-                    },
-                }
-            )
+    def _execute_single_measurement_query(
+        self,
+        ctx: Any,
+        query: DataFrameQuery,
+        capture_plans: bool,
+        supports_profiled: bool,
+        supports_capture_plan_kw: bool,
+        profiled_runner: Any,
+        iteration: int,
+        stream_id: int,
+        monitor: Any | None,
+    ) -> dict[str, Any]:
+        """Execute a single measurement query, optionally with monitoring and plan capture."""
 
-        return query_results
+        def _run() -> dict[str, Any]:
+            try:
+                if capture_plans and supports_profiled:
+                    if supports_capture_plan_kw:
+                        raw_result, profile = profiled_runner(ctx, query, capture_plan=True)
+                    else:
+                        raw_result, profile = profiled_runner(ctx, query)
+                    raw_result = dict(raw_result)
+                    if profile.query_plan is not None:
+                        raw_result["query_plan"] = profile.query_plan
+                else:
+                    raw_result = self.execute_query(ctx, query)
+                    raw_result = dict(raw_result)
+            except Exception as e:
+                logger.error(f"Query {query.query_id} failed: {e}")
+                raw_result = {
+                    "query_id": query.query_id,
+                    "status": "FAILED",
+                    "error": str(e),
+                    "execution_time_seconds": 0.0,
+                }
+            raw_result["iteration"] = iteration
+            raw_result["stream_id"] = stream_id
+            raw_result["run_type"] = "measurement"
+            return raw_result
+
+        if monitor:
+            with monitor.time_operation(f"query_{query.query_id}_iter{iteration}"):
+                return _run()
+        return _run()
+
+    def _append_skip_summary(
+        self,
+        query_results: list[dict[str, Any]],
+        executed_unique_ids: set[str],
+        filtered_skip_query_ids: set[str],
+    ) -> None:
+        """Append a DF_SKIP_SUMMARY entry to query_results."""
+        query_results.append(
+            {
+                "query_id": "DF_SKIP_SUMMARY",
+                "status": "SUCCESS",
+                "execution_time_seconds": 0.0,
+                "run_type": "summary",
+                "stream_id": 0,
+                "iteration": 0,
+                "rows_returned": len(filtered_skip_query_ids),
+                "dataframe_skip_summary": {
+                    "executed_total": len(executed_unique_ids),
+                    "skipped_total": len(filtered_skip_query_ids),
+                    "executed_by_category": self._count_query_categories(executed_unique_ids),
+                    "skipped_by_category": self._count_query_categories(filtered_skip_query_ids),
+                },
+            }
+        )
 
     def _print_iteration_summary(
         self,
@@ -865,104 +1095,9 @@ class BenchmarkExecutionMixin:
 
         # Check registry for pre-defined queries
         if benchmark_id == "tpch":
-            from benchbox.core.tpch.dataframe_queries import TPCH_DATAFRAME_QUERIES
-            from benchbox.core.tpch.streams import TPCHStreams
-
-            query_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id % len(TPCHStreams.PERMUTATION_MATRIX)]
-
-            queries = []
-            for query_num in query_permutation:
-                query_id = f"Q{query_num}"
-                query = TPCH_DATAFRAME_QUERIES.get(query_id)
-                if query:
-                    queries.append(query)
-                else:
-                    logger.warning(f"Query {query_id} not found in TPC-H DataFrame registry")
-            return queries
-
+            return self._get_tpch_queries(stream_id)
         elif benchmark_id == "tpcds":
-            from benchbox.core.tpcds.dataframe_queries import TPCDS_DATAFRAME_QUERIES
-            from benchbox.core.tpcds.streams import create_standard_streams
-
-            options_map = getattr(benchmark_config, "options", {}) or {}
-            allow_variant_fallback = bool(options_map.get("tpcds_dataframe_variant_fallback", True))
-
-            queries = []
-            missing_variants: list[str] = []
-
-            query_manager = None
-            if benchmark_instance and hasattr(benchmark_instance, "query_manager"):
-                query_manager = benchmark_instance.query_manager
-            elif (
-                benchmark_instance
-                and hasattr(benchmark_instance, "_impl")
-                and hasattr(benchmark_instance._impl, "query_manager")
-            ):
-                query_manager = benchmark_instance._impl.query_manager
-
-            available_query_ids = sorted(
-                int(qid[1:])
-                for qid in TPCDS_DATAFRAME_QUERIES.get_query_ids()
-                if qid.upper().startswith("Q") and qid[1:].isdigit()
-            )
-
-            if query_manager is None:
-                logger.warning("TPC-DS query_manager unavailable; using legacy 99-query DataFrame ordering")
-                from benchbox.core.tpcds.streams import PermutationMode, TPCDSPermutationGenerator
-
-                generator = TPCDSPermutationGenerator(seed=42 + stream_id)
-                query_permutation = generator.generate_permutation(available_query_ids, PermutationMode.TPCDS_STANDARD)
-                for query_num in query_permutation:
-                    query_id = f"Q{query_num}"
-                    query = TPCDS_DATAFRAME_QUERIES.get(query_id)
-                    if query:
-                        queries.append(query)
-                return queries
-
-            stream_manager = create_standard_streams(
-                query_manager=query_manager,
-                num_streams=1,
-                query_ids=available_query_ids,
-                query_range=(1, 99),
-                base_seed=42 + stream_id,
-            )
-            stream_queries = stream_manager.generate_streams().get(0, [])
-
-            for stream_query in stream_queries:
-                base_query_id = f"Q{stream_query.query_id}"
-                base_query = TPCDS_DATAFRAME_QUERIES.get(base_query_id)
-                if base_query is None:
-                    logger.warning("Query %s not found in TPC-DS DataFrame registry", base_query_id)
-                    continue
-
-                if stream_query.variant is None:
-                    queries.append(base_query)
-                    continue
-
-                variant_id = f"{base_query_id}{stream_query.variant.lower()}"
-                variant_query = (
-                    TPCDS_DATAFRAME_QUERIES.get(variant_id)
-                    or TPCDS_DATAFRAME_QUERIES.get(variant_id.upper())
-                    or TPCDS_DATAFRAME_QUERIES.get(variant_id.capitalize())
-                )
-                if variant_query is not None:
-                    queries.append(variant_query)
-                    continue
-
-                missing_variants.append(variant_id)
-                if allow_variant_fallback:
-                    queries.append(replace(base_query, query_id=variant_id))
-
-            if missing_variants and not allow_variant_fallback:
-                missing = ", ".join(sorted(set(missing_variants)))
-                raise RuntimeError(
-                    "TPC-DS DataFrame SQL parity check failed: missing variant DataFrame implementations "
-                    f"for [{missing}]. Set option tpcds_dataframe_variant_fallback=true to allow "
-                    "non-parity fallback execution."
-                )
-
-            return queries
-
+            return self._get_tpcds_queries(benchmark_config, benchmark_instance, stream_id)
         elif benchmark_id == "clickbench":
             from benchbox.core.clickbench.dataframe_queries import CLICKBENCH_DATAFRAME_QUERIES
 
@@ -981,6 +1116,114 @@ class BenchmarkExecutionMixin:
             )
 
         return []
+
+    @staticmethod
+    def _get_tpch_queries(stream_id: int) -> list[DataFrameQuery]:
+        """Get TPC-H DataFrame queries in stream-permuted order."""
+        from benchbox.core.tpch.dataframe_queries import TPCH_DATAFRAME_QUERIES
+        from benchbox.core.tpch.streams import TPCHStreams
+
+        query_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id % len(TPCHStreams.PERMUTATION_MATRIX)]
+
+        queries: list[DataFrameQuery] = []
+        for query_num in query_permutation:
+            query_id = f"Q{query_num}"
+            query = TPCH_DATAFRAME_QUERIES.get(query_id)
+            if query:
+                queries.append(query)
+            else:
+                logger.warning(f"Query {query_id} not found in TPC-H DataFrame registry")
+        return queries
+
+    @staticmethod
+    def _get_tpcds_queries(
+        benchmark_config: BenchmarkConfig,
+        benchmark_instance: Any | None,
+        stream_id: int,
+    ) -> list[DataFrameQuery]:
+        """Get TPC-DS DataFrame queries in stream-permuted order with variant resolution."""
+        from benchbox.core.tpcds.dataframe_queries import TPCDS_DATAFRAME_QUERIES
+        from benchbox.core.tpcds.streams import create_standard_streams
+
+        options_map = getattr(benchmark_config, "options", {}) or {}
+        allow_variant_fallback = bool(options_map.get("tpcds_dataframe_variant_fallback", True))
+
+        query_manager = None
+        if benchmark_instance and hasattr(benchmark_instance, "query_manager"):
+            query_manager = benchmark_instance.query_manager
+        elif (
+            benchmark_instance
+            and hasattr(benchmark_instance, "_impl")
+            and hasattr(benchmark_instance._impl, "query_manager")
+        ):
+            query_manager = benchmark_instance._impl.query_manager
+
+        available_query_ids = sorted(
+            int(qid[1:])
+            for qid in TPCDS_DATAFRAME_QUERIES.get_query_ids()
+            if qid.upper().startswith("Q") and qid[1:].isdigit()
+        )
+
+        if query_manager is None:
+            logger.warning("TPC-DS query_manager unavailable; using legacy 99-query DataFrame ordering")
+            from benchbox.core.tpcds.streams import PermutationMode, TPCDSPermutationGenerator
+
+            generator = TPCDSPermutationGenerator(seed=42 + stream_id)
+            query_permutation = generator.generate_permutation(available_query_ids, PermutationMode.TPCDS_STANDARD)
+            queries: list[DataFrameQuery] = []
+            for query_num in query_permutation:
+                query_id = f"Q{query_num}"
+                query = TPCDS_DATAFRAME_QUERIES.get(query_id)
+                if query:
+                    queries.append(query)
+            return queries
+
+        stream_manager = create_standard_streams(
+            query_manager=query_manager,
+            num_streams=1,
+            query_ids=available_query_ids,
+            query_range=(1, 99),
+            base_seed=42 + stream_id,
+        )
+        stream_queries = stream_manager.generate_streams().get(0, [])
+
+        queries = []
+        missing_variants: list[str] = []
+
+        for stream_query in stream_queries:
+            base_query_id = f"Q{stream_query.query_id}"
+            base_query = TPCDS_DATAFRAME_QUERIES.get(base_query_id)
+            if base_query is None:
+                logger.warning("Query %s not found in TPC-DS DataFrame registry", base_query_id)
+                continue
+
+            if stream_query.variant is None:
+                queries.append(base_query)
+                continue
+
+            variant_id = f"{base_query_id}{stream_query.variant.lower()}"
+            variant_query = (
+                TPCDS_DATAFRAME_QUERIES.get(variant_id)
+                or TPCDS_DATAFRAME_QUERIES.get(variant_id.upper())
+                or TPCDS_DATAFRAME_QUERIES.get(variant_id.capitalize())
+            )
+            if variant_query is not None:
+                queries.append(variant_query)
+                continue
+
+            missing_variants.append(variant_id)
+            if allow_variant_fallback:
+                queries.append(replace(base_query, query_id=variant_id))
+
+        if missing_variants and not allow_variant_fallback:
+            missing = ", ".join(sorted(set(missing_variants)))
+            raise RuntimeError(
+                "TPC-DS DataFrame SQL parity check failed: missing variant DataFrame implementations "
+                f"for [{missing}]. Set option tpcds_dataframe_variant_fallback=true to allow "
+                "non-parity fallback execution."
+            )
+
+        return queries
 
     @staticmethod
     def _query_category(query_id: str) -> str:

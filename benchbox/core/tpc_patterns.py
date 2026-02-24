@@ -711,7 +711,7 @@ class StreamExecutor:
                 except Exception as e:
                     self.logger.warning(f"Error closing connection for stream {config.stream_id}: {e}")
 
-            stream_result.end_time = time.time()
+            stream_result.end_time = mono_time()
 
         return stream_result
 

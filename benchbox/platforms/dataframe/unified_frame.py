@@ -2628,17 +2628,7 @@ def _apply_datafusion_post_ops(result: Any, post_ops: list[tuple]) -> Any:
                     result = result.drop(temp_alias)
 
         else:
-            # Legacy format: (temp_alias, final_alias, value, operation)
-            # Keep for backwards compatibility
-            temp_alias, final_alias, value, operation = post_op
-
-            if operation == "multiply":
-                result = result.with_column(final_alias, df_col(temp_alias) * value)
-            elif operation == "divide":
-                result = result.with_column(final_alias, df_col(temp_alias) / value)
-
-            if temp_alias != final_alias:
-                result = result.drop(temp_alias)
+            raise ValueError(f"Unsupported DataFusion post-op format: {post_op}")
 
     return result
 

@@ -109,6 +109,21 @@ DataFusionAdapter(
 | `--datafusion-batch-size` | `batch_size` | int | 8192 | RecordBatch size for query execution |
 | `--datafusion-working-dir` | `working_dir` | str | Auto | Working directory for tables and data |
 
+### Testing a Specific DataFusion Version
+
+The universal `driver_version` and `driver_auto_install` options are available via `--platform-option`:
+
+```bash
+benchbox run --platform datafusion --benchmark tpch \
+  --platform-option driver_version=50.1.0 \
+  --platform-option driver_auto_install=true
+```
+
+The driver package for DataFusion is `datafusion`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
+
 ### Performance Tuning
 
 #### Memory Configuration

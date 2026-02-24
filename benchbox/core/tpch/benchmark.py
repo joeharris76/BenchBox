@@ -90,6 +90,49 @@ class TPCHMaintenanceTestConfig:
     output_dir: Path | None = None
 
 
+def _validate_tpch_get_query_args(query_id: int, scale_factor: float | None, seed: int | None) -> None:
+    """Validate common arguments for get_query."""
+    if not isinstance(query_id, int):
+        raise TypeError(f"query_id must be an integer, got {type(query_id).__name__}")
+    if not (1 <= query_id <= 22):
+        raise ValueError(f"Query ID must be 1-22, got {query_id}")
+    if scale_factor is not None:
+        if not isinstance(scale_factor, (int, float)):
+            raise TypeError(f"scale_factor must be a number, got {type(scale_factor).__name__}")
+        if scale_factor <= 0:
+            raise ValueError(f"scale_factor must be positive, got {scale_factor}")
+    if seed is not None and not isinstance(seed, int):
+        raise TypeError(f"seed must be an integer, got {type(seed).__name__}")
+
+
+def _resolve_tpch_seed(
+    actual_seed: int | None, query_id: int, stream_id: int | None, permutation: list | None
+) -> int | None:
+    """Resolve seed from stream_id or explicit permutation for TPC-H queries."""
+    if stream_id is not None:
+        if not (0 <= stream_id < len(TPCHStreams.PERMUTATION_MATRIX)):
+            raise ValueError(f"stream_id must be 0-{len(TPCHStreams.PERMUTATION_MATRIX) - 1}")
+
+        stream_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id]
+        try:
+            position = stream_permutation.index(query_id)
+            if actual_seed is None:
+                return stream_id * 1000 + position
+        except ValueError:
+            raise ValueError(f"Query {query_id} not found in stream {stream_id} permutation")
+
+    elif permutation is not None:
+        if query_id not in permutation:
+            raise ValueError(f"Query {query_id} not found in provided permutation")
+        if actual_seed is None:
+            try:
+                return permutation.index(query_id)
+            except ValueError:
+                pass
+
+    return actual_seed
+
+
 class TPCHBenchmark(BaseBenchmark):
     """TPC-H benchmark implementation.
 
@@ -259,69 +302,18 @@ class TPCHBenchmark(BaseBenchmark):
             ValueError: If the query_id is invalid
             TypeError: If query_id is not an integer
         """
-        # Validate query_id to match TPC-DS patterns
-        if not isinstance(query_id, int):
-            raise TypeError(f"query_id must be an integer, got {type(query_id).__name__}")
-        if not (1 <= query_id <= 22):
-            raise ValueError(f"Query ID must be 1-22, got {query_id}")
-
-        # Validate scale_factor if provided
-        if scale_factor is not None:
-            if not isinstance(scale_factor, (int, float)):
-                raise TypeError(f"scale_factor must be a number, got {type(scale_factor).__name__}")
-            if scale_factor <= 0:
-                raise ValueError(f"scale_factor must be positive, got {scale_factor}")
-
-        # Validate seed if provided
-        if seed is not None and not isinstance(seed, int):
-            raise TypeError(f"seed must be an integer, got {type(seed).__name__}")
+        _validate_tpch_get_query_args(query_id, scale_factor, seed)
 
         if params is None:
             params = {}
 
-        # Extract parameters from both params dict and direct arguments
-        # Direct arguments take precedence
         actual_seed = seed if seed is not None else params.get("seed")
         actual_scale_factor = (
             scale_factor if scale_factor is not None else params.get("scale_factor", self.scale_factor)
         )
-        stream_id = params.get("stream_id")
-        permutation = params.get("permutation")
 
-        # Handle stream/permutation logic
-        if stream_id is not None:
-            # Import permutation matrix from streams module
-            from benchbox.core.tpch.streams import TPCHStreams
+        actual_seed = _resolve_tpch_seed(actual_seed, query_id, params.get("stream_id"), params.get("permutation"))
 
-            if not (0 <= stream_id < len(TPCHStreams.PERMUTATION_MATRIX)):
-                raise ValueError(f"stream_id must be 0-{len(TPCHStreams.PERMUTATION_MATRIX) - 1}")
-
-            # Get the permutation for this stream
-            stream_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id]
-
-            # Find the position of query_id in the permutation (for seed generation)
-            try:
-                position = stream_permutation.index(query_id)
-                # Use position-based seed if no explicit seed provided
-                if actual_seed is None:
-                    actual_seed = stream_id * 1000 + position
-            except ValueError:
-                raise ValueError(f"Query {query_id} not found in stream {stream_id} permutation")
-
-        elif permutation is not None:
-            # Use explicit permutation
-            if query_id not in permutation:
-                raise ValueError(f"Query {query_id} not found in provided permutation")
-
-            # Use position-based seed if no explicit seed provided
-            if actual_seed is None:
-                try:
-                    position = permutation.index(query_id)
-                    actual_seed = position
-                except ValueError:
-                    pass
-
-        # Generate base query then always normalize through SQLGlot
         src = (base_dialect or "netezza").lower()
         tgt = (dialect or src).lower()
         query = self.query_manager.get_query(query_id, seed=actual_seed, scale_factor=actual_scale_factor)

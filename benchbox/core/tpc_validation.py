@@ -20,6 +20,8 @@ from pathlib import Path
 from statistics import mean, median, stdev
 from typing import Any, Optional
 
+from benchbox.utils.printing import emit
+
 
 class ValidationLevel(Enum):
     """Validation levels for TPC compliance."""
@@ -402,48 +404,69 @@ class TimingValidator(BaseValidator):
         result = ValidationResult.PASSED
 
         # Validate overall test timing
+        result = self._validate_overall_timing(test_results, report, result)
+
+        # Validate query timing precision and consistency
+        result = self._validate_query_timing(test_results, report, result)
+
+        # Validate data generation timing
+        result = self._validate_data_generation_timing(test_results, report, result)
+
+        return result
+
+    def _validate_overall_timing(
+        self, test_results: dict[str, Any], report: ValidationReport, result: ValidationResult
+    ) -> ValidationResult:
+        """Validate overall test start/end timing."""
         test_start = test_results.get("test_start_time")
         test_end = test_results.get("test_end_time")
 
-        if test_start and test_end:
-            try:
-                start_time = datetime.fromisoformat(test_start.replace("Z", "+00:00"))
-                end_time = datetime.fromisoformat(test_end.replace("Z", "+00:00"))
-                total_time = (end_time - start_time).total_seconds()
+        if not (test_start and test_end):
+            return result
 
-                if total_time > self.max_total_time:
-                    report.add_issue(
-                        "WARNING",
-                        f"Total test time ({total_time}s) exceeds maximum ({self.max_total_time}s)",
-                        {"total_time": total_time, "max_time": self.max_total_time},
-                        self.name,
-                    )
-                    if result == ValidationResult.PASSED:
-                        result = ValidationResult.WARNING
+        try:
+            start_time = datetime.fromisoformat(test_start.replace("Z", "+00:00"))
+            end_time = datetime.fromisoformat(test_end.replace("Z", "+00:00"))
+            total_time = (end_time - start_time).total_seconds()
 
-                if total_time < 0:
-                    report.add_issue(
-                        "ERROR",
-                        "Invalid test timing: end time before start time",
-                        {
-                            "start_time": test_start,
-                            "end_time": test_end,
-                            "total_time": total_time,
-                        },
-                        self.name,
-                    )
-                    result = ValidationResult.FAILED
+            if total_time > self.max_total_time:
+                report.add_issue(
+                    "WARNING",
+                    f"Total test time ({total_time}s) exceeds maximum ({self.max_total_time}s)",
+                    {"total_time": total_time, "max_time": self.max_total_time},
+                    self.name,
+                )
+                if result == ValidationResult.PASSED:
+                    result = ValidationResult.WARNING
 
-            except ValueError as e:
+            if total_time < 0:
                 report.add_issue(
                     "ERROR",
-                    f"Invalid timestamp format: {e}",
-                    {"start_time": test_start, "end_time": test_end},
+                    "Invalid test timing: end time before start time",
+                    {
+                        "start_time": test_start,
+                        "end_time": test_end,
+                        "total_time": total_time,
+                    },
                     self.name,
                 )
                 result = ValidationResult.FAILED
 
-        # Validate query timing precision and consistency
+        except ValueError as e:
+            report.add_issue(
+                "ERROR",
+                f"Invalid timestamp format: {e}",
+                {"start_time": test_start, "end_time": test_end},
+                self.name,
+            )
+            result = ValidationResult.FAILED
+
+        return result
+
+    def _validate_query_timing(
+        self, test_results: dict[str, Any], report: ValidationReport, result: ValidationResult
+    ) -> ValidationResult:
+        """Validate query timing precision and consistency."""
         query_results = test_results.get("query_results", {})
         execution_times = []
 
@@ -486,12 +509,16 @@ class TimingValidator(BaseValidator):
         if len(execution_times) > 1:
             self._validate_timing_consistency(execution_times, report)
 
-        # Validate data generation timing
+        return result
+
+    def _validate_data_generation_timing(
+        self, test_results: dict[str, Any], report: ValidationReport, result: ValidationResult
+    ) -> ValidationResult:
+        """Validate data generation timing."""
         data_generation = test_results.get("data_generation", {})
         gen_time = data_generation.get("generation_time", 0)
 
         if gen_time > 0:
-            # Check if data generation time is reasonable
             tables_generated = len(data_generation.get("generated_tables", []))
             if tables_generated > 0:
                 avg_time_per_table = gen_time / tables_generated
@@ -682,41 +709,22 @@ class MetricsValidator(BaseValidator):
                 )
                 result = ValidationResult.FAILED
 
-        # Validate metric values
+        # Validate metric values (range and type)
+        result = self._validate_metric_values(metrics, report, result)
+
+        # Validate calculated metrics
+        result = self._validate_derived_metrics(test_results, metrics, report, result)
+
+        return result
+
+    def _validate_metric_values(
+        self, metrics: dict[str, Any], report: ValidationReport, result: ValidationResult
+    ) -> ValidationResult:
+        """Validate metric values for range and type constraints."""
         for metric_name, metric_value in metrics.items():
             # Check if metric is within expected range
             if metric_name in self.metric_ranges:
-                range_config = self.metric_ranges[metric_name]
-                min_val = range_config.get("min")
-                max_val = range_config.get("max")
-
-                if min_val is not None and metric_value < min_val:
-                    report.add_issue(
-                        "WARNING",
-                        f"Metric {metric_name} ({metric_value}) below minimum ({min_val})",
-                        {
-                            "metric_name": metric_name,
-                            "value": metric_value,
-                            "min": min_val,
-                        },
-                        self.name,
-                    )
-                    if result == ValidationResult.PASSED:
-                        result = ValidationResult.WARNING
-
-                if max_val is not None and metric_value > max_val:
-                    report.add_issue(
-                        "WARNING",
-                        f"Metric {metric_name} ({metric_value}) above maximum ({max_val})",
-                        {
-                            "metric_name": metric_name,
-                            "value": metric_value,
-                            "max": max_val,
-                        },
-                        self.name,
-                    )
-                    if result == ValidationResult.PASSED:
-                        result = ValidationResult.WARNING
+                result = self._check_metric_range(metric_name, metric_value, report, result)
 
             # Validate metric data type
             if not isinstance(metric_value, (int, float)):
@@ -732,14 +740,47 @@ class MetricsValidator(BaseValidator):
                 )
                 if result == ValidationResult.PASSED:
                     result = ValidationResult.WARNING
+        return result
 
-        # Validate calculated metrics
+    def _check_metric_range(
+        self, metric_name: str, metric_value: Any, report: ValidationReport, result: ValidationResult
+    ) -> ValidationResult:
+        """Check if a single metric is within its expected range."""
+        range_config = self.metric_ranges[metric_name]
+        min_val = range_config.get("min")
+        max_val = range_config.get("max")
+
+        if min_val is not None and metric_value < min_val:
+            report.add_issue(
+                "WARNING",
+                f"Metric {metric_name} ({metric_value}) below minimum ({min_val})",
+                {"metric_name": metric_name, "value": metric_value, "min": min_val},
+                self.name,
+            )
+            if result == ValidationResult.PASSED:
+                result = ValidationResult.WARNING
+
+        if max_val is not None and metric_value > max_val:
+            report.add_issue(
+                "WARNING",
+                f"Metric {metric_name} ({metric_value}) above maximum ({max_val})",
+                {"metric_name": metric_name, "value": metric_value, "max": max_val},
+                self.name,
+            )
+            if result == ValidationResult.PASSED:
+                result = ValidationResult.WARNING
+
+        return result
+
+    def _validate_derived_metrics(
+        self, test_results: dict[str, Any], metrics: dict[str, Any], report: ValidationReport, result: ValidationResult
+    ) -> ValidationResult:
+        """Validate that derived metrics match reported values."""
         calculated_metrics = self._calculate_derived_metrics(test_results)
+        tolerance = 0.01  # 1% tolerance
         for metric_name, calculated_value in calculated_metrics.items():
             reported_value = metrics.get(metric_name)
             if reported_value is not None:
-                # Check if calculated value matches reported value (within tolerance)
-                tolerance = 0.01  # 1% tolerance
                 if abs(calculated_value - reported_value) > abs(calculated_value * tolerance):
                     report.add_issue(
                         "WARNING",
@@ -754,7 +795,6 @@ class MetricsValidator(BaseValidator):
                     )
                     if result == ValidationResult.PASSED:
                         result = ValidationResult.WARNING
-
         return result
 
     def _calculate_derived_metrics(self, test_results: dict[str, Any]) -> dict[str, float]:
@@ -1405,9 +1445,9 @@ if __name__ == "__main__":
 
     report = validator.validate(sample_results, ValidationLevel.CERTIFICATION)
 
-    print(f"Validation completed with result: {report.overall_result.value}")
-    print(f"Issues found: {len(report.issues)}")
-    print(f"Certification status: {report.certification_status}")
+    emit(f"Validation completed with result: {report.overall_result.value}")
+    emit(f"Issues found: {len(report.issues)}")
+    emit(f"Certification status: {report.certification_status}")
 
     # Save report
     validator.save_report(report, Path("validation_report.json"))

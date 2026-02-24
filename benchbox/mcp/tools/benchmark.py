@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -34,7 +35,7 @@ from benchbox.mcp.errors import (
 )
 from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
-from benchbox.utils.printing import get_quiet_console
+from benchbox.utils.printing import get_quiet_console, silence_output
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +132,9 @@ def _map_phases_to_test_execution_type(phases: list[str]) -> str:
         return "standard"
 
 
-def register_benchmark_tools(mcp: FastMCP) -> None:
+def register_benchmark_tools(mcp: FastMCP, *, results_dir: Path) -> None:
     """Register benchmark execution tools with the MCP server."""
+    resolved_results_dir = Path(results_dir)
 
     @mcp.tool(annotations=RUN_BENCHMARK_ANNOTATIONS)
     def run_benchmark(
@@ -142,6 +144,7 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
         queries: str | None = None,
         phases: str | None = None,
         mode: str | None = None,
+        capture_plans: bool = False,
         dry_run: bool = False,
         validate_only: bool = False,
     ) -> dict[str, Any]:
@@ -149,16 +152,25 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
 
         Args:
             platform: Target platform (duckdb, polars-df, snowflake, etc.)
-            benchmark: Benchmark to run (tpch, tpcds, ssb, clickbench)
+            benchmark: Benchmark to run (tpch, tpcds, tpcds_obt, ssb, clickbench, nyctaxi, tsbs_devops, h2odb, amplab, coffeeshop, tpch_skew, datavault, tpcdi, write_primitives, read_primitives, and more)
             scale_factor: Data scale factor (0.01 for testing, 1+ for production)
             queries: Comma-separated query IDs to run (e.g., "1,3,6")
             phases: Comma-separated phases (default: "load,power")
             mode: Execution mode: 'sql', 'dataframe', or 'data_only'
+            capture_plans: Capture query execution plans (3-8%% overhead). Supported: DuckDB, PostgreSQL, DataFusion.
             dry_run: Preview execution plan without running
             validate_only: Validate configuration without running
 
         Returns:
             Benchmark results, dry-run preview, or validation status.
+
+        Platform options (passed via the CLI --platform-option KEY=VALUE flag):
+            driver_version: Pin the Python driver package to a specific version (e.g. "1.2.0").
+                Available for all platforms.
+            driver_auto_install: Auto-install the requested driver version via uv if not already
+                installed ("true"/"false"). Available for all platforms.
+            engine_version: Select the Spark engine version for Athena Spark
+                (e.g. "PySpark engine version 3"). Athena Spark only; auto-probed on other platforms.
         """
         # Handle validate_only mode
         if validate_only:
@@ -169,7 +181,16 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
             return _dry_run_impl(platform, benchmark, scale_factor, queries, mode)
 
         # Run benchmark
-        return _run_benchmark_impl(platform, benchmark, scale_factor, queries, phases, mode)
+        return _run_benchmark_impl(
+            platform,
+            benchmark,
+            scale_factor,
+            queries,
+            phases,
+            mode,
+            capture_plans,
+            results_dir=resolved_results_dir,
+        )
 
     @mcp.tool(annotations=QUERY_DETAILS_ANNOTATIONS)
     def get_query_details(
@@ -181,7 +202,7 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
         """Get detailed information about a specific query.
 
         Args:
-            benchmark: Benchmark name (tpch, tpcds)
+            benchmark: Benchmark name (tpch, tpcds, ssb, clickbench, nyctaxi, tsbs_devops, h2odb, amplab, coffeeshop, tpch_skew, datavault, and more)
             query_id: Query identifier (e.g., '1', 'Q1', '17')
             platform: Target platform for dialect translation
             mode: Execution mode: 'sql' or 'dataframe'
@@ -234,6 +255,55 @@ def register_benchmark_tools(mcp: FastMCP) -> None:
             )
 
 
+def _make_failed_response(error_response: dict[str, Any], execution_id: str) -> dict[str, Any]:
+    """Attach execution_id and failed status to an error response."""
+    error_response["execution_id"] = execution_id
+    error_response["status"] = "failed"
+    return error_response
+
+
+def _export_and_build_payload(
+    result: Any,
+    execution_id: str,
+    results_dir: Path,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Export benchmark result to JSON and build payload dict."""
+    result_file_path = None
+    result_payload: dict[str, Any] | None = None
+    try:
+        result.execution_id = execution_id
+        exporter = ResultExporter(output_dir=results_dir, anonymize=False, console=get_quiet_console())
+        exported_files = exporter.export_result(result, formats=["json"])
+        if "json" in exported_files:
+            result_file_path = str(exported_files["json"])
+            with open(result_file_path) as handle:
+                result_payload = json.load(handle)
+    except Exception as export_err:
+        logger.warning(f"Failed to export benchmark results: {export_err}")
+        try:
+            result_payload = build_result_payload(result)
+        except Exception as payload_err:
+            logger.warning(f"Failed to build benchmark payload: {payload_err}")
+    return result_file_path, result_payload
+
+
+def _attach_summary_charts(response: dict[str, Any], result: Any) -> None:
+    """Attach post-run summary charts to the response if available."""
+    if not result or not result.query_results:
+        return
+    try:
+        from benchbox.core.visualization.post_run_summary import generate_post_run_summary
+
+        summary = generate_post_run_summary(result)
+        if summary.charts:
+            response["summary_charts"] = {
+                "summary_box": summary.summary_box,
+                "query_histogram": summary.query_histogram,
+            }
+    except Exception:
+        logger.debug("Failed to generate post-run summary charts", exc_info=True)
+
+
 def _run_benchmark_impl(
     platform: str,
     benchmark: str,
@@ -241,6 +311,9 @@ def _run_benchmark_impl(
     queries: str | None,
     phases: str | None,
     mode: str | None,
+    capture_plans: bool = False,
+    *,
+    results_dir: Path,
 ) -> dict[str, Any]:
     """Core implementation for running benchmarks."""
     execution_id = f"mcp_{uuid.uuid4().hex[:8]}"
@@ -251,29 +324,25 @@ def _run_benchmark_impl(
         all_benchmarks = get_all_benchmarks()
 
         if benchmark_lower not in all_benchmarks:
-            error_response = make_not_found_error("benchmark", benchmark, available=list(all_benchmarks.keys()))
-            error_response["execution_id"] = execution_id
-            error_response["status"] = "failed"
-            return error_response
+            return _make_failed_response(
+                make_not_found_error("benchmark", benchmark, available=list(all_benchmarks.keys())), execution_id
+            )
 
         benchmark_class = get_benchmark_class(benchmark_lower)
         if benchmark_class is None:
-            error_response = make_error(
-                ErrorCode.DEPENDENCY_MISSING,
-                f"Benchmark '{benchmark}' requires additional dependencies",
-                details={"benchmark": benchmark},
+            return _make_failed_response(
+                make_error(
+                    ErrorCode.DEPENDENCY_MISSING,
+                    f"Benchmark '{benchmark}' requires additional dependencies",
+                    details={"benchmark": benchmark},
+                ),
+                execution_id,
             )
-            error_response["execution_id"] = execution_id
-            error_response["status"] = "failed"
-            return error_response
 
         resolved_mode, mode_error = _validate_and_resolve_mode(platform, mode)
         if mode_error:
-            mode_error["execution_id"] = execution_id
-            mode_error["status"] = "failed"
-            return mode_error
+            return _make_failed_response(mode_error, execution_id)
 
-        # Handle data_only mode
         if resolved_mode == "data_only":
             return _generate_data_impl(benchmark_lower, benchmark_class, scale_factor, execution_id, start_time)
 
@@ -284,19 +353,12 @@ def _run_benchmark_impl(
                 platform, mode=resolved_mode, benchmark=benchmark_lower, scale_factor=scale_factor
             )
         except (ValueError, ImportError) as e:
-            error_response = make_error(
-                ErrorCode.VALIDATION_UNSUPPORTED_PLATFORM,
-                str(e),
-                details={"platform": platform},
+            return _make_failed_response(
+                make_error(ErrorCode.VALIDATION_UNSUPPORTED_PLATFORM, str(e), details={"platform": platform}),
+                execution_id,
             )
-            error_response["execution_id"] = execution_id
-            error_response["status"] = "failed"
-            return error_response
 
-        query_subset = None
-        if queries:
-            query_subset = [q.strip() for q in queries.split(",")]
-
+        query_subset = [q.strip() for q in queries.split(",")] if queries else None
         phases_list = [p.strip() for p in (phases or "load,power").split(",")]
         execution_context = ExecutionContext(
             entry_point="mcp",
@@ -307,34 +369,22 @@ def _run_benchmark_impl(
 
         test_execution_type = _map_phases_to_test_execution_type(phases_list)
 
-        result = benchmark_instance.run_with_platform(
-            adapter,
-            query_subset=query_subset,
-            test_execution_type=test_execution_type,
-        )
+        with silence_output(enabled=True):
+            result = benchmark_instance.run_with_platform(
+                adapter,
+                query_subset=query_subset,
+                test_execution_type=test_execution_type,
+                capture_plans=capture_plans,
+            )
 
         if result is not None:
             result.execution_context = execution_context.model_dump()
 
         execution_time = elapsed_seconds(start_time)
 
-        result_file_path = None
-        result_payload: dict[str, Any] | None = None
-        if result:
-            try:
-                result.execution_id = execution_id
-                exporter = ResultExporter(anonymize=False, console=get_quiet_console())
-                exported_files = exporter.export_result(result, formats=["json"])
-                if "json" in exported_files:
-                    result_file_path = str(exported_files["json"])
-                    with open(result_file_path) as handle:
-                        result_payload = json.load(handle)
-            except Exception as export_err:
-                logger.warning(f"Failed to export benchmark results: {export_err}")
-                try:
-                    result_payload = build_result_payload(result)
-                except Exception as payload_err:
-                    logger.warning(f"Failed to build benchmark payload: {payload_err}")
+        result_file_path, result_payload = (
+            _export_and_build_payload(result, execution_id, results_dir) if result else (None, None)
+        )
 
         response: dict[str, Any] = result_payload or {}
         response["mcp_metadata"] = {
@@ -348,19 +398,7 @@ def _run_benchmark_impl(
             "result_file": result_file_path,
         }
 
-        # Generate summary charts for MCP response
-        if result and result.query_results:
-            try:
-                from benchbox.core.visualization.post_run_summary import generate_post_run_summary
-
-                summary = generate_post_run_summary(result)
-                if summary.charts:
-                    response["summary_charts"] = {
-                        "summary_box": summary.summary_box,
-                        "query_histogram": summary.query_histogram,
-                    }
-            except Exception:
-                logger.debug("Failed to generate post-run summary charts", exc_info=True)
+        _attach_summary_charts(response, result)
 
         return response
 
@@ -393,9 +431,11 @@ def _generate_data_impl(
     bm = benchmark_class(scale_factor=scale_factor)
 
     if hasattr(bm, "generate_data"):
-        bm.generate_data(output_dir=data_dir, format="parquet")
+        with silence_output(enabled=True):
+            bm.generate_data(output_dir=data_dir, format="parquet")
     elif hasattr(bm, "generate"):
-        bm.generate(output_dir=data_dir)
+        with silence_output(enabled=True):
+            bm.generate(output_dir=data_dir)
     else:
         error_response = make_error(
             ErrorCode.INTERNAL_ERROR,
@@ -442,9 +482,9 @@ def _dry_run_impl(
     mode: str | None,
 ) -> dict[str, Any]:
     """Preview what a benchmark run would do without executing."""
-    from benchbox.core.config import BenchmarkConfig, DatabaseConfig
     from benchbox.core.dryrun import DryRunExecutor
     from benchbox.core.platform_registry import PlatformRegistry
+    from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
     from benchbox.core.system import SystemProfiler
 
     try:
@@ -535,21 +575,11 @@ def _dry_run_impl(
         return error_response
 
 
-def _validate_config_impl(
-    platform: str,
-    benchmark: str,
-    scale_factor: float,
-    mode: str | None,
-) -> dict[str, Any]:
-    """Validate a benchmark configuration before running."""
+def _validate_platform_config(
+    platform: str, platform_lower: str, base_platform: str, errors: list[str], warnings: list[str]
+) -> Any:
+    """Validate platform availability and return platform info."""
     from benchbox.core.platform_registry import PlatformRegistry
-    from benchbox.platforms import is_dataframe_platform
-
-    errors = []
-    warnings = []
-
-    platform_lower = platform.lower()
-    base_platform = platform_lower.replace("-df", "")
 
     info = PlatformRegistry.get_platform_info(base_platform)
     if info is None:
@@ -557,25 +587,53 @@ def _validate_config_impl(
     elif not info.available:
         errors.append(f"Platform '{platform}' dependencies not installed: {info.installation_command}")
 
-    resolved_mode = None
-    if mode is not None:
-        mode_lower = mode.lower()
-        if mode_lower in ("datagen", "generate"):
-            mode_lower = "data_only"
-        if mode_lower not in ("sql", "dataframe", "data_only"):
-            errors.append(f"Invalid mode: {mode}. Must be 'sql', 'dataframe', or 'data_only'")
-        elif mode_lower == "data_only":
-            resolved_mode = "data_only"
-        elif info is not None and not PlatformRegistry.supports_mode(base_platform, mode_lower):
-            supported = [m for m in ["sql", "dataframe"] if PlatformRegistry.supports_mode(base_platform, m)]
-            supported.append("data_only")
-            errors.append(f"Platform '{platform}' doesn't support {mode_lower} mode. Supported: {', '.join(supported)}")
-        else:
-            resolved_mode = mode_lower
-    else:
-        resolved_mode = PlatformRegistry.get_default_mode(base_platform)
+    cloud_platforms = ["snowflake", "bigquery", "databricks", "redshift"]
+    if base_platform in cloud_platforms:
+        warnings.append(f"Cloud platform '{platform}' requires credential configuration")
 
-    benchmark_lower = benchmark.lower()
+    return info
+
+
+def _validate_mode_config(
+    mode: str | None, platform: str, base_platform: str, info: Any, errors: list[str]
+) -> str | None:
+    """Validate and resolve execution mode."""
+    from benchbox.core.platform_registry import PlatformRegistry
+
+    if mode is None:
+        return PlatformRegistry.get_default_mode(base_platform)
+
+    mode_lower = mode.lower()
+    if mode_lower in ("datagen", "generate"):
+        mode_lower = "data_only"
+
+    if mode_lower not in ("sql", "dataframe", "data_only"):
+        errors.append(f"Invalid mode: {mode}. Must be 'sql', 'dataframe', or 'data_only'")
+        return None
+
+    if mode_lower == "data_only":
+        return "data_only"
+
+    if info is not None and not PlatformRegistry.supports_mode(base_platform, mode_lower):
+        supported = [m for m in ["sql", "dataframe"] if PlatformRegistry.supports_mode(base_platform, m)]
+        supported.append("data_only")
+        errors.append(f"Platform '{platform}' doesn't support {mode_lower} mode. Supported: {', '.join(supported)}")
+        return None
+
+    return mode_lower
+
+
+def _validate_benchmark_config(
+    benchmark: str,
+    benchmark_lower: str,
+    scale_factor: float,
+    platform_lower: str,
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Validate benchmark name, scale factor, and dataframe compatibility."""
+    from benchbox.platforms import is_dataframe_platform
+
     all_benchmarks = get_all_benchmarks()
 
     if benchmark_lower not in all_benchmarks:
@@ -585,20 +643,33 @@ def _validate_config_impl(
         min_scale = meta.get("min_scale", 0.01)
         if scale_factor < min_scale:
             warnings.append(f"{benchmark} requires scale factor >= {min_scale}")
+        if is_dataframe_platform(platform_lower) and not meta.get("supports_dataframe", False):
+            errors.append(f"DataFrame mode does not support {benchmark} benchmark")
 
     if scale_factor <= 0:
         errors.append(f"Scale factor must be positive, got: {scale_factor}")
     elif scale_factor < 0.01:
         warnings.append(f"Scale factor {scale_factor} is very small")
 
-    if benchmark_lower in all_benchmarks:
-        meta = all_benchmarks[benchmark_lower]
-        if is_dataframe_platform(platform_lower) and not meta.get("supports_dataframe", False):
-            errors.append(f"DataFrame mode does not support {benchmark} benchmark")
 
-    cloud_platforms = ["snowflake", "bigquery", "databricks", "redshift"]
-    if base_platform in cloud_platforms:
-        warnings.append(f"Cloud platform '{platform}' requires credential configuration")
+def _validate_config_impl(
+    platform: str,
+    benchmark: str,
+    scale_factor: float,
+    mode: str | None,
+) -> dict[str, Any]:
+    """Validate a benchmark configuration before running."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    platform_lower = platform.lower()
+    base_platform = platform_lower.replace("-df", "")
+
+    info = _validate_platform_config(platform, platform_lower, base_platform, errors, warnings)
+    resolved_mode = _validate_mode_config(mode, platform, base_platform, info, errors)
+
+    benchmark_lower = benchmark.lower()
+    _validate_benchmark_config(benchmark, benchmark_lower, scale_factor, platform_lower, errors, warnings)
 
     return {
         "valid": len(errors) == 0,

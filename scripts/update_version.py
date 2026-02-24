@@ -88,11 +88,17 @@ def update_version_in_init(new_version: str, dry_run: bool = False) -> bool:
         return False
 
     content = init_file.read_text()
-    new_content = re.sub(r'(__version__\s*=\s*["\'])[^"\']+(["\'])', rf"\g<1>{new_version}\g<2>", content)
-
-    if content == new_content:
+    match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
+    if not match:
         print(f"Warning: Version in {init_file} was not updated (pattern not found)")
         return False
+
+    current_version = match.group(1)
+    if current_version == new_version:
+        print(f"No version changes needed in {init_file}")
+        return True
+
+    new_content = re.sub(r'(__version__\s*=\s*["\'])[^"\']+(["\'])', rf"\g<1>{new_version}\g<2>", content)
 
     if dry_run:
         print(f"[dry-run] Would update version in {init_file} to {new_version}")
@@ -112,11 +118,17 @@ def update_version_in_pyproject(new_version: str, dry_run: bool = False) -> bool
         return False
 
     content = pyproject_file.read_text()
-    new_content = re.sub(r'(version\s*=\s*["\'])[^"\']+(["\'])', rf"\g<1>{new_version}\g<2>", content)
-
-    if content == new_content:
+    match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
+    if not match:
         print(f"Warning: Version in {pyproject_file} was not updated (pattern not found)")
         return False
+
+    current_version = match.group(1)
+    if current_version == new_version:
+        print(f"No version changes needed in {pyproject_file}")
+        return True
+
+    new_content = re.sub(r'(version\s*=\s*["\'])[^"\']+(["\'])', rf"\g<1>{new_version}\g<2>", content)
 
     if dry_run:
         print(f"[dry-run] Would update version in {pyproject_file} to {new_version}")

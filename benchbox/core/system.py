@@ -16,7 +16,7 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-from benchbox.core.config import SystemProfile
+from benchbox.core.schemas import SystemProfile
 
 
 class SystemProfiler:

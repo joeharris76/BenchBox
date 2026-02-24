@@ -109,7 +109,7 @@ class ArtifactManager:
         ...     artifact_type=ArtifactType.RESULT,
         ...     metadata=ArtifactMetadata(benchmark_name="tpch", platform="duckdb"),
         ... )
-        >>> print(artifact.artifact_id)
+        >>> emit(artifact.artifact_id)
     """
 
     def __init__(self, storage_root: str | Path | None = None):

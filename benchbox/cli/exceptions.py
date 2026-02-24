@@ -224,31 +224,20 @@ class ErrorHandler:
                 context.source_line = error.source_line
                 context.source_function = error.source_function
 
-        # Error type specific handling
-        if isinstance(error, ConfigurationError):
-            self.console.print("\n[red]❌ Configuration Error[/red]")
-            self._show_configuration_help(error, context)
-
-        elif isinstance(error, DatabaseError):
-            self.console.print("\n[red]❌ Database Error[/red]")
-            self._show_database_help(error, context)
-
-        elif isinstance(error, ExecutionError):
-            self.console.print("\n[red]❌ Execution Error[/red]")
-            self._show_execution_help(error, context)
-
-        elif isinstance(error, ValidationError):
-            self.console.print("\n[red]❌ Input Validation Error[/red]")
-            self._show_validation_help(error, context)
-
-        elif isinstance(error, CloudStorageError):
-            self.console.print("\n[red]❌ Cloud Storage Error[/red]")
-            self._show_cloud_storage_help(error, context)
-
-        elif isinstance(error, PlatformError):
-            self.console.print("\n[red]❌ Platform Error[/red]")
-            self._show_platform_help(error, context)
-
+        # Error type → (header label, help method name); checked in order (subclasses first).
+        _ERROR_DISPATCH = [
+            (ConfigurationError, "Configuration Error", "_show_configuration_help"),
+            (DatabaseError, "Database Error", "_show_database_help"),
+            (ExecutionError, "Execution Error", "_show_execution_help"),
+            (ValidationError, "Input Validation Error", "_show_validation_help"),
+            (CloudStorageError, "Cloud Storage Error", "_show_cloud_storage_help"),
+            (PlatformError, "Platform Error", "_show_platform_help"),
+        ]
+        matched = next(((label, fn) for t, label, fn in _ERROR_DISPATCH if isinstance(error, t)), None)
+        if matched:
+            label, fn = matched
+            self.console.print(f"\n[red]❌ {label}[/red]")
+            getattr(self, fn)(error, context)
         else:
             self.console.print("\n[red]❌ Error[/red]")
 

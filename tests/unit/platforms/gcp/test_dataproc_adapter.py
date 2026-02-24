@@ -139,7 +139,7 @@ class TestDataprocAdapterPlatformInfo:
             info = adapter.get_platform_info()
 
             assert info["platform"] == "dataproc"
-            assert info["display_name"] == "GCP Dataproc"
+            assert info["display_name"] == "Google Cloud Dataproc"
             assert info["vendor"] == "Google Cloud"
             assert info["type"] == "managed_spark"
             assert info["project_id"] == "my-project"
@@ -276,7 +276,7 @@ class TestDataprocAdapterRegistry:
         assert "dataproc" in all_metadata
         dataproc_meta = all_metadata["dataproc"]
 
-        assert dataproc_meta["display_name"] == "GCP Dataproc"
+        assert dataproc_meta["display_name"] == "Google Cloud Dataproc"
         assert dataproc_meta["category"] == "cloud"
         assert dataproc_meta["capabilities"]["supports_sql"] is True
         assert dataproc_meta["capabilities"]["supports_dataframe"] is True

@@ -1,32 +1,14 @@
-"""Core data structures for benchmark configuration, results, and execution.
+"""Compatibility exports for ``benchbox.core.config`` imports.
 
-This module re-exports configuration models from schemas.py for backward compatibility.
-All models now use Pydantic for validation.
+The canonical models live in :mod:`benchbox.core.schemas`. This module
+re-exports them so that existing examples and external code that import
+from ``benchbox.core.config`` continue to work.
 
 Copyright 2026 Joe Harris / BenchBox Project
 
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-# Re-export all schema models
-from benchbox.core.schemas import (
-    BenchmarkConfig,
-    DatabaseConfig,
-    DryRunResult,
-    LibraryInfo,
-    PlatformInfo,
-    QueryResult,
-    RunConfig,
-    SystemProfile,
-)
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, RunConfig
 
-__all__ = [
-    "QueryResult",
-    "RunConfig",
-    "BenchmarkConfig",
-    "DatabaseConfig",
-    "SystemProfile",
-    "LibraryInfo",
-    "PlatformInfo",
-    "DryRunResult",
-]
+__all__ = ["BenchmarkConfig", "DatabaseConfig", "RunConfig"]

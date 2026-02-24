@@ -53,7 +53,7 @@ class TPCDSPowerTestResult:
 
     @property
     def scale_factor(self) -> float:
-        """Scale factor from config for backward compatibility."""
+        """Get scale factor from config."""
         return self.config.scale_factor
 
 
@@ -124,8 +124,6 @@ class TPCDSPowerTest:
         # Store target dialect for query translation
         self.target_dialect = dialect
 
-        # Legacy compatibility attributes
-        self.scale_factor = scale_factor
         self.connection = None
         self.test_running = False
         self.current_query = None
@@ -508,7 +506,7 @@ class TPCDSPowerTest:
             return 0.0
         from benchbox.core.results.metrics import TPCMetricsCalculator
 
-        return TPCMetricsCalculator.calculate_power_at_size(exec_times, self.scale_factor)
+        return TPCMetricsCalculator.calculate_power_at_size(exec_times, self.config.scale_factor)
 
     @property
     def query_sequence(self) -> list:
@@ -542,7 +540,7 @@ class TPCDSPowerTest:
         return {
             "running": self.test_running,
             "current_query": self.current_query,
-            "scale_factor": self.scale_factor,
+            "scale_factor": self.config.scale_factor,
             "seed": self.config.seed,
             "dialect": "standard",
             "query_sequence_length": len(self.query_sequence),
@@ -680,9 +678,6 @@ class TPCDSPowerTest:
 
         # Convert result to dictionary
         result_dict = dataclasses.asdict(result)
-
-        # Include scale_factor at top level for backward compatibility
-        result_dict["scale_factor"] = result.config.scale_factor
 
         # Export query results keyed by query_id for stable lookups by downstream tooling.
         query_results_dict = {}

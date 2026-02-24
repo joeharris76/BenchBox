@@ -150,7 +150,7 @@ class TestPowerTestResult:
             errors=[],
         )
 
-        assert result.scale_factor == 1.0  # Property from config
+        assert result.config.scale_factor == 1.0
         assert result.total_time == 100.0
         assert result.power_at_size == 36.0
         assert result.query_results == []
@@ -283,7 +283,7 @@ class TestTPCDSPowerTest:
         assert power_at_size == 3600.0
 
         # Test with different scale factor
-        power_test.scale_factor = 10.0
+        power_test.config.scale_factor = 10.0
         power_at_size = power_test._calculate_power_at_size([1.0, 1.0, 1.0, 1.0])
         assert power_at_size == 36000.0
 
@@ -603,7 +603,7 @@ class TestTPCDSPowerTest:
             with open(output_file) as f:
                 exported_data = json.load(f)
 
-            assert exported_data["scale_factor"] == 1.0
+            assert exported_data["config"]["scale_factor"] == 1.0
             assert exported_data["total_time"] == 100.0
             assert exported_data["power_at_size"] == 36.0
             assert exported_data["query_results"]["1"]["query_id"] == 1
@@ -816,7 +816,7 @@ class TestTPCDSPowerTestIntegration:
         result = power_test.run()
 
         # Verify results
-        assert result.scale_factor == 1.0
+        assert result.config.scale_factor == 1.0
         assert result.total_time > 0
         assert result.power_at_size > 0
         assert len(result.query_results) == 4
@@ -870,7 +870,7 @@ class TestTPCDSPowerTestIntegration:
         result = power_test.run()
 
         # Verify that the test completed despite failures
-        assert result.scale_factor == 1.0
+        assert result.config.scale_factor == 1.0
         assert result.total_time > 0
         assert len(result.query_results) == 3
 

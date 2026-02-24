@@ -221,7 +221,19 @@ class TestCrossLayerAgreement:
 # ---------------------------------------------------------------------------
 
 
+def _gitignore_has_private_sections() -> bool:
+    """Return True only when .gitignore contains the private-repo section marker."""
+    gitignore = Path(__file__).parent.parent.parent / ".gitignore"
+    if not gitignore.exists():
+        return False
+    return "# Exclude everything in _project/" in gitignore.read_text()
+
+
 @pytest.mark.fast
+@pytest.mark.skipif(
+    not _gitignore_has_private_sections(),
+    reason="Private gitignore sections only exist in the source repository",
+)
 class TestGitignoreConstants:
     """Validate GITIGNORE_PRIVATE_SECTIONS and GITIGNORE_PRIVATE_LINES against .gitignore."""
 

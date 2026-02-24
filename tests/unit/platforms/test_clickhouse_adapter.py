@@ -137,8 +137,9 @@ class TestClickHouseAdapter:
         # Mock database check to return empty list (database doesn't exist)
         # Mock SELECT 1 to return None for connection test
         # Mock COUNT(*) query to return the row count
-        # Mock: database check (connection setup), connection test (connection setup), INSERT statement, COUNT(*) query
-        mock_client.execute.side_effect = [[], None, None, [[100]]]
+        # Mock: database check (connection setup), connection test (connection setup),
+        # COUNT(*) before, INSERT statement, COUNT(*) after
+        mock_client.execute.side_effect = [[], None, [[0]], None, [[100]]]
 
         # Create temporary test file first
         import tempfile
@@ -295,7 +296,7 @@ class TestClickHouseAdapter:
     def test_get_database_path_server_mode(self):
         """Test database path generation in server mode returns None."""
         with patch("benchbox.platforms.clickhouse.setup.ClickHouseClient"):
-            adapter = ClickHouseAdapter(mode="server")
+            adapter = ClickHouseAdapter(deployment_mode="server")
 
             result = adapter.get_database_path(database_path="some/path.duckdb")
             assert result is None
@@ -306,7 +307,7 @@ class TestClickHouseAdapter:
         with patch("benchbox.platforms.clickhouse.setup.ClickHouseClient"):
             mock_connection = Mock()
 
-            adapter = ClickHouseAdapter(mode="embedded")
+            adapter = ClickHouseAdapter(deployment_mode="local")
 
             # Test that known problematic settings are skipped in embedded mode
             result = adapter._apply_setting_with_validation(mock_connection, "join_algorithm", "hash")
@@ -330,7 +331,7 @@ class TestClickHouseAdapter:
         with patch("benchbox.platforms.clickhouse.setup.ClickHouseClient"):
             mock_connection = Mock()
 
-            adapter = ClickHouseAdapter(mode="server")
+            adapter = ClickHouseAdapter(deployment_mode="server")
 
             # Test that problematic settings are attempted in server mode
             result = adapter._apply_setting_with_validation(mock_connection, "join_algorithm", "hash")
@@ -644,3 +645,101 @@ class TestClickHouseAdapter:
 
         clause = adapter.generate_tuning_clause(mock_tuning)
         assert clause == ""
+
+
+class TestClickHouseNativeHandlerBulk:
+    """Tests for ClickHouseNativeHandler.load_table_bulk() glob-pattern loading."""
+
+    def _make_handler(self, dry_run: bool = False):
+        from benchbox.platforms.base.data_loading import ClickHouseNativeHandler
+
+        adapter = Mock(spec=[])  # no dry_run_mode unless set
+        if dry_run:
+            adapter.dry_run_mode = True
+            adapter.capture_sql = Mock()
+        benchmark = Mock(spec=[])
+        return ClickHouseNativeHandler("|", adapter, benchmark)
+
+    def _make_bulk_connection(self, before: int, after: int) -> Mock:
+        """Mock for a single bulk load: [COUNT_before, INSERT, COUNT_after]."""
+        connection = Mock()
+        connection.execute.side_effect = [[[before]], None, [[after]]]
+        return connection
+
+    def test_bulk_load_same_dir_uses_glob_sql(self, tmp_path):
+        """4 shards in same dir must produce a single INSERT with file(glob) SQL."""
+        shards = [tmp_path / f"lineitem.tbl.{i}" for i in range(1, 5)]
+        for s in shards:
+            s.touch()
+
+        handler = self._make_handler()
+        connection = self._make_bulk_connection(before=0, after=4000)
+
+        result = handler.load_table_bulk("lineitem", shards, connection, Mock(), Mock())
+
+        assert result == 4000
+        # Single bulk INSERT: [COUNT_before, INSERT, COUNT_after]
+        assert connection.execute.call_count == 3
+        insert_sql = connection.execute.call_args_list[1][0][0]
+        assert "INSERT INTO lineitem" in insert_sql
+        # Glob must reference the common prefix
+        assert "lineitem.tbl.*" in insert_sql
+        assert "file(" in insert_sql
+        # Pipe delimiter setting
+        assert "format_csv_delimiter" in insert_sql
+
+    def test_bulk_load_different_dirs_falls_back(self, tmp_path):
+        """Shards in different directories must fall back to per-shard loop."""
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        shards = [dir_a / "orders.tbl.1", dir_b / "orders.tbl.2"]
+        for s in shards:
+            s.touch()
+
+        handler = self._make_handler()
+
+        # Each load_table() call needs: [COUNT_before, INSERT, COUNT_after]
+        connection = Mock()
+        connection.execute.side_effect = [
+            [[0]],  # shard 1 COUNT before
+            None,  # shard 1 INSERT
+            [[500]],  # shard 1 COUNT after
+            [[500]],  # shard 2 COUNT before
+            None,  # shard 2 INSERT
+            [[1000]],  # shard 2 COUNT after
+        ]
+
+        result = handler.load_table_bulk("orders", shards, connection, Mock(), Mock())
+
+        # Fallback: 2 load_table() calls → 3 executes each = 6 total
+        assert connection.execute.call_count == 6
+        assert result == 1000  # 500 + 500
+
+    def test_bulk_load_single_shard_delegates_to_load_table(self, tmp_path):
+        """Single-element list must produce same result as load_table()."""
+        shard = tmp_path / "region.tbl"
+        shard.touch()
+
+        handler = self._make_handler()
+        connection = self._make_bulk_connection(before=0, after=5)
+
+        result = handler.load_table_bulk("region", [shard], connection, Mock(), Mock())
+
+        assert result == 5
+
+    def test_bulk_load_dry_run_returns_placeholder(self, tmp_path):
+        """Dry-run mode must return 1000*N without executing INSERT."""
+        shards = [tmp_path / f"customer.tbl.{i}" for i in range(1, 5)]
+        for s in shards:
+            s.touch()
+
+        handler = self._make_handler(dry_run=True)
+        connection = Mock()
+
+        result = handler.load_table_bulk("customer", shards, connection, Mock(), Mock())
+
+        assert result == 4000
+        assert not connection.execute.called
+        handler.adapter.capture_sql.assert_called_once()

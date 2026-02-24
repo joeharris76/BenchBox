@@ -589,6 +589,8 @@ class TestSchemaV2Validation:
             driver_package="duckdb",
             driver_version_requested="1.0.0",
             driver_version_resolved="1.0.1",
+            driver_version_actual="1.0.1",
+            driver_runtime_strategy="current-process",
             driver_auto_install=True,
             platform_info={"name": "duckdb", "version": "1.0.1"},
         )
@@ -598,6 +600,14 @@ class TestSchemaV2Validation:
         assert payload["version"] == "2.1"
         assert payload["platform"]["name"] == "duckdb"
         assert payload["platform"]["version"] == "1.0.1"
+        assert payload["platform"]["driver_package"] == "duckdb"
+        assert payload["platform"]["driver_requested_version"] == "1.0.0"
+        assert payload["platform"]["driver_resolved_version"] == "1.0.1"
+        assert payload["platform"]["driver_actual_version"] == "1.0.1"
+        assert payload["platform"]["driver_runtime_strategy"] == "current-process"
+        assert payload["execution"]["driver_version_requested"] == "1.0.0"
+        assert payload["execution"]["driver_version_resolved"] == "1.0.1"
+        assert payload["execution"]["driver_version_actual"] == "1.0.1"
 
     def test_timing_computed_from_queries(self) -> None:
         """Test that timing statistics are computed from query results.

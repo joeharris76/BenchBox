@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from benchbox.cli.shared import console
 from benchbox.core.query_plans.comparison import (
     PlanComparisonSummary,
     compare_query_plans,
@@ -17,8 +18,6 @@ from benchbox.core.query_plans.comparison import (
 )
 from benchbox.core.query_plans.visualization import render_comparison
 from benchbox.core.results.models import BenchmarkResults
-
-console = Console()
 
 
 @click.command("compare-plans", hidden=True, deprecated=True)

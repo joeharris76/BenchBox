@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
 from ..utils.dependencies import check_platform_dependencies, get_dependency_error_message, get_package_install_message
 from ..utils.file_format import get_delimiter_for_file, is_parquet_format, is_tpc_format
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 
 # Microsoft Fabric uses T-SQL dialect (subset of SQL Server T-SQL)
 FABRIC_DIALECT = "tsql"
@@ -94,6 +94,8 @@ class FabricWarehouseAdapter(PlatformAdapter):
         ...     auth_method="default_credential",
         ... )
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     # Fabric item type this adapter supports
     SUPPORTED_ITEM_TYPE = "Warehouse"

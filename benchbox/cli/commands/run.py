@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 import click
@@ -42,7 +43,7 @@ from benchbox.cli.platform_checks import check_and_setup_platform_credentials
 from benchbox.cli.platform_hooks import PlatformHookRegistry, PlatformOptionError
 from benchbox.cli.presentation.system import display_system_recommendations
 from benchbox.cli.progress import BenchmarkProgress, should_show_progress
-from benchbox.cli.shared import console, set_quiet_output
+from benchbox.cli.shared import console, set_quiet_output, silence_output
 from benchbox.cli.system import SystemProfiler
 from benchbox.cli.tuning_resolver import (
     TuningMode,
@@ -160,6 +161,82 @@ def _build_execution_context(
     )
 
 
+def _execute_orchestrated_run(
+    orchestrator: BenchmarkOrchestrator,
+    benchmark_config: BenchmarkConfig,
+    system_profile: Any,
+    database_config: DatabaseConfig | None,
+    phases_to_run: list[str],
+    *,
+    quiet: bool,
+    no_progress: bool,
+    no_monitoring: bool,
+    execution_context: ExecutionContext | None = None,
+) -> Any:
+    """Execute benchmark through the canonical orchestrator path."""
+    progress_enabled = not no_progress and should_show_progress()
+    enable_monitoring = not no_monitoring
+
+    if progress_enabled and not quiet:
+        progress = BenchmarkProgress(
+            console=console,
+            enable_monitoring=enable_monitoring,
+        )
+        with progress:
+            return orchestrator.execute_benchmark(
+                benchmark_config,
+                system_profile,
+                database_config,
+                phases_to_run,
+                progress=progress,
+                execution_context=execution_context,
+            )
+
+    with silence_output(enabled=bool(quiet)):
+        return orchestrator.execute_benchmark(
+            benchmark_config,
+            system_profile,
+            database_config,
+            phases_to_run,
+            progress=None,
+            execution_context=execution_context,
+        )
+
+
+def _export_orchestrated_result(
+    *,
+    orchestrator: BenchmarkOrchestrator,
+    result: Any,
+    benchmark: str,
+    scale: float,
+    platform_label: str,
+    mode_label: str,
+    quiet: bool,
+    export_formats: list[str] | None = None,
+) -> dict[str, Any]:
+    """Export a canonical run result using directory-manager naming."""
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_path = orchestrator.directory_manager.get_result_path(
+        benchmark,
+        scale,
+        platform_label,
+        timestamp,
+        result.execution_id,
+        mode=mode_label,
+    )
+
+    exporter = ResultExporter()
+    exporter.output_dir = orchestrator.directory_manager.results_dir
+    result.output_filename = result_path.name
+
+    formats = export_formats or ["json"]
+    with silence_output(enabled=bool(quiet)):
+        exported_files = exporter.export_result(result, formats)
+    return exported_files
+
+
 class PlatformOptionParamType(click.ParamType):
     """Click parameter type for key=value platform options."""
 
@@ -207,87 +284,11 @@ def setup_verbose_logging(
         BenchBox CLI logger (or ``None`` when verbosity is disabled) and
         ``settings`` is the normalized :class:`VerbositySettings` instance.
     """
+    settings = _resolve_verbosity_settings(verbose, quiet)
+    log_level = _determine_log_level(settings)
 
-    if isinstance(verbose, VerbositySettings):
-        settings = verbose
-        if quiet and not verbose.quiet:
-            settings = VerbositySettings.from_flags(verbose.level, True)
-    else:
-        settings = compute_verbosity(verbose, quiet)
-
-    if settings.quiet:
-        log_level = logging.CRITICAL
-    elif settings.very_verbose:
-        log_level = logging.DEBUG
-    elif settings.verbose_enabled:
-        log_level = logging.INFO
-    else:
-        log_level = logging.WARNING
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-
-    # Remove existing handlers to avoid duplicates
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-
-    # Add console handler with appropriate formatting
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(log_level)
-    if settings.very_verbose:
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%H:%M:%S",
-        )
-    elif settings.verbose_enabled:
-        formatter = logging.Formatter("%(levelname)s - %(message)s")
-    else:
-        formatter = logging.Formatter("%(message)s")
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # Configure BenchBox namespace loggers to follow the same level
-    for logger_name in [
-        "benchbox",
-        "benchbox.cli",
-        "benchbox.platforms",
-        "benchbox.core",
-        "benchbox.utils",
-    ]:
-        logging.getLogger(logger_name).setLevel(log_level)
-
-    # Third-party loggers default to warning unless very-verbose requests debug
-    urllib3_logger = logging.getLogger("urllib3")
-    requests_logger = logging.getLogger("requests")
-    sqlalchemy_logger = logging.getLogger("sqlalchemy")
-
-    # PySpark/py4j loggers are extremely noisy at DEBUG level - always suppress
-    # These emit protocol-level messages for every JVM communication
-    py4j_loggers = [
-        "py4j",
-        "py4j.java_gateway",
-        "py4j.clientserver",
-        "pyspark",
-        "pyspark.sql",
-    ]
-
-    if settings.quiet:
-        urllib3_logger.setLevel(logging.WARNING)
-        requests_logger.setLevel(logging.WARNING)
-        sqlalchemy_logger.setLevel(logging.WARNING)
-        for logger_name in py4j_loggers:
-            logging.getLogger(logger_name).setLevel(logging.WARNING)
-    else:
-        urllib3_logger.setLevel(logging.WARNING)
-        requests_logger.setLevel(logging.WARNING)
-        # Keep py4j at WARNING even in very-verbose mode - too noisy
-        for logger_name in py4j_loggers:
-            logging.getLogger(logger_name).setLevel(logging.WARNING)
-        if settings.very_verbose:
-            sqlalchemy_logger.setLevel(logging.INFO)
-        else:
-            sqlalchemy_logger.setLevel(logging.WARNING)
+    root_logger = _configure_root_logger(log_level, settings)
+    _configure_third_party_loggers(settings)
 
     logger = None
     if settings.verbose_enabled:
@@ -295,11 +296,71 @@ def setup_verbose_logging(
         if settings.very_verbose:
             logger.debug("Very verbose logging enabled - DEBUG level logging active")
             logger.debug(f"Root logger level: {logging.getLevelName(root_logger.level)}")
-            logger.debug(f"Console handler level: {logging.getLevelName(console_handler.level)}")
         else:
             logger.info("Verbose logging enabled - INFO level logging active")
 
     return logger, settings
+
+
+def _resolve_verbosity_settings(verbose: int | bool | VerbositySettings, quiet: bool) -> VerbositySettings:
+    """Normalize verbose parameter into VerbositySettings."""
+    if isinstance(verbose, VerbositySettings):
+        if quiet and not verbose.quiet:
+            return VerbositySettings.from_flags(verbose.level, True)
+        return verbose
+    return compute_verbosity(verbose, quiet)
+
+
+def _determine_log_level(settings: VerbositySettings) -> int:
+    """Map verbosity settings to a logging level."""
+    if settings.quiet:
+        return logging.CRITICAL
+    if settings.very_verbose:
+        return logging.DEBUG
+    if settings.verbose_enabled:
+        return logging.INFO
+    return logging.WARNING
+
+
+def _configure_root_logger(log_level: int, settings: VerbositySettings) -> logging.Logger:
+    """Configure the root logger with appropriate handler and formatter."""
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(log_level)
+
+    if settings.very_verbose:
+        fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        formatter = logging.Formatter(fmt, datefmt="%H:%M:%S")
+    elif settings.verbose_enabled:
+        formatter = logging.Formatter("%(levelname)s - %(message)s")
+    else:
+        formatter = logging.Formatter("%(message)s")
+
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # Keep BenchBox namespace loggers inheriting from root
+    for logger_name in ["benchbox", "benchbox.cli", "benchbox.platforms", "benchbox.core", "benchbox.utils"]:
+        logging.getLogger(logger_name).setLevel(logging.NOTSET)
+
+    return root_logger
+
+
+def _configure_third_party_loggers(settings: VerbositySettings) -> None:
+    """Configure third-party library loggers to appropriate levels."""
+    # Always suppress noisy libraries at WARNING
+    _always_warn = ["urllib3", "requests", "py4j", "py4j.java_gateway", "py4j.clientserver", "pyspark", "pyspark.sql"]
+    for name in _always_warn:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    # SQLAlchemy gets INFO only in very-verbose mode
+    sa_level = logging.INFO if (settings.very_verbose and not settings.quiet) else logging.WARNING
+    logging.getLogger("sqlalchemy").setLevel(sa_level)
 
 
 @click.command("run", cls=BenchBoxCommand)
@@ -333,6 +394,30 @@ def setup_verbose_logging(
     type=str,
     default="notuning",
     help="Tuning: tuned, notuning, auto, or YAML path",
+)
+@advanced_option(
+    "--sorted-ingestion-mode",
+    type=click.Choice(["off", "auto", "force"], case_sensitive=False),
+    default=None,
+    help="Cloud sorted-ingestion strategy mode: off, auto, force",
+)
+@advanced_option(
+    "--sorted-ingestion-method",
+    type=click.Choice(["auto", "ctas", "z_order", "liquid_clustering", "vacuum_sort"], case_sensitive=False),
+    default=None,
+    help="Cloud sorted-ingestion method override",
+)
+@advanced_option(
+    "--databricks-clustering-strategy",
+    type=click.Choice(["z_order", "liquid_clustering", "none"], case_sensitive=False),
+    default=None,
+    help="Databricks clustering strategy override for SQL tuning",
+)
+@advanced_option(
+    "--liquid-clustering-columns",
+    type=str,
+    default=None,
+    help="Comma-separated Databricks liquid clustering columns",
 )
 @click.option(
     "--dry-run",
@@ -397,7 +482,16 @@ def setup_verbose_logging(
     type=PlatformOptionParamType(),
     multiple=True,
     hidden=True,
-    help="Platform option in KEY=VALUE form (repeatable)",
+    help=(
+        "Platform option in KEY=VALUE form (repeatable). "
+        "Well-known keys available on all platforms: "
+        "driver_version (pin Python driver package version, e.g. '1.2.0'), "
+        "driver_auto_install (auto-install driver via uv if missing, true/false). "
+        "Athena Spark only: engine_version (Spark engine version, "
+        "e.g. 'PySpark engine version 3'). "
+        "Platform-specific keys are also accepted (e.g. warehouse=MY_WH for Snowflake). "
+        "Run --help-topic examples for the full driver versioning workflow."
+    ),
 )
 @advanced_option(
     "--mode",
@@ -410,6 +504,11 @@ def setup_verbose_logging(
 @advanced_option("--no-monitoring", is_flag=True, help="Disable metrics collection")
 @advanced_option("--no-progress", is_flag=True, help="Disable progress bars")
 @advanced_option("--ignore-memory-warnings", is_flag=True, help="Proceed despite insufficient memory warnings")
+@advanced_option(
+    "--global-cache",
+    is_flag=True,
+    help="Use ~/.benchbox/datagen/ as DataFrame cache (shared across projects). Default: project-local benchmark_runs/.",
+)
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -420,6 +519,10 @@ def run(
     phases: str,
     queries: str | None,
     tuning: str,
+    sorted_ingestion_mode: str | None,
+    sorted_ingestion_method: str | None,
+    databricks_clustering_strategy: str | None,
+    liquid_clustering_columns: str | None,
     dry_run: str | None,
     force: ForceConfig | None,
     verbose: int,
@@ -437,6 +540,7 @@ def run(
     no_monitoring: bool,
     no_progress: bool,
     ignore_memory_warnings: bool,
+    global_cache: bool,
 ) -> None:
     """Run benchmarks.
 
@@ -493,8 +597,6 @@ def run(
     enable_postload_validation = val_config.postload
 
     # Removed options (no longer supported)
-    quick = False  # Removed: use defaults directly
-    no_regenerate = False  # Removed: edge case
     describe_platforms: tuple[str, ...] = ()  # Moved to separate command
 
     # Assign plan_queries to match original variable name used in body
@@ -672,15 +774,17 @@ def run(
 
     # Determine test execution type based on phases
     query_phases = {"power", "throughput", "maintenance"}
-    if set(phases_to_run) & query_phases:
-        # Has query phases, determine primary type
-        if "power" in phases_to_run and "throughput" in phases_to_run and "maintenance" in phases_to_run:
+    selected_query_phases = set(phases_to_run) & query_phases
+    if selected_query_phases:
+        # Any mixed query-phase request should use combined mode so the adapter
+        # can execute exactly the requested subset of query phases.
+        if len(selected_query_phases) > 1:
             test_execution_type = "combined"
-        elif "power" in phases_to_run:
+        elif "power" in selected_query_phases:
             test_execution_type = "power"
-        elif "throughput" in phases_to_run:
+        elif "throughput" in selected_query_phases:
             test_execution_type = "throughput"
-        elif "maintenance" in phases_to_run:
+        elif "maintenance" in selected_query_phases:
             test_execution_type = "maintenance"
         else:
             test_execution_type = "standard"
@@ -699,12 +803,13 @@ def run(
     # Set execution_mode for compatibility (simplified logic)
     execution_mode = test_execution_type
 
-    console.print(
-        Panel.fit(
-            Text("BenchBox Interactive Benchmark Runner", style="bold blue"),
-            style="blue",
+    if not quiet:
+        console.print(
+            Panel.fit(
+                Text("BenchBox Interactive Benchmark Runner", style="bold blue"),
+                style="blue",
+            )
         )
-    )
 
     # Platform validation
     platform_manager = get_platform_manager()
@@ -871,7 +976,7 @@ def run(
 
     elif tuning_resolution.source == TuningSource.FALLBACK:
         # Fallback to basic constraints OR launch tuning wizard
-        if not non_interactive and not quick:
+        if not non_interactive:
             console.print("\n[bold cyan]Tuning Configuration[/bold cyan]")
 
             if Confirm.ask("Would you like to configure tuning options?", default=False):
@@ -901,6 +1006,28 @@ def run(
         loaded_unified_config = UnifiedTuningConfiguration()
         if logger:
             logger.debug(f"Using basic unified config for mode: {tuning_resolution.mode.value}")
+
+    # Apply explicit sorted-ingestion strategy flags from CLI (if provided).
+    if sorted_ingestion_mode:
+        loaded_unified_config.platform_optimizations.sorted_ingestion_mode = sorted_ingestion_mode.lower()
+    if sorted_ingestion_method:
+        loaded_unified_config.platform_optimizations.sorted_ingestion_method = sorted_ingestion_method.lower()
+    if (
+        loaded_unified_config.platform_optimizations.sorted_ingestion_mode == "off"
+        and loaded_unified_config.platform_optimizations.sorted_ingestion_method != "auto"
+    ):
+        console.print("[red]❌ --sorted-ingestion-method requires --sorted-ingestion-mode auto or force[/red]")
+        ctx.exit(1)
+
+    if databricks_clustering_strategy:
+        strategy = databricks_clustering_strategy.lower()
+        loaded_unified_config.platform_optimizations.databricks_clustering_strategy = strategy
+        loaded_unified_config.platform_optimizations.liquid_clustering_enabled = strategy == "liquid_clustering"
+    if liquid_clustering_columns:
+        columns = [c.strip() for c in liquid_clustering_columns.split(",") if c.strip()]
+        loaded_unified_config.platform_optimizations.liquid_clustering_columns = columns
+        if columns:
+            loaded_unified_config.platform_optimizations.liquid_clustering_enabled = True
 
     # Apply DataFrame tuning configuration (for DataFrame platforms)
     # Uses the unified --tuning parameter
@@ -1165,11 +1292,11 @@ def run(
                 "tuning_enabled": tuning_enabled,
                 "unified_tuning_configuration": loaded_unified_config,
                 "force_regenerate": force_regenerate,
-                "no_regenerate": no_regenerate,
                 "enable_preflight_validation": enable_preflight_validation,
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
                 "enable_postload_validation": enable_postload_validation,
                 "ignore_memory_warnings": ignore_memory_warnings,
+                **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
                 **({"seed": seed} if seed is not None else {}),
                 **({"validation_mode": validation_mode} if validation_mode is not None else {}),
                 **({"convert_format": convert_format} if convert_format is not None else {}),
@@ -1224,12 +1351,10 @@ def run(
 
         return
 
-    # Handle quick mode or direct arguments
-    if test_execution_type not in {"data_only", "load_only"} and (
-        (quick and platform and benchmark) or (platform and benchmark and not quick)
-    ):
+    # Handle direct non-interactive SQL/DataFrame execution arguments
+    if test_execution_type not in {"data_only", "load_only"} and platform and benchmark:
         if logger:
-            logger.debug(f"Entering direct execution mode: quick={quick}, platform={platform}, benchmark={benchmark}")
+            logger.debug(f"Entering direct execution mode: platform={platform}, benchmark={benchmark}")
 
         # Validate scale factor: if >= 1, must be whole integer
         if logger:
@@ -1242,7 +1367,6 @@ def run(
                 logger.error(f"Invalid scale factor for direct execution: {scale}")
             return
 
-        console.print(f"Running {benchmark} on {platform} at scale {scale}")
         if logger:
             logger.info(f"Starting direct benchmark execution: {benchmark} on {platform} at scale {scale}")
 
@@ -1286,6 +1410,13 @@ def run(
                 logger.error(f"Database configuration failed: {exc}")
             ctx.exit(1)
 
+        # Emit the run announcement now that driver version is resolved
+        _driver_version = database_config.driver_version_actual or database_config.driver_version_resolved
+        if _driver_version:
+            console.print(f"Running {benchmark} on {platform} at scale {scale} \\[driver {_driver_version}]")
+        else:
+            console.print(f"Running {benchmark} on {platform} at scale {scale}")
+
         # Validate benchmark exists
         if benchmark not in bench_manager.benchmarks:
             console.print(f"[red]❌ Unknown benchmark: {benchmark}[/red]")
@@ -1321,12 +1452,12 @@ def run(
                 "tuning_enabled": tuning_enabled,
                 "unified_tuning_configuration": loaded_unified_config,
                 "force_regenerate": force_regenerate,
-                "no_regenerate": no_regenerate,
                 "enable_preflight_validation": enable_preflight_validation,
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
                 "enable_postload_validation": enable_postload_validation,
                 "seed": seed,
                 "ignore_memory_warnings": ignore_memory_warnings,
+                **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
                 **({"convert_format": convert_format} if convert_format is not None else {}),
                 **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
                 **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
@@ -1364,59 +1495,38 @@ def run(
             assert normalized_output is not None
             orchestrator.set_custom_output_dir(normalized_output)
 
-        # Create progress tracker if enabled
-        progress_enabled = not no_progress and should_show_progress()
-        enable_monitoring = not no_monitoring
-
-        if progress_enabled and not quiet:
-            progress = BenchmarkProgress(
-                console=console,
-                enable_monitoring=enable_monitoring,
-            )
-            with progress:
-                result = orchestrator.execute_benchmark(
-                    benchmark_config,
-                    system_profile,
-                    database_config,
-                    phases_to_run,
-                    progress=progress,
-                    execution_context=execution_context,
-                )
-        else:
-            # No progress bars - use simple text output
-            result = orchestrator.execute_benchmark(
-                benchmark_config,
-                system_profile,
-                database_config,
-                phases_to_run,
-                progress=None,
-                execution_context=execution_context,
-            )
+        result = _execute_orchestrated_run(
+            orchestrator,
+            benchmark_config,
+            system_profile,
+            database_config,
+            phases_to_run,
+            quiet=bool(quiet),
+            no_progress=bool(no_progress),
+            no_monitoring=bool(no_monitoring),
+            execution_context=execution_context,
+        )
 
         # Export results if successful
         if result.validation_status not in ["FAILED", "INTERRUPTED"]:
-            console.print("\n[bold]Exporting results...[/bold]")
+            if not quiet:
+                console.print("\n[bold]Exporting results...[/bold]")
 
-            # Use directory manager for result export
-            from datetime import datetime
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            result_path = orchestrator.directory_manager.get_result_path(
-                benchmark, scale, platform.lower(), timestamp, result.execution_id, mode=resolved_mode
+            exported_files = _export_orchestrated_result(
+                orchestrator=orchestrator,
+                result=result,
+                benchmark=benchmark,
+                scale=scale,
+                platform_label=platform.lower(),
+                mode_label=resolved_mode,
+                quiet=bool(quiet),
+                export_formats=["json"],
             )
 
-            # Export to the organized directory
-            exporter = ResultExporter()
-            export_formats = ["json"]
-            exporter.output_dir = orchestrator.directory_manager.results_dir
-
-            # Set specific filename
-            result.output_filename = result_path.name
-            exported_files = exporter.export_result(result, export_formats)
-
-            console.print(f"\n[green]✅ Benchmark completed: {result.validation_status}[/green]")
-            for format_name, filepath in exported_files.items():
-                console.print(f"{format_name.upper()}: [dim]{filepath}[/dim]")
+            if not quiet:
+                console.print(f"\n[green]✅ Benchmark completed: {result.validation_status}[/green]")
+                for format_name, filepath in exported_files.items():
+                    console.print(f"{format_name.upper()}: [dim]{filepath}[/dim]")
 
             _render_post_run_charts(result, console, quiet)
 
@@ -1438,6 +1548,7 @@ def run(
             )
         else:
             console.print(f"\n[red]❌ Benchmark failed: {result.validation_status}[/red]")
+            ctx.exit(1)
 
         return
 
@@ -1452,7 +1563,8 @@ def run(
         # For data-only mode, platform is not required
         if test_execution_type == "data_only":
             if platform:
-                console.print("[yellow]⚠️️  Note: Platform parameter ignored in data-only mode[/yellow]")
+                if not quiet:
+                    console.print("[yellow]⚠️️  Note: Platform parameter ignored in data-only mode[/yellow]")
             # database_config stays None for data_only mode
         else:
             # For load-only mode, platform is required
@@ -1547,6 +1659,7 @@ def run(
                 "enable_postload_validation": enable_postload_validation,
                 "seed": seed,
                 "ignore_memory_warnings": ignore_memory_warnings,
+                **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
                 **({"convert_format": convert_format} if convert_format is not None else {}),
                 **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
                 **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
@@ -1589,52 +1702,34 @@ def run(
                 f"Executing {'data-only' if execution_mode == 'data_only' else 'load-only'} mode with orchestrator"
             )
 
-        # Create progress tracker if enabled
-        progress_enabled = not no_progress and should_show_progress()
-        enable_monitoring = not no_monitoring
-
-        if progress_enabled and not quiet:
-            progress = BenchmarkProgress(
-                console=console,
-                enable_monitoring=enable_monitoring,
-            )
-            with progress:
-                result = orchestrator.execute_benchmark(
-                    benchmark_config,
-                    system_profile,
-                    database_config,
-                    phases_to_run,
-                    progress=progress,
-                    execution_context=execution_context,
-                )
-        else:
-            # No progress bars - use simple text output
-            result = orchestrator.execute_benchmark(
-                benchmark_config,
-                system_profile,
-                database_config,
-                phases_to_run,
-                progress=None,
-                execution_context=execution_context,
-            )
+        result = _execute_orchestrated_run(
+            orchestrator,
+            benchmark_config,
+            system_profile,
+            database_config,
+            phases_to_run,
+            quiet=bool(quiet),
+            no_progress=bool(no_progress),
+            no_monitoring=bool(no_monitoring),
+            execution_context=execution_context,
+        )
 
         # Export results if successful
         if result.validation_status not in ["FAILED", "INTERRUPTED"]:
-            console.print("\n[bold]Exporting results...[/bold]")
-            from datetime import datetime
-
-            exporter = ResultExporter()
-            export_formats = ["json"]  # Default format for command-line execution
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if not quiet:
+                console.print("\n[bold]Exporting results...[/bold]")
             platform_label = platform.lower() if platform else "unknown"
             mode_label = "data_only" if execution_mode == "data_only" else resolved_mode
-            result_path = orchestrator.directory_manager.get_result_path(
-                benchmark, scale, platform_label, timestamp, result.execution_id, mode=mode_label
+            exported_files = _export_orchestrated_result(
+                orchestrator=orchestrator,
+                result=result,
+                benchmark=benchmark,
+                scale=scale,
+                platform_label=platform_label,
+                mode_label=mode_label,
+                quiet=bool(quiet),
+                export_formats=["json"],
             )
-            result.output_filename = result_path.name
-
-            exported_files = exporter.export_result(result, export_formats)
 
             # Determine actual status from execution phases, not validation status
             if execution_mode == "data_only":
@@ -1657,9 +1752,10 @@ def run(
                 else:
                     operation_status = "NOT_RUN"
 
-            console.print(f"\n[green]✅ {operation_name} completed: {operation_status}[/green]")
-            for format_name, filepath in exported_files.items():
-                console.print(f"{format_name.upper()}: {filepath}")
+            if not quiet:
+                console.print(f"\n[green]✅ {operation_name} completed: {operation_status}[/green]")
+                for format_name, filepath in exported_files.items():
+                    console.print(f"{format_name.upper()}: {filepath}")
 
             # Save configuration for quick restart
             from benchbox.cli.preferences import save_last_run_config
@@ -1683,6 +1779,7 @@ def run(
             )
             if result.validation_details:
                 console.print(f"Error details: {result.validation_details}")
+            ctx.exit(1)
 
         return
 
@@ -1796,6 +1893,7 @@ def run(
                     "complexity": benchmark_info.get("complexity", "medium"),
                     "seed": seed,
                     "ignore_memory_warnings": ignore_memory_warnings,
+                    **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
                     **({"convert_format": convert_format} if convert_format is not None else {}),
                     **(
                         {"conversion_compression": conversion_compression} if conversion_compression is not None else {}
@@ -2142,41 +2240,32 @@ def run(
         assert normalized_output is not None
         orchestrator.set_custom_output_dir(normalized_output)
 
-    # Create progress tracker if enabled
-    progress_enabled = not no_progress and should_show_progress()
-    enable_monitoring = not no_monitoring
-
-    if progress_enabled and not quiet:
-        progress = BenchmarkProgress(
-            console=console,
-            enable_monitoring=enable_monitoring,
-        )
-        with progress:
-            result = orchestrator.execute_benchmark(
-                benchmark_config,
-                system_profile,
-                database_config,
-                phases_to_run,
-                progress=progress,
-                execution_context=execution_context,
-            )
-    else:
-        # No progress bars - use simple text output
-        result = orchestrator.execute_benchmark(
-            benchmark_config,
-            system_profile,
-            database_config,
-            phases_to_run,
-            progress=None,
-            execution_context=execution_context,
-        )
+    result = _execute_orchestrated_run(
+        orchestrator,
+        benchmark_config,
+        system_profile,
+        database_config,
+        phases_to_run,
+        quiet=bool(quiet),
+        no_progress=bool(no_progress),
+        no_monitoring=bool(no_monitoring),
+        execution_context=execution_context,
+    )
 
     # Export results
-    if result.validation_status != "FAILED":
+    if result.validation_status not in ["FAILED", "INTERRUPTED"]:
         console.print("\n[bold]Step 5:[/bold] Export Results")
-        exporter = ResultExporter()
         export_formats = config.get("output.formats", ["json"])
-        exported_files = exporter.export_result(result, export_formats)
+        exported_files = _export_orchestrated_result(
+            orchestrator=orchestrator,
+            result=result,
+            benchmark=benchmark_config.name,
+            scale=benchmark_config.scale_factor,
+            platform_label=database_config.type.lower(),
+            mode_label=resolved_mode,
+            quiet=bool(quiet),
+            export_formats=export_formats,
+        )
 
         # Show what was exported
         console.print(f"\n[green]✅ Benchmark completed with status: {result.validation_status}[/green]")
@@ -2205,6 +2294,7 @@ def run(
         )
     else:
         console.print(f"\n[red]❌ Benchmark failed with status: {result.validation_status}[/red]")
+        ctx.exit(1)
 
 
 __all__ = ["run", "PlatformOptionParamType", "setup_verbose_logging"]

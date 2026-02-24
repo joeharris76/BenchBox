@@ -9,7 +9,7 @@ from datetime import datetime
 
 import pytest
 
-from benchbox.core.config import (
+from benchbox.core.schemas import (
     BenchmarkConfig,
     DatabaseConfig,
     DryRunResult,

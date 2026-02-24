@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.core.sql_utils import normalize_table_name_in_sql
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
         ForeignKeyConfiguration,
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
+        TuningColumn,
         UnifiedTuningConfiguration,
     )
 
@@ -31,7 +33,7 @@ from ..utils.dependencies import (
     get_dependency_group_packages,
 )
 from ..utils.file_format import detect_compression, get_delimiter_for_file
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 from .base.data_loading import FileFormatRegistry
 
 try:
@@ -54,6 +56,8 @@ except ImportError:
 
 class RedshiftAdapter(PlatformAdapter):
     """Amazon Redshift platform adapter with S3 integration."""
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -179,6 +183,26 @@ class RedshiftAdapter(PlatformAdapter):
     @property
     def platform_name(self) -> str:
         return "Redshift"
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | list[str] | None:
+        """Build opt-in sorted-ingestion SQL for Redshift."""
+        mode, method = self.resolve_sorted_ingestion_strategy()
+        if mode == "off":
+            return None
+
+        if method == "vacuum_sort":
+            return f"VACUUM SORT ONLY {self.schema}.{table_name}"
+
+        if method == "ctas":
+            ordered_cols = ", ".join(column.name for column in sort_columns)
+            temp_table = f"{table_name}__ctas_sort"
+            return [
+                f"CREATE TABLE {self.schema}.{temp_table} AS SELECT * FROM {self.schema}.{table_name} ORDER BY {ordered_cols}",
+                f"DROP TABLE {self.schema}.{table_name}",
+                f"ALTER TABLE {self.schema}.{temp_table} RENAME TO {table_name}",
+            ]
+
+        raise ValueError(f"Sorted ingestion method '{method}' is not supported for Redshift.")
 
     @staticmethod
     def add_cli_arguments(parser) -> None:
@@ -310,6 +334,8 @@ class RedshiftAdapter(PlatformAdapter):
                 cursor.execute("SELECT version()")
                 result = cursor.fetchone()
                 platform_info["platform_version"] = result[0] if result else None
+                platform_info["engine_version"] = platform_info["platform_version"]
+                platform_info["engine_version_source"] = "sql_query"
 
                 # Step 2: Collect deployment-specific metadata using fallback chain
                 deployment_metadata = {}
@@ -1001,6 +1027,238 @@ class RedshiftAdapter(PlatformAdapter):
 
         return elapsed_seconds(start_time)
 
+    def _resolve_data_files(self, benchmark, data_dir: Path) -> dict:
+        """Resolve data files from benchmark tables or manifest fallback."""
+        if hasattr(benchmark, "tables") and benchmark.tables:
+            return benchmark.tables
+
+        data_files = None
+        try:
+            manifest_path = Path(data_dir) / "_datagen_manifest.json"
+            if manifest_path.exists():
+                with open(manifest_path) as f:
+                    manifest = json.load(f)
+                tables = manifest.get("tables") or {}
+                mapping = {}
+                for table, entries in tables.items():
+                    if entries:
+                        # Collect ALL chunk files, not just the first one
+                        chunk_paths = []
+                        for entry in entries:
+                            rel = entry.get("path")
+                            if rel:
+                                chunk_paths.append(Path(data_dir) / rel)
+                        if chunk_paths:
+                            mapping[table] = chunk_paths
+                if mapping:
+                    data_files = mapping
+                    self.logger.debug("Using data files from _datagen_manifest.json")
+        except Exception as e:
+            self.logger.debug(f"Manifest fallback failed: {e}")
+        if not data_files:
+            raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+        return data_files
+
+    def _create_s3_client(self):
+        """Create S3 client with explicit error handling."""
+        try:
+            return boto3.client(
+                "s3",
+                aws_access_key_id=self.aws_access_key_id,
+                aws_secret_access_key=self.aws_secret_access_key,
+                region_name=self.aws_region,
+            )
+        except NoCredentialsError as e:
+            raise ValueError(
+                "AWS credentials not found. Configure credentials via:\n"
+                "  1. IAM role (aws_access_key_id/aws_secret_access_key in config)\n"
+                "  2. AWS CLI (aws configure)\n"
+                "  3. Environment variables (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY)"
+            ) from e
+        except ClientError as e:
+            raise ValueError(f"Failed to create AWS S3 client: {e}") from e
+
+    def _upload_file_to_s3(self, s3_client, file_path: Path, table_name: str, file_idx: int) -> str:
+        """Upload a single file to S3 and return the S3 URI."""
+        # Preserve full multi-part suffix for chunked files (e.g., .tbl.1.zst)
+        file_stem = file_path.stem
+        original_suffix = file_path.suffix
+        if "." in file_stem:
+            parts = file_path.name.split(".", 1)
+            full_suffix = "." + parts[1] if len(parts) > 1 else original_suffix
+        else:
+            full_suffix = original_suffix
+
+        s3_key = f"{self.s3_prefix}/{table_name}_{file_idx}{full_suffix}"
+
+        try:
+            s3_client.upload_file(str(file_path), self.s3_bucket, s3_key)
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            if error_code == "NoSuchBucket":
+                raise ValueError(
+                    f"S3 bucket '{self.s3_bucket}' does not exist. Create the bucket or update your configuration."
+                ) from e
+            elif error_code == "AccessDenied":
+                raise ValueError(
+                    f"Access denied to S3 bucket '{self.s3_bucket}'. Check IAM permissions for s3:PutObject."
+                ) from e
+            else:
+                raise ValueError(
+                    f"Failed to upload {file_path.name} to s3://{self.s3_bucket}/{s3_key}: {error_code} - {e}"
+                ) from e
+
+        return f"s3://{self.s3_bucket}/{s3_key}"
+
+    def _build_s3_copy_source(self, s3_client, s3_uris: list[str], table_name: str) -> tuple[str, str]:
+        """Build COPY source path and manifest option from S3 URIs.
+
+        Returns:
+            Tuple of (copy_from_path, manifest_option)
+        """
+        if len(s3_uris) > 1:
+            manifest = {"entries": [{"url": uri, "mandatory": True} for uri in s3_uris]}
+            manifest_key = f"{self.s3_prefix}/{table_name}_manifest.json"
+
+            try:
+                s3_client.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=manifest_key,
+                    Body=json.dumps(manifest),
+                )
+            except ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code", "Unknown")
+                raise ValueError(
+                    f"Failed to upload manifest file to s3://{self.s3_bucket}/{manifest_key}: {error_code} - {e}"
+                ) from e
+
+            return f"s3://{self.s3_bucket}/{manifest_key}", "manifest"
+        else:
+            return s3_uris[0], ""
+
+    def _get_copy_credentials_clause(self) -> str:
+        """Build credentials clause for Redshift COPY command."""
+        if self.iam_role:
+            return f"IAM_ROLE '{self.iam_role}'"
+        elif self.aws_access_key_id and self.aws_secret_access_key:
+            return f"ACCESS_KEY_ID '{self.aws_access_key_id}' SECRET_ACCESS_KEY '{self.aws_secret_access_key}'"
+        else:
+            self.log_verbose("No explicit credentials configured for COPY; using cluster default IAM role")
+            return ""
+
+    def _load_table_via_s3(self, cursor, s3_client, table_name: str, valid_files: list[Path], connection: Any) -> int:
+        """Upload files to S3 and load a single table via COPY command. Returns row count."""
+        table_name_lower = table_name.lower()
+
+        # Upload all files to S3 and collect S3 URIs
+        s3_uris = []
+        for file_idx, file_path in enumerate(valid_files):
+            file_path = Path(file_path)
+            delimiter = get_delimiter_for_file(file_path)
+            s3_uris.append(self._upload_file_to_s3(s3_client, file_path, table_name, file_idx))
+
+        copy_from_path, manifest_option = self._build_s3_copy_source(s3_client, s3_uris, table_name)
+
+        # Detect compression format from file extension
+        compressions = {detect_compression(f) for f in valid_files}
+        if "zstd" in compressions:
+            compression_option = "ZSTD"
+        elif "gzip" in compressions:
+            compression_option = "GZIP"
+        else:
+            compression_option = ""
+
+        credentials_clause = self._get_copy_credentials_clause()
+        delimiter = get_delimiter_for_file(valid_files[0])
+
+        # Build and execute COPY command
+        qualified_table = f"{self.schema}.{table_name_lower}"
+        copy_sql = f"""
+            COPY {qualified_table}
+            FROM '{copy_from_path}'
+            {credentials_clause}
+            {manifest_option}
+            {compression_option}
+            DELIMITER '{delimiter}'
+            IGNOREHEADER 0
+            COMPUPDATE {self.compupdate}
+        """
+
+        cursor.execute(copy_sql)
+
+        effective_tuning = self.get_effective_tuning_configuration()
+        if effective_tuning is not None:
+            self.apply_ctas_sort(table_name_lower, effective_tuning, connection)
+
+        # Get row count
+        cursor.execute(f"SELECT COUNT(*) FROM {qualified_table}")
+        row_count = cursor.fetchone()[0]
+
+        # Run ANALYZE if configured
+        if self.auto_analyze:
+            cursor.execute(f"ANALYZE {qualified_table}")
+
+        return row_count
+
+    def _load_table_via_insert(self, cursor, table_name: str, valid_files: list[Path], connection: Any) -> int:
+        """Load a single table via INSERT statements. Returns total rows loaded."""
+        table_name_lower = table_name.lower()
+        total_rows_loaded = 0
+
+        for file_idx, file_path in enumerate(valid_files):
+            chunk_info = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
+            self.log_very_verbose(f"Loading {table_name}{chunk_info} from {file_path.name}")
+
+            delimiter = get_delimiter_for_file(file_path)
+            compression_handler = FileFormatRegistry.get_compression_handler(file_path)
+
+            with compression_handler.open(file_path) as f:
+                rows_loaded = 0
+                batch_size = 1000
+                batch_data = []
+
+                for line in f:
+                    line = line.strip()
+                    if line and line.endswith(delimiter):
+                        line = line[:-1]
+
+                    values = line.split(delimiter)
+                    escaped_values = ["'" + str(v).replace("'", "''") + "'" for v in values]
+                    batch_data.append(f"({', '.join(escaped_values)})")
+
+                    if len(batch_data) >= batch_size:
+                        insert_sql = f"INSERT INTO {table_name_lower} VALUES " + ", ".join(batch_data)
+                        cursor.execute(insert_sql)
+                        rows_loaded += len(batch_data)
+                        total_rows_loaded += len(batch_data)
+                        batch_data = []
+
+                # Insert remaining batch
+                if batch_data:
+                    insert_sql = f"INSERT INTO {table_name_lower} VALUES " + ", ".join(batch_data)
+                    cursor.execute(insert_sql)
+                    rows_loaded += len(batch_data)
+                    total_rows_loaded += len(batch_data)
+
+            self.log_very_verbose(f"Loaded {rows_loaded:,} rows from {file_path.name}")
+
+        effective_tuning = self.get_effective_tuning_configuration()
+        if effective_tuning is not None:
+            self.apply_ctas_sort(table_name_lower, effective_tuning, connection)
+
+        return total_rows_loaded
+
+    def _filter_valid_files(self, file_paths) -> list[Path]:
+        """Normalize to list and filter out non-existent or empty files."""
+        if not isinstance(file_paths, list):
+            file_paths = [file_paths]
+        valid_files = []
+        for file_path in file_paths:
+            file_path = Path(file_path)
+            if file_path.exists() and file_path.stat().st_size > 0:
+                valid_files.append(file_path)
+        return valid_files
+
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
@@ -1011,68 +1269,14 @@ class RedshiftAdapter(PlatformAdapter):
         cursor = connection.cursor()
 
         try:
-            # Get data files from benchmark or manifest fallback
-            if hasattr(benchmark, "tables") and benchmark.tables:
-                data_files = benchmark.tables
-            else:
-                data_files = None
-                try:
-                    manifest_path = Path(data_dir) / "_datagen_manifest.json"
-                    if manifest_path.exists():
-                        with open(manifest_path) as f:
-                            manifest = json.load(f)
-                        tables = manifest.get("tables") or {}
-                        mapping = {}
-                        for table, entries in tables.items():
-                            if entries:
-                                # Collect ALL chunk files, not just the first one
-                                chunk_paths = []
-                                for entry in entries:
-                                    rel = entry.get("path")
-                                    if rel:
-                                        chunk_paths.append(Path(data_dir) / rel)
-                                if chunk_paths:
-                                    mapping[table] = chunk_paths
-                        if mapping:
-                            data_files = mapping
-                            self.logger.debug("Using data files from _datagen_manifest.json")
-                except Exception as e:
-                    self.logger.debug(f"Manifest fallback failed: {e}")
-                if not data_files:
-                    # No data files available - benchmark should have generated data first
-                    raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+            data_files = self._resolve_data_files(benchmark, data_dir)
 
             # Upload files to S3 and load via COPY command
             if self.s3_bucket and boto3:
-                # Create S3 client with explicit error handling
-                try:
-                    s3_client = boto3.client(
-                        "s3",
-                        aws_access_key_id=self.aws_access_key_id,
-                        aws_secret_access_key=self.aws_secret_access_key,
-                        region_name=self.aws_region,
-                    )
-                except NoCredentialsError as e:
-                    raise ValueError(
-                        "AWS credentials not found. Configure credentials via:\n"
-                        "  1. IAM role (aws_access_key_id/aws_secret_access_key in config)\n"
-                        "  2. AWS CLI (aws configure)\n"
-                        "  3. Environment variables (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY)"
-                    ) from e
-                except ClientError as e:
-                    raise ValueError(f"Failed to create AWS S3 client: {e}") from e
+                s3_client = self._create_s3_client()
 
                 for table_name, file_paths in data_files.items():
-                    # Normalize to list (data resolver should always return lists now)
-                    if not isinstance(file_paths, list):
-                        file_paths = [file_paths]
-
-                    # Filter out non-existent or empty files
-                    valid_files = []
-                    for file_path in file_paths:
-                        file_path = Path(file_path)
-                        if file_path.exists() and file_path.stat().st_size > 0:
-                            valid_files.append(file_path)
+                    valid_files = self._filter_valid_files(file_paths)
 
                     if not valid_files:
                         self.logger.warning(f"Skipping {table_name} - no valid data files")
@@ -1084,142 +1288,12 @@ class RedshiftAdapter(PlatformAdapter):
 
                     try:
                         load_start = mono_time()
-                        # Normalize table name to lowercase for Redshift consistency
-                        table_name_lower = table_name.lower()
-
-                        # Upload all files to S3 and collect S3 URIs
-                        # Redshift supports compressed files and any delimiter natively
-                        s3_uris = []
-                        for file_idx, file_path in enumerate(valid_files):
-                            file_path = Path(file_path)
-
-                            # Detect file format to determine delimiter
-                            # TPC-H uses .tbl (pipe-delimited), TPC-DS uses .dat (pipe-delimited)
-                            # get_delimiter_for_file handles chunked files like customer.tbl.1 or customer.tbl.1.zst
-                            delimiter = get_delimiter_for_file(file_path)
-
-                            # Upload file directly with original compression and format
-                            # Preserve full multi-part suffix for chunked files (e.g., .tbl.1.zst)
-                            # Extract all suffixes after table name (e.g., "customer.tbl.1.zst" -> ".tbl.1.zst")
-                            file_stem = file_path.stem  # e.g., "customer.tbl.1" or "customer"
-                            # Get original suffix (e.g., ".zst")
-                            original_suffix = file_path.suffix
-                            # Check if stem has more suffixes (e.g., ".tbl.1" in "customer.tbl.1")
-                            if "." in file_stem:
-                                # Extract all suffixes: split at first dot and take the rest
-                                parts = file_path.name.split(".", 1)  # e.g., ["customer", "tbl.1.zst"]
-                                if len(parts) > 1:
-                                    full_suffix = "." + parts[1]  # e.g., ".tbl.1.zst"
-                                else:
-                                    full_suffix = original_suffix
-                            else:
-                                full_suffix = original_suffix
-
-                            s3_key = f"{self.s3_prefix}/{table_name}_{file_idx}{full_suffix}"
-
-                            # Upload file with explicit error handling
-                            try:
-                                s3_client.upload_file(str(file_path), self.s3_bucket, s3_key)
-                            except ClientError as e:
-                                error_code = e.response.get("Error", {}).get("Code", "Unknown")
-                                if error_code == "NoSuchBucket":
-                                    raise ValueError(
-                                        f"S3 bucket '{self.s3_bucket}' does not exist. "
-                                        f"Create the bucket or update your configuration."
-                                    ) from e
-                                elif error_code == "AccessDenied":
-                                    raise ValueError(
-                                        f"Access denied to S3 bucket '{self.s3_bucket}'. "
-                                        f"Check IAM permissions for s3:PutObject."
-                                    ) from e
-                                else:
-                                    raise ValueError(
-                                        f"Failed to upload {file_path.name} to s3://{self.s3_bucket}/{s3_key}: "
-                                        f"{error_code} - {e}"
-                                    ) from e
-
-                            s3_uris.append(f"s3://{self.s3_bucket}/{s3_key}")
-
-                        # For multi-file loads, create manifest file and use that
-                        if len(s3_uris) > 1:
-                            manifest = {"entries": [{"url": uri, "mandatory": True} for uri in s3_uris]}
-                            manifest_key = f"{self.s3_prefix}/{table_name}_manifest.json"
-
-                            # Upload manifest with explicit error handling
-                            try:
-                                s3_client.put_object(
-                                    Bucket=self.s3_bucket,
-                                    Key=manifest_key,
-                                    Body=json.dumps(manifest),
-                                )
-                            except ClientError as e:
-                                error_code = e.response.get("Error", {}).get("Code", "Unknown")
-                                raise ValueError(
-                                    f"Failed to upload manifest file to s3://{self.s3_bucket}/{manifest_key}: "
-                                    f"{error_code} - {e}"
-                                ) from e
-
-                            copy_from_path = f"s3://{self.s3_bucket}/{manifest_key}"
-                            manifest_option = "manifest"
-                        else:
-                            copy_from_path = s3_uris[0]
-                            manifest_option = ""
-
-                        # Detect compression format from file extension
-                        # Redshift auto-detects gzip, but we should be explicit for zstd
-                        compressions = {detect_compression(f) for f in valid_files}
-                        if "zstd" in compressions:
-                            compression_option = "ZSTD"
-                        elif "gzip" in compressions:
-                            compression_option = "GZIP"
-                        else:
-                            compression_option = ""
-
-                        # Load from S3 using COPY command with three-way credential handling:
-                        # 1. IAM role (preferred)
-                        # 2. Explicit access keys
-                        # 3. Cluster default IAM role (no credentials in SQL)
-                        if self.iam_role:
-                            # Use IAM role for authentication
-                            credentials_clause = f"IAM_ROLE '{self.iam_role}'"
-                        elif self.aws_access_key_id and self.aws_secret_access_key:
-                            # Use explicit access keys
-                            credentials_clause = f"ACCESS_KEY_ID '{self.aws_access_key_id}' SECRET_ACCESS_KEY '{self.aws_secret_access_key}'"
-                        else:
-                            # No explicit credentials - rely on cluster's default IAM role
-                            credentials_clause = ""
-                            self.log_verbose(
-                                "No explicit credentials configured for COPY; using cluster default IAM role"
-                            )
-
-                        # Build COPY command with credentials clause (may be empty)
-                        # Fully qualify table name with schema for clarity and to avoid ambiguity
-                        qualified_table = f"{self.schema}.{table_name_lower}"
-                        copy_sql = f"""
-                            COPY {qualified_table}
-                            FROM '{copy_from_path}'
-                            {credentials_clause}
-                            {manifest_option}
-                            {compression_option}
-                            DELIMITER '{delimiter}'
-                            IGNOREHEADER 0
-                            COMPUPDATE {self.compupdate}
-                        """
-
-                        cursor.execute(copy_sql)
-
-                        # Get row count
-                        cursor.execute(f"SELECT COUNT(*) FROM {qualified_table}")
-                        row_count = cursor.fetchone()[0]
-                        table_stats[table_name_lower] = row_count
-
-                        # Run ANALYZE if configured
-                        if self.auto_analyze:
-                            cursor.execute(f"ANALYZE {qualified_table}")
+                        row_count = self._load_table_via_s3(cursor, s3_client, table_name, valid_files, connection)
+                        table_stats[table_name.lower()] = row_count
 
                         load_time = elapsed_seconds(load_start)
                         self.logger.info(
-                            f"✅ Loaded {row_count:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
+                            f"✅ Loaded {row_count:,} rows into {table_name.lower()}{chunk_info} in {load_time:.2f}s"
                         )
 
                     except Exception as e:
@@ -1231,16 +1305,7 @@ class RedshiftAdapter(PlatformAdapter):
                 self.logger.warning("No S3 bucket configured, using direct INSERT loading")
 
                 for table_name, file_paths in data_files.items():
-                    # Normalize to list (handle both single paths and lists for TPC-H vs TPC-DS)
-                    if not isinstance(file_paths, list):
-                        file_paths = [file_paths]
-
-                    # Filter valid files
-                    valid_files = []
-                    for file_path in file_paths:
-                        file_path = Path(file_path)
-                        if file_path.exists() and file_path.stat().st_size > 0:
-                            valid_files.append(file_path)
+                    valid_files = self._filter_valid_files(file_paths)
 
                     if not valid_files:
                         self.logger.warning(f"Skipping {table_name} - no valid data files")
@@ -1250,59 +1315,14 @@ class RedshiftAdapter(PlatformAdapter):
                     try:
                         self.log_verbose(f"Direct loading data for table: {table_name}")
                         load_start = mono_time()
-                        # Normalize table name to lowercase for Redshift consistency
-                        table_name_lower = table_name.lower()
 
-                        # Load data row by row from all chunks (inefficient but works without S3)
-                        total_rows_loaded = 0
-
-                        for file_idx, file_path in enumerate(valid_files):
-                            chunk_info = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
-                            self.log_very_verbose(f"Loading {table_name}{chunk_info} from {file_path.name}")
-
-                            # TPC-H uses .tbl files, TPC-DS uses .dat files - both are pipe-delimited
-                            delimiter = get_delimiter_for_file(file_path)
-
-                            # Get compression handler (handles .zst, .gz, or uncompressed)
-                            compression_handler = FileFormatRegistry.get_compression_handler(file_path)
-
-                            with compression_handler.open(file_path) as f:
-                                rows_loaded = 0
-                                batch_size = 1000
-                                batch_data = []
-
-                                for line in f:
-                                    line = line.strip()
-                                    if line and line.endswith(delimiter):
-                                        line = line[:-1]
-
-                                    values = line.split(delimiter)
-                                    # Simple escaping for SQL
-                                    escaped_values = ["'" + str(v).replace("'", "''") + "'" for v in values]
-                                    batch_data.append(f"({', '.join(escaped_values)})")
-
-                                    if len(batch_data) >= batch_size:
-                                        insert_sql = f"INSERT INTO {table_name_lower} VALUES " + ", ".join(batch_data)
-                                        cursor.execute(insert_sql)
-                                        rows_loaded += len(batch_data)
-                                        total_rows_loaded += len(batch_data)
-                                        batch_data = []
-
-                                # Insert remaining batch
-                                if batch_data:
-                                    insert_sql = f"INSERT INTO {table_name_lower} VALUES " + ", ".join(batch_data)
-                                    cursor.execute(insert_sql)
-                                    rows_loaded += len(batch_data)
-                                    total_rows_loaded += len(batch_data)
-
-                            self.log_very_verbose(f"Loaded {rows_loaded:,} rows from {file_path.name}")
-
-                        table_stats[table_name_lower] = total_rows_loaded
+                        total_rows_loaded = self._load_table_via_insert(cursor, table_name, valid_files, connection)
+                        table_stats[table_name.lower()] = total_rows_loaded
 
                         load_time = elapsed_seconds(load_start)
                         chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
                         self.logger.info(
-                            f"✅ Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
+                            f"✅ Loaded {total_rows_loaded:,} rows into {table_name.lower()}{chunk_info} in {load_time:.2f}s"
                         )
 
                     except Exception as e:
@@ -1412,75 +1432,20 @@ class RedshiftAdapter(PlatformAdapter):
         Raises:
             ConfigurationError: If cache control validation fails and strict_validation=True
         """
-        cursor = connection.cursor()
-        result = {
-            "validated": False,
-            "cache_disabled": False,
-            "settings": {},
-            "warnings": [],
-            "errors": [],
-        }
+        from benchbox.platforms.cloud_shared import validate_session_cache_control
 
-        try:
-            # Query current session setting using current_setting() function
-            cursor.execute("SELECT current_setting('enable_result_cache_for_session') as value")
-            row = cursor.fetchone()
-
-            if row:
-                actual_value = str(row[0]).lower()
-                result["settings"]["enable_result_cache_for_session"] = actual_value
-
-                # Determine expected value based on configuration
-                expected_value = "off" if self.disable_result_cache else "on"
-
-                if actual_value == expected_value:
-                    result["validated"] = True
-                    result["cache_disabled"] = actual_value == "off"
-                    self.logger.debug(
-                        f"Cache control validated: enable_result_cache_for_session={actual_value} "
-                        f"(expected {expected_value})"
-                    )
-                else:
-                    error_msg = (
-                        f"Cache control validation failed: "
-                        f"expected enable_result_cache_for_session={expected_value}, "
-                        f"got {actual_value}"
-                    )
-                    result["errors"].append(error_msg)
-                    self.logger.error(error_msg)
-
-                    # Raise error if strict validation mode enabled
-                    if self.strict_validation:
-                        raise ConfigurationError(
-                            "Redshift session cache control validation failed - "
-                            "benchmark results may be incorrect due to cached query results",
-                            details=result,
-                        )
-            else:
-                warning_msg = "Could not retrieve enable_result_cache_for_session parameter from session"
-                result["warnings"].append(warning_msg)
-                self.logger.warning(warning_msg)
-
-        except Exception as e:
-            # If this is our ConfigurationError, re-raise it
-            if isinstance(e, ConfigurationError):
-                raise
-
-            # Otherwise log validation error
-            error_msg = f"Validation query failed: {e}"
-            result["errors"].append(error_msg)
-            self.logger.error(f"Cache control validation error: {e}")
-
-            # Raise if strict mode and query failed
-            if self.strict_validation:
-                raise ConfigurationError(
-                    "Failed to validate Redshift cache control settings",
-                    details={"original_error": str(e), "validation_result": result},
-                ) from e
-        finally:
-            cursor.close()
-
-        return result
+        return validate_session_cache_control(
+            connection=connection,
+            query="SELECT current_setting('enable_result_cache_for_session') as value",
+            setting_key="enable_result_cache_for_session",
+            disabled_value="off",
+            enabled_value="on",
+            normalize="lower",
+            platform_name="Redshift",
+            disable_result_cache=self.disable_result_cache,
+            strict_validation=self.strict_validation,
+            adapter_logger=self.logger,
+        )
 
     def execute_query(
         self,
@@ -1591,39 +1556,8 @@ class RedshiftAdapter(PlatformAdapter):
         return None
 
     def _normalize_table_name_in_sql(self, sql: str) -> str:
-        """Normalize table names in SQL to lowercase for Redshift.
-
-        Redshift converts unquoted identifiers to lowercase, so we normalize
-        all table names to lowercase to ensure consistency across CREATE, COPY,
-        and SELECT operations. This prevents case sensitivity issues.
-
-        Args:
-            sql: SQL statement
-
-        Returns:
-            SQL with normalized (lowercase) table names
-        """
-        import re
-
-        # Match CREATE TABLE "TABLENAME" or CREATE TABLE TABLENAME
-        # and convert to CREATE TABLE tablename (unquoted lowercase)
-        sql = re.sub(
-            r'CREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"CREATE TABLE {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        # Match foreign key references to quoted/unquoted table names
-        # FOREIGN KEY ... REFERENCES "TABLENAME" → REFERENCES tablename
-        sql = re.sub(
-            r'REFERENCES\s+"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"REFERENCES {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        return sql
+        """Normalize table names in SQL to lowercase for Redshift."""
+        return normalize_table_name_in_sql(sql)
 
     def _optimize_table_definition(self, statement: str) -> str:
         """Optimize table definition for Redshift."""
@@ -2170,7 +2104,7 @@ def _build_redshift_config(
     Returns:
         DatabaseConfig with credentials loaded
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

@@ -34,7 +34,7 @@ class TestFireboltAdapterInitialization:
         except ImportError:
             pytest.skip("Firebolt SDK not installed")
 
-        assert adapter.mode == "core"
+        assert adapter.deployment_mode == "core"
         assert adapter.url == "http://localhost:3473"
         assert adapter.database == "test_db"
         assert adapter.platform_name == "Firebolt (Core)"
@@ -47,7 +47,7 @@ class TestFireboltAdapterInitialization:
         except ImportError:
             pytest.skip("Firebolt SDK not installed")
 
-        assert adapter.mode == "core"
+        assert adapter.deployment_mode == "core"
         assert adapter.url == "http://localhost:3473"
         assert adapter.database == "benchbox"
 
@@ -64,7 +64,7 @@ class TestFireboltAdapterInitialization:
         except ImportError:
             pytest.skip("Firebolt SDK not installed")
 
-        assert adapter.mode == "cloud"
+        assert adapter.deployment_mode == "cloud"
         assert adapter.client_id == "test_client_id"
         assert adapter.client_secret == "test_client_secret"
         assert adapter.account_name == "test_account"
@@ -85,7 +85,7 @@ class TestFireboltAdapterInitialization:
         except ImportError:
             pytest.skip("Firebolt SDK not installed")
 
-        assert adapter.mode == "cloud"
+        assert adapter.deployment_mode == "cloud"
         assert adapter.api_endpoint == "custom.api.firebolt.io"
 
     def test_initialization_default_api_endpoint(self):
@@ -106,7 +106,7 @@ class TestFireboltAdapterInitialization:
         """Invalid explicit mode should raise a clear error."""
         try:
             with pytest.raises(ValueError):
-                FireboltAdapter(firebolt_mode="invalid")
+                FireboltAdapter(deployment_mode="invalid")
         except ImportError:
             pytest.skip("Firebolt SDK not installed")
 
@@ -129,7 +129,7 @@ class TestFireboltAdapterInitialization:
         try:
             with pytest.raises(ConfigurationError, match="Firebolt Cloud configuration is incomplete"):
                 FireboltAdapter(
-                    firebolt_mode="cloud",
+                    deployment_mode="cloud",
                     client_id="id",
                     client_secret="secret",
                     account_name="acct",
@@ -788,7 +788,7 @@ class TestFireboltFromConfig:
         except ImportError:
             pytest.skip("Firebolt SDK not installed")
 
-        assert adapter.mode == "core"
+        assert adapter.deployment_mode == "core"
         assert adapter.url == "http://localhost:3473"
 
     def test_from_config_cloud_mode(self):
@@ -808,7 +808,7 @@ class TestFireboltFromConfig:
         except ImportError:
             pytest.skip("Firebolt SDK not installed")
 
-        assert adapter.mode == "cloud"
+        assert adapter.deployment_mode == "cloud"
         assert adapter.client_id == "test_client_id"
         assert adapter.account_name == "test_account"
         assert adapter.engine_name == "test_engine"

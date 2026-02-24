@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import SparkTuningMixin
 from benchbox.utils.dependencies import (
     check_platform_dependencies,
@@ -102,6 +102,8 @@ class SnowparkConnectAdapter(SparkTuningMixin, PlatformAdapter):
     - Standard Snowflake credit consumption
     - Based on warehouse size and query duration
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(
         self,

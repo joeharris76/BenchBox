@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from benchbox.core.config import QueryResult
+from benchbox.core.schemas import QueryResult
 from benchbox.platforms.base import (
     BenchmarkResults,
     ConnectionConfig,
@@ -62,7 +62,7 @@ class MockPlatformAdapter(PlatformAdapter):
     def configure_for_benchmark(self, connection, benchmark_type):
         pass
 
-    def execute_query(self, connection, query, query_id):
+    def execute_query(self, connection, query, query_id, **kwargs):
         return {
             "query_id": query_id,
             "status": "SUCCESS",
@@ -365,6 +365,7 @@ class TestPlatformAdapter:
         args, kwargs = mock_benchmark.get_queries.call_args
         assert "dialect" not in kwargs
         assert isinstance(results, list)
+        assert all(r.get("run_type") == "measurement" for r in results)
 
     def test_execute_all_queries_benchmark_no_dialect_parameter(self):
         """Test _execute_all_queries when benchmark doesn't support dialect parameter."""
@@ -409,6 +410,80 @@ class TestPlatformAdapter:
             mock_benchmark.get_queries.assert_called_once()
             args, kwargs = mock_benchmark.get_queries.call_args
             assert "dialect" not in kwargs
+
+    def test_execute_queries_by_type_sets_run_type_for_throughput(self):
+        """_execute_queries_by_type should enforce run_type tagging for throughput rows."""
+        adapter = MockPlatformAdapter()
+        benchmark = Mock()
+        connection = Mock()
+        run_config = {"test_execution_type": "throughput"}
+
+        adapter._execute_throughput_test = Mock(
+            return_value=[{"query_id": "Q1", "status": "SUCCESS", "execution_time_seconds": 0.1}]
+        )
+
+        results = adapter._execute_queries_by_type(benchmark, connection, run_config)
+        assert results[0]["run_type"] == "measurement"
+
+    def test_execute_queries_by_type_sets_run_type_for_power(self):
+        """_execute_queries_by_type should enforce run_type tagging for power rows."""
+        adapter = MockPlatformAdapter()
+        benchmark = Mock()
+        connection = Mock()
+        run_config = {"test_execution_type": "power"}
+
+        adapter._execute_power_test = Mock(
+            return_value=[{"query_id": "Q1", "status": "SUCCESS", "execution_time_seconds": 0.1}]
+        )
+
+        results = adapter._execute_queries_by_type(benchmark, connection, run_config)
+        assert results[0]["run_type"] == "measurement"
+
+    def test_execute_queries_by_type_sets_run_type_for_maintenance(self):
+        """_execute_queries_by_type should enforce run_type tagging for maintenance rows."""
+        adapter = MockPlatformAdapter()
+        benchmark = Mock()
+        connection = Mock()
+        run_config = {"test_execution_type": "maintenance"}
+
+        adapter._execute_maintenance_test = Mock(
+            return_value=[{"query_id": "Q1", "status": "SUCCESS", "execution_time_seconds": 0.1}]
+        )
+
+        results = adapter._execute_queries_by_type(benchmark, connection, run_config)
+        assert results[0]["run_type"] == "measurement"
+
+    def test_execute_queries_by_type_combined_preserves_explicit_run_type(self):
+        """Combined runs preserve explicit run_type and backfill missing values."""
+        adapter = MockPlatformAdapter()
+        benchmark = Mock()
+        connection = Mock()
+        run_config = {"test_execution_type": "combined"}
+
+        adapter._execute_combined_test = Mock(
+            return_value=[
+                {"query_id": "Q1", "status": "SUCCESS", "execution_time_seconds": 0.1, "run_type": "warmup"},
+                {"query_id": "Q1", "status": "SUCCESS", "execution_time_seconds": 0.09},
+            ]
+        )
+
+        results = adapter._execute_queries_by_type(benchmark, connection, run_config)
+        assert results[0]["run_type"] == "warmup"
+        assert results[1]["run_type"] == "measurement"
+
+    def test_ensure_query_results_run_type_infers_warmup_from_iteration(self):
+        """Missing run_type should infer warmup when iteration is zero."""
+        results = MockPlatformAdapter._ensure_query_results_run_type(
+            [{"query_id": "Q1", "status": "SUCCESS", "execution_time_seconds": 0.1, "iteration": 0}]
+        )
+        assert results[0]["run_type"] == "warmup"
+
+    def test_ensure_query_results_run_type_infers_warmup_from_flag(self):
+        """Missing run_type should infer warmup when is_warmup flag is true."""
+        results = MockPlatformAdapter._ensure_query_results_run_type(
+            [{"query_id": "Q1", "status": "SUCCESS", "execution_time_seconds": 0.1, "is_warmup": True}]
+        )
+        assert results[0]["run_type"] == "warmup"
 
 
 class TestBenchmarkResults:
@@ -577,14 +652,20 @@ class TestPlatformAdapterWorkflow:
         assert result.total_queries == 1
         mock_benchmark.get_queries_by_category.assert_called_once_with("category1")
 
-    def test_run_benchmark_with_data_generation(self, mock_benchmark, tmp_path):
-        """Test benchmark execution with data generation."""
+    def test_run_benchmark_with_no_tables(self, mock_benchmark, tmp_path):
+        """Test benchmark execution when tables are not pre-populated.
+
+        Data generation is the responsibility of run_benchmark_lifecycle (via
+        _ensure_data_generated), which runs before the adapter is called. The
+        adapter itself does not call generate_data(); it proceeds directly to
+        connection, schema, load, and execute phases.
+        """
         from datetime import datetime
 
         adapter = MockPlatformAdapter()
         mock_benchmark.output_dir = tmp_path
-        mock_benchmark.tables = None  # Trigger data generation
-        mock_benchmark._impl = None  # Make sure _impl also has no tables
+        mock_benchmark.tables = None
+        mock_benchmark._impl = None
 
         # Mock create_enhanced_benchmark_result
         mock_result = BenchmarkResults(
@@ -610,7 +691,8 @@ class TestPlatformAdapterWorkflow:
 
         result = adapter.run_benchmark(mock_benchmark)
 
-        mock_benchmark.generate_data.assert_called_once()
+        # Adapter must NOT call generate_data — that is runner.py's responsibility
+        mock_benchmark.generate_data.assert_not_called()
         assert isinstance(result, BenchmarkResults)
 
     def test_run_benchmark_query_failure(self, mock_benchmark, tmp_path):
@@ -1169,8 +1251,10 @@ class TestStandardExecutionPhase:
         assert result[0].stream_id == "test_stream"
         assert result[0].execution_order == 1
         assert result[0].execution_time_ms == 1500.0
+        assert result[0].run_type == "measurement"
         assert result[1].query_id == "Q2"
         assert result[1].execution_order == 2
+        assert result[1].run_type == "measurement"
 
     def test_create_standard_execution_phase_defaults(self):
         """Test creating execution phase with default stream ID."""
@@ -1183,6 +1267,7 @@ class TestStandardExecutionPhase:
         assert len(result) == 1
         assert result[0].stream_id == "standard"
         assert result[0].query_id == "Q1"  # Default
+        assert result[0].run_type == "measurement"
 
 
 class TestThroughputPhaseCreation:
@@ -1225,6 +1310,33 @@ class TestThroughputPhaseCreation:
         assert result.streams[0].stream_id == 0
         assert len(result.streams[0].query_executions) == 2
         assert result.total_queries_executed == 2
+        assert result.streams[0].query_executions[0].run_type == "measurement"
+        assert result.streams[0].query_executions[1].run_type == "measurement"
+
+    def test_create_throughput_phase_infers_warmup_run_type(self):
+        """Throughput query executions infer warmup run_type from iteration metadata."""
+        adapter = MockPlatformAdapter()
+
+        stream1 = Mock()
+        stream1.stream_id = 0
+        stream1.start_time = "2025-01-01T10:00:00"
+        stream1.end_time = "2025-01-01T10:01:00"
+        stream1.duration = 60.0
+        stream1.query_results = [{"query_id": "Q1", "execution_time_seconds": 1.0, "success": True, "iteration": 0}]
+        stream1.queries_executed = 1
+
+        throughput_result = Mock()
+        throughput_result.stream_results = [stream1]
+        throughput_result.total_time = 60.0
+        throughput_result.start_time = "2025-01-01T10:00:00"
+        throughput_result.end_time = "2025-01-01T10:01:00"
+        throughput_result.config = Mock(num_streams=1)
+        throughput_result.throughput_at_size = 720.0
+
+        result = adapter._create_throughput_phase(throughput_result)
+
+        assert result is not None
+        assert result.streams[0].query_executions[0].run_type == "warmup"
 
 
 class TestGetExistingTables:

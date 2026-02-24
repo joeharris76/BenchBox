@@ -8,8 +8,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from benchbox.core.config import BenchmarkConfig
 from benchbox.core.runner.runner import _ensure_data_generated
+from benchbox.core.schemas import BenchmarkConfig
 
 pytestmark = pytest.mark.fast
 
@@ -28,19 +28,23 @@ def benchmark_config() -> BenchmarkConfig:
 
 
 def _write_manifest(tmp_path: Path, *, table_names: list[str]) -> dict:
-    tables: dict[str, list[dict[str, int | str]]] = {}
+    tables: dict[str, dict] = {}
     file_count = 0
     for table in table_names:
         file_path = tmp_path / f"{table}.dat"
         file_path.write_text("1|sample\n")
         size = file_path.stat().st_size
-        tables[table] = [
-            {
-                "path": file_path.name,
-                "size_bytes": size,
-                "row_count": 1,
+        tables[table] = {
+            "formats": {
+                "dat": [
+                    {
+                        "path": file_path.name,
+                        "size_bytes": size,
+                        "row_count": 1,
+                    }
+                ]
             }
-        ]
+        }
         file_count += 1
 
     manifest = {
@@ -59,19 +63,16 @@ def _write_manifest(tmp_path: Path, *, table_names: list[str]) -> dict:
     return manifest
 
 
-def test_manifest_reuse_populates_tables_and_logs(tmp_path: Path, benchmark_config: BenchmarkConfig):
+def test_manifest_reuse_populates_tables_and_logs(
+    tmp_path: Path, benchmark_config: BenchmarkConfig, capsys: pytest.CaptureFixture[str]
+):
     manifest = _write_manifest(tmp_path, table_names=["customer", "orders"])
-
-    messages: list[str] = []
 
     class DummyBenchmark:
         def __init__(self) -> None:
             self.output_dir = tmp_path
             self.tables = None
             self.generate_data = Mock()
-
-        def log_verbose(self, message: str) -> None:
-            messages.append(message)
 
     dummy = DummyBenchmark()
 
@@ -85,13 +86,11 @@ def test_manifest_reuse_populates_tables_and_logs(tmp_path: Path, benchmark_conf
         assert isinstance(path, Path)
         assert path.exists()
 
-    assert messages, "Expected reuse log message"
-    summary_msg = messages[0]
-    assert "Reusing benchmark data" in summary_msg
-    assert "2 tables" in summary_msg
-    # The manifest has one file per table
-    assert "2 files" in summary_msg
-    assert manifest["created_at"] in summary_msg
+    out = capsys.readouterr().out
+    assert "Reusing benchmark data" in out
+    assert "2 tables" in out
+    assert "2 files" in out
+    assert manifest["created_at"] in out
 
 
 def test_manifest_reuse_prints_when_no_logger(
@@ -169,7 +168,7 @@ def test_force_regenerate_ignores_manifest(tmp_path: Path, benchmark_config: Ben
 def test_invalid_manifest_regenerates(tmp_path: Path, benchmark_config: BenchmarkConfig):
     manifest = _write_manifest(tmp_path, table_names=["orders"])
     # Corrupt manifest by altering file size expectation
-    manifest["tables"]["orders"][0]["size_bytes"] += 100
+    manifest["tables"]["orders"]["formats"]["dat"][0]["size_bytes"] += 100
     with (tmp_path / "_datagen_manifest.json").open("w") as fh:
         json.dump(manifest, fh)
 
@@ -192,7 +191,7 @@ def test_invalid_manifest_regenerates(tmp_path: Path, benchmark_config: Benchmar
 
 def test_no_regenerate_with_invalid_manifest_raises(tmp_path: Path, benchmark_config: BenchmarkConfig):
     manifest = _write_manifest(tmp_path, table_names=["orders"])
-    manifest["tables"]["orders"][0]["size_bytes"] += 50
+    manifest["tables"]["orders"]["formats"]["dat"][0]["size_bytes"] += 50
     with (tmp_path / "_datagen_manifest.json").open("w") as fh:
         json.dump(manifest, fh)
 

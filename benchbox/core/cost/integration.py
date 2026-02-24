@@ -100,14 +100,7 @@ def add_cost_estimation_to_results(
             platform_config = _extract_platform_config_from_results(results)
 
         # Validate platform configuration
-        config_valid, config_warnings = validate_platform_config(platform, platform_config)
-        if config_warnings:
-            for warning in config_warnings:
-                logger.warning(f"Platform config validation: {warning}")
-            if not config_valid:
-                logger.error(
-                    f"Platform configuration incomplete for {platform}. Cost estimation may fail or be inaccurate."
-                )
+        _validate_and_warn_platform_config(platform, platform_config)
 
         calculator = CostCalculator()
 
@@ -127,103 +120,16 @@ def add_cost_estimation_to_results(
         # Calculate phase-level costs
         phase_costs = _calculate_phase_costs(results, platform, platform_config, calculator)
 
-        # Calculate total benchmark cost
-        from benchbox.core.cost.pricing import (
-            PRICING_LAST_UPDATED,
-            PRICING_VERSION,
-            get_pricing_age_days,
-            is_pricing_stale,
-        )
-
-        platform_details = {
-            "platform": platform,
-            "platform_type": platform_config.get("platform_type"),
-            "region": platform_config.get("region"),
-            "warehouse_size": platform_config.get("warehouse_size"),
-            "node_type": platform_config.get("node_type"),
-            "edition": platform_config.get("edition"),
-            "tier": platform_config.get("tier"),
-            "pricing_version": PRICING_VERSION,
-            "pricing_date": PRICING_LAST_UPDATED,
-        }
-
-        # Remove None values
-        platform_details = {k: v for k, v in platform_details.items() if v is not None}
+        # Build platform details and benchmark cost
+        platform_details = _build_platform_details(platform, platform_config)
 
         benchmark_cost = calculator.calculate_benchmark_cost(
             phase_costs=phase_costs,
             platform_details=platform_details,
         )
 
-        # Set cost model and add warnings based on platform type
-        platform_lower = platform.lower()
-        if platform_lower == "redshift":
-            benchmark_cost.cost_model = "marginal"
-            node_count = platform_config.get("node_count", "N")
-            node_type = platform_config.get("node_type", "unknown")
-
-            # Get price for warning message
-            from benchbox.core.cost.pricing import get_redshift_node_price
-
-            region = platform_config.get("region", "us-east-1")
-            price_per_node_hour = get_redshift_node_price(node_type, region)
-
-            benchmark_cost.warnings.append(
-                f"Redshift costs show marginal per-query costs, not total cluster TCO. "
-                f"Cluster idle time is excluded. For full cluster cost, calculate: "
-                f"cluster_runtime_hours × {node_count} nodes × ${price_per_node_hour:.2f}/hour."
-            )
-        elif platform_lower == "databricks":
-            workload_type = platform_config.get("workload_type", "")
-            if workload_type == "all_purpose":
-                benchmark_cost.cost_model = "marginal"
-                benchmark_cost.warnings.append(
-                    "Databricks all-purpose cluster costs show marginal per-query costs. "
-                    "Cluster idle time is excluded. For SQL warehouses, costs represent actual usage."
-                )
-            else:
-                benchmark_cost.cost_model = "actual"
-        elif platform_lower in ["snowflake", "bigquery"] or platform_lower in ["duckdb", "clickhouse"]:
-            benchmark_cost.cost_model = "actual"
-        else:
-            benchmark_cost.cost_model = "estimated"
-
-        # Add pricing staleness warning if applicable
-        if is_pricing_stale(threshold_days=90):
-            pricing_age = get_pricing_age_days()
-            benchmark_cost.warnings.append(
-                f"Pricing data is {pricing_age} days old (last updated: {PRICING_LAST_UPDATED}). "
-                f"Costs may be inaccurate. Please check for pricing updates."
-            )
-
-        # Add storage cost estimate if data was loaded
-        if results.data_size_mb and results.data_size_mb > 0:
-            from benchbox.core.cost.storage import estimate_storage_cost
-
-            # Convert MB to bytes
-            total_bytes = int(results.data_size_mb * 1024 * 1024)
-
-            # Estimate storage duration: minimum 1 hour for benchmarks
-            storage_duration_hours = max(1.0, results.duration_seconds / 3600.0)
-
-            region = platform_config.get("region", "us-east-1")
-            storage_est = estimate_storage_cost(
-                platform=platform,
-                total_bytes=total_bytes,
-                storage_duration_hours=storage_duration_hours,
-                region=region,
-            )
-
-            benchmark_cost.storage_cost = storage_est["storage_cost"]
-            platform_details["storage_estimate"] = storage_est
-
-            # Add warning about storage cost estimate
-            if storage_est["storage_cost"] > 0:
-                benchmark_cost.warnings.append(
-                    f"Storage cost estimate: ${storage_est['storage_cost']:.4f} for "
-                    f"{storage_est['storage_tb']:.2f} TB over {storage_duration_hours:.1f} hours. "
-                    f"{storage_est['note']}"
-                )
+        _apply_cost_model_and_warnings(benchmark_cost, platform, platform_config)
+        _add_storage_cost_estimate(benchmark_cost, results, platform, platform_config, platform_details)
 
         # Add cost_summary to results
         results.cost_summary = benchmark_cost.to_dict()
@@ -242,6 +148,115 @@ def add_cost_estimation_to_results(
         )
 
     return results
+
+
+def _validate_and_warn_platform_config(platform: str, platform_config: dict[str, Any]) -> None:
+    """Validate platform config and log warnings."""
+    config_valid, config_warnings = validate_platform_config(platform, platform_config)
+    if config_warnings:
+        for warning in config_warnings:
+            logger.warning(f"Platform config validation: {warning}")
+        if not config_valid:
+            logger.error(
+                f"Platform configuration incomplete for {platform}. Cost estimation may fail or be inaccurate."
+            )
+
+
+def _build_platform_details(platform: str, platform_config: dict[str, Any]) -> dict[str, Any]:
+    """Build platform details dict for cost calculation."""
+    from benchbox.core.cost.pricing import PRICING_LAST_UPDATED, PRICING_VERSION
+
+    platform_details = {
+        "platform": platform,
+        "platform_type": platform_config.get("platform_type"),
+        "region": platform_config.get("region"),
+        "warehouse_size": platform_config.get("warehouse_size"),
+        "node_type": platform_config.get("node_type"),
+        "edition": platform_config.get("edition"),
+        "tier": platform_config.get("tier"),
+        "pricing_version": PRICING_VERSION,
+        "pricing_date": PRICING_LAST_UPDATED,
+    }
+    return {k: v for k, v in platform_details.items() if v is not None}
+
+
+def _apply_cost_model_and_warnings(benchmark_cost: Any, platform: str, platform_config: dict[str, Any]) -> None:
+    """Set cost model and add platform-specific warnings."""
+    from benchbox.core.cost.pricing import (
+        PRICING_LAST_UPDATED,
+        get_pricing_age_days,
+        get_redshift_node_price,
+        is_pricing_stale,
+    )
+
+    platform_lower = platform.lower()
+    if platform_lower == "redshift":
+        benchmark_cost.cost_model = "marginal"
+        node_count = platform_config.get("node_count", "N")
+        node_type = platform_config.get("node_type", "unknown")
+        region = platform_config.get("region", "us-east-1")
+        price_per_node_hour = get_redshift_node_price(node_type, region)
+        benchmark_cost.warnings.append(
+            f"Redshift costs show marginal per-query costs, not total cluster TCO. "
+            f"Cluster idle time is excluded. For full cluster cost, calculate: "
+            f"cluster_runtime_hours × {node_count} nodes × ${price_per_node_hour:.2f}/hour."
+        )
+    elif platform_lower == "databricks":
+        workload_type = platform_config.get("workload_type", "")
+        if workload_type == "all_purpose":
+            benchmark_cost.cost_model = "marginal"
+            benchmark_cost.warnings.append(
+                "Databricks all-purpose cluster costs show marginal per-query costs. "
+                "Cluster idle time is excluded. For SQL warehouses, costs represent actual usage."
+            )
+        else:
+            benchmark_cost.cost_model = "actual"
+    elif platform_lower in ("snowflake", "bigquery", "duckdb", "clickhouse"):
+        benchmark_cost.cost_model = "actual"
+    else:
+        benchmark_cost.cost_model = "estimated"
+
+    if is_pricing_stale(threshold_days=90):
+        pricing_age = get_pricing_age_days()
+        benchmark_cost.warnings.append(
+            f"Pricing data is {pricing_age} days old (last updated: {PRICING_LAST_UPDATED}). "
+            f"Costs may be inaccurate. Please check for pricing updates."
+        )
+
+
+def _add_storage_cost_estimate(
+    benchmark_cost: Any,
+    results: BenchmarkResults,
+    platform: str,
+    platform_config: dict[str, Any],
+    platform_details: dict[str, Any],
+) -> None:
+    """Add storage cost estimate if data was loaded."""
+    if not results.data_size_mb or results.data_size_mb <= 0:
+        return
+
+    from benchbox.core.cost.storage import estimate_storage_cost
+
+    total_bytes = int(results.data_size_mb * 1024 * 1024)
+    storage_duration_hours = max(1.0, results.duration_seconds / 3600.0)
+    region = platform_config.get("region", "us-east-1")
+
+    storage_est = estimate_storage_cost(
+        platform=platform,
+        total_bytes=total_bytes,
+        storage_duration_hours=storage_duration_hours,
+        region=region,
+    )
+
+    benchmark_cost.storage_cost = storage_est["storage_cost"]
+    platform_details["storage_estimate"] = storage_est
+
+    if storage_est["storage_cost"] > 0:
+        benchmark_cost.warnings.append(
+            f"Storage cost estimate: ${storage_est['storage_cost']:.4f} for "
+            f"{storage_est['storage_tb']:.2f} TB over {storage_duration_hours:.1f} hours. "
+            f"{storage_est['note']}"
+        )
 
 
 def _extract_platform_config_from_results(results: BenchmarkResults) -> dict[str, Any]:
@@ -347,95 +362,130 @@ def _calculate_phase_costs(
     calculator: CostCalculator,
 ) -> list[PhaseCost]:
     """Calculate costs for each benchmark phase."""
-    phase_costs = []
+    phase_costs: list[PhaseCost] = []
 
     # Process execution phases if available
     if results.execution_phases:
-        # Power Test Phase
-        if results.execution_phases.power_test:
-            power_phase = results.execution_phases.power_test
-            query_costs = []
-            for query_exec in power_phase.query_executions:
-                if hasattr(query_exec, "resource_usage") and query_exec.resource_usage:
-                    qc = calculator.calculate_query_cost(
-                        platform=platform,
-                        resource_usage=query_exec.resource_usage,
-                        platform_config=platform_config,
-                    )
-                    if qc:
-                        query_costs.append(qc)
-
-            if query_costs:
-                phase_cost = calculator.calculate_phase_cost("power_test", query_costs)
-                # Add timing context
-                if hasattr(power_phase, "duration_ms"):
-                    phase_cost.wall_clock_duration_seconds = power_phase.duration_ms / 1000.0
-                phase_cost.concurrent_streams = 1  # Power test is sequential
-                phase_costs.append(phase_cost)
-
-        # Throughput Test Phase
-        if results.execution_phases.throughput_test:
-            throughput_phase = results.execution_phases.throughput_test
-            query_costs = []
-            for stream in throughput_phase.streams:
-                for query_exec in stream.query_executions:
-                    if hasattr(query_exec, "resource_usage") and query_exec.resource_usage:
-                        qc = calculator.calculate_query_cost(
-                            platform=platform,
-                            resource_usage=query_exec.resource_usage,
-                            platform_config=platform_config,
-                        )
-                        if qc:
-                            query_costs.append(qc)
-
-            if query_costs:
-                phase_cost = calculator.calculate_phase_cost("throughput_test", query_costs)
-                # Add timing context
-                if hasattr(throughput_phase, "duration_ms"):
-                    phase_cost.wall_clock_duration_seconds = throughput_phase.duration_ms / 1000.0
-                if hasattr(throughput_phase, "streams"):
-                    phase_cost.concurrent_streams = len(throughput_phase.streams)
-                phase_costs.append(phase_cost)
-
-        # Maintenance Test Phase
-        if results.execution_phases.maintenance_test:
-            maintenance_phase = results.execution_phases.maintenance_test
-            query_costs = []
-            for query_exec in maintenance_phase.query_executions:
-                if hasattr(query_exec, "resource_usage") and query_exec.resource_usage:
-                    qc = calculator.calculate_query_cost(
-                        platform=platform,
-                        resource_usage=query_exec.resource_usage,
-                        platform_config=platform_config,
-                    )
-                    if qc:
-                        query_costs.append(qc)
-
-            if query_costs:
-                phase_cost = calculator.calculate_phase_cost("data_maintenance", query_costs)
-                # Add timing context
-                if hasattr(maintenance_phase, "duration_ms"):
-                    phase_cost.wall_clock_duration_seconds = maintenance_phase.duration_ms / 1000.0
-                phase_cost.concurrent_streams = 1  # Maintenance test is typically sequential
-                phase_costs.append(phase_cost)
+        _calculate_power_test_cost(results.execution_phases, platform, platform_config, calculator, phase_costs)
+        _calculate_throughput_test_cost(results.execution_phases, platform, platform_config, calculator, phase_costs)
+        _calculate_maintenance_test_cost(results.execution_phases, platform, platform_config, calculator, phase_costs)
 
     # Fallback: If no execution_phases, calculate from flat query_results
     if not phase_costs and results.query_results:
-        query_costs = []
-        for query_result in results.query_results:
-            if isinstance(query_result, dict):
-                resource_usage = query_result.get("resource_usage")
-                if resource_usage:
-                    qc = calculator.calculate_query_cost(
-                        platform=platform,
-                        resource_usage=resource_usage,
-                        platform_config=platform_config,
-                    )
-                    if qc:
-                        query_costs.append(qc)
-
-        if query_costs:
-            phase_cost = calculator.calculate_phase_cost("all_queries", query_costs)
-            phase_costs.append(phase_cost)
+        _calculate_fallback_costs(results.query_results, platform, platform_config, calculator, phase_costs)
 
     return phase_costs
+
+
+def _collect_query_costs_from_executions(
+    query_executions: Any,
+    platform: str,
+    platform_config: dict[str, Any],
+    calculator: CostCalculator,
+) -> list:
+    """Collect query costs from a list of query executions."""
+    query_costs = []
+    for query_exec in query_executions:
+        if hasattr(query_exec, "resource_usage") and query_exec.resource_usage:
+            qc = calculator.calculate_query_cost(
+                platform=platform,
+                resource_usage=query_exec.resource_usage,
+                platform_config=platform_config,
+            )
+            if qc:
+                query_costs.append(qc)
+    return query_costs
+
+
+def _calculate_power_test_cost(
+    execution_phases: Any,
+    platform: str,
+    platform_config: dict[str, Any],
+    calculator: CostCalculator,
+    phase_costs: list[PhaseCost],
+) -> None:
+    """Calculate cost for the power test phase."""
+    if not execution_phases.power_test:
+        return
+    power_phase = execution_phases.power_test
+    query_costs = _collect_query_costs_from_executions(
+        power_phase.query_executions, platform, platform_config, calculator
+    )
+    if query_costs:
+        phase_cost = calculator.calculate_phase_cost("power_test", query_costs)
+        if hasattr(power_phase, "duration_ms"):
+            phase_cost.wall_clock_duration_seconds = power_phase.duration_ms / 1000.0
+        phase_cost.concurrent_streams = 1
+        phase_costs.append(phase_cost)
+
+
+def _calculate_throughput_test_cost(
+    execution_phases: Any,
+    platform: str,
+    platform_config: dict[str, Any],
+    calculator: CostCalculator,
+    phase_costs: list[PhaseCost],
+) -> None:
+    """Calculate cost for the throughput test phase."""
+    if not execution_phases.throughput_test:
+        return
+    throughput_phase = execution_phases.throughput_test
+    query_costs = []
+    for stream in throughput_phase.streams:
+        query_costs.extend(
+            _collect_query_costs_from_executions(stream.query_executions, platform, platform_config, calculator)
+        )
+    if query_costs:
+        phase_cost = calculator.calculate_phase_cost("throughput_test", query_costs)
+        if hasattr(throughput_phase, "duration_ms"):
+            phase_cost.wall_clock_duration_seconds = throughput_phase.duration_ms / 1000.0
+        if hasattr(throughput_phase, "streams"):
+            phase_cost.concurrent_streams = len(throughput_phase.streams)
+        phase_costs.append(phase_cost)
+
+
+def _calculate_maintenance_test_cost(
+    execution_phases: Any,
+    platform: str,
+    platform_config: dict[str, Any],
+    calculator: CostCalculator,
+    phase_costs: list[PhaseCost],
+) -> None:
+    """Calculate cost for the maintenance test phase."""
+    if not execution_phases.maintenance_test:
+        return
+    maintenance_phase = execution_phases.maintenance_test
+    query_costs = _collect_query_costs_from_executions(
+        maintenance_phase.query_executions, platform, platform_config, calculator
+    )
+    if query_costs:
+        phase_cost = calculator.calculate_phase_cost("data_maintenance", query_costs)
+        if hasattr(maintenance_phase, "duration_ms"):
+            phase_cost.wall_clock_duration_seconds = maintenance_phase.duration_ms / 1000.0
+        phase_cost.concurrent_streams = 1
+        phase_costs.append(phase_cost)
+
+
+def _calculate_fallback_costs(
+    query_results: list,
+    platform: str,
+    platform_config: dict[str, Any],
+    calculator: CostCalculator,
+    phase_costs: list[PhaseCost],
+) -> None:
+    """Calculate costs from flat query_results when no execution_phases are available."""
+    query_costs = []
+    for query_result in query_results:
+        if isinstance(query_result, dict):
+            resource_usage = query_result.get("resource_usage")
+            if resource_usage:
+                qc = calculator.calculate_query_cost(
+                    platform=platform,
+                    resource_usage=resource_usage,
+                    platform_config=platform_config,
+                )
+                if qc:
+                    query_costs.append(qc)
+    if query_costs:
+        phase_cost = calculator.calculate_phase_cost("all_queries", query_costs)
+        phase_costs.append(phase_cost)

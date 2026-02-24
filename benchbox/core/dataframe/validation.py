@@ -22,7 +22,7 @@ Usage:
     # Compare two DataFrame results
     result = compare_dataframes(df1, df2)
     if not result.is_valid:
-        print(f"Validation failed: {result.errors}")
+        emit(f"Validation failed: {result.errors}")
 
     # Compare DataFrame result with SQL result
     result = compare_with_sql(df_result, sql_result, query_id="Q1")
@@ -403,26 +403,54 @@ def compare_dataframes(
         return result
 
     # Data comparison - sort both DataFrames for order-invariant comparison
-    if cfg.ignore_row_order:
-        # Sort by all columns for consistent ordering
-        common_cols = list(set(actual_cols) & set(expected_cols))
-        if common_cols:
-            try:
-                actual_sorted = actual_df.select(common_cols).sort(common_cols)
-                expected_sorted = expected_df.select(common_cols).sort(common_cols)
-            except Exception as e:
-                result.add_warning(f"Could not sort DataFrames for comparison: {e}")
-                actual_sorted = actual_df.select(common_cols)
-                expected_sorted = expected_df.select(common_cols)
-        else:
-            result.add_error("No common columns to compare")
-            return result
-    else:
-        common_cols = list(set(actual_cols) & set(expected_cols))
-        actual_sorted = actual_df.select(common_cols)
-        expected_sorted = expected_df.select(common_cols)
+    common_cols = list(set(actual_cols) & set(expected_cols))
+    if not common_cols:
+        result.add_error("No common columns to compare")
+        return result
+
+    actual_sorted, expected_sorted = _prepare_sorted_dataframes(actual_df, expected_df, common_cols, cfg, result)
 
     # Compare column by column
+    mismatches = _compare_columns(actual_sorted, expected_sorted, common_cols, cfg, result)
+
+    if mismatches:
+        for msg in mismatches:
+            result.add_error(msg)
+        result.metrics["column_mismatches"] = len(mismatches)
+
+    return result
+
+
+def _prepare_sorted_dataframes(
+    actual_df: Any,
+    expected_df: Any,
+    common_cols: list[str],
+    cfg: ValidationConfig,
+    result: ValidationResult,
+) -> tuple[Any, Any]:
+    """Prepare DataFrames for comparison, optionally sorting for order-invariance."""
+    if cfg.ignore_row_order:
+        try:
+            actual_sorted = actual_df.select(common_cols).sort(common_cols)
+            expected_sorted = expected_df.select(common_cols).sort(common_cols)
+        except Exception as e:
+            result.add_warning(f"Could not sort DataFrames for comparison: {e}")
+            actual_sorted = actual_df.select(common_cols)
+            expected_sorted = expected_df.select(common_cols)
+    else:
+        actual_sorted = actual_df.select(common_cols)
+        expected_sorted = expected_df.select(common_cols)
+    return actual_sorted, expected_sorted
+
+
+def _compare_columns(
+    actual_sorted: Any,
+    expected_sorted: Any,
+    common_cols: list[str],
+    cfg: ValidationConfig,
+    result: ValidationResult,
+) -> list[str]:
+    """Compare columns between two DataFrames, returning mismatch descriptions."""
     import polars as pl
 
     mismatches = []
@@ -432,7 +460,6 @@ def compare_dataframes(
 
         # Check type compatibility
         if actual_col.dtype != expected_col.dtype:
-            # Try to compare anyway for numeric types
             if actual_col.dtype.is_numeric() and expected_col.dtype.is_numeric():
                 result.add_warning(f"Column '{col}' has different types: {actual_col.dtype} vs {expected_col.dtype}")
             else:
@@ -441,47 +468,50 @@ def compare_dataframes(
 
         # Compare values
         if actual_col.dtype.is_float():
-            # Use fuzzy comparison for floats
-            # Build comparison using Series operations
-            diff = (actual_col - expected_col).abs()
-
-            # Calculate threshold: max(rel_tolerance * |expected|, abs_tolerance)
-            rel_threshold = expected_col.abs() * cfg.float_tolerance
-            threshold = rel_threshold.fill_null(cfg.float_abs_tolerance)
-            # Ensure minimum absolute tolerance
-            threshold = (
-                pl.when(threshold < cfg.float_abs_tolerance)
-                .then(pl.lit(cfg.float_abs_tolerance))
-                .otherwise(threshold)
-                .alias("threshold")
-            )
-            threshold_series = actual_sorted.select(threshold).to_series()
-
-            # Handle nulls - both null is a match
-            actual_null = actual_col.is_null()
-            expected_null = expected_col.is_null()
-
-            # Value matches if: diff <= threshold OR (both are null)
-            value_match = (diff <= threshold_series) | (actual_null & expected_null)
-            if not value_match.all():
-                mismatch_count = (~value_match).sum()
-                mismatches.append(f"Column '{col}': {mismatch_count} value mismatches")
+            mismatch = _compare_float_column(actual_sorted, actual_col, expected_col, col, cfg, pl)
         else:
-            # Exact comparison for non-floats
-            if cfg.null_equals_null:
-                match = (actual_col == expected_col) | (actual_col.is_null() & expected_col.is_null())
-            else:
-                match = actual_col == expected_col
-            if not match.all():
-                mismatch_count = (~match).sum()
-                mismatches.append(f"Column '{col}': {mismatch_count} value mismatches")
+            mismatch = _compare_exact_column(actual_col, expected_col, col, cfg)
 
-    if mismatches:
-        for msg in mismatches:
-            result.add_error(msg)
-        result.metrics["column_mismatches"] = len(mismatches)
+        if mismatch:
+            mismatches.append(mismatch)
 
-    return result
+    return mismatches
+
+
+def _compare_float_column(
+    actual_sorted: Any, actual_col: Any, expected_col: Any, col: str, cfg: ValidationConfig, pl: Any
+) -> str | None:
+    """Compare a float column with fuzzy tolerance. Returns mismatch description or None."""
+    diff = (actual_col - expected_col).abs()
+    rel_threshold = expected_col.abs() * cfg.float_tolerance
+    threshold = rel_threshold.fill_null(cfg.float_abs_tolerance)
+    threshold = (
+        pl.when(threshold < cfg.float_abs_tolerance)
+        .then(pl.lit(cfg.float_abs_tolerance))
+        .otherwise(threshold)
+        .alias("threshold")
+    )
+    threshold_series = actual_sorted.select(threshold).to_series()
+
+    actual_null = actual_col.is_null()
+    expected_null = expected_col.is_null()
+    value_match = (diff <= threshold_series) | (actual_null & expected_null)
+    if not value_match.all():
+        mismatch_count = (~value_match).sum()
+        return f"Column '{col}': {mismatch_count} value mismatches"
+    return None
+
+
+def _compare_exact_column(actual_col: Any, expected_col: Any, col: str, cfg: ValidationConfig) -> str | None:
+    """Compare a non-float column exactly. Returns mismatch description or None."""
+    if cfg.null_equals_null:
+        match = (actual_col == expected_col) | (actual_col.is_null() & expected_col.is_null())
+    else:
+        match = actual_col == expected_col
+    if not match.all():
+        mismatch_count = (~match).sum()
+        return f"Column '{col}': {mismatch_count} value mismatches"
+    return None
 
 
 def compare_with_sql(

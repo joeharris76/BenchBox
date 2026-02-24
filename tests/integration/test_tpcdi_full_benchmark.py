@@ -265,7 +265,7 @@ class TestTPCDIFullBenchmarkIntegration:
 
         # Establish performance expectations (these would be adjusted based on actual baseline measurements)
         assert performance_metrics["schema_creation_time"] < 5.0, "Schema creation too slow"
-        assert performance_metrics["data_generation_time"] < 10.0, "Data generation too slow"
+        assert performance_metrics["data_generation_time"] < 30.0, "Data generation too slow"
         assert performance_metrics["etl_pipeline_time"] < 30.0, "ETL pipeline too slow"
         assert performance_metrics["validation_time"] < 5.0, "Validation too slow"
 

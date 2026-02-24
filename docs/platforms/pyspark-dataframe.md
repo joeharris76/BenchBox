@@ -41,10 +41,10 @@ BenchBox defaults to DataFrame mode for historical compatibility. Use `--mode sq
 
 ```bash
 # Install PySpark DataFrame support
-uv add benchbox --extra dataframe-pyspark
+uv add benchbox --extra pyspark
 
 # Or with pip
-pip install "benchbox[dataframe-pyspark]"
+pip install "benchbox[pyspark]"
 
 # Or install PySpark directly
 pip install pyspark pyarrow
@@ -311,7 +311,7 @@ adapter = PySparkDataFrameAdapter(
 |---------|------------|
 | `Detected Java 24...` | Install Temurin/OpenJDK 17 or 21 and export `JAVA_HOME` before running BenchBox. |
 | `SparkSession already created with a different configuration` | Ensure SQL/DataFrame adapters share identical Spark options (master, memory, shuffle partitions). |
-| `PySpark not installed` | Run `uv add benchbox --extra dataframe-pyspark` or `pip install pyspark pyarrow`. |
+| `PySpark not installed` | Run `uv add benchbox --extra pyspark` or `pip install pyspark pyarrow`. |
 | Cloud storage read errors | Include required Spark packages via `--platform-option spark.hadoop.fs.s3a.impl=...` and supply credentials through environment variables. |
 
 ## Query Implementation

@@ -38,6 +38,7 @@ from finalize_release import (
     verify_git_status,
     verify_source_fingerprint,
 )
+from update_version import update_version_in_init, update_version_in_pyproject
 from verify_release import verify_wheel_fingerprint
 
 # =============================================================================
@@ -219,6 +220,55 @@ class TestRunCiChecks:
             result = run_ci_checks(tmp_path)
 
         assert result is False
+
+
+@pytest.mark.fast
+class TestUpdateVersionScript:
+    """Regression coverage for scripts/update_version.py helpers."""
+
+    def test_update_version_in_init_noop_returns_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Already-matching __version__ should be treated as a successful no-op."""
+        pkg_dir = tmp_path / "benchbox"
+        pkg_dir.mkdir()
+        init_file = pkg_dir / "__init__.py"
+        init_file.write_text('__version__ = "0.1.3"\n')
+
+        monkeypatch.setattr("update_version.get_project_root", lambda: tmp_path)
+
+        assert update_version_in_init("0.1.3") is True
+        assert init_file.read_text() == '__version__ = "0.1.3"\n'
+
+    def test_update_version_in_init_missing_pattern_returns_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Missing __version__ marker should fail clearly."""
+        pkg_dir = tmp_path / "benchbox"
+        pkg_dir.mkdir()
+        (pkg_dir / "__init__.py").write_text("name = 'benchbox'\n")
+
+        monkeypatch.setattr("update_version.get_project_root", lambda: tmp_path)
+
+        assert update_version_in_init("0.1.3") is False
+
+    def test_update_version_in_pyproject_noop_returns_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Already-matching pyproject version should be treated as a successful no-op."""
+        pyproject_file = tmp_path / "pyproject.toml"
+        pyproject_file.write_text('[project]\nname = "benchbox"\nversion = "0.1.3"\n')
+
+        monkeypatch.setattr("update_version.get_project_root", lambda: tmp_path)
+
+        assert update_version_in_pyproject("0.1.3") is True
+        assert pyproject_file.read_text() == '[project]\nname = "benchbox"\nversion = "0.1.3"\n'
+
+    def test_update_version_in_pyproject_updates_value(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Version field should update when target differs."""
+        pyproject_file = tmp_path / "pyproject.toml"
+        pyproject_file.write_text('[project]\nname = "benchbox"\nversion = "0.1.2"\n')
+
+        monkeypatch.setattr("update_version.get_project_root", lambda: tmp_path)
+
+        assert update_version_in_pyproject("0.1.3") is True
+        assert 'version = "0.1.3"' in pyproject_file.read_text()
 
 
 # =============================================================================
@@ -666,7 +716,7 @@ import subprocess
 
 def _init_git_repo(path: Path) -> None:
     """Helper: initialize a git repo with initial commit."""
-    subprocess.run(["git", "init"], cwd=path, capture_output=True, check=True)
+    subprocess.run(["git", "init", "--initial-branch=main"], cwd=path, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=path, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=path, capture_output=True, check=True)
 

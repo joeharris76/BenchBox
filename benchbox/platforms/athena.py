@@ -18,10 +18,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.core.sql_utils import normalize_table_name_in_sql
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         ForeignKeyConfiguration,
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
+        TuningColumn,
         UnifiedTuningConfiguration,
     )
 
@@ -37,8 +38,8 @@ from ..utils.dependencies import (
     check_platform_dependencies,
     get_dependency_error_message,
 )
-from .base import PlatformAdapter
-from .base.data_loading import FileFormatRegistry
+from .base import DriverIsolationCapability, PlatformAdapter
+from .base.data_loading import DataSourceResolver, FileFormatRegistry
 
 try:
     import boto3
@@ -63,6 +64,8 @@ class AthenaAdapter(PlatformAdapter):
     - AWS Glue Data Catalog for metadata management
     - Workgroup-based resource management and cost controls
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -129,6 +132,18 @@ class AthenaAdapter(PlatformAdapter):
 
         # Validate configuration
         self._validate_configuration()
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """Build opt-in sorted-ingestion SQL for Athena."""
+        mode, method = self.resolve_sorted_ingestion_strategy()
+        if mode == "off":
+            return None
+
+        if method != "ctas":
+            raise ValueError(f"Sorted ingestion method '{method}' is not supported for Athena.")
+
+        order_by = ", ".join(column.name for column in sort_columns)
+        return f"CREATE TABLE {table_name} AS SELECT * FROM {table_name} ORDER BY {order_by}"
 
     def _validate_configuration(self) -> None:
         """Validate Athena configuration and provide actionable error messages.
@@ -695,6 +710,7 @@ class AthenaAdapter(PlatformAdapter):
         """
         start_time = mono_time()
         table_stats = {}
+        total_time = 0.0
 
         # Validate S3 bucket is configured
         if not self.s3_bucket:
@@ -708,34 +724,7 @@ class AthenaAdapter(PlatformAdapter):
         cursor = connection.cursor()
 
         try:
-            # Get data files
-            if hasattr(benchmark, "tables") and benchmark.tables:
-                data_files = benchmark.tables
-            else:
-                data_files = None
-                try:
-                    manifest_path = Path(data_dir) / "_datagen_manifest.json"
-                    if manifest_path.exists():
-                        with open(manifest_path) as f:
-                            manifest = json.load(f)
-                        tables = manifest.get("tables") or {}
-                        mapping = {}
-                        for table, entries in tables.items():
-                            if entries:
-                                chunk_paths = []
-                                for entry in entries:
-                                    rel = entry.get("path")
-                                    if rel:
-                                        chunk_paths.append(Path(data_dir) / rel)
-                                if chunk_paths:
-                                    mapping[table] = chunk_paths
-                        if mapping:
-                            data_files = mapping
-                except Exception as e:
-                    self.logger.debug(f"Manifest fallback failed: {e}")
-
-                if not data_files:
-                    raise ValueError("No data files found")
+            data_files = self._resolve_data_files(benchmark, data_dir)
 
             # Determine S3 path based on mode
             # In parquet mode, upload to staging location; otherwise, upload to final location
@@ -743,75 +732,34 @@ class AthenaAdapter(PlatformAdapter):
 
             # Track tables for CTAS conversion
             tables_to_convert = []
+            effective_tuning = self.get_effective_tuning_configuration()
 
             # Upload data to S3 for each table
             for table_name, file_paths in data_files.items():
-                if not isinstance(file_paths, list):
-                    file_paths = [file_paths]
-
                 table_name_lower = table_name.lower()
-
-                # In parquet mode, upload to staging location
-                if is_parquet_mode:
-                    s3_table_path = f"{self.s3_prefix}/{self.database}_staging/{table_name_lower}/"
-                else:
-                    s3_table_path = f"{self.s3_prefix}/{self.database}/{table_name_lower}/"
-
-                uploaded_rows = 0
-                chunk_info = f" from {len(file_paths)} file(s)" if len(file_paths) > 1 else ""
+                uploaded_rows, file_count = self._upload_files_to_s3(
+                    s3_client=s3_client,
+                    table_name=table_name,
+                    table_name_lower=table_name_lower,
+                    file_paths=file_paths,
+                    is_parquet_mode=is_parquet_mode,
+                )
+                chunk_info = f" from {file_count} file(s)" if file_count > 1 else ""
                 self.log_verbose(f"Uploading data for table: {table_name}{chunk_info}")
-
-                for file_path in file_paths:
-                    file_path = Path(file_path)
-                    if not file_path.exists() or file_path.stat().st_size == 0:
-                        continue
-
-                    # Upload file to S3
-                    # Athena Engine v3 supports ZSTD, GZIP, BZIP2, LZ4, SNAPPY for TEXTFILE
-                    s3_key = f"{s3_table_path}{file_path.name}"
-
-                    try:
-                        s3_client.upload_file(str(file_path), self.s3_bucket, s3_key)
-
-                        # Count rows in uploaded file (handle compression for accurate count)
-                        compression_handler = FileFormatRegistry.get_compression_handler(file_path)
-                        with compression_handler.open(file_path) as f:
-                            rows = sum(1 for line in f if line.strip())
-                        uploaded_rows += rows
-
-                        self.logger.debug(f"Uploaded {file_path.name} to s3://{self.s3_bucket}/{s3_key}")
-
-                    except Exception as e:
-                        self.logger.error(f"Failed to upload {file_path}: {e}")
-                        raise
 
                 if is_parquet_mode:
                     # Track for CTAS conversion
                     tables_to_convert.append((table_name_lower, uploaded_rows))
                     self.logger.info(f"📤 Uploaded {uploaded_rows:,} rows to staging for {table_name_lower}")
                 else:
-                    # Text mode: Repair table to discover the uploaded data
-                    try:
-                        cursor.execute(f"MSCK REPAIR TABLE {table_name_lower}")
-                        self.logger.debug(f"Repaired table {table_name_lower}")
-                    except Exception as e:
-                        self.logger.debug(f"MSCK REPAIR for {table_name_lower}: {e}")
-
-                    # Verify actual row count from table
-                    try:
-                        cursor.execute(f"SELECT COUNT(*) FROM {table_name_lower}")
-                        result = cursor.fetchone()
-                        actual_row_count = result[0] if result else 0
-                        table_stats[table_name_lower] = actual_row_count
-
-                        if actual_row_count != uploaded_rows:
-                            self.logger.warning(
-                                f"Row count mismatch for {table_name_lower}: "
-                                f"uploaded {uploaded_rows:,}, table has {actual_row_count:,}"
-                            )
-                    except Exception as e:
-                        self.logger.warning(f"Could not verify row count for {table_name_lower}: {e}")
-                        table_stats[table_name_lower] = uploaded_rows
+                    row_count, count_verified = self._load_text_mode_table(
+                        cursor=cursor,
+                        table_name_lower=table_name_lower,
+                        uploaded_rows=uploaded_rows,
+                    )
+                    table_stats[table_name_lower] = row_count
+                    if count_verified and effective_tuning is not None:
+                        self.apply_ctas_sort(table_name_lower, effective_tuning, connection)
 
                     self.logger.info(
                         f"✅ Loaded {table_stats[table_name_lower]:,} rows into {table_name_lower}{chunk_info}"
@@ -821,6 +769,9 @@ class AthenaAdapter(PlatformAdapter):
             if is_parquet_mode and tables_to_convert:
                 self.logger.info("🔄 Converting staging tables to Parquet format...")
                 table_stats = self._convert_staging_to_parquet(cursor, tables_to_convert, s3_client)
+                if effective_tuning is not None:
+                    for table_name_lower in table_stats:
+                        self.apply_ctas_sort(table_name_lower, effective_tuning, connection)
 
             total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
@@ -834,6 +785,88 @@ class AthenaAdapter(PlatformAdapter):
             cursor.close()
 
         return table_stats, total_time, None
+
+    def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
+        """Resolve benchmark data files from benchmark tables or manifest."""
+        resolver = DataSourceResolver()
+        data_source = resolver.resolve(benchmark, data_dir)
+        if not data_source or not data_source.tables:
+            raise ValueError("No data files found")
+        return data_source.tables
+
+    @staticmethod
+    def _normalize_existing_files(file_paths: Any) -> list[Path]:
+        """Normalize file inputs to existing, non-empty local paths."""
+        normalized_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        valid_files: list[Path] = []
+        for file_path in normalized_paths:
+            path = Path(file_path)
+            if path.exists() and path.stat().st_size > 0:
+                valid_files.append(path)
+        return valid_files
+
+    def _build_s3_table_path(self, table_name_lower: str, is_parquet_mode: bool) -> str:
+        """Build the destination S3 prefix for a table load."""
+        if is_parquet_mode:
+            return f"{self.s3_prefix}/{self.database}_staging/{table_name_lower}/"
+        return f"{self.s3_prefix}/{self.database}/{table_name_lower}/"
+
+    def _upload_files_to_s3(
+        self,
+        s3_client: Any,
+        table_name: str,
+        table_name_lower: str,
+        file_paths: Any,
+        is_parquet_mode: bool,
+    ) -> tuple[int, int]:
+        """Upload table files to S3 and return (uploaded_rows, file_count)."""
+        valid_files = self._normalize_existing_files(file_paths)
+        file_count = len(valid_files)
+        s3_table_path = self._build_s3_table_path(table_name_lower, is_parquet_mode)
+        uploaded_rows = 0
+
+        for file_path in valid_files:
+            s3_key = f"{s3_table_path}{file_path.name}"
+            try:
+                s3_client.upload_file(str(file_path), self.s3_bucket, s3_key)
+
+                compression_handler = FileFormatRegistry.get_compression_handler(file_path)
+                with compression_handler.open(file_path) as file_handle:
+                    uploaded_rows += sum(1 for line in file_handle if line.strip())
+
+                self.logger.debug(f"Uploaded {file_path.name} to s3://{self.s3_bucket}/{s3_key}")
+            except Exception as e:
+                self.logger.error(f"Failed to upload {file_path}: {e}")
+                raise
+
+        return uploaded_rows, file_count
+
+    def _load_text_mode_table(self, cursor: Any, table_name_lower: str, uploaded_rows: int) -> tuple[int, bool]:
+        """Load one table in text mode and return (row_count, count_verified).
+
+        The second element indicates whether SELECT COUNT(*) succeeded,
+        which determines whether post-load operations like CTAS sort
+        should proceed.
+        """
+        try:
+            cursor.execute(f"MSCK REPAIR TABLE {table_name_lower}")
+            self.logger.debug(f"Repaired table {table_name_lower}")
+        except Exception as e:
+            self.logger.debug(f"MSCK REPAIR for {table_name_lower}: {e}")
+
+        try:
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name_lower}")
+            result = cursor.fetchone()
+            actual_row_count = result[0] if result else 0
+            if actual_row_count != uploaded_rows:
+                self.logger.warning(
+                    f"Row count mismatch for {table_name_lower}: "
+                    f"uploaded {uploaded_rows:,}, table has {actual_row_count:,}"
+                )
+            return actual_row_count, True
+        except Exception as e:
+            self.logger.warning(f"Could not verify row count for {table_name_lower}: {e}")
+            return uploaded_rows, False
 
     def _convert_staging_to_parquet(
         self,
@@ -1059,32 +1092,8 @@ class AthenaAdapter(PlatformAdapter):
         return None
 
     def _normalize_table_name_in_sql(self, sql: str) -> str:
-        """Normalize table names to lowercase in CREATE TABLE statements.
-
-        This function lowercases table names while preserving the rest of the SQL.
-        It handles CREATE TABLE (with or without EXTERNAL/IF NOT EXISTS).
-        """
-        import re
-
-        # Match the CREATE TABLE clause including the table name, then preserve the rest
-        # Group 1: CREATE [EXTERNAL] TABLE [IF NOT EXISTS] part
-        # Group 2: table name
-        # The rest of the SQL (columns, etc.) is preserved automatically
-        sql = re.sub(
-            r'CREATE(\s+EXTERNAL)?\s+TABLE(\s+IF\s+NOT\s+EXISTS)?\s+"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"CREATE{m.group(1) or ''} TABLE{m.group(2) or ''} {m.group(3).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        sql = re.sub(
-            r'REFERENCES\s+"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"REFERENCES {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        return sql
+        """Normalize table names to lowercase in CREATE TABLE statements."""
+        return normalize_table_name_in_sql(sql)
 
     def get_query_plan(self, connection: Any, query: str) -> str:
         """Get query execution plan."""
@@ -1229,7 +1238,7 @@ def _build_athena_config(
     info: Any,
 ) -> Any:
     """Build Athena database configuration with credential loading."""
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

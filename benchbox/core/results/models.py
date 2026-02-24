@@ -15,6 +15,21 @@ if TYPE_CHECKING:
     from benchbox.core.results.query_plan_models import QueryPlanDAG
 
 
+# Canonical run_type vocabulary for query-result rows.
+# `test_execution_type` captures run mode (power/throughput/etc.);
+# `run_type` captures per-row execution role.
+QUERY_RUN_TYPE_WARMUP = "warmup"
+QUERY_RUN_TYPE_MEASUREMENT = "measurement"
+QUERY_RUN_TYPE_METADATA = "metadata"
+QUERY_RUN_TYPE_SUMMARY = "summary"
+QUERY_RUN_TYPES = {
+    QUERY_RUN_TYPE_WARMUP,
+    QUERY_RUN_TYPE_MEASUREMENT,
+    QUERY_RUN_TYPE_METADATA,
+    QUERY_RUN_TYPE_SUMMARY,
+}
+
+
 @dataclass
 class TableGenerationStats:
     generation_time_ms: int
@@ -238,7 +253,17 @@ class BenchmarkResults:
     driver_package: str | None = None
     driver_version_requested: str | None = None
     driver_version_resolved: str | None = None
+    driver_version_actual: str | None = None
+    driver_runtime_strategy: str | None = None
+    driver_runtime_path: str | None = None
+    driver_runtime_python_executable: str | None = None
     driver_auto_install: bool = False
+    # Engine/service version metadata (independent from Python driver version).
+    # For coupled platforms (DuckDB, DataFusion): engine version == driver version.
+    # For decoupled platforms (Snowflake, Redshift, etc.): engine version is the
+    # remote service/runtime version, probed from connection or API metadata.
+    engine_version: str | None = None  # Observed engine/service version
+    engine_version_source: str | None = None  # Provenance: "sql_query", "api", "connection_metadata", "driver_coupled"
     # Additional optional attributes set dynamically
     output_filename: str | None = None
     resource_utilization: dict[str, Any] | None = None

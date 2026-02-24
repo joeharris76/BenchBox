@@ -143,6 +143,8 @@ class QueryExecution:
     rows_returned: int | None = None
     resource_usage: dict[str, Any] | None = None
     error_message: str | None = None
+    iteration: int | None = None
+    run_type: str | None = None
 
 
 @dataclass

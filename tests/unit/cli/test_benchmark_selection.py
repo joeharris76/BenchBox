@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from benchbox.cli.benchmarks import BenchmarkManager
-from benchbox.core.config import BenchmarkConfig
+from benchbox.core.schemas import BenchmarkConfig
 
 pytestmark = pytest.mark.fast
 

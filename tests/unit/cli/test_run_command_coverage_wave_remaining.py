@@ -8,9 +8,40 @@ benchbox/cli/exceptions.py is already at 72%.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
+
+# ===================================================================
+# normalize_benchmark_name
+# ===================================================================
+
+
+class TestNormalizeBenchmarkName:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("tpch", "tpch"),
+            ("TPC-H", "tpch"),
+            ("tpc_h", "tpch"),
+            ("TPC-DS", "tpcds"),
+            ("tpcds-obt", "tpcds_obt"),
+            ("star-schema", "ssb"),
+        ],
+    )
+    def test_aliases(self, raw: str, expected: str):
+        from benchbox.cli.commands.run import normalize_benchmark_name
+
+        assert normalize_benchmark_name(raw) == expected
+
+    def test_unknown_name_passthrough(self):
+        from benchbox.cli.commands.run import normalize_benchmark_name
+
+        assert normalize_benchmark_name("custom_benchmark") == "custom_benchmark"
+
 
 # ===================================================================
 # PlatformOptionParamType
@@ -212,6 +243,10 @@ class TestRenderPostRunCharts:
 # ===================================================================
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="Click command mock.patch requires Python 3.11+ for attribute access",
+)
 class TestDescribePlatformOptions:
     def test_no_options(self):
         from benchbox.cli.commands.run import _describe_platform_options
@@ -574,3 +609,89 @@ class TestCreateErrorHandler:
         handler = create_error_handler(mock)
         assert isinstance(handler, ErrorHandler)
         assert handler.console is mock
+
+
+# ===================================================================
+# run command branch coverage
+# ===================================================================
+
+
+class TestRunCommandBranchCoverage:
+    def setup_method(self):
+        self.runner = CliRunner()
+        self._orig_non_interactive = os.environ.get("BENCHBOX_NON_INTERACTIVE")
+
+    def teardown_method(self):
+        if self._orig_non_interactive is None:
+            os.environ.pop("BENCHBOX_NON_INTERACTIVE", None)
+        else:
+            os.environ["BENCHBOX_NON_INTERACTIVE"] = self._orig_non_interactive
+
+    def test_official_with_seed_and_platform_option_without_platform(self):
+        from benchbox.cli.commands.run import run
+
+        result = self.runner.invoke(
+            run,
+            [
+                "--official",
+                "--scale",
+                "1",
+                "--seed",
+                "7",
+                "--benchmark",
+                "tpch",
+                "--phases",
+                "generate",
+                "--platform-option",
+                "threads=4",
+            ],
+            obj={},
+        )
+
+        assert result.exit_code == 1
+        assert "Platform options require a --platform selection" in result.output
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
+    def test_platform_option_parse_error_logs_and_exits(self):
+        from benchbox.cli.commands.run import PlatformOptionError, run
+
+        with patch("benchbox.cli.commands.run.PlatformHookRegistry.parse_options") as parse_options:
+            parse_options.side_effect = PlatformOptionError("invalid option")
+            result = self.runner.invoke(
+                run,
+                [
+                    "--platform",
+                    "duckdb",
+                    "--benchmark",
+                    "tpch",
+                    "--phases",
+                    "generate",
+                    "--platform-option",
+                    "threads=4",
+                    "--verbose",
+                ],
+                obj={},
+            )
+
+        assert result.exit_code == 1
+        assert "invalid option" in result.output
+
+    def test_non_interactive_missing_required_args(self):
+        from benchbox.cli.commands.run import run
+
+        result = self.runner.invoke(
+            run,
+            [
+                "--non-interactive",
+                "--verbose",
+                "--phases",
+                "load",
+            ],
+            obj={},
+        )
+
+        assert result.exit_code == 2
+        assert "Non-interactive mode requires all parameters" in result.output

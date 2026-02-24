@@ -7,13 +7,12 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-import importlib
 from datetime import datetime
 
 import pytest
 
-from benchbox.core.config import BenchmarkConfig, QueryResult
 from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.schemas import BenchmarkConfig, QueryResult
 
 
 @pytest.mark.unit
@@ -176,11 +175,10 @@ class TestBenchmarkResults:
         assert getattr(stored, "query_id", None) == "q1"
 
 
-def test_cli_types_does_not_expose_legacy_benchmark_result() -> None:
-    """Ensure the legacy BenchmarkResult symbol is no longer exported."""
-
-    module = importlib.import_module("benchbox.cli.types")
-    assert not hasattr(module, "BenchmarkResult")
+def test_cli_types_module_removed() -> None:
+    """Legacy CLI type compatibility module is no longer available."""
+    with pytest.raises(ModuleNotFoundError):
+        __import__("benchbox.cli.types")
 
 
 @pytest.mark.unit

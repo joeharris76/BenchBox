@@ -188,121 +188,134 @@ def resolve_tuning(
         TuningResolution with full metadata about the resolution
     """
     tuning_lower = tuning_arg.lower()
+
+    # === Case 1: notuning - baseline mode ===
+    if tuning_lower == "notuning":
+        return _resolve_notuning(logger)
+
+    # === Case 2: auto - smart defaults from system profile ===
+    if tuning_lower == "auto":
+        return _resolve_auto(logger)
+
+    # === Case 3: Explicit file path ===
+    tuning_path = Path(tuning_arg)
+    if tuning_path.exists():
+        return _resolve_explicit_file(tuning_path, logger)
+
+    # === Case 4: tuned - auto-discovery or fallback ===
+    if tuning_lower == "tuned":
+        return _resolve_tuned(platform, benchmark, config_manager, logger)
+
+    # === Case 5: Invalid value (not a keyword and file doesn't exist) ===
+    _raise_invalid_tuning_value(tuning_arg)
+
+
+def _resolve_notuning(logger: Logger | None) -> TuningResolution:
+    """Resolve notuning (baseline) mode."""
     resolution = TuningResolution(
         mode=TuningMode.NOTUNING,
         source=TuningSource.BASELINE,
         enabled=False,
     )
+    resolution.info_messages.append("Tuning disabled: running baseline comparison (no optimizations)")
+    if logger:
+        logger.debug("Tuning mode: notuning (baseline)")
+    return resolution
 
-    # === Case 1: notuning - baseline mode ===
-    if tuning_lower == "notuning":
-        resolution.mode = TuningMode.NOTUNING
-        resolution.source = TuningSource.BASELINE
-        resolution.enabled = False
-        resolution.info_messages.append("Tuning disabled: running baseline comparison (no optimizations)")
 
-        if logger:
-            logger.debug("Tuning mode: notuning (baseline)")
+def _resolve_auto(logger: Logger | None) -> TuningResolution:
+    """Resolve auto (smart defaults) mode."""
+    resolution = TuningResolution(
+        mode=TuningMode.AUTO,
+        source=TuningSource.SMART_DEFAULTS,
+        enabled=True,
+    )
+    resolution.info_messages.append("Tuning mode: auto (using smart defaults based on system profile)")
+    if logger:
+        logger.debug("Tuning mode: auto (smart defaults)")
+    return resolution
 
-        return resolution
 
-    # === Case 2: auto - smart defaults from system profile ===
-    if tuning_lower == "auto":
-        resolution.mode = TuningMode.AUTO
-        resolution.source = TuningSource.SMART_DEFAULTS
-        resolution.enabled = True
-        resolution.info_messages.append("Tuning mode: auto (using smart defaults based on system profile)")
+def _resolve_explicit_file(tuning_path: Path, logger: Logger | None) -> TuningResolution:
+    """Resolve an explicit file path."""
+    resolution = TuningResolution(
+        mode=TuningMode.CUSTOM_FILE,
+        source=TuningSource.EXPLICIT_FILE,
+        enabled=True,
+        config_file=tuning_path.resolve(),
+    )
+    resolution.info_messages.append(f"Tuning: loading configuration from {resolution.config_file}")
+    if logger:
+        logger.debug(f"Tuning mode: explicit file ({resolution.config_file})")
+    return resolution
 
-        if logger:
-            logger.debug("Tuning mode: auto (smart defaults)")
 
-        return resolution
+def _resolve_tuned(
+    platform: str | None,
+    benchmark: str | None,
+    config_manager: ConfigManager,
+    logger: Logger | None,
+) -> TuningResolution:
+    """Resolve tuned mode with auto-discovery or fallback."""
+    resolution = TuningResolution(
+        mode=TuningMode.TUNED,
+        source=TuningSource.FALLBACK,
+        enabled=True,
+    )
 
-    # === Case 3: Explicit file path ===
-    tuning_path = Path(tuning_arg)
-    if tuning_path.exists():
-        resolution.mode = TuningMode.CUSTOM_FILE
-        resolution.source = TuningSource.EXPLICIT_FILE
-        resolution.enabled = True
-        resolution.config_file = tuning_path.resolve()
-        resolution.info_messages.append(f"Tuning: loading configuration from {resolution.config_file}")
-
-        if logger:
-            logger.debug(f"Tuning mode: explicit file ({resolution.config_file})")
-
-        return resolution
-
-    # === Case 4: tuned - auto-discovery or fallback ===
-    if tuning_lower == "tuned":
-        resolution.mode = TuningMode.TUNED
-        resolution.enabled = True
-
-        # First, check if there's a default config file in config
-        default_config = config_manager.get("tuning.default_config_file")
-        if default_config:
-            default_path = Path(default_config)
-            if default_path.exists():
-                resolution.source = TuningSource.EXPLICIT_FILE
-                resolution.config_file = default_path.resolve()
-                resolution.info_messages.append(
-                    f"Tuning: using default config from benchbox.yaml: {resolution.config_file}"
-                )
-                if logger:
-                    logger.debug(f"Tuning mode: tuned (config file default: {resolution.config_file})")
-                return resolution
-            else:
-                resolution.warnings.append(f"Default tuning config '{default_config}' from benchbox.yaml not found")
-
-        if platform and benchmark:
-            # Search for template
-            search_paths = get_tuning_template_paths(platform, benchmark)
-            resolution.searched_paths = search_paths
-
-            for path in search_paths:
-                if path.exists():
-                    resolution.source = TuningSource.AUTO_DISCOVERED
-                    resolution.config_file = path.resolve()
-                    resolution.info_messages.append(f"Tuning: auto-discovered template at {resolution.config_file}")
-
-                    if logger:
-                        logger.debug(f"Tuning mode: tuned (auto-discovered: {resolution.config_file})")
-
-                    return resolution
-
-            # No template found - will fall back
-            resolution.source = TuningSource.FALLBACK
-            resolution.warnings.append(
-                f"No tuning template found for {platform}/{benchmark}. "
-                f"Searched: {', '.join(str(p) for p in search_paths)}"
+    # First, check if there's a default config file in config
+    default_config = config_manager.get("tuning.default_config_file")
+    if default_config:
+        default_path = Path(default_config)
+        if default_path.exists():
+            resolution.source = TuningSource.EXPLICIT_FILE
+            resolution.config_file = default_path.resolve()
+            resolution.info_messages.append(
+                f"Tuning: using default config from benchbox.yaml: {resolution.config_file}"
             )
-            resolution.info_messages.append("Tuning: using basic constraints (no optimized template available)")
-
             if logger:
-                logger.debug("Tuning mode: tuned (fallback - no template found)")
-
+                logger.debug(f"Tuning mode: tuned (config file default: {resolution.config_file})")
             return resolution
         else:
-            # No platform/benchmark specified yet - will use basic constraints
-            resolution.source = TuningSource.FALLBACK
-            resolution.warnings.append("Cannot auto-discover tuning template without platform and benchmark specified")
-            resolution.info_messages.append("Tuning: using basic constraints")
+            resolution.warnings.append(f"Default tuning config '{default_config}' from benchbox.yaml not found")
 
-            if logger:
-                logger.debug("Tuning mode: tuned (fallback - no platform/benchmark)")
+    if platform and benchmark:
+        search_paths = get_tuning_template_paths(platform, benchmark)
+        resolution.searched_paths = search_paths
 
-            return resolution
+        for path in search_paths:
+            if path.exists():
+                resolution.source = TuningSource.AUTO_DISCOVERED
+                resolution.config_file = path.resolve()
+                resolution.info_messages.append(f"Tuning: auto-discovered template at {resolution.config_file}")
+                if logger:
+                    logger.debug(f"Tuning mode: tuned (auto-discovered: {resolution.config_file})")
+                return resolution
 
-    # === Case 5: Invalid value (not a keyword and file doesn't exist) ===
-    # Check if it looks like a file path that doesn't exist
+        resolution.warnings.append(
+            f"No tuning template found for {platform}/{benchmark}. Searched: {', '.join(str(p) for p in search_paths)}"
+        )
+        resolution.info_messages.append("Tuning: using basic constraints (no optimized template available)")
+        if logger:
+            logger.debug("Tuning mode: tuned (fallback - no template found)")
+    else:
+        resolution.warnings.append("Cannot auto-discover tuning template without platform and benchmark specified")
+        resolution.info_messages.append("Tuning: using basic constraints")
+        if logger:
+            logger.debug("Tuning mode: tuned (fallback - no platform/benchmark)")
+
+    return resolution
+
+
+def _raise_invalid_tuning_value(tuning_arg: str) -> None:
+    """Raise ValueError for invalid tuning argument."""
     if "/" in tuning_arg or "\\" in tuning_arg or tuning_arg.endswith(".yaml"):
-        # Looks like a file path
         raise ValueError(
             f"Tuning file not found: '{tuning_arg}'\n"
             f"Please verify the file exists at the specified path.\n"
             f"Use --tuning list to see available templates."
         )
     else:
-        # Invalid keyword
         raise ValueError(
             f"Invalid tuning value: '{tuning_arg}'\n"
             f"Valid options:\n"

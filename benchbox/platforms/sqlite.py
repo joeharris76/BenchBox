@@ -20,10 +20,11 @@ if TYPE_CHECKING:
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
         TableTuning,
+        TuningColumn,
         UnifiedTuningConfiguration,
     )
 
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 
 try:
     import sqlite3
@@ -33,6 +34,8 @@ except ImportError:
 
 class SQLiteAdapter(PlatformAdapter):
     """SQLite platform adapter for testing and lightweight usage."""
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_APPLICABLE
 
     @property
     def platform_name(self) -> str:
@@ -114,13 +117,6 @@ class SQLiteAdapter(PlatformAdapter):
             adapter_config["database_path"] = str(data_dir / db_filename)
             # Create directory if it doesn't exist
             data_dir.mkdir(parents=True, exist_ok=True)
-        elif (
-            "connection" in config
-            and isinstance(config["connection"], dict)
-            and config["connection"].get("database_path")
-        ):
-            # Legacy: Check nested connection dict for database_path
-            adapter_config["database_path"] = config["connection"]["database_path"]
         else:
             # No database path and no benchmark/scale to generate one - raise error
             from ..core.exceptions import ConfigurationError
@@ -135,19 +131,17 @@ class SQLiteAdapter(PlatformAdapter):
         adapter_config["check_same_thread"] = config.get("check_same_thread", False)
 
         # Force recreate (if database should be replaced)
-        adapter_config["force_recreate"] = config.get("force", False)
+        # force_recreate may arrive via config["options"] (from DatabaseConfig.model_dump() in the
+        # execution pipeline) or directly at the top level (direct API usage / old code path).
+        _opts = config.get("options") or {}
+        adapter_config["force_recreate"] = bool(
+            config.get("force_recreate") or _opts.get("force_recreate") or config.get("force")
+        )
 
         # Pass through other relevant config (verbose settings, tuning config, etc.)
         for key in ["tuning_config", "verbose_enabled", "very_verbose"]:
             if key in config:
                 adapter_config[key] = config[key]
-
-        # Legacy: Normalize keys from nested "connection" dict
-        if "connection" in config and isinstance(config["connection"], dict):
-            conn = config["connection"]
-            for key in ("database_path", "timeout", "check_same_thread"):
-                if key in conn and key not in adapter_config:
-                    adapter_config[key] = conn[key]
 
         return cls(**adapter_config)
 
@@ -296,10 +290,15 @@ class SQLiteAdapter(PlatformAdapter):
             benchmark=benchmark,
             connection=connection,
             data_dir=data_dir,
+            tuning_config=self.unified_tuning_configuration if self.tuning_enabled else None,
         )
         table_stats, loading_time = loader.load()
         # DataLoader doesn't provide per-table timings yet
         return table_stats, loading_time, None
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """SQLite does not support efficient post-load CTAS sorting in this workflow."""
+        return None
 
     def _get_existing_tables(self, connection) -> list[str]:
         """Get list of existing tables in the SQLite database.

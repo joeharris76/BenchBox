@@ -285,95 +285,47 @@ class ConcurrencyAnalyzer:
             Scaling analysis with efficiency metrics
         """
         if results_by_concurrency is None:
-            # Single result - estimate from resource metrics
-            concurrency_levels = [self._result.max_concurrency_reached]
-            throughput_at_level = {self._result.max_concurrency_reached: self._result.overall_throughput}
+            return self._analyze_scaling_single()
 
-            latencies = []
-            for stream in self._result.streams:
-                for ex in stream.query_executions:
-                    latencies.append((ex.end_time - ex.start_time) * 1000)
+        return self._analyze_scaling_multi(results_by_concurrency)
 
-            avg_latency = statistics.mean(latencies) if latencies else 0
-            latency_at_level = {self._result.max_concurrency_reached: avg_latency}
+    def _analyze_scaling_single(self) -> ScalingAnalysis:
+        """Scaling analysis from a single concurrency result."""
+        concurrency_levels = [self._result.max_concurrency_reached]
+        throughput_at_level = {self._result.max_concurrency_reached: self._result.overall_throughput}
 
-            return ScalingAnalysis(
-                concurrency_levels=concurrency_levels,
-                throughput_at_level=throughput_at_level,
-                latency_at_level=latency_at_level,
-                scaling_efficiency=1.0,  # Unknown with single data point
-                optimal_concurrency=self._result.max_concurrency_reached,
-                saturation_point=None,
-                parallelizable_fraction=0.5,  # Unknown
-                scaling_type="unknown",
-            )
+        latencies = self._collect_latencies(self._result)
+        avg_latency = statistics.mean(latencies) if latencies else 0
+        latency_at_level = {self._result.max_concurrency_reached: avg_latency}
 
-        # Multiple results - full scaling analysis
+        return ScalingAnalysis(
+            concurrency_levels=concurrency_levels,
+            throughput_at_level=throughput_at_level,
+            latency_at_level=latency_at_level,
+            scaling_efficiency=1.0,
+            optimal_concurrency=self._result.max_concurrency_reached,
+            saturation_point=None,
+            parallelizable_fraction=0.5,
+            scaling_type="unknown",
+        )
+
+    def _analyze_scaling_multi(self, results_by_concurrency: dict[int, ConcurrentLoadResult]) -> ScalingAnalysis:
+        """Full scaling analysis from multiple concurrency levels."""
         concurrency_levels = sorted(results_by_concurrency.keys())
-        throughput_at_level = {}
-        latency_at_level = {}
+        throughput_at_level: dict[int, float] = {}
+        latency_at_level: dict[int, float] = {}
 
         for level in concurrency_levels:
             result = results_by_concurrency[level]
             throughput_at_level[level] = result.overall_throughput
-
-            latencies = []
-            for stream in result.streams:
-                for ex in stream.query_executions:
-                    latencies.append((ex.end_time - ex.start_time) * 1000)
+            latencies = self._collect_latencies(result)
             latency_at_level[level] = statistics.mean(latencies) if latencies else 0
 
-        # Calculate scaling efficiency
-        if len(concurrency_levels) >= 2:
-            base_level = concurrency_levels[0]
-            base_throughput = throughput_at_level[base_level]
-
-            # Perfect scaling would be: throughput[n] = throughput[1] * n
-            efficiencies = []
-            for level in concurrency_levels[1:]:
-                expected = base_throughput * (level / base_level)
-                actual = throughput_at_level[level]
-                efficiency = actual / expected if expected > 0 else 0
-                efficiencies.append(efficiency)
-
-            avg_efficiency = statistics.mean(efficiencies) if efficiencies else 1.0
-        else:
-            avg_efficiency = 1.0
-
-        # Find optimal concurrency (highest throughput)
+        avg_efficiency = self._compute_scaling_efficiency(concurrency_levels, throughput_at_level)
         optimal = max(concurrency_levels, key=lambda x: throughput_at_level[x])
+        saturation = self._find_saturation_point(concurrency_levels, throughput_at_level)
+        p = self._estimate_parallelizable_fraction(concurrency_levels, throughput_at_level)
 
-        # Find saturation point (where throughput stops increasing)
-        saturation = None
-        for i, level in enumerate(concurrency_levels[:-1]):
-            next_level = concurrency_levels[i + 1]
-            current_throughput = throughput_at_level[level]
-            next_throughput = throughput_at_level[next_level]
-
-            # If throughput increase < 10% despite concurrency increase
-            if next_throughput < current_throughput * 1.1:
-                saturation = level
-                break
-
-        # Estimate parallelizable fraction (Amdahl's law)
-        # speedup = 1 / ((1 - p) + p/n)
-        # Solve for p given observed speedup
-        if len(concurrency_levels) >= 2:
-            max_level = max(concurrency_levels)
-            base_throughput = throughput_at_level[concurrency_levels[0]]
-            max_throughput = throughput_at_level[max_level]
-            speedup = max_throughput / base_throughput if base_throughput > 0 else 1
-
-            # p = (speedup - 1) / (speedup - 1/n)
-            if speedup > 1 and max_level > 1:
-                p = (speedup - 1) / (speedup - 1 / max_level)
-                p = max(0, min(1, p))  # Clamp to [0, 1]
-            else:
-                p = 0.5
-        else:
-            p = 0.5
-
-        # Determine scaling type
         if avg_efficiency > 0.9:
             scaling_type = "linear"
         elif avg_efficiency > 0.5:
@@ -393,6 +345,53 @@ class ConcurrencyAnalyzer:
             parallelizable_fraction=p,
             scaling_type=scaling_type,
         )
+
+    @staticmethod
+    def _collect_latencies(result: ConcurrentLoadResult) -> list[float]:
+        """Collect all query latencies in milliseconds from a load result."""
+        return [(ex.end_time - ex.start_time) * 1000 for stream in result.streams for ex in stream.query_executions]
+
+    @staticmethod
+    def _compute_scaling_efficiency(concurrency_levels: list[int], throughput_at_level: dict[int, float]) -> float:
+        """Calculate average scaling efficiency across concurrency levels."""
+        if len(concurrency_levels) < 2:
+            return 1.0
+        base_level = concurrency_levels[0]
+        base_throughput = throughput_at_level[base_level]
+
+        efficiencies = []
+        for level in concurrency_levels[1:]:
+            expected = base_throughput * (level / base_level)
+            actual = throughput_at_level[level]
+            efficiencies.append(actual / expected if expected > 0 else 0)
+
+        return statistics.mean(efficiencies) if efficiencies else 1.0
+
+    @staticmethod
+    def _find_saturation_point(concurrency_levels: list[int], throughput_at_level: dict[int, float]) -> int | None:
+        """Find the concurrency level where throughput stops increasing (<10% gain)."""
+        for i, level in enumerate(concurrency_levels[:-1]):
+            next_level = concurrency_levels[i + 1]
+            if throughput_at_level[next_level] < throughput_at_level[level] * 1.1:
+                return level
+        return None
+
+    @staticmethod
+    def _estimate_parallelizable_fraction(
+        concurrency_levels: list[int], throughput_at_level: dict[int, float]
+    ) -> float:
+        """Estimate parallelizable fraction using Amdahl's law."""
+        if len(concurrency_levels) < 2:
+            return 0.5
+        max_level = max(concurrency_levels)
+        base_throughput = throughput_at_level[concurrency_levels[0]]
+        max_throughput = throughput_at_level[max_level]
+        speedup = max_throughput / base_throughput if base_throughput > 0 else 1
+
+        if speedup > 1 and max_level > 1:
+            p = (speedup - 1) / (speedup - 1 / max_level)
+            return max(0.0, min(1.0, p))
+        return 0.5
 
     def get_summary(self) -> dict:
         """Get a summary of all analyses.

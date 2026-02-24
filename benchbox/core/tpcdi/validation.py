@@ -16,6 +16,8 @@ from typing import Any, Optional, Union
 
 import sqlglot
 
+from benchbox.utils.printing import emit
+
 logger = logging.getLogger(__name__)
 
 
@@ -360,36 +362,36 @@ class TPCDIValidator:
 
     def print_validation_summary(self, result: DataQualityResult) -> None:
         """Print a formatted summary of validation results."""
-        print("\n" + "=" * 60)
-        print("TPC-DI DATA QUALITY VALIDATION RESULTS")
-        print("=" * 60)
+        emit("\n" + "=" * 60)
+        emit("TPC-DI DATA QUALITY VALIDATION RESULTS")
+        emit("=" * 60)
 
-        print(f"Total Validations: {result.total_validations}")
-        print(f"Passed: {result.passed_validations}")
-        print(f"Failed: {result.failed_validations}")
-        print(f"Overall Quality Score: {result.quality_score:.1%}")
+        emit(f"Total Validations: {result.total_validations}")
+        emit(f"Passed: {result.passed_validations}")
+        emit(f"Failed: {result.failed_validations}")
+        emit(f"Overall Quality Score: {result.quality_score:.1%}")
 
         if result.error_count > 0:
-            print(f"Errors: {result.error_count}")
+            emit(f"Errors: {result.error_count}")
         if result.warning_count > 0:
-            print(f"Warnings: {result.warning_count}")
+            emit(f"Warnings: {result.warning_count}")
 
-        print("\nResults by Category:")
+        emit("\nResults by Category:")
         for category, stats in result.categories.items():
             score = stats["passed"] / stats["total"] if stats["total"] > 0 else 0
-            print(f"  {category}: {stats['passed']}/{stats['total']} ({score:.1%})")
+            emit(f"  {category}: {stats['passed']}/{stats['total']} ({score:.1%})")
 
-        print("\nFailed Validations:")
+        emit("\nFailed Validations:")
         failed_validations = [v for v in result.validations if not v.passed]
         if not failed_validations:
-            print("  None - All validations passed!")
+            emit("  None - All validations passed!")
         else:
             for validation in failed_validations:
-                print(f"  ❌ {validation.name}: {validation.status}")
-                print(f"     {validation.description}")
+                emit(f"  ❌ {validation.name}: {validation.status}")
+                emit(f"     {validation.description}")
                 if hasattr(validation, "violations") and validation.violations > 0:
-                    print(f"     Violations found: {validation.violations}")
+                    emit(f"     Violations found: {validation.violations}")
                 if hasattr(validation, "error") and validation.error:
-                    print(f"     Error: {validation.error}")
+                    emit(f"     Error: {validation.error}")
 
-        print("=" * 60)
+        emit("=" * 60)

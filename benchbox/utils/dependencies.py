@@ -43,22 +43,23 @@ def is_development_install() -> bool:
 
 # Map platform names to their pyproject.toml extra names
 PLATFORM_TO_EXTRA: dict[str, str] = {
-    # DataFrame platforms use "dataframe-*" prefix
-    "polars": "dataframe-polars",
-    "polars-df": "dataframe-polars",
-    "modin": "dataframe-modin",
-    "modin-df": "dataframe-modin",
-    "dask": "dataframe-dask",
-    "dask-df": "dataframe-dask",
-    "pandas": "dataframe-pandas",
-    "pandas-df": "dataframe-pandas",
-    "cudf": "dataframe-cudf",
-    "cudf-df": "dataframe-cudf",
-    "pyspark": "dataframe-pyspark",
-    "pyspark-df": "dataframe-pyspark",
+    # DataFrame platforms — plain-name extras (dataframe-* aliases also exist)
+    "polars": "polars",
+    "polars-df": "polars",
+    "modin": "modin",
+    "modin-df": "modin",
+    "dask": "dask",
+    "dask-df": "dask",
+    "pandas": "pandas",
+    "pandas-df": "pandas",
+    "cudf": "cudf",
+    "cudf-df": "cudf",
+    "pyspark": "pyspark",
+    "pyspark-df": "pyspark",
     "spark": "spark",
-    "datafusion": "dataframe-datafusion",
-    "datafusion-df": "dataframe-datafusion",
+    "lakesail": "lakesail",
+    "datafusion": "datafusion",
+    "datafusion-df": "datafusion",
     # Cloud/SQL platforms
     "athena": "athena",
     "bigquery": "bigquery",
@@ -68,14 +69,20 @@ PLATFORM_TO_EXTRA: dict[str, str] = {
     "redshift": "redshift",
     "synapse": "synapse",
     "fabric": "fabric",
+    "fabric-lakehouse": "fabric",
+    "fabric_lakehouse": "fabric",
+    "fabric-spark": "fabric-spark",
     "trino": "trino",
     "presto": "presto",
     "clickhouse": "clickhouse",
     "clickhouse-local": "clickhouse-local",
     "firebolt": "firebolt",
+    "databend": "databend",
     "influxdb": "influxdb",
+    "doris": "doris",
     "postgresql": "postgresql",
     "postgres": "postgresql",
+    "questdb": "questdb",
 }
 
 
@@ -225,51 +232,51 @@ class InstallationScenario:
 # Platform dependency information
 # DataFrame platform dependency information
 DATAFRAME_DEPENDENCY_GROUPS: dict[str, DependencyInfo] = {
-    "dataframe-pandas": DependencyInfo(
-        name="dataframe-pandas",
+    "pandas": DependencyInfo(
+        name="pandas",
         description="Pandas DataFrame library for data analysis",
         packages=["pandas"],
-        install_command="uv add benchbox --extra dataframe-pandas",
+        install_command="uv add benchbox --extra pandas",
         use_cases=["Data analysis", "Data manipulation", "DataFrame benchmarking"],
         platforms=["Pandas"],
     ),
-    "dataframe-modin": DependencyInfo(
-        name="dataframe-modin",
+    "modin": DependencyInfo(
+        name="modin",
         description="Modin distributed Pandas replacement",
         packages=["modin", "pandas"],
-        install_command="uv add benchbox --extra dataframe-modin",
+        install_command="uv add benchbox --extra modin",
         use_cases=["Distributed Pandas", "Large datasets", "Multi-core processing"],
         platforms=["Modin (Ray backend)"],
     ),
-    "dataframe-dask": DependencyInfo(
-        name="dataframe-dask",
+    "dask": DependencyInfo(
+        name="dask",
         description="Dask parallel computing library",
         packages=["dask", "pandas"],
-        install_command="uv add benchbox --extra dataframe-dask",
+        install_command="uv add benchbox --extra dask",
         use_cases=["Parallel computing", "Out-of-core processing", "Large datasets"],
         platforms=["Dask"],
     ),
-    "dataframe-pyspark": DependencyInfo(
-        name="dataframe-pyspark",
+    "pyspark": DependencyInfo(
+        name="pyspark",
         description="Apache Spark Python interface",
         packages=["pyspark"],
-        install_command="uv add benchbox --extra dataframe-pyspark",
+        install_command="uv add benchbox --extra pyspark",
         use_cases=["Distributed computing", "Big data processing", "Spark SQL"],
         platforms=["Apache Spark (PySpark)"],
     ),
-    "dataframe-polars": DependencyInfo(
-        name="dataframe-polars",
+    "polars": DependencyInfo(
+        name="polars",
         description="Polars high-performance DataFrame library",
         packages=["polars"],
-        install_command="uv add benchbox --extra dataframe-polars",
+        install_command="uv add benchbox --extra polars",
         use_cases=["High-performance analytics", "Lazy evaluation", "Rust-powered DataFrame"],
         platforms=["Polars"],
     ),
-    "dataframe-datafusion": DependencyInfo(
-        name="dataframe-datafusion",
+    "datafusion": DependencyInfo(
+        name="datafusion",
         description="Apache DataFusion query engine",
         packages=["datafusion"],
-        install_command="uv add benchbox --extra dataframe-datafusion",
+        install_command="uv add benchbox --extra datafusion",
         use_cases=["SQL on DataFrames", "Arrow-native processing", "Query optimization"],
         platforms=["Apache DataFusion"],
     ),
@@ -389,6 +396,14 @@ DEPENDENCY_GROUPS: dict[str, DependencyInfo] = {
         use_cases=["Vectorized analytics", "Cloud data warehouse", "Local development", "S3 staging"],
         platforms=["Firebolt Core (local)", "Firebolt Cloud"],
     ),
+    "databend": DependencyInfo(
+        name="databend",
+        description="Databend cloud-native OLAP data warehouse",
+        packages=["databend-driver"],
+        install_command="uv add benchbox --extra databend",
+        use_cases=["Cloud-native OLAP", "Snowflake-compatible analytics", "Object storage backend"],
+        platforms=["Databend Cloud", "Databend Self-Hosted"],
+    ),
     "influxdb": DependencyInfo(
         name="influxdb",
         description="InfluxDB time series database with FlightSQL support",
@@ -397,6 +412,14 @@ DEPENDENCY_GROUPS: dict[str, DependencyInfo] = {
         use_cases=["Time series analytics", "TSBS DevOps benchmarks", "FlightSQL queries"],
         platforms=["InfluxDB Core (OSS)", "InfluxDB Cloud"],
     ),
+    "starrocks": DependencyInfo(
+        name="starrocks",
+        description="StarRocks columnar analytics engine via MySQL protocol",
+        packages=["pymysql"],
+        install_command="uv add benchbox --extra starrocks",
+        use_cases=["Columnar analytics", "Fast OLAP queries", "Distributed MPP"],
+        platforms=["StarRocks"],
+    ),
     "postgresql": DependencyInfo(
         name="postgresql",
         description="PostgreSQL open-source relational database connector",
@@ -404,6 +427,14 @@ DEPENDENCY_GROUPS: dict[str, DependencyInfo] = {
         install_command="uv add benchbox --extra postgresql",
         use_cases=["Row-store baseline", "OLTP benchmarks", "TimescaleDB time-series"],
         platforms=["PostgreSQL", "TimescaleDB"],
+    ),
+    "questdb": DependencyInfo(
+        name="questdb",
+        description="QuestDB time-series database connector (via PostgreSQL wire protocol)",
+        packages=["psycopg2-binary", "requests"],
+        install_command="uv add benchbox --extra questdb",
+        use_cases=["Time-series analytics", "High-throughput ingestion", "Columnar OLAP"],
+        platforms=["QuestDB"],
     ),
     "synapse": DependencyInfo(
         name="synapse",
@@ -493,6 +524,14 @@ DEPENDENCY_GROUPS: dict[str, DependencyInfo] = {
         use_cases=["Distributed SQL", "Big data processing", "Spark SQL"],
         platforms=["Apache Spark", "Spark on YARN", "Spark on Kubernetes"],
     ),
+    "lakesail": DependencyInfo(
+        name="lakesail",
+        description="LakeSail Sail Spark-compatible engine (uses PySpark Spark Connect client)",
+        packages=["pyspark"],
+        install_command="uv add benchbox --extra lakesail",
+        use_cases=["Spark-compatible SQL", "High-performance analytics", "DataFusion-based"],
+        platforms=["LakeSail Sail"],
+    ),
     "snowpark-connect": DependencyInfo(
         name="snowpark-connect",
         description="Snowpark Connect PySpark-compatible API on Snowflake",
@@ -569,6 +608,10 @@ DEPENDENCY_GROUPS: dict[str, DependencyInfo] = {
             # InfluxDB 3.0
             "influxdb3-python",
             "pyarrow",  # For InfluxDB and DataFusion
+            # Databend
+            "databend-driver",
+            # MySQL-protocol platforms (StarRocks, Doris)
+            "pymysql",
         ],
         install_command="uv add benchbox --extra all",
         use_cases=["Complete platform coverage", "Testing all adapters", "Maximum flexibility"],

@@ -71,6 +71,23 @@ benchbox run --platform trino --benchmark tpch --scale 1.0 \
 | `verify_ssl` | true | Verify SSL certificates |
 | `staging_root` | (none) | S3/GCS path for data staging |
 | `table_format` | hive | Table format (hive, iceberg, delta) |
+| `driver_version` | (latest) | Pin the trino package version (e.g. `0.336.0`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific Trino Connector Version
+
+```bash
+benchbox run --platform trino --benchmark tpch \
+  --platform-option driver_version=0.336.0 \
+  --platform-option driver_auto_install=true \
+  --platform-option host=trino.example.com \
+  --platform-option catalog=hive
+```
+
+The driver package for Trino is `trino`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Usage Examples
 

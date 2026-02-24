@@ -75,6 +75,23 @@ benchbox run --platform snowflake --benchmark tpch --scale 1.0 \
 | `role` | (default) | Snowflake role |
 | `stage_name` | (auto) | Stage for data loading |
 | `stage_type` | user | Stage type: user, table, external |
+| `driver_version` | (latest) | Pin the Snowflake Python connector version (e.g. `3.12.0`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific Snowflake Connector Version
+
+```bash
+benchbox run --platform snowflake --benchmark tpch \
+  --platform-option driver_version=3.12.0 \
+  --platform-option driver_auto_install=true \
+  --platform-option account=xy12345.us-east-1 \
+  --platform-option warehouse=COMPUTE_WH
+```
+
+The driver package for Snowflake is `snowflake-connector-python`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Authentication Methods
 

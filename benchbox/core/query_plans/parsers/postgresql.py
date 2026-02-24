@@ -237,62 +237,15 @@ class PostgreSQLQueryPlanParser(QueryPlanParser):
         Returns:
             Dictionary of operator-specific fields (excluding 'properties' key)
         """
-        kwargs: dict[str, Any] = {}
+        _extractors = {
+            LogicalOperatorType.SCAN: self._extract_scan_info,
+            LogicalOperatorType.JOIN: self._extract_join_info,
+            LogicalOperatorType.AGGREGATE: self._extract_aggregate_info,
+            LogicalOperatorType.SORT: self._extract_sort_info,
+        }
 
-        if logical_type == LogicalOperatorType.SCAN:
-            # Extract table information
-            table_name = node.get("Relation Name")
-            if table_name:
-                kwargs["table_name"] = table_name
-
-        elif logical_type == LogicalOperatorType.JOIN:
-            # Extract join type
-            join_type_str = node.get("Join Type", "Inner")
-            kwargs["join_type"] = self.JOIN_TYPE_MAP.get(join_type_str, JoinType.INNER)
-
-            # Extract join conditions
-            join_filter = node.get("Join Filter")
-            hash_cond = node.get("Hash Cond")
-            merge_cond = node.get("Merge Cond")
-
-            conditions = []
-            if join_filter:
-                conditions.append(join_filter)
-            if hash_cond:
-                conditions.append(hash_cond)
-            if merge_cond:
-                conditions.append(merge_cond)
-            if conditions:
-                kwargs["join_conditions"] = conditions
-
-        elif logical_type == LogicalOperatorType.AGGREGATE:
-            # Extract group by keys
-            group_key = node.get("Group Key")
-            if group_key:
-                kwargs["group_by_keys"] = group_key if isinstance(group_key, list) else [group_key]
-
-        elif logical_type == LogicalOperatorType.SORT:
-            # Extract sort keys
-            sort_key = node.get("Sort Key")
-            if sort_key:
-                sort_keys = []
-                for key in sort_key if isinstance(sort_key, list) else [sort_key]:
-                    # PostgreSQL includes direction in the key string
-                    direction = "DESC" if " DESC" in key else "ASC"
-                    expr = (
-                        key.replace(" DESC", "")
-                        .replace(" ASC", "")
-                        .replace(" NULLS FIRST", "")
-                        .replace(" NULLS LAST", "")
-                        .strip()
-                    )
-                    sort_keys.append({"expr": expr, "direction": direction})
-                kwargs["sort_keys"] = sort_keys
-
-        elif logical_type == LogicalOperatorType.LIMIT:
-            # Extract limit count
-            # PostgreSQL doesn't always include limit in EXPLAIN output
-            pass
+        extractor = _extractors.get(logical_type)
+        kwargs = extractor(node) if extractor else {}
 
         # Extract filter expressions (common to many operators)
         filter_expr = node.get("Filter")
@@ -305,3 +258,47 @@ class PostgreSQLQueryPlanParser(QueryPlanParser):
             kwargs["projection_expressions"] = output if isinstance(output, list) else [output]
 
         return kwargs
+
+    @staticmethod
+    def _extract_scan_info(node: dict[str, Any]) -> dict[str, Any]:
+        """Extract scan operator info."""
+        table_name = node.get("Relation Name")
+        return {"table_name": table_name} if table_name else {}
+
+    def _extract_join_info(self, node: dict[str, Any]) -> dict[str, Any]:
+        """Extract join operator info."""
+        kwargs: dict[str, Any] = {}
+        join_type_str = node.get("Join Type", "Inner")
+        kwargs["join_type"] = self.JOIN_TYPE_MAP.get(join_type_str, JoinType.INNER)
+
+        conditions = [v for k in ("Join Filter", "Hash Cond", "Merge Cond") if (v := node.get(k))]
+        if conditions:
+            kwargs["join_conditions"] = conditions
+        return kwargs
+
+    @staticmethod
+    def _extract_aggregate_info(node: dict[str, Any]) -> dict[str, Any]:
+        """Extract aggregate operator info."""
+        group_key = node.get("Group Key")
+        if group_key:
+            return {"group_by_keys": group_key if isinstance(group_key, list) else [group_key]}
+        return {}
+
+    @staticmethod
+    def _extract_sort_info(node: dict[str, Any]) -> dict[str, Any]:
+        """Extract sort operator info."""
+        sort_key = node.get("Sort Key")
+        if not sort_key:
+            return {}
+        sort_keys = []
+        for key in sort_key if isinstance(sort_key, list) else [sort_key]:
+            direction = "DESC" if " DESC" in key else "ASC"
+            expr = (
+                key.replace(" DESC", "")
+                .replace(" ASC", "")
+                .replace(" NULLS FIRST", "")
+                .replace(" NULLS LAST", "")
+                .strip()
+            )
+            sort_keys.append({"expr": expr, "direction": direction})
+        return {"sort_keys": sort_keys}

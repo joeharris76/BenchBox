@@ -514,9 +514,9 @@ class TestClickBenchBenchmarkDirectly:
 
         with patch.object(ClickBenchBenchmark, "execute_query") as mock_execute:
             mock_execute.return_value = [("result1",), ("result2",)]
-            with patch("time.time") as mock_time:
-                # Mock time to return predictable values
-                mock_time.side_effect = [0.0, 0.5, 1.0, 1.2]  # Two iterations
+            with patch("benchbox.core.simple_benchmark_mixin.elapsed_seconds") as mock_elapsed:
+                # Mock elapsed_seconds to return predictable values per iteration
+                mock_elapsed.side_effect = [0.5, 0.2]  # Two iterations: 0.5s then 0.2s
 
                 result = clickbench_benchmark.run_benchmark(mock_connection, queries=["Q1"], iterations=2)
 

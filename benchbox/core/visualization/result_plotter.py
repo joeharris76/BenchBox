@@ -60,6 +60,8 @@ class ResultPlotter:
         self.results = list(results)
         self._disambiguate_platforms()
         self._disambiguate_modes()
+        self._disambiguate_versions()
+        self._sort_results_by_version()
         self.theme = theme
 
     def _disambiguate_platforms(self) -> None:
@@ -110,6 +112,62 @@ class ResultPlotter:
                 mode = modes[id(result)]
                 abbrev = self.MODE_ABBREVIATIONS.get(mode, mode)
                 object.__setattr__(result, "platform", f"{result.platform} ({abbrev})")
+
+    def _disambiguate_versions(self) -> None:
+        """Append driver version to platform labels when platforms are still duplicated.
+
+        Runs after scale-factor and mode disambiguation. When two results share the
+        same platform label but have different driver versions, both labels get the
+        version appended so charts can distinguish them (e.g. "DuckDB 1.0.0" vs
+        "DuckDB 1.4.3").
+        """
+        from collections import Counter
+
+        platform_counts = Counter(r.platform for r in self.results)
+        duplicated_platforms = {p for p, count in platform_counts.items() if count > 1}
+        if not duplicated_platforms:
+            return
+
+        for platform in duplicated_platforms:
+            matching = [r for r in self.results if r.platform == platform]
+            versions: dict[int, str | None] = {}
+            for r in matching:
+                raw = r.raw or {}
+                platform_block = raw.get("platform") or raw.get("platform_info") or {}
+                version = platform_block.get("version") if isinstance(platform_block, dict) else None
+                versions[id(r)] = version
+
+            unique_versions = {v for v in versions.values() if v is not None}
+            if len(unique_versions) <= 1:
+                continue
+
+            for result in matching:
+                v = versions[id(result)]
+                if v:
+                    object.__setattr__(result, "platform", f"{result.platform} {v}")
+
+    def _sort_results_by_version(self) -> None:
+        """Sort results by semantic version extracted from the platform label.
+
+        Provides a natural progression ordering (1.0.0 → 1.1.3 → 1.2.2 ...) for
+        multi-version comparisons, regardless of run timestamp or file order.
+        Non-versioned labels sort last, preserving their relative order.
+        """
+        import re
+
+        def _version_key(result: NormalizedResult) -> tuple:
+            m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?(?:-(\w+))?", result.platform)
+            if not m:
+                return (float("inf"), 0, 0, 0, result.platform)
+            major = int(m.group(1))
+            minor = int(m.group(2))
+            patch = int(m.group(3)) if m.group(3) else 0
+            # Pre-release suffixes (dev, alpha, beta) sort after the base release
+            # since they represent development snapshots beyond the tagged version.
+            is_pre = 1 if m.group(4) else 0
+            return (major, minor, patch, is_pre, result.platform)
+
+        self.results.sort(key=_version_key)
 
     # ------------------------------------------------------------------ Loading
     @classmethod

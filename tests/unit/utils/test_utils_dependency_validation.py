@@ -29,7 +29,10 @@ class TestDependencyValidation:
 
         assert problems == []
 
-    def test_cli_matrix_output(self, capsys):
+    def test_cli_matrix_output(self, capsys, monkeypatch):
+        import benchbox.utils.printing as printing
+
+        monkeypatch.setattr(printing, "_STD_CONSOLE", None)
         exit_code = dependency_validation.main(
             ["--matrix", "--pyproject", str(self.pyproject_path), "--lock", str(self.lock_path)]
         )

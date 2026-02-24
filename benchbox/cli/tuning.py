@@ -16,7 +16,7 @@ from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 from rich.text import Text
 
-from benchbox.core.config import SystemProfile
+from benchbox.core.schemas import SystemProfile
 from benchbox.core.tuning.interface import TuningType, UnifiedTuningConfiguration
 from benchbox.utils.printing import quiet_console
 
@@ -743,14 +743,34 @@ def run_dataframe_write_wizard(
     if not Confirm.ask("Would you like to configure write layout options?", default=False):
         return None
 
-    # Initialize configuration
-    sort_by: list[SortColumn] = []
-    partition_by: list[PartitionColumn] = []
-    row_group_size: int | None = None
-    repartition_count: int | None = None
-    compression_level: int | None = None
+    # Collect options from each wizard step
+    sort_by = _wizard_sorting_step(caps, benchmark, platform_lower, SortColumn)
+    partition_by = _wizard_partitioning_step(caps, platform_lower, PartitionColumn, PartitionStrategy)
+    row_group_size = _wizard_row_group_step(caps)
+    repartition_count = _wizard_repartition_step(caps)
+    compression_level = _wizard_compression_step()
 
-    # Step 1: Sorting
+    # Create configuration if any options were set
+    if sort_by or partition_by or row_group_size or repartition_count or compression_level:
+        config = DataFrameWriteConfiguration(
+            sort_by=sort_by,
+            partition_by=partition_by,
+            row_group_size=row_group_size,
+            repartition_count=repartition_count,
+            compression_level=compression_level,
+        )
+
+        # Show summary
+        _show_dataframe_write_summary(config, platform_lower)
+
+        return config
+
+    return None
+
+
+def _wizard_sorting_step(caps: dict, benchmark: str, platform_lower: str, SortColumn: type) -> list:
+    """Wizard step for configuring sort columns."""
+    sort_by: list = []
     if caps.get("sort_by"):
         console.print("\n[bold cyan]Step 1: Sorting[/bold cyan]")
         console.print("Sorted data improves compression and enables skip-scanning.")
@@ -770,8 +790,12 @@ def run_dataframe_write_wizard(
                         console.print(f"[green]✓ Added sort column: {col_name} ({order})[/green]")
     else:
         console.print(f"\n[dim]Sorting not supported by {platform_lower} - skipping[/dim]")
+    return sort_by
 
-    # Step 2: Partitioning (only for platforms that support it)
+
+def _wizard_partitioning_step(caps: dict, platform_lower: str, PartitionColumn: type, PartitionStrategy: type) -> list:
+    """Wizard step for configuring partition columns."""
+    partition_by: list = []
     if caps.get("partition_by"):
         console.print("\n[bold cyan]Step 2: Partitioning[/bold cyan]")
         console.print("Hive-style partitioning creates directory structure for partition pruning.")
@@ -791,10 +815,13 @@ def run_dataframe_write_wizard(
                         strategy = PartitionStrategy(strategy_choice)
                         partition_by.append(PartitionColumn(name=col_name, strategy=strategy))
                         console.print(f"[green]✓ Added partition column: {col_name} ({strategy_choice})[/green]")
-    elif not caps.get("partition_by"):
+    else:
         console.print(f"\n[dim]Partitioning not supported by {platform_lower} - skipping[/dim]")
+    return partition_by
 
-    # Step 3: Row Group Size
+
+def _wizard_row_group_step(caps: dict) -> int | None:
+    """Wizard step for configuring row group size."""
     if caps.get("row_group_size"):
         console.print("\n[bold cyan]Step 3: Row Group Size[/bold cyan]")
         console.print("Row groups affect read parallelism and compression. Default: ~128MB worth of rows.")
@@ -803,8 +830,12 @@ def run_dataframe_write_wizard(
         if Confirm.ask("Customize row group size?", default=False):
             row_group_size = IntPrompt.ask("Rows per group", default=1000000)
             console.print(f"[green]✓ Row group size: {row_group_size:,} rows[/green]")
+            return row_group_size
+    return None
 
-    # Step 4: Repartitioning (for distributed platforms)
+
+def _wizard_repartition_step(caps: dict) -> int | None:
+    """Wizard step for configuring repartition count."""
     if caps.get("repartition_count"):
         console.print("\n[bold cyan]Step 4: Output File Count[/bold cyan]")
         console.print("Control the number of output files for parallel processing.")
@@ -813,30 +844,19 @@ def run_dataframe_write_wizard(
         if Confirm.ask("Specify output file count?", default=False):
             repartition_count = IntPrompt.ask("Number of output files", default=8)
             console.print(f"[green]✓ Output file count: {repartition_count}[/green]")
+            return repartition_count
+    return None
 
-    # Step 5: Compression Level
+
+def _wizard_compression_step() -> int | None:
+    """Wizard step for configuring compression level."""
     console.print("\n[bold cyan]Step 5: Compression Level[/bold cyan]")
     console.print("Higher levels = better compression but slower writes. Default: platform default.")
 
     if Confirm.ask("Customize compression level?", default=False):
         compression_level = IntPrompt.ask("Compression level (1-22 for zstd)", default=3)
         console.print(f"[green]✓ Compression level: {compression_level}[/green]")
-
-    # Create configuration if any options were set
-    if sort_by or partition_by or row_group_size or repartition_count or compression_level:
-        config = DataFrameWriteConfiguration(
-            sort_by=sort_by,
-            partition_by=partition_by,
-            row_group_size=row_group_size,
-            repartition_count=repartition_count,
-            compression_level=compression_level,
-        )
-
-        # Show summary
-        _show_dataframe_write_summary(config, platform_lower)
-
-        return config
-
+        return compression_level
     return None
 
 

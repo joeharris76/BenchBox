@@ -70,7 +70,7 @@ class PermalinkGenerator:
     Example:
         >>> generator = PermalinkGenerator(base_url="https://benchbox.io/results")
         >>> permalink = generator.generate(artifact_id="abc123", storage_path="s3://bucket/results/abc123.json")
-        >>> print(permalink.full_url)
+        >>> emit(permalink.full_url)
         https://benchbox.io/results/bx_a1b2c3d4
     """
 

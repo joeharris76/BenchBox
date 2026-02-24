@@ -64,6 +64,9 @@ class TestListTemplates:
         assert "head_to_head" in names
         assert "trends" in names
         assert "cost_optimization" in names
+        assert "latency_deep_dive" in names
+        assert "regression_triage" in names
+        assert "executive_summary" in names
 
     def test_returns_chart_template_instances(self):
         templates = list_templates()

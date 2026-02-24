@@ -7,6 +7,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -109,7 +110,7 @@ class TestRunBenchmarkTool:
 
     def test_database_config_creation(self):
         """Test that DatabaseConfig can be created correctly."""
-        from benchbox.core.config import DatabaseConfig
+        from benchbox.core.schemas import DatabaseConfig
 
         db_config = DatabaseConfig(
             type="duckdb",
@@ -293,15 +294,11 @@ class TestPopulateDataframeQueryDetails:
         assert "source_code" in response
         assert response["source_code"] is not None
 
-    def test_tpch_no_platform_defaults_to_expression(self):
-        """Test that no platform defaults to expression impl when available."""
-        from benchbox.mcp.tools.benchmark import _populate_dataframe_query_details
+    def test_no_platform_dataframe_family_is_none(self):
+        """Test that no platform resolves to no explicit DataFrame family."""
+        from benchbox.mcp.tools.benchmark import _get_dataframe_family_for_platform
 
-        response: dict = {}
-        _populate_dataframe_query_details(response, "tpch", "6", None)
-
-        assert response["dataframe_family"] == "expression"
-        assert "source_code" in response
+        assert _get_dataframe_family_for_platform(None) is None
 
     def test_unknown_query_returns_error(self):
         """Test that unknown query ID returns error in response."""
@@ -318,8 +315,34 @@ class TestPopulateDataframeQueryDetails:
 
         response: dict = {}
         _populate_dataframe_query_details(response, "clickbench", "1", "polars-df")
-
         assert "error" in response
+
+
+class TestBenchmarkResultExportPath:
+    """Tests for MCP benchmark export path configuration."""
+
+    def test_export_and_build_payload_uses_injected_results_dir(self, tmp_path: Path):
+        """Result exporter should write using injected MCP results_dir."""
+        from benchbox.mcp.tools.benchmark import _export_and_build_payload
+
+        result = SimpleNamespace(execution_id=None)
+        execution_id = "mcp_test_001"
+        exported_json = tmp_path / "tpch_test.json"
+        exported_json.write_text("{}", encoding="utf-8")
+
+        with (
+            patch("benchbox.mcp.tools.benchmark.ResultExporter") as exporter_cls,
+            patch("benchbox.mcp.tools.benchmark.build_result_payload", return_value={"ok": True}),
+        ):
+            exporter = exporter_cls.return_value
+            exporter.export_result.return_value = {"json": exported_json}
+
+            result_file_path, result_payload = _export_and_build_payload(result, execution_id, tmp_path)
+
+        assert result.execution_id == execution_id
+        assert result_file_path == str(exported_json)
+        assert result_payload == {}
+        assert exporter_cls.call_args.kwargs["output_dir"] == tmp_path
 
 
 class TestPopulateSqlQueryDetails:

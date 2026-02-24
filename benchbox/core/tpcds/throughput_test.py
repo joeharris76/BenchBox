@@ -15,7 +15,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 import concurrent.futures
 import logging
 import sqlite3
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Optional
@@ -75,7 +74,7 @@ class TPCDSThroughputTestResult:
 
     @property
     def scale_factor(self) -> float:
-        """Scale factor from config for backward compatibility."""
+        """Get scale factor from config."""
         return self.config.scale_factor
 
 
@@ -548,7 +547,7 @@ class TPCDSThroughputTest:
                         self.logger.warning(f"Failed to close connection for stream {stream_id}: {close_error}")
 
             # Record end time and duration
-            stream_result.end_time = time.time()
+            stream_result.end_time = mono_time()
             stream_result.duration = stream_result.end_time - stream_result.start_time
 
         return stream_result

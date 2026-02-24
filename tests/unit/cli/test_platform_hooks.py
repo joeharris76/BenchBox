@@ -4,7 +4,7 @@ import pytest
 
 from benchbox.cli.database import DatabaseManager
 from benchbox.cli.platform_hooks import PlatformHookRegistry, PlatformOptionError
-from benchbox.core.config import DatabaseConfig
+from benchbox.core.schemas import DatabaseConfig
 from benchbox.utils.runtime_env import DriverResolution
 
 pytestmark = pytest.mark.fast
@@ -12,7 +12,7 @@ pytestmark = pytest.mark.fast
 
 def test_clickhouse_platform_options_defaults():
     options = PlatformHookRegistry.parse_options("clickhouse", [])
-    assert options["mode"] == "server"
+    assert options["deployment_mode"] == "server"
     assert options["secure"] is False
     assert options["port"] == 9000
 
@@ -21,12 +21,12 @@ def test_clickhouse_platform_options_overrides():
     parsed = PlatformHookRegistry.parse_options(
         "clickhouse",
         [
-            ("mode", "embedded"),
+            ("deployment_mode", "local"),
             ("secure", "true"),
             ("port", "9440"),
         ],
     )
-    assert parsed["mode"] == "local"
+    assert parsed["deployment_mode"] == "local"
     assert parsed["secure"] is True
     assert parsed["port"] == 9440
 
@@ -43,24 +43,33 @@ def test_database_manager_create_config_merges_options(monkeypatch):
             package=package_name or "",
             requested=requested_version,
             resolved=requested_version or "local-dev",
+            actual=requested_version or "local-dev",
             auto_install_used=False,
+            runtime_strategy="current-process",
+            runtime_path=None,
+            runtime_python_executable="/tmp/python",
         ),
     )
     manager = DatabaseManager()
     config = manager.create_config(
         "clickhouse",
-        {"mode": "local", "secure": True},
+        {"deployment_mode": "local", "secure": True},
         {"force_recreate": True},
     )
     assert config.type == "clickhouse"
-    assert config.options["mode"] == "local"
+    assert config.options["deployment_mode"] == "local"
     assert config.options["secure"] is True
     assert config.options["force_recreate"] is True
     # Local mode should always include a data path
-    if config.options.get("mode") == "local":
+    if config.options.get("deployment_mode") == "local":
         assert config.options["data_path"]
     assert config.driver_package == "clickhouse-driver"
     assert config.driver_version_resolved == "local-dev"
+    assert config.driver_version_actual == "local-dev"
+    assert config.driver_runtime_strategy == "current-process"
+    assert config.driver_runtime_python_executable == "/tmp/python"
+    assert config.options["driver_version_actual"] == "local-dev"
+    assert config.options["driver_runtime_strategy"] == "current-process"
 
 
 class TestPlatformConfigBuilders:

@@ -626,16 +626,45 @@ class BaseBenchmark(VerbosityMixin, ABC):
 
         # Fallback implementation for wrapper class
         from benchbox.core.results.builder import (
-            BenchmarkInfoInput,
-            ResultBuilder,
-            RunConfigInput,
             normalize_benchmark_id,
         )
         from benchbox.core.results.models import ExecutionPhases
-        from benchbox.core.results.platform_info import PlatformInfoInput
         from benchbox.core.results.query_normalizer import normalize_query_result
 
         execution_metadata = execution_metadata or {}
+        builder = self._create_result_builder(platform, execution_metadata, normalize_benchmark_id, **kwargs)
+
+        self._populate_builder(builder, execution_metadata, query_results, normalize_query_result, **kwargs)
+
+        self._apply_phases_to_builder(builder, phases, ExecutionPhases)
+
+        if performance_characteristics is not None:
+            builder.add_execution_metadata("performance_characteristics", performance_characteristics)
+
+        if resource_utilization is not None:
+            builder.add_execution_metadata("resource_utilization", resource_utilization)
+
+        result = builder.build()
+
+        self._attach_performance_snapshot(result, performance_characteristics, **kwargs)
+
+        return result
+
+    def _create_result_builder(
+        self,
+        platform: str,
+        execution_metadata: dict[str, Any],
+        normalize_benchmark_id: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Create and configure the ResultBuilder with benchmark and platform info."""
+        from benchbox.core.results.builder import (
+            BenchmarkInfoInput,
+            ResultBuilder,
+            RunConfigInput,
+        )
+        from benchbox.core.results.platform_info import PlatformInfoInput
+
         benchmark_name = self.benchmark_name
         short_name = benchmark_name[:-10] if benchmark_name.lower().endswith(" benchmark") else benchmark_name
         benchmark_id = execution_metadata.get("benchmark_id") or normalize_benchmark_id(benchmark_name)
@@ -679,6 +708,17 @@ class BaseBenchmark(VerbosityMixin, ABC):
                 )
             )
 
+        return builder
+
+    def _populate_builder(
+        self,
+        builder: Any,
+        execution_metadata: dict[str, Any],
+        query_results: list[dict[str, Any]],
+        normalize_query_result: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Populate builder with query results, metadata, and ancillary config."""
         for qr in query_results:
             builder.add_query_result(normalize_query_result(qr))
 
@@ -703,6 +743,8 @@ class BaseBenchmark(VerbosityMixin, ABC):
             kwargs.get("plan_capture_errors", []),
         )
 
+    def _apply_phases_to_builder(self, builder: Any, phases: Any, ExecutionPhases: type) -> None:
+        """Apply execution phase information to the builder."""
         phases_obj = phases if isinstance(phases, ExecutionPhases) else None
         if phases_obj:
             builder.set_execution_phases(phases_obj)
@@ -715,14 +757,13 @@ class BaseBenchmark(VerbosityMixin, ABC):
                         phase_data.get("duration_ms"),
                     )
 
-        if performance_characteristics is not None:
-            builder.add_execution_metadata("performance_characteristics", performance_characteristics)
-
-        if resource_utilization is not None:
-            builder.add_execution_metadata("resource_utilization", resource_utilization)
-
-        result = builder.build()
-
+    def _attach_performance_snapshot(
+        self,
+        result: "BenchmarkResults",
+        performance_characteristics: Optional[dict[str, Any]],
+        **kwargs: Any,
+    ) -> None:
+        """Attach performance snapshot data to the built result."""
         snapshot_payload = kwargs.get("performance_snapshot")
         if snapshot_payload is not None:
             try:
@@ -741,5 +782,3 @@ class BaseBenchmark(VerbosityMixin, ABC):
                         result.performance_characteristics = dict(snapshot_payload)
         elif performance_characteristics and not result.performance_summary:
             result.performance_summary = dict(performance_characteristics)
-
-        return result

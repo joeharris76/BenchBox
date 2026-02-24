@@ -43,7 +43,7 @@ class DataFrameTuningLoader:
     Example:
         >>> loader = DataFrameTuningLoader()
         >>> config = loader.load_config("path/to/config.yaml", platform="polars")
-        >>> print(config.execution.streaming_mode)
+        >>> emit(config.execution.streaming_mode)
         True
     """
 

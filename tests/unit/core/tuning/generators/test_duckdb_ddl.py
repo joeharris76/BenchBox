@@ -247,13 +247,13 @@ class TestDuckDBCTAS:
         assert "ORDER BY order_date, order_id" in ddl
         assert ddl.endswith(";")
 
-    def test_ctas_with_if_not_exists(self) -> None:
-        """Test CTAS with OR REPLACE (if_not_exists=True)."""
+    def test_ctas_with_or_replace(self) -> None:
+        """Test CTAS with OR REPLACE (or_replace=True)."""
         generator = DuckDBDDLGenerator()
         ddl = generator.generate_ctas_ddl(
             table_name="test",
             source_query="SELECT 1 AS a",
-            if_not_exists=True,
+            or_replace=True,
         )
         assert "CREATE OR REPLACE TABLE test" in ddl
 

@@ -5,12 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.table import Table
 
+from benchbox.cli.shared import console
 from benchbox.core.query_plans.history import PlanHistory
-
-console = Console()
 
 
 @click.command("plan-history")

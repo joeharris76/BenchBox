@@ -681,75 +681,35 @@ def _guided_file_selection() -> tuple[Path, Path] | None:
     console.print(f"[dim]Found {len(all_results)} result files[/dim]\n")
 
     # Step 1: Select benchmark
-    benchmarks = sorted({r.benchmark for r in all_results})
+    selected_benchmark = _select_from_options(
+        items=sorted({r.benchmark for r in all_results}),
+        label="benchmark",
+        count_fn=lambda bench: sum(1 for r in all_results if r.benchmark == bench),
+        format_fn=lambda bench: bench,
+    )
 
-    if len(benchmarks) == 1:
-        selected_benchmark = benchmarks[0]
-        console.print(f"[dim]Only one benchmark found: {selected_benchmark}[/dim]")
-    else:
-        console.print("[bold]Select benchmark:[/bold]")
-        for i, bench in enumerate(benchmarks, start=1):
-            count = sum(1 for r in all_results if r.benchmark == bench)
-            console.print(f"  [cyan]{i}[/cyan]  {bench} ({count} results)")
-
-        while True:
-            bench_input = Prompt.ask("\nBenchmark", default="1")
-            if bench_input.isdigit():
-                idx = int(bench_input) - 1
-                if 0 <= idx < len(benchmarks):
-                    selected_benchmark = benchmarks[idx]
-                    break
-            console.print(f"[yellow]Enter 1-{len(benchmarks)}[/yellow]")
-
-    # Filter to selected benchmark
     filtered = [r for r in all_results if r.benchmark == selected_benchmark]
 
     # Step 2: Select platform
-    platforms = sorted({r.platform for r in filtered})
+    selected_platform = _select_from_options(
+        items=sorted({r.platform for r in filtered}),
+        label="platform",
+        count_fn=lambda plat: sum(1 for r in filtered if r.platform == plat),
+        format_fn=lambda plat: plat,
+        header=f"Select platform for {selected_benchmark}:",
+    )
 
-    if len(platforms) == 1:
-        selected_platform = platforms[0]
-        console.print(f"[dim]Only one platform: {selected_platform}[/dim]")
-    else:
-        console.print(f"\n[bold]Select platform for {selected_benchmark}:[/bold]")
-        for i, plat in enumerate(platforms, start=1):
-            count = sum(1 for r in filtered if r.platform == plat)
-            console.print(f"  [cyan]{i}[/cyan]  {plat} ({count} results)")
-
-        while True:
-            plat_input = Prompt.ask("\nPlatform", default="1")
-            if plat_input.isdigit():
-                idx = int(plat_input) - 1
-                if 0 <= idx < len(platforms):
-                    selected_platform = platforms[idx]
-                    break
-            console.print(f"[yellow]Enter 1-{len(platforms)}[/yellow]")
-
-    # Filter to selected platform
     filtered = [r for r in filtered if r.platform == selected_platform]
 
     # Step 3: Select scale factor
-    scales = sorted({r.scale for r in filtered})
+    selected_scale = _select_from_options(
+        items=sorted({r.scale for r in filtered}),
+        label="scale factor",
+        count_fn=lambda sc: sum(1 for r in filtered if r.scale == sc),
+        format_fn=lambda sc: f"SF {sc}",
+        header="Select scale factor:",
+    )
 
-    if len(scales) == 1:
-        selected_scale = scales[0]
-        console.print(f"[dim]Only one scale factor: {selected_scale}[/dim]")
-    else:
-        console.print("\n[bold]Select scale factor:[/bold]")
-        for i, scale in enumerate(scales, start=1):
-            count = sum(1 for r in filtered if r.scale == scale)
-            console.print(f"  [cyan]{i}[/cyan]  SF {scale} ({count} results)")
-
-        while True:
-            scale_input = Prompt.ask("\nScale factor", default="1")
-            if scale_input.isdigit():
-                idx = int(scale_input) - 1
-                if 0 <= idx < len(scales):
-                    selected_scale = scales[idx]
-                    break
-            console.print(f"[yellow]Enter 1-{len(scales)}[/yellow]")
-
-    # Filter to selected scale and limit to 10 most recent
     filtered = [r for r in filtered if r.scale == selected_scale]
     filtered = filtered[:10]  # Already sorted by timestamp (newest first)
 
@@ -758,9 +718,39 @@ def _guided_file_selection() -> tuple[Path, Path] | None:
         console.print("[dim]Need at least 2 results to compare.[/dim]")
         return None
 
-    # Step 4: Display filtered results and let user select
-    console.print(f"\n[bold]Select files to compare ({len(filtered)} results):[/bold]\n")
+    # Step 4: Select files to compare
+    return _select_comparison_files(filtered)
 
+
+def _select_from_options(
+    items: list,
+    label: str,
+    count_fn: Any,
+    format_fn: Any,
+    header: str | None = None,
+) -> Any:
+    """Prompt user to select from a list of options. Auto-selects if only one option."""
+    if len(items) == 1:
+        console.print(f"[dim]Only one {label} found: {items[0]}[/dim]")
+        return items[0]
+
+    console.print(f"\n[bold]{header or f'Select {label}:'}[/bold]")
+    for i, item in enumerate(items, start=1):
+        count = count_fn(item)
+        console.print(f"  [cyan]{i}[/cyan]  {format_fn(item)} ({count} results)")
+
+    while True:
+        user_input = Prompt.ask(f"\n{label.title()}", default="1")
+        if user_input.isdigit():
+            idx = int(user_input) - 1
+            if 0 <= idx < len(items):
+                return items[idx]
+        console.print(f"[yellow]Enter 1-{len(items)}[/yellow]")
+
+
+def _select_comparison_files(filtered: list[ResultFileMetadata]) -> tuple[Path, Path] | None:
+    """Display filtered results and let user select baseline and current files."""
+    console.print(f"\n[bold]Select files to compare ({len(filtered)} results):[/bold]\n")
     _display_results_table(filtered)
 
     # Select baseline
@@ -999,18 +989,25 @@ def _run_platform_comparison(
     summary = suite.get_summary(results)
 
     # Output results
+    _output_comparison_results(output_format, output_file, suite, config, results, summary)
+
+    # Generate charts if requested
+    if generate_charts and output_file:
+        _generate_comparison_charts(output_file, results, theme, UnifiedComparisonPlotter)
+
+
+def _output_comparison_results(
+    output_format: str,
+    output_file: str | None,
+    suite: Any,
+    config: Any,
+    results: list,
+    summary: Any,
+) -> None:
+    """Output comparison results in the specified format."""
     if output_format == "text":
-        output_text = suite._generate_text_report(results)
-        if output_file:
-            output_path = Path(output_file)
-            if output_path.suffix:
-                output_path.write_text(output_text, encoding="utf-8")
-            else:
-                output_path.mkdir(parents=True, exist_ok=True)
-                (output_path / "comparison.txt").write_text(output_text, encoding="utf-8")
-            console.print(f"[green]Results saved to {output_file}[/green]")
-        else:
-            console.print(output_text)
+        content = suite._generate_text_report(results)
+        _write_or_print(content, output_file, "comparison.txt")
 
     elif output_format == "json":
         output_path = Path(output_file) if output_file else None
@@ -1035,48 +1032,49 @@ def _run_platform_comparison(
             console.print(json.dumps(data, indent=2))
 
     elif output_format == "markdown":
-        md_content = suite._generate_markdown_report(results)
-        if output_file:
-            output_path = Path(output_file)
-            if not output_path.suffix:
-                output_path.mkdir(parents=True, exist_ok=True)
-                output_path = output_path / "comparison.md"
-            output_path.write_text(md_content, encoding="utf-8")
-            console.print(f"[green]Report saved to {output_path}[/green]")
-        else:
-            console.print(md_content)
+        content = suite._generate_markdown_report(results)
+        _write_or_print(content, output_file, "comparison.md")
 
     elif output_format == "html":
-        # For HTML, generate markdown and convert (or use text for now)
-        output_text = suite._generate_text_report(results)
-        if output_file:
-            output_path = Path(output_file)
-            if not output_path.suffix:
-                output_path.mkdir(parents=True, exist_ok=True)
-                output_path = output_path / "comparison.html"
-            output_path.write_text(f"<pre>{output_text}</pre>", encoding="utf-8")
-            console.print(f"[green]Report saved to {output_path}[/green]")
+        content = suite._generate_text_report(results)
+        html_content = f"<pre>{content}</pre>" if output_file else content
+        _write_or_print(html_content if output_file else content, output_file, "comparison.html")
+        if not output_file:
+            console.print(content)
+            return
+
+
+def _write_or_print(content: str, output_file: str | None, default_filename: str) -> None:
+    """Write content to file or print to console."""
+    if output_file:
+        output_path = Path(output_file)
+        if not output_path.suffix:
+            output_path.mkdir(parents=True, exist_ok=True)
+            output_path = output_path / default_filename
+        output_path.write_text(content, encoding="utf-8")
+        console.print(f"[green]Results saved to {output_path}[/green]")
+    else:
+        console.print(content)
+
+
+def _generate_comparison_charts(output_file: str, results: list, theme: str, plotter_class: type) -> None:
+    """Generate comparison charts if requested."""
+    try:
+        output_dir = Path(output_file)
+        if output_dir.suffix:
+            output_dir = output_dir.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        plotter = plotter_class(results, theme=theme)
+        charts_dir = output_dir / "charts"
+        exports = plotter.generate_charts(output_dir=charts_dir)
+        if exports:
+            chart_list = ", ".join(f"{ct}.txt" for ct in exports)
+            console.print(f"[green]Charts generated in {charts_dir}: {chart_list}[/green]")
         else:
-            console.print(output_text)
-
-    # Generate charts if requested
-    if generate_charts and output_file:
-        try:
-            output_dir = Path(output_file)
-            if output_dir.suffix:
-                output_dir = output_dir.parent
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            plotter = UnifiedComparisonPlotter(results, theme=theme)
-            charts_dir = output_dir / "charts"
-            exports = plotter.generate_charts(output_dir=charts_dir)
-            if exports:
-                chart_list = ", ".join(f"{ct}.txt" for ct in exports)
-                console.print(f"[green]Charts generated in {charts_dir}: {chart_list}[/green]")
-            else:
-                console.print("[yellow]No charts generated (insufficient data)[/yellow]")
-        except Exception as e:
-            console.print(f"[yellow]Chart generation failed: {e}[/yellow]")
+            console.print("[yellow]No charts generated (insufficient data)[/yellow]")
+    except Exception as e:
+        console.print(f"[yellow]Chart generation failed: {e}[/yellow]")
 
 
 def _run_file_comparison(
@@ -1099,16 +1097,7 @@ def _run_file_comparison(
         console.print("  benchbox compare --run -p duckdb -p sqlite")
         sys.exit(1)
 
-    # Parse regression threshold if provided
-    regression_threshold = None
-    if fail_on_regression:
-        regression_threshold = _parse_threshold(fail_on_regression)
-        if regression_threshold is None:
-            console.print(
-                f'[red]Error: Invalid threshold format "{fail_on_regression}". '
-                'Use percentage (e.g., "10%") or decimal (e.g., "0.1")[/red]'
-            )
-            sys.exit(1)
+    regression_threshold = _validate_regression_threshold(fail_on_regression)
 
     # For now, support 2-file comparison (baseline vs current)
     if len(result_files) > 2:
@@ -1117,10 +1106,35 @@ def _run_file_comparison(
     baseline_path = Path(result_files[0])
     current_path = Path(result_files[1])
 
-    # Load result files
+    baseline, current = _load_comparison_files(baseline_path, current_path)
+
+    comparison = _perform_comparison(baseline, current, baseline_path, current_path, include_plans, plan_threshold)
+
+    _output_file_comparison(comparison, baseline, current, output_format, output_file, show_all_queries)
+
+    _check_regression_threshold(comparison, regression_threshold)
+
+
+def _validate_regression_threshold(fail_on_regression: str | None) -> float | None:
+    """Parse and validate the regression threshold argument."""
+    if not fail_on_regression:
+        return None
+    regression_threshold = _parse_threshold(fail_on_regression)
+    if regression_threshold is None:
+        console.print(
+            f'[red]Error: Invalid threshold format "{fail_on_regression}". '
+            'Use percentage (e.g., "10%") or decimal (e.g., "0.1")[/red]'
+        )
+        sys.exit(1)
+    return regression_threshold
+
+
+def _load_comparison_files(baseline_path: Path, current_path: Path) -> tuple[Any, Any]:
+    """Load and return the baseline and current result files."""
     try:
-        baseline, baseline_raw = load_result_file(baseline_path)
-        current, current_raw = load_result_file(current_path)
+        baseline, _baseline_raw = load_result_file(baseline_path)
+        current, _current_raw = load_result_file(current_path)
+        return baseline, current
     except FileNotFoundError as e:
         console.print(f"[red]Error: Result file not found: {e}[/red]")
         sys.exit(1)
@@ -1135,17 +1149,23 @@ def _run_file_comparison(
         console.print(f"[red]Unexpected error loading files: {e}[/red]")
         sys.exit(1)
 
-    # Perform comparison using core ResultExporter
+
+def _perform_comparison(
+    baseline: Any,
+    current: Any,
+    baseline_path: Path,
+    current_path: Path,
+    include_plans: bool,
+    plan_threshold: float,
+) -> dict[str, Any]:
+    """Run the core comparison and optional plan comparison."""
     exporter = ResultExporter()
     comparison = exporter.compare_results(baseline_path, current_path)
 
-    # Check for comparison errors
     if "error" in comparison:
         console.print(f"[red]Comparison failed: {comparison['error']}[/red]")
         sys.exit(1)
 
-    # Perform plan comparison if requested
-    plan_comparison = None
     if include_plans:
         plan_comparison = _compare_plans(baseline, current, plan_threshold)
         if plan_comparison:
@@ -1154,41 +1174,51 @@ def _run_file_comparison(
             console.print("[yellow]Note: No query plans found in result files.[/yellow]")
             console.print("[dim]Plans must be captured with --capture-plans during benchmark runs.[/dim]\n")
 
-    # Format and display output
-    if output_format == "text":
-        output_text = _format_text_comparison(comparison, baseline, current, show_all_queries)
-        if output_file:
-            Path(output_file).write_text(output_text, encoding="utf-8")
-            console.print(f"[green]Comparison saved to {output_file}[/green]")
-        else:
-            console.print(output_text)
-    elif output_format == "json":
-        output_json = json.dumps(comparison, indent=2)
-        if output_file:
-            Path(output_file).write_text(output_json, encoding="utf-8")
-            console.print(f"[green]Comparison saved to {output_file}[/green]")
-        else:
-            console.print(output_json)
-    elif output_format in ("html", "markdown"):
-        output_html = _format_html_comparison(comparison, baseline, current)
-        if output_file:
-            Path(output_file).write_text(output_html, encoding="utf-8")
-            console.print(f"[green]Comparison saved to {output_file}[/green]")
-        else:
-            console.print(output_html)
+    return comparison
 
-    # Check for regressions and handle --fail-on-regression
-    if regression_threshold is not None:
-        has_regression = _check_regression(comparison, regression_threshold)
-        if has_regression:
-            console.print(
-                f"\n[bold red]❌ Performance regression detected (threshold: {regression_threshold * 100:.1f}%)[/bold red]"
-            )
-            sys.exit(1)
-        else:
-            console.print(
-                f"\n[bold green]✓ No performance regression (threshold: {regression_threshold * 100:.1f}%)[/bold green]"
-            )
+
+def _output_file_comparison(
+    comparison: dict[str, Any],
+    baseline: Any,
+    current: Any,
+    output_format: str,
+    output_file: str | None,
+    show_all_queries: bool,
+) -> None:
+    """Format and display/save the comparison output."""
+    format_dispatch = {
+        "text": lambda: _format_text_comparison(comparison, baseline, current, show_all_queries),
+        "json": lambda: json.dumps(comparison, indent=2),
+        "html": lambda: _format_html_comparison(comparison, baseline, current),
+        "markdown": lambda: _format_html_comparison(comparison, baseline, current),
+    }
+
+    formatter = format_dispatch.get(output_format)
+    if formatter is None:
+        return
+
+    content = formatter()
+    if output_file:
+        Path(output_file).write_text(content, encoding="utf-8")
+        console.print(f"[green]Comparison saved to {output_file}[/green]")
+    else:
+        console.print(content)
+
+
+def _check_regression_threshold(comparison: dict[str, Any], regression_threshold: float | None) -> None:
+    """Check for regressions and exit if threshold exceeded."""
+    if regression_threshold is None:
+        return
+    has_regression = _check_regression(comparison, regression_threshold)
+    if has_regression:
+        console.print(
+            f"\n[bold red]❌ Performance regression detected (threshold: {regression_threshold * 100:.1f}%)[/bold red]"
+        )
+        sys.exit(1)
+    else:
+        console.print(
+            f"\n[bold green]✓ No performance regression (threshold: {regression_threshold * 100:.1f}%)[/bold green]"
+        )
 
 
 def _compare_plans(
@@ -1347,239 +1377,266 @@ def _check_regression(comparison: dict[str, Any], threshold: float) -> bool:
 
 def _format_text_comparison(comparison: dict[str, Any], baseline: Any, current: Any, show_all: bool) -> str:
     """Format comparison as human-readable text."""
-    lines = []
+    lines: list[str] = []
 
-    # Header
-    lines.append("=" * 80)
-    lines.append("BENCHMARK COMPARISON REPORT")
-    lines.append("=" * 80)
-    lines.append("")
+    _format_header_section(lines, comparison, baseline)
+    _format_summary_section(lines, comparison)
+    _format_performance_metrics_section(lines, comparison)
 
-    # Files being compared
-    lines.append(f"Baseline: {comparison['baseline_file']}")
-    lines.append(f"Current:  {comparison['current_file']}")
-    lines.append("")
-
-    # Benchmark metadata
-    lines.append(f"Benchmark:  {baseline.benchmark_name}")
-    lines.append(f"Platform:   {baseline.platform}")
-    lines.append(f"Scale:      {baseline.scale_factor}")
-    lines.append("")
-
-    # Overall performance summary
-    summary = comparison.get("summary", {})
-    if summary:
-        lines.append("-" * 80)
-        lines.append("OVERALL SUMMARY")
-        lines.append("-" * 80)
-        lines.append(f"Total queries compared: {summary.get('total_queries_compared', 0)}")
-        lines.append(f"  Improved:  {summary.get('improved_queries', 0)}")
-        lines.append(f"  Regressed: {summary.get('regressed_queries', 0)}")
-        lines.append(f"  Unchanged: {summary.get('unchanged_queries', 0)}")
-        lines.append(f"Assessment: {summary.get('overall_assessment', 'unknown').upper()}")
-        lines.append("")
-
-    # Performance metrics changes
-    perf_changes = comparison.get("performance_changes", {})
-    if perf_changes:
-        lines.append("-" * 80)
-        lines.append("PERFORMANCE METRICS")
-        lines.append("-" * 80)
-
-        for metric_name, metric_data in perf_changes.items():
-            if not isinstance(metric_data, dict):
-                continue
-
-            baseline_val = metric_data.get("baseline", 0)
-            current_val = metric_data.get("current", 0)
-            change_pct = metric_data.get("change_percent", 0)
-            improved = metric_data.get("improved", False)
-
-            # Format metric name nicely
-            display_name = metric_name.replace("_", " ").title()
-
-            # Color indicators
-            if improved:
-                indicator = "🟢"
-                change_str = f"-{abs(change_pct):.2f}%"
-            elif change_pct > 10:
-                indicator = "🔴"
-                change_str = f"+{change_pct:.2f}%"
-            elif change_pct > 0:
-                indicator = "🟡"
-                change_str = f"+{change_pct:.2f}%"
-            else:
-                indicator = "⚪"
-                change_str = "0.00%"
-
-            lines.append(f"{indicator} {display_name:25s} {baseline_val:10.3f}s → {current_val:10.3f}s ({change_str})")
-
-        lines.append("")
-
-    # Geometric mean calculation
     query_comparisons = comparison.get("query_comparisons", [])
-    if query_comparisons:
-        baseline_times = [q["baseline_time_ms"] for q in query_comparisons if q["baseline_time_ms"] > 0]
-        current_times = [q["current_time_ms"] for q in query_comparisons if q["current_time_ms"] > 0]
-
-        if baseline_times and current_times:
-            baseline_geomean = statistics.geometric_mean(baseline_times)
-            current_geomean = statistics.geometric_mean(current_times)
-            geomean_change = ((current_geomean - baseline_geomean) / baseline_geomean * 100) if baseline_geomean else 0
-
-            lines.append("-" * 80)
-            lines.append("GEOMETRIC MEAN (Query Times)")
-            lines.append("-" * 80)
-
-            if geomean_change < 0:
-                indicator = "🟢 IMPROVED"
-                change_str = f"-{abs(geomean_change):.2f}%"
-            elif geomean_change > 10:
-                indicator = "🔴 REGRESSED"
-                change_str = f"+{geomean_change:.2f}%"
-            elif geomean_change > 0:
-                indicator = "🟡 SLOWER"
-                change_str = f"+{geomean_change:.2f}%"
-            else:
-                indicator = "⚪ UNCHANGED"
-                change_str = "0.00%"
-
-            lines.append(f"Baseline: {baseline_geomean:.3f} ms")
-            lines.append(f"Current:  {current_geomean:.3f} ms")
-            lines.append(f"Change:   {change_str} {indicator}")
-            lines.append("")
-
-    # Per-query comparison
-    if query_comparisons:
-        lines.append("-" * 80)
-        lines.append("PER-QUERY COMPARISON")
-        lines.append("-" * 80)
-        lines.append(f"{'Query':10s} {'Baseline':>12s} {'Current':>12s} {'Change':>12s}  {'Severity':10s}")
-        lines.append("-" * 80)
-
-        # Sort by change percent (largest regressions first)
-        sorted_queries = sorted(query_comparisons, key=lambda q: q.get("change_percent", 0), reverse=True)
-
-        for query in sorted_queries:
-            query_id = str(query["query_id"])
-            baseline_time = query["baseline_time_ms"]
-            current_time = query["current_time_ms"]
-            change_pct = query["change_percent"]
-            improved = query["improved"]
-
-            # Only show if: regression, improvement, or show_all flag
-            if not show_all and abs(change_pct) < 1.0:
-                continue
-
-            # Determine severity
-            if improved:
-                severity = "✓ FASTER"
-                change_str = f"-{abs(change_pct):.2f}%"
-            elif change_pct > 50:
-                severity = "🔴 CRITICAL"
-                change_str = f"+{change_pct:.2f}%"
-            elif change_pct > 25:
-                severity = "🔴 MAJOR"
-                change_str = f"+{change_pct:.2f}%"
-            elif change_pct > 10:
-                severity = "🟡 MINOR"
-                change_str = f"+{change_pct:.2f}%"
-            elif change_pct > 1:
-                severity = "⚪ SLIGHT"
-                change_str = f"+{change_pct:.2f}%"
-            else:
-                severity = "⚪ SAME"
-                change_str = "0.00%"
-
-            lines.append(
-                f"{query_id:10s} {baseline_time:10.2f} ms {current_time:10.2f} ms {change_str:>12s}  {severity}"
-            )
-
-        lines.append("")
-
-    # Query plan comparison section (if included)
-    plan_comparison = comparison.get("plan_comparison")
-    if plan_comparison:
-        lines.append("-" * 80)
-        lines.append("QUERY PLAN ANALYSIS")
-        lines.append("-" * 80)
-
-        plans_compared = plan_comparison.get("plans_compared", 0)
-        plans_unchanged = plan_comparison.get("plans_unchanged", 0)
-        plans_changed = plan_comparison.get("plans_changed", 0)
-        threshold = plan_comparison.get("threshold_applied", 0.0)
-
-        lines.append(f"Plans Compared: {plans_compared}")
-        lines.append(f"  Unchanged:    {plans_unchanged}")
-        lines.append(f"  Changed:      {plans_changed}")
-        if threshold > 0:
-            lines.append(f"  (Filtered by similarity < {threshold:.0%})")
-        lines.append("")
-
-        # Show plan change details
-        query_plans = plan_comparison.get("query_plans", [])
-        if query_plans:
-            lines.append(
-                f"{'Query':10s} {'Similarity':>12s} {'Type Δ':>8s} {'Prop Δ':>8s} {'Perf Δ':>10s}  {'Status':20s}"
-            )
-            lines.append("-" * 80)
-
-            # Sort by similarity (lowest first = most different)
-            sorted_plans = sorted(query_plans, key=lambda p: p.get("similarity", 1.0))
-
-            for plan in sorted_plans:
-                query_id = plan.get("query_id", "?")
-                similarity = plan.get("similarity", 1.0)
-                type_diff = plan.get("type_mismatches", 0)
-                prop_diff = plan.get("property_mismatches", 0)
-                perf_change = plan.get("perf_change_pct", 0.0)
-                is_regression = plan.get("is_regression", False)
-
-                # Determine status
-                if plan.get("plans_identical"):
-                    status = "✓ Identical"
-                elif similarity >= 0.95:
-                    status = "≈ Nearly Identical"
-                elif similarity >= 0.75:
-                    status = "~ Similar"
-                elif is_regression:
-                    status = "🔴 REGRESSION"
-                else:
-                    status = "✗ Different"
-
-                perf_str = f"{perf_change:+.1f}%" if perf_change != 0 else "-"
-                type_str = str(type_diff) if type_diff > 0 else "-"
-                prop_str = str(prop_diff) if prop_diff > 0 else "-"
-
-                lines.append(
-                    f"{query_id:10s} {similarity:11.1%} {type_str:>8s} {prop_str:>8s} {perf_str:>10s}  {status:20s}"
-                )
-
-            lines.append("")
-
-        # Highlight regressions
-        regressions = plan_comparison.get("regressions", [])
-        if regressions:
-            lines.append(f"⚠️  PLAN-CORRELATED REGRESSIONS: {len(regressions)}")
-            lines.append("    (Plan changed AND performance degraded >20%)")
-            for reg in regressions:
-                query_id = reg.get("query_id", "?")
-                perf_change = reg.get("perf_change_pct", 0.0)
-                similarity = reg.get("similarity", 0.0)
-                lines.append(f"    • {query_id}: plan similarity {similarity:.0%}, perf {perf_change:+.1f}%")
-            lines.append("")
-        else:
-            lines.append("✓ No plan-correlated regressions detected")
-            lines.append("")
+    _format_geometric_mean_section(lines, query_comparisons)
+    _format_query_details_section(lines, query_comparisons, show_all)
+    _format_plan_analysis_section(lines, comparison)
 
     lines.append("=" * 80)
 
     return "\n".join(lines)
 
 
+def _format_header_section(lines: list[str], comparison: dict[str, Any], baseline: Any) -> None:
+    """Format the header and metadata section."""
+    lines.append("=" * 80)
+    lines.append("BENCHMARK COMPARISON REPORT")
+    lines.append("=" * 80)
+    lines.append("")
+    lines.append(f"Baseline: {comparison['baseline_file']}")
+    lines.append(f"Current:  {comparison['current_file']}")
+    lines.append("")
+    lines.append(f"Benchmark:  {baseline.benchmark_name}")
+    lines.append(f"Platform:   {baseline.platform}")
+    lines.append(f"Scale:      {baseline.scale_factor}")
+    lines.append("")
+
+
+def _format_summary_section(lines: list[str], comparison: dict[str, Any]) -> None:
+    """Format the overall summary section."""
+    summary = comparison.get("summary", {})
+    if not summary:
+        return
+    lines.append("-" * 80)
+    lines.append("OVERALL SUMMARY")
+    lines.append("-" * 80)
+    lines.append(f"Total queries compared: {summary.get('total_queries_compared', 0)}")
+    lines.append(f"  Improved:  {summary.get('improved_queries', 0)}")
+    lines.append(f"  Regressed: {summary.get('regressed_queries', 0)}")
+    lines.append(f"  Unchanged: {summary.get('unchanged_queries', 0)}")
+    lines.append(f"Assessment: {summary.get('overall_assessment', 'unknown').upper()}")
+    lines.append("")
+
+
+def _format_performance_metrics_section(lines: list[str], comparison: dict[str, Any]) -> None:
+    """Format the performance metrics changes section."""
+    perf_changes = comparison.get("performance_changes", {})
+    if not perf_changes:
+        return
+    lines.append("-" * 80)
+    lines.append("PERFORMANCE METRICS")
+    lines.append("-" * 80)
+
+    for metric_name, metric_data in perf_changes.items():
+        if not isinstance(metric_data, dict):
+            continue
+
+        baseline_val = metric_data.get("baseline", 0)
+        current_val = metric_data.get("current", 0)
+        change_pct = metric_data.get("change_percent", 0)
+        improved = metric_data.get("improved", False)
+
+        display_name = metric_name.replace("_", " ").title()
+
+        if improved:
+            indicator = "🟢"
+            change_str = f"-{abs(change_pct):.2f}%"
+        elif change_pct > 10:
+            indicator = "🔴"
+            change_str = f"+{change_pct:.2f}%"
+        elif change_pct > 0:
+            indicator = "🟡"
+            change_str = f"+{change_pct:.2f}%"
+        else:
+            indicator = "⚪"
+            change_str = "0.00%"
+
+        lines.append(f"{indicator} {display_name:25s} {baseline_val:10.3f}s → {current_val:10.3f}s ({change_str})")
+
+    lines.append("")
+
+
+def _format_geometric_mean_section(lines: list[str], query_comparisons: list[dict[str, Any]]) -> None:
+    """Format the geometric mean section."""
+    if not query_comparisons:
+        return
+
+    baseline_times = [q["baseline_time_ms"] for q in query_comparisons if q["baseline_time_ms"] > 0]
+    current_times = [q["current_time_ms"] for q in query_comparisons if q["current_time_ms"] > 0]
+
+    if not baseline_times or not current_times:
+        return
+
+    baseline_geomean = statistics.geometric_mean(baseline_times)
+    current_geomean = statistics.geometric_mean(current_times)
+    geomean_change = ((current_geomean - baseline_geomean) / baseline_geomean * 100) if baseline_geomean else 0
+
+    lines.append("-" * 80)
+    lines.append("GEOMETRIC MEAN (Query Times)")
+    lines.append("-" * 80)
+
+    if geomean_change < 0:
+        indicator = "🟢 IMPROVED"
+        change_str = f"-{abs(geomean_change):.2f}%"
+    elif geomean_change > 10:
+        indicator = "🔴 REGRESSED"
+        change_str = f"+{geomean_change:.2f}%"
+    elif geomean_change > 0:
+        indicator = "🟡 SLOWER"
+        change_str = f"+{geomean_change:.2f}%"
+    else:
+        indicator = "⚪ UNCHANGED"
+        change_str = "0.00%"
+
+    lines.append(f"Baseline: {baseline_geomean:.3f} ms")
+    lines.append(f"Current:  {current_geomean:.3f} ms")
+    lines.append(f"Change:   {change_str} {indicator}")
+    lines.append("")
+
+
+def _format_query_details_section(lines: list[str], query_comparisons: list[dict[str, Any]], show_all: bool) -> None:
+    """Format the per-query comparison section."""
+    if not query_comparisons:
+        return
+
+    lines.append("-" * 80)
+    lines.append("PER-QUERY COMPARISON")
+    lines.append("-" * 80)
+    lines.append(f"{'Query':10s} {'Baseline':>12s} {'Current':>12s} {'Change':>12s}  {'Severity':10s}")
+    lines.append("-" * 80)
+
+    sorted_queries = sorted(query_comparisons, key=lambda q: q.get("change_percent", 0), reverse=True)
+
+    for query in sorted_queries:
+        change_pct = query["change_percent"]
+        if not show_all and abs(change_pct) < 1.0:
+            continue
+
+        query_id = str(query["query_id"])
+        baseline_time = query["baseline_time_ms"]
+        current_time = query["current_time_ms"]
+        improved = query["improved"]
+
+        severity, change_str = _query_severity_and_change(improved, change_pct)
+
+        lines.append(f"{query_id:10s} {baseline_time:10.2f} ms {current_time:10.2f} ms {change_str:>12s}  {severity}")
+
+    lines.append("")
+
+
+def _query_severity_and_change(improved: bool, change_pct: float) -> tuple[str, str]:
+    """Return (severity_label, change_str) for a query comparison."""
+    if improved:
+        return "✓ FASTER", f"-{abs(change_pct):.2f}%"
+    if change_pct > 50:
+        return "🔴 CRITICAL", f"+{change_pct:.2f}%"
+    if change_pct > 25:
+        return "🔴 MAJOR", f"+{change_pct:.2f}%"
+    if change_pct > 10:
+        return "🟡 MINOR", f"+{change_pct:.2f}%"
+    if change_pct > 1:
+        return "⚪ SLIGHT", f"+{change_pct:.2f}%"
+    return "⚪ SAME", "0.00%"
+
+
+def _format_plan_analysis_section(lines: list[str], comparison: dict[str, Any]) -> None:
+    """Format the query plan analysis section."""
+    plan_comparison = comparison.get("plan_comparison")
+    if not plan_comparison:
+        return
+
+    lines.append("-" * 80)
+    lines.append("QUERY PLAN ANALYSIS")
+    lines.append("-" * 80)
+
+    plans_compared = plan_comparison.get("plans_compared", 0)
+    plans_unchanged = plan_comparison.get("plans_unchanged", 0)
+    plans_changed = plan_comparison.get("plans_changed", 0)
+    threshold = plan_comparison.get("threshold_applied", 0.0)
+
+    lines.append(f"Plans Compared: {plans_compared}")
+    lines.append(f"  Unchanged:    {plans_unchanged}")
+    lines.append(f"  Changed:      {plans_changed}")
+    if threshold > 0:
+        lines.append(f"  (Filtered by similarity < {threshold:.0%})")
+    lines.append("")
+
+    query_plans = plan_comparison.get("query_plans", [])
+    if query_plans:
+        lines.append(f"{'Query':10s} {'Similarity':>12s} {'Type Δ':>8s} {'Prop Δ':>8s} {'Perf Δ':>10s}  {'Status':20s}")
+        lines.append("-" * 80)
+
+        sorted_plans = sorted(query_plans, key=lambda p: p.get("similarity", 1.0))
+
+        for plan in sorted_plans:
+            query_id = plan.get("query_id", "?")
+            similarity = plan.get("similarity", 1.0)
+            type_diff = plan.get("type_mismatches", 0)
+            prop_diff = plan.get("property_mismatches", 0)
+            perf_change = plan.get("perf_change_pct", 0.0)
+            is_regression = plan.get("is_regression", False)
+
+            status = _plan_status_label(plan.get("plans_identical", False), similarity, is_regression)
+
+            perf_str = f"{perf_change:+.1f}%" if perf_change != 0 else "-"
+            type_str = str(type_diff) if type_diff > 0 else "-"
+            prop_str = str(prop_diff) if prop_diff > 0 else "-"
+
+            lines.append(
+                f"{query_id:10s} {similarity:11.1%} {type_str:>8s} {prop_str:>8s} {perf_str:>10s}  {status:20s}"
+            )
+
+        lines.append("")
+
+    regressions = plan_comparison.get("regressions", [])
+    if regressions:
+        lines.append(f"⚠️  PLAN-CORRELATED REGRESSIONS: {len(regressions)}")
+        lines.append("    (Plan changed AND performance degraded >20%)")
+        for reg in regressions:
+            query_id = reg.get("query_id", "?")
+            perf_change = reg.get("perf_change_pct", 0.0)
+            similarity = reg.get("similarity", 0.0)
+            lines.append(f"    • {query_id}: plan similarity {similarity:.0%}, perf {perf_change:+.1f}%")
+        lines.append("")
+    else:
+        lines.append("✓ No plan-correlated regressions detected")
+        lines.append("")
+
+
+def _plan_status_label(plans_identical: bool, similarity: float, is_regression: bool) -> str:
+    """Return status label for a plan comparison row."""
+    if plans_identical:
+        return "✓ Identical"
+    if similarity >= 0.95:
+        return "≈ Nearly Identical"
+    if similarity >= 0.75:
+        return "~ Similar"
+    if is_regression:
+        return "🔴 REGRESSION"
+    return "✗ Different"
+
+
 def _format_html_comparison(comparison: dict[str, Any], baseline: Any, current: Any) -> str:
     """Format comparison as HTML."""
-    html = []
+    html: list[str] = []
+    _append_html_header(html)
+    _append_html_metadata(html, comparison, baseline)
+    _append_html_summary_table(html, comparison)
+    _append_html_query_comparison(html, comparison)
+    _append_html_plan_section(html, comparison)
+    html.append("</body>")
+    html.append("</html>")
+    return "\n".join(html)
+
+
+def _append_html_header(html: list[str]) -> None:
+    """Append HTML document header with styles."""
     html.append("<!DOCTYPE html>")
     html.append("<html>")
     html.append("<head>")
@@ -1599,6 +1656,9 @@ def _format_html_comparison(comparison: dict[str, Any], baseline: Any, current: 
     html.append("</head>")
     html.append("<body>")
 
+
+def _append_html_metadata(html: list[str], comparison: dict[str, Any], baseline: Any) -> None:
+    """Append HTML metadata section (title, file paths, benchmark info)."""
     html.append("<h1>Benchmark Comparison Report</h1>")
     html.append(f"<p><strong>Baseline:</strong> {comparison['baseline_file']}</p>")
     html.append(f"<p><strong>Current:</strong> {comparison['current_file']}</p>")
@@ -1606,167 +1666,152 @@ def _format_html_comparison(comparison: dict[str, Any], baseline: Any, current: 
         f"<p><strong>Benchmark:</strong> {baseline.benchmark_name} | <strong>Platform:</strong> {baseline.platform} | <strong>Scale:</strong> {baseline.scale_factor}</p>"
     )
 
-    # Summary table
-    summary = comparison.get("summary", {})
-    if summary:
-        html.append("<h2>Summary</h2>")
-        html.append("<table>")
-        html.append("<tr><th>Metric</th><th>Value</th></tr>")
-        html.append(f"<tr><td>Total Queries</td><td>{summary.get('total_queries_compared', 0)}</td></tr>")
-        html.append(f"<tr><td>Improved</td><td class='improved'>{summary.get('improved_queries', 0)}</td></tr>")
-        html.append(f"<tr><td>Regressed</td><td class='regressed'>{summary.get('regressed_queries', 0)}</td></tr>")
-        html.append(f"<tr><td>Unchanged</td><td>{summary.get('unchanged_queries', 0)}</td></tr>")
-        html.append("</table>")
 
-    # Query comparison table
+def _append_html_summary_table(html: list[str], comparison: dict[str, Any]) -> None:
+    """Append HTML summary table."""
+    summary = comparison.get("summary", {})
+    if not summary:
+        return
+    html.append("<h2>Summary</h2>")
+    html.append("<table>")
+    html.append("<tr><th>Metric</th><th>Value</th></tr>")
+    html.append(f"<tr><td>Total Queries</td><td>{summary.get('total_queries_compared', 0)}</td></tr>")
+    html.append(f"<tr><td>Improved</td><td class='improved'>{summary.get('improved_queries', 0)}</td></tr>")
+    html.append(f"<tr><td>Regressed</td><td class='regressed'>{summary.get('regressed_queries', 0)}</td></tr>")
+    html.append(f"<tr><td>Unchanged</td><td>{summary.get('unchanged_queries', 0)}</td></tr>")
+    html.append("</table>")
+
+
+def _html_query_row_class_and_severity(improved: bool, change_pct: float) -> tuple[str, str]:
+    """Return (row_class, severity) for an HTML query comparison row."""
+    if improved:
+        return "", "Improved"
+    if change_pct > 50:
+        return ' class="critical"', "Critical"
+    if change_pct > 25:
+        return ' class="major"', "Major"
+    if change_pct > 10:
+        return ' class="minor"', "Minor"
+    return "", "None"
+
+
+def _append_html_query_comparison(html: list[str], comparison: dict[str, Any]) -> None:
+    """Append HTML query comparison table."""
     query_comparisons = comparison.get("query_comparisons", [])
-    if query_comparisons:
-        html.append("<h2>Query Comparison</h2>")
+    if not query_comparisons:
+        return
+
+    html.append("<h2>Query Comparison</h2>")
+    html.append("<table>")
+    html.append("<tr><th>Query</th><th>Baseline (ms)</th><th>Current (ms)</th><th>Change</th><th>Severity</th></tr>")
+
+    sorted_queries = sorted(query_comparisons, key=lambda q: q.get("change_percent", 0), reverse=True)
+
+    for query in sorted_queries:
+        row_class, severity = _html_query_row_class_and_severity(query["improved"], query["change_percent"])
+        change_str = f"{query['change_percent']:+.2f}%"
+        html.append(f"<tr{row_class}>")
+        html.append(f"<td>{query['query_id']}</td>")
+        html.append(f"<td>{query['baseline_time_ms']:.2f}</td>")
+        html.append(f"<td>{query['current_time_ms']:.2f}</td>")
+        html.append(f"<td>{change_str}</td>")
+        html.append(f"<td>{severity}</td>")
+        html.append("</tr>")
+
+    html.append("</table>")
+
+
+def _html_plan_status(plan: dict[str, Any]) -> tuple[str, str]:
+    """Return (status, status_class) for a plan comparison row."""
+    if plan.get("plans_identical"):
+        return "Identical", "improved"
+    similarity = plan.get("similarity", 1.0)
+    if similarity >= 0.95:
+        return "Nearly Identical", "improved"
+    if similarity >= 0.75:
+        return "Similar", ""
+    if plan.get("is_regression", False):
+        return "REGRESSION", "regressed"
+    return "Different", "minor"
+
+
+def _append_html_plan_section(html: list[str], comparison: dict[str, Any]) -> None:
+    """Append HTML query plan analysis section."""
+    plan_comparison = comparison.get("plan_comparison")
+    if not plan_comparison:
+        return
+
+    html.append("<h2>Query Plan Analysis</h2>")
+
+    plans_compared = plan_comparison.get("plans_compared", 0)
+    plans_unchanged = plan_comparison.get("plans_unchanged", 0)
+    plans_changed = plan_comparison.get("plans_changed", 0)
+    regressions_detected = plan_comparison.get("regressions_detected", 0)
+
+    # Summary cards
+    html.append("<div style='display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px 0;'>")
+    html.append(
+        f"<div style='background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;'><strong>{plans_compared}</strong><br>Plans Compared</div>"
+    )
+    html.append(
+        f"<div style='background: #d4edda; padding: 15px; border-radius: 8px; text-align: center;'><strong>{plans_unchanged}</strong><br>Unchanged</div>"
+    )
+    html.append(
+        f"<div style='background: #fff3cd; padding: 15px; border-radius: 8px; text-align: center;'><strong>{plans_changed}</strong><br>Changed</div>"
+    )
+    regression_style = "background: #f8d7da;" if regressions_detected > 0 else "background: #d4edda;"
+    html.append(
+        f"<div style='{regression_style} padding: 15px; border-radius: 8px; text-align: center;'><strong>{regressions_detected}</strong><br>Regressions</div>"
+    )
+    html.append("</div>")
+
+    # Plan comparison table
+    query_plans = plan_comparison.get("query_plans", [])
+    if query_plans:
         html.append("<table>")
         html.append(
-            "<tr><th>Query</th><th>Baseline (ms)</th><th>Current (ms)</th><th>Change</th><th>Severity</th></tr>"
+            "<tr><th>Query</th><th>Similarity</th><th>Type Δ</th><th>Prop Δ</th><th>Perf Δ</th><th>Status</th></tr>"
         )
 
-        sorted_queries = sorted(query_comparisons, key=lambda q: q.get("change_percent", 0), reverse=True)
-
-        for query in sorted_queries:
-            query_id = query["query_id"]
-            baseline_time = query["baseline_time_ms"]
-            current_time = query["current_time_ms"]
-            change_pct = query["change_percent"]
-            improved = query["improved"]
-
-            # Determine row class
-            if improved:
-                row_class = ""
-                severity = "Improved"
-            elif change_pct > 50:
-                row_class = ' class="critical"'
-                severity = "Critical"
-            elif change_pct > 25:
-                row_class = ' class="major"'
-                severity = "Major"
-            elif change_pct > 10:
-                row_class = ' class="minor"'
-                severity = "Minor"
-            else:
-                row_class = ""
-                severity = "None"
-
-            change_str = f"{change_pct:+.2f}%"
-
+        for plan in sorted(query_plans, key=lambda p: p.get("similarity", 1.0)):
+            status, status_class = _html_plan_status(plan)
+            is_regression = plan.get("is_regression", False)
+            row_class = ' class="critical"' if is_regression else ""
+            type_diff = plan.get("type_mismatches", 0)
+            prop_diff = plan.get("property_mismatches", 0)
+            perf_change = plan.get("perf_change_pct", 0.0)
             html.append(f"<tr{row_class}>")
-            html.append(f"<td>{query_id}</td>")
-            html.append(f"<td>{baseline_time:.2f}</td>")
-            html.append(f"<td>{current_time:.2f}</td>")
-            html.append(f"<td>{change_str}</td>")
-            html.append(f"<td>{severity}</td>")
+            html.append(f"<td>{plan.get('query_id', '?')}</td>")
+            html.append(f"<td>{plan.get('similarity', 1.0):.1%}</td>")
+            html.append(f"<td>{type_diff if type_diff > 0 else '-'}</td>")
+            html.append(f"<td>{prop_diff if prop_diff > 0 else '-'}</td>")
+            html.append(f"<td>{perf_change:+.1f}%</td>")
+            html.append(f"<td class='{status_class}'>{status}</td>")
             html.append("</tr>")
 
         html.append("</table>")
 
-    # Query plan comparison section (if included)
-    plan_comparison = comparison.get("plan_comparison")
-    if plan_comparison:
-        html.append("<h2>Query Plan Analysis</h2>")
-
-        plans_compared = plan_comparison.get("plans_compared", 0)
-        plans_unchanged = plan_comparison.get("plans_unchanged", 0)
-        plans_changed = plan_comparison.get("plans_changed", 0)
-        regressions_detected = plan_comparison.get("regressions_detected", 0)
-
-        # Summary cards
-        html.append("<div style='display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px 0;'>")
+    # Regressions alert
+    regressions = plan_comparison.get("regressions", [])
+    if regressions:
         html.append(
-            f"<div style='background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;'><strong>{plans_compared}</strong><br>Plans Compared</div>"
+            "<div style='background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-top: 20px;'>"
         )
-        html.append(
-            f"<div style='background: #d4edda; padding: 15px; border-radius: 8px; text-align: center;'><strong>{plans_unchanged}</strong><br>Unchanged</div>"
-        )
-        html.append(
-            f"<div style='background: #fff3cd; padding: 15px; border-radius: 8px; text-align: center;'><strong>{plans_changed}</strong><br>Changed</div>"
-        )
-        regression_style = "background: #f8d7da;" if regressions_detected > 0 else "background: #d4edda;"
-        html.append(
-            f"<div style='{regression_style} padding: 15px; border-radius: 8px; text-align: center;'><strong>{regressions_detected}</strong><br>Regressions</div>"
-        )
+        html.append(f"<strong>⚠️ Plan-Correlated Regressions: {len(regressions)}</strong>")
+        html.append("<p>These queries have both plan changes AND performance degradation >20%:</p>")
+        html.append("<ul>")
+        for reg in regressions:
+            html.append(
+                f"<li><strong>{reg.get('query_id', '?')}</strong>: plan similarity {reg.get('similarity', 0.0):.0%}, performance {reg.get('perf_change_pct', 0.0):+.1f}%</li>"
+            )
+        html.append("</ul>")
         html.append("</div>")
-
-        # Plan comparison table
-        query_plans = plan_comparison.get("query_plans", [])
-        if query_plans:
-            html.append("<table>")
-            html.append(
-                "<tr><th>Query</th><th>Similarity</th><th>Type Δ</th><th>Prop Δ</th><th>Perf Δ</th><th>Status</th></tr>"
-            )
-
-            sorted_plans = sorted(query_plans, key=lambda p: p.get("similarity", 1.0))
-
-            for plan in sorted_plans:
-                query_id = plan.get("query_id", "?")
-                similarity = plan.get("similarity", 1.0)
-                type_diff = plan.get("type_mismatches", 0)
-                prop_diff = plan.get("property_mismatches", 0)
-                perf_change = plan.get("perf_change_pct", 0.0)
-                is_regression = plan.get("is_regression", False)
-
-                if plan.get("plans_identical"):
-                    status = "Identical"
-                    status_class = "improved"
-                elif similarity >= 0.95:
-                    status = "Nearly Identical"
-                    status_class = "improved"
-                elif similarity >= 0.75:
-                    status = "Similar"
-                    status_class = ""
-                elif is_regression:
-                    status = "REGRESSION"
-                    status_class = "regressed"
-                else:
-                    status = "Different"
-                    status_class = "minor"
-
-                row_class = ' class="critical"' if is_regression else ""
-                html.append(f"<tr{row_class}>")
-                html.append(f"<td>{query_id}</td>")
-                html.append(f"<td>{similarity:.1%}</td>")
-                html.append(f"<td>{type_diff if type_diff > 0 else '-'}</td>")
-                html.append(f"<td>{prop_diff if prop_diff > 0 else '-'}</td>")
-                html.append(f"<td>{perf_change:+.1f}%</td>")
-                html.append(f"<td class='{status_class}'>{status}</td>")
-                html.append("</tr>")
-
-            html.append("</table>")
-
-        # Regressions alert
-        regressions = plan_comparison.get("regressions", [])
-        if regressions:
-            html.append(
-                "<div style='background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-top: 20px;'>"
-            )
-            html.append(f"<strong>⚠️ Plan-Correlated Regressions: {len(regressions)}</strong>")
-            html.append("<p>These queries have both plan changes AND performance degradation >20%:</p>")
-            html.append("<ul>")
-            for reg in regressions:
-                query_id = reg.get("query_id", "?")
-                perf_change = reg.get("perf_change_pct", 0.0)
-                similarity = reg.get("similarity", 0.0)
-                html.append(
-                    f"<li><strong>{query_id}</strong>: plan similarity {similarity:.0%}, performance {perf_change:+.1f}%</li>"
-                )
-            html.append("</ul>")
-            html.append("</div>")
-        else:
-            html.append(
-                "<div style='background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-top: 20px;'>"
-            )
-            html.append("<strong>✓ No plan-correlated regressions detected</strong>")
-            html.append("</div>")
-
-    html.append("</body>")
-    html.append("</html>")
-
-    return "\n".join(html)
+    else:
+        html.append(
+            "<div style='background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-top: 20px;'>"
+        )
+        html.append("<strong>✓ No plan-correlated regressions detected</strong>")
+        html.append("</div>")
 
 
 __all__ = ["compare"]

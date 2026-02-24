@@ -381,7 +381,7 @@ class MockPlatformAdapterErrorHandling:
         """Test that ClickHouse adapter handles critical data loading failures gracefully."""
         from benchbox.platforms.clickhouse import ClickHouseAdapter
 
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
 
         # temporary files to ensure they exist
         with tempfile.TemporaryDirectory() as temp_dir:

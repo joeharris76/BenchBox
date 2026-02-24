@@ -1,4 +1,4 @@
-"""Refactored CLI execution architecture using pipeline pattern.
+"""Legacy CLI execution pipeline compatibility layer.
 
 Copyright 2026 Joe Harris / BenchBox Project
 
@@ -12,15 +12,19 @@ from typing import Any, Callable, Optional
 
 from rich.console import Console
 
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig, RunConfig, SystemProfile
 from benchbox.core.constants import (
     GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS,
     GENERIC_POWER_DEFAULT_WARMUP_ITERATIONS,
 )
+from benchbox.core.results.driver_metadata import apply_driver_metadata
 from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, RunConfig, SystemProfile
 from benchbox.utils.printing import quiet_console
 
-# Note: Core lifecycle orchestration lives in benchbox.core.runner.
+# NOTE:
+# `benchbox run` executes through BenchmarkOrchestrator -> run_benchmark_lifecycle.
+# This module is retained for legacy CLI interfaces and focused unit tests.
+# Behavior-critical execution logic should live on the orchestrator/lifecycle path.
 
 
 logger = logging.getLogger(__name__)
@@ -397,55 +401,12 @@ class ExecutionEngine:
         self.console.print(f"[blue]▶[/blue] {display_name}...")
 
     def _enrich_driver_metadata(self, context: ExecutionContext) -> None:
-        """Propagate driver version metadata onto the final result."""
-
-        result = context.result
-        if result is None:
-            return
-
-        db_config = context.database_config
-        adapter = context.platform_adapter
-
-        driver_package = None
-        driver_version_requested = None
-        driver_version_resolved = None
-        auto_install_used = False
-
-        if adapter is not None:
-            driver_package = getattr(adapter, "driver_package", None) or driver_package
-            driver_version_requested = getattr(adapter, "driver_version_requested", None) or driver_version_requested
-            driver_version_resolved = getattr(adapter, "driver_version_resolved", None) or driver_version_resolved
-            auto_install_used = getattr(adapter, "driver_auto_install_used", False) or auto_install_used
-
-        if db_config is not None:
-            driver_package = driver_package or db_config.driver_package
-            driver_version_requested = driver_version_requested or db_config.driver_version
-            driver_version_resolved = (
-                driver_version_resolved or db_config.driver_version_resolved or db_config.driver_version
-            )
-            auto_install_used = auto_install_used or db_config.driver_auto_install
-            if driver_version_resolved and db_config.driver_version_resolved != driver_version_resolved:
-                db_config.driver_version_resolved = driver_version_resolved
-
-        if hasattr(result, "driver_package"):
-            result.driver_package = driver_package
-        if hasattr(result, "driver_version_requested"):
-            result.driver_version_requested = driver_version_requested
-        if hasattr(result, "driver_version_resolved"):
-            result.driver_version_resolved = driver_version_resolved
-        if hasattr(result, "driver_auto_install"):
-            result.driver_auto_install = auto_install_used
-
-        # Surface in execution metadata when available
-        execution_metadata = getattr(result, "execution_metadata", None)
-        if isinstance(execution_metadata, dict):
-            if driver_package:
-                execution_metadata.setdefault("driver_package", driver_package)
-            if driver_version_requested:
-                execution_metadata.setdefault("driver_version_requested", driver_version_requested)
-            if driver_version_resolved:
-                execution_metadata["driver_version_resolved"] = driver_version_resolved
-            execution_metadata.setdefault("driver_auto_install_used", auto_install_used)
+        """Apply shared driver metadata propagation logic."""
+        apply_driver_metadata(
+            context.result,
+            database_config=context.database_config,
+            platform_adapter=context.platform_adapter,
+        )
 
     @property
     def last_context(self) -> Optional[ExecutionContext]:
@@ -462,5 +423,5 @@ class ExecutionEngine:
 
 
 def create_execution_engine(console: Optional[Console] = None) -> ExecutionEngine:
-    """Factory function to create execution engine."""
+    """Factory for legacy execution engine compatibility."""
     return ExecutionEngine(console)

@@ -1,14 +1,10 @@
-"""Entry point for running the BenchBox MCP server.
+"""Entry point for running the BenchBox MCP server."""
 
-Usage:
-    python -m benchbox.mcp
+from __future__ import annotations
 
-Copyright 2026 Joe Harris / BenchBox Project
+import sys
 
-Licensed under the MIT License. See LICENSE file in the project root for details.
-"""
-
-from benchbox.mcp import run_server
+from benchbox.mcp.cli import main
 
 if __name__ == "__main__":
-    run_server()
+    main(sys.argv[1:])

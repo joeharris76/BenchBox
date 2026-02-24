@@ -94,10 +94,10 @@ Infrastructure is in place for these platforms:
 # Already included in base BenchBox installation
 
 # Pandas DataFrame
-uv add benchbox --extra dataframe-pandas
+uv add benchbox --extra pandas
 
 # PySpark DataFrame
-uv add benchbox --extra dataframe-pyspark
+uv add benchbox --extra pyspark
 
 # Install all DataFrame platforms
 uv add benchbox --extra dataframe-all

@@ -10,13 +10,14 @@ from benchbox.base import BaseBenchmark
 from benchbox.core.coffeeshop.generator import CoffeeShopDataGenerator
 from benchbox.core.coffeeshop.queries import CoffeeShopQueryManager
 from benchbox.core.coffeeshop.schema import TABLES, get_all_create_table_sql
+from benchbox.core.query_catalog_base import TranslatableQueryMixin
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
 
 
-class CoffeeShopBenchmark(BaseBenchmark):
+class CoffeeShopBenchmark(TranslatableQueryMixin, BaseBenchmark):
     """Expose data generation and query execution for the CoffeeShop benchmark."""
 
     def __init__(
@@ -81,16 +82,7 @@ class CoffeeShopBenchmark(BaseBenchmark):
             translated[query_id] = self.translate_query_text(sql, dialect)
         return translated
 
-    def translate_query_text(self, query_text: str, target_dialect: str) -> str:
-        """Translate CoffeeShop query to target dialect."""
-        from benchbox.utils.dialect_utils import translate_sql_query
-
-        # CoffeeShop queries use modern SQL (netezza/postgres) as source dialect
-        return translate_sql_query(
-            query=query_text,
-            target_dialect=target_dialect,
-            source_dialect="netezza",
-        )
+    # translate_query_text() is inherited from TranslatableQueryMixin
 
     def get_all_queries(self) -> dict[str, str]:
         return self.query_manager.get_all_queries()

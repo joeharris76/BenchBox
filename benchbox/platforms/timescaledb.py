@@ -8,7 +8,7 @@ Extends PostgreSQL adapter with TimescaleDB-specific functionality:
 
 Deployment modes:
 - self-hosted: Self-hosted TimescaleDB server (default)
-- cloud: Timescale Cloud managed service (requires SSL)
+- cloud: TigerData managed service (requires SSL)
 
 TimescaleDB is a PostgreSQL extension that transforms PostgreSQL into a
 time-series database with automatic time-based partitioning (hypertables),
@@ -29,6 +29,7 @@ from typing import Any
 
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
+from .base import DriverIsolationCapability
 from .postgresql import POSTGRES_DIALECT, PostgreSQLAdapter
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,8 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
 
     Requires PostgreSQL 12+ with TimescaleDB 2.x extension installed.
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     @property
     def platform_name(self) -> str:
@@ -220,49 +223,71 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
         # Set skip_database_management for cloud mode (can't DROP/CREATE managed databases)
         if self.deployment_mode == "cloud":
             self.skip_database_management = config.get("skip_database_management", True)
-            logger.info(f"TimescaleDB Cloud adapter initialized for host: {config.get('host')}")
+            logger.info(f"TigerData adapter initialized for host: {config.get('host')}")
 
     def _configure_cloud_mode(self, config: dict) -> None:
-        """Configure adapter for Timescale Cloud.
+        """Configure adapter for TigerData cloud mode.
 
-        Timescale Cloud uses SSL and has specific connection requirements.
+        TigerData uses SSL and has specific connection requirements.
         Credentials can be provided via:
         - Config parameters: host, password, username, port, database
-        - Environment variables: TIMESCALE_HOST, TIMESCALE_PASSWORD, etc.
-        - Service URL: TIMESCALE_SERVICE_URL (postgres://user:pass@host:port/db)
+        - Environment variables: TIGERDATA_HOST, TIGERDATA_PASSWORD, etc.
+          (TIMESCALE_* variables are supported as backward-compatible fallback)
+        - Service URL: TIGERDATA_SERVICE_URL (or TIMESCALE_SERVICE_URL fallback)
+          (postgres://user:pass@host:port/db)
         """
         # Check for service URL first (most convenient)
-        service_url = config.get("service_url") or os.environ.get("TIMESCALE_SERVICE_URL")
+        service_url = (
+            config.get("service_url")
+            or os.environ.get("TIGERDATA_SERVICE_URL")
+            or os.environ.get("TIMESCALE_SERVICE_URL")
+        )
         if service_url:
             self._parse_service_url(config, service_url)
             return
 
         # Otherwise use individual parameters
-        config["host"] = config.get("host") or os.environ.get("TIMESCALE_HOST")
+        config["host"] = config.get("host") or os.environ.get("TIGERDATA_HOST") or os.environ.get("TIMESCALE_HOST")
         config["password"] = (
-            config.get("password") or os.environ.get("TIMESCALE_PASSWORD") or os.environ.get("PGPASSWORD")
+            config.get("password")
+            or os.environ.get("TIGERDATA_PASSWORD")
+            or os.environ.get("TIMESCALE_PASSWORD")
+            or os.environ.get("PGPASSWORD")
         )
         # For cloud mode, default to "tsdbadmin" - don't use PGUSER as it may be set to
         # something else (e.g., "postgres") by system PostgreSQL installations
-        config["username"] = config.get("username") or os.environ.get("TIMESCALE_USER") or "tsdbadmin"
-        config["port"] = config.get("port") or int(os.environ.get("TIMESCALE_PORT") or os.environ.get("PGPORT", "5432"))
+        config["username"] = (
+            config.get("username")
+            or os.environ.get("TIGERDATA_USER")
+            or os.environ.get("TIMESCALE_USER")
+            or "tsdbadmin"
+        )
+        config["port"] = config.get("port") or int(
+            os.environ.get("TIGERDATA_PORT") or os.environ.get("TIMESCALE_PORT") or os.environ.get("PGPORT", "5432")
+        )
         config["database"] = (
-            config.get("database") or os.environ.get("TIMESCALE_DATABASE") or os.environ.get("PGDATABASE", "tsdb")
+            config.get("database")
+            or os.environ.get("TIGERDATA_DATABASE")
+            or os.environ.get("TIMESCALE_DATABASE")
+            or os.environ.get("PGDATABASE", "tsdb")
         )
 
         # Validate required credentials
         if not config.get("host"):
             raise ValueError(
-                "Timescale Cloud requires host configuration.\n"
+                "TigerData requires host configuration.\n"
                 "Provide via --platform-option host=<hostname> or "
-                "TIMESCALE_HOST environment variable, or use TIMESCALE_SERVICE_URL.\n"
+                "TIGERDATA_HOST environment variable "
+                "(TIMESCALE_HOST supported as fallback), or use "
+                "TIGERDATA_SERVICE_URL (TIMESCALE_SERVICE_URL fallback).\n"
                 "Example: abc123.rc8ft3nbrw.tsdb.cloud.timescale.com"
             )
         if not config.get("password"):
             raise ValueError(
-                "Timescale Cloud requires password authentication.\n"
+                "TigerData requires password authentication.\n"
                 "Provide via --platform-option password=<password> or "
-                "TIMESCALE_PASSWORD/PGPASSWORD environment variable."
+                "TIGERDATA_PASSWORD/PGPASSWORD environment variable "
+                "(TIMESCALE_PASSWORD supported as fallback)."
             )
 
         # Cloud always requires SSL
@@ -274,7 +299,7 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
         config["skip_database_management"] = True  # New flag to skip DROP/CREATE database
 
     def _parse_service_url(self, config: dict, service_url: str) -> None:
-        """Parse Timescale Cloud service URL into connection parameters.
+        """Parse TigerData service URL into connection parameters.
 
         Service URL format: postgres://user:pass@host:port/database?sslmode=require
         """
@@ -282,6 +307,9 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
 
         try:
             parsed = urllib.parse.urlparse(service_url)
+
+            if parsed.scheme not in ("postgres", "postgresql"):
+                raise ValueError(f"Unsupported scheme '{parsed.scheme}'. Expected 'postgres://' or 'postgresql://'.")
 
             config["host"] = parsed.hostname
             config["port"] = parsed.port or 5432
@@ -301,7 +329,7 @@ class TimescaleDBAdapter(PostgreSQLAdapter):
             )
 
         except Exception as e:
-            raise ValueError(f"Invalid TIMESCALE_SERVICE_URL format: {e}")
+            raise ValueError(f"Invalid TIGERDATA_SERVICE_URL (or TIMESCALE_SERVICE_URL) format: {e}")
 
     @staticmethod
     def _validate_interval(value: str, param_name: str) -> str:

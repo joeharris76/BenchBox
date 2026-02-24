@@ -196,10 +196,15 @@ class TestDuckDBParquetHandler:
         parquet_file = tmp_path / "test.parquet"
         parquet_file.touch()
 
-        # Mock connection
+        # Mock connection with before/after COUNT(*) returning 0 and 1000
+        # Call sequence: [0] COUNT(*) before -> 0, [1] INSERT, [2] COUNT(*) after -> 1000
         connection = Mock()
-        connection.execute = Mock()
-        connection.execute.return_value.fetchone.return_value = (1000,)
+        before_result = Mock()
+        before_result.fetchone.return_value = (0,)
+        insert_result = Mock()
+        after_result = Mock()
+        after_result.fetchone.return_value = (1000,)
+        connection.execute.side_effect = [before_result, insert_result, after_result]
 
         # Mock logger and benchmark
         logger = Mock()
@@ -217,11 +222,11 @@ class TestDuckDBParquetHandler:
         # Verify row count
         assert row_count == 1000
 
-        # Verify execute was called with correct SQL
-        assert connection.execute.call_count == 2  # INSERT + COUNT
+        # Verify execute was called with correct SQL (COUNT before + INSERT + COUNT after)
+        assert connection.execute.call_count == 3
 
-        # Check INSERT statement
-        insert_call = connection.execute.call_args_list[0]
+        # Check INSERT statement (index 1 now, after the before-COUNT)
+        insert_call = connection.execute.call_args_list[1]
         insert_sql = insert_call[0][0]
         assert "INSERT INTO customer" in insert_sql
         assert f"read_parquet('{parquet_file}')" in insert_sql
@@ -261,6 +266,76 @@ class TestDuckDBParquetHandler:
 
         # Verify connection was not used
         assert not connection.execute.called
+
+
+class TestDuckDBParquetHandlerBulk:
+    """Tests for DuckDBParquetHandler.load_table_bulk() multi-file array syntax."""
+
+    @pytest.fixture
+    def adapter(self):
+        adapter = Mock()
+        adapter.dry_run_mode = False
+        return adapter
+
+    @pytest.fixture
+    def handler(self, adapter):
+        return DuckDBParquetHandler(adapter)
+
+    def _make_bulk_connection(self, total_rows: int) -> Mock:
+        """Mock connection for a single bulk-load: [COUNT_before, INSERT, COUNT_after]."""
+        connection = Mock()
+        before_result = Mock()
+        before_result.fetchone.return_value = (0,)
+        insert_result = Mock()
+        after_result = Mock()
+        after_result.fetchone.return_value = (total_rows,)
+        connection.execute.side_effect = [before_result, insert_result, after_result]
+        return connection
+
+    def test_bulk_load_two_shards_uses_array_syntax(self, handler, tmp_path):
+        """2 shards must produce a single INSERT with read_parquet([array]) SQL."""
+        shards = [tmp_path / f"customer.parquet.{i}" for i in range(1, 3)]
+        for shard in shards:
+            shard.touch()
+
+        connection = self._make_bulk_connection(total_rows=2000)
+
+        result = handler.load_table_bulk("customer", shards, connection, Mock(), Mock())
+
+        assert result == 2000
+        assert connection.execute.call_count == 3  # COUNT_before, INSERT, COUNT_after
+        insert_sql = connection.execute.call_args_list[1][0][0]
+        assert "read_parquet([" in insert_sql
+        for shard in shards:
+            assert str(shard) in insert_sql
+
+    def test_bulk_load_dry_run_returns_placeholder(self, adapter, tmp_path):
+        """Dry-run must capture SQL and return 1000*N without executing INSERT."""
+        adapter.dry_run_mode = True
+        adapter.capture_sql = Mock()
+        handler = DuckDBParquetHandler(adapter)
+
+        shards = [tmp_path / f"orders.parquet.{i}" for i in range(1, 4)]
+        for shard in shards:
+            shard.touch()
+
+        connection = Mock()
+        result = handler.load_table_bulk("orders", shards, connection, Mock(), Mock())
+
+        assert result == 3000
+        adapter.capture_sql.assert_called_once()
+        assert not connection.execute.called
+
+    def test_bulk_load_single_shard_delegates_to_load_table(self, handler, tmp_path):
+        """Single-element list must produce same result as load_table()."""
+        shard = tmp_path / "lineitem.parquet"
+        shard.touch()
+
+        connection = self._make_bulk_connection(total_rows=6001215)
+
+        result = handler.load_table_bulk("lineitem", [shard], connection, Mock(), Mock())
+
+        assert result == 6001215
 
 
 class TestFileFormatRegistry:

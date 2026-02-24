@@ -64,6 +64,51 @@ class TestDuckDBAdapter:
             with pytest.raises(ImportError, match="DuckDB not installed"):
                 DuckDBAdapter()
 
+    @patch("benchbox.platforms.duckdb.load_driver_module")
+    def test_initialization_with_runtime_contract_uses_materialized_module(self, mock_load_driver_module):
+        """Runtime contract should materialize and bind the requested DuckDB module."""
+        mock_duckdb_module = Mock()
+        mock_duckdb_module.__version__ = "0.9.2"
+        mock_load_driver_module.return_value = mock_duckdb_module
+
+        with patch("benchbox.platforms.duckdb.duckdb", None):
+            adapter = DuckDBAdapter(
+                driver_package="duckdb",
+                driver_version_requested="0.9.2",
+                driver_version_resolved="0.9.2",
+                driver_runtime_strategy="isolated-site-packages",
+                driver_runtime_path="/tmp/isolated-site-packages",
+            )
+
+        assert adapter._duckdb_module is mock_duckdb_module
+        assert adapter.driver_version_actual == "0.9.2"
+        mock_load_driver_module.assert_called_once()
+
+    @patch("benchbox.platforms.duckdb.load_driver_module")
+    def test_create_connection_uses_materialized_duckdb_module(self, mock_load_driver_module):
+        """Connection creation should use the runtime-bound DuckDB module."""
+        mock_connection = Mock()
+        mock_duckdb_module = Mock()
+        mock_duckdb_module.__version__ = "1.2.2"
+        mock_duckdb_module.connect.return_value = mock_connection
+        mock_load_driver_module.return_value = mock_duckdb_module
+
+        with patch("benchbox.platforms.duckdb.duckdb", None):
+            adapter = DuckDBAdapter(
+                database_path=":memory:",
+                driver_package="duckdb",
+                driver_version_requested="1.2.2",
+                driver_version_resolved="1.2.2",
+                driver_runtime_strategy="isolated-site-packages",
+                driver_runtime_path="/tmp/runtime",
+            )
+
+        with patch.object(adapter, "handle_existing_database"):
+            connection = adapter.create_connection()
+
+        assert connection == mock_connection
+        mock_duckdb_module.connect.assert_called_once_with(":memory:")
+
     def test_get_database_path(self):
         """Test database path configuration."""
         with patch("benchbox.platforms.duckdb.duckdb"):
@@ -164,6 +209,73 @@ class TestDuckDBAdapter:
             with pytest.raises(Exception, match="Connection failed"):
                 adapter.create_connection()
 
+    @patch("benchbox.platforms.duckdb.load_driver_module")
+    def test_create_connection_records_live_runtime_version(self, mock_load_driver_module):
+        """Live connection version should be captured as driver_version_actual."""
+        mock_connection = Mock()
+        version_result = Mock()
+        version_result.fetchone.return_value = ("v1.2.2",)
+        generic_result = Mock()
+
+        def execute_side_effect(sql, *args, **kwargs):
+            if str(sql).strip().upper().startswith("SELECT VERSION()"):
+                return version_result
+            return generic_result
+
+        mock_connection.execute.side_effect = execute_side_effect
+
+        mock_duckdb_module = Mock()
+        mock_duckdb_module.__version__ = "1.2.2"
+        mock_duckdb_module.connect.return_value = mock_connection
+        mock_load_driver_module.return_value = mock_duckdb_module
+
+        with patch("benchbox.platforms.duckdb.duckdb", None):
+            adapter = DuckDBAdapter(
+                driver_package="duckdb",
+                driver_version_requested="1.2.2",
+                driver_version_resolved="1.2.2",
+                driver_runtime_strategy="isolated-site-packages",
+                driver_runtime_path="/tmp/runtime",
+            )
+
+        with patch.object(adapter, "handle_existing_database"):
+            adapter.create_connection()
+
+        assert adapter.driver_version_actual == "1.2.2"
+
+    @patch("benchbox.platforms.duckdb.load_driver_module")
+    def test_create_connection_raises_on_live_runtime_version_mismatch(self, mock_load_driver_module):
+        """Adapter should fail fast if requested version differs from live runtime."""
+        mock_connection = Mock()
+        version_result = Mock()
+        version_result.fetchone.return_value = ("v1.4.3",)
+        generic_result = Mock()
+
+        def execute_side_effect(sql, *args, **kwargs):
+            if str(sql).strip().upper().startswith("SELECT VERSION()"):
+                return version_result
+            return generic_result
+
+        mock_connection.execute.side_effect = execute_side_effect
+
+        mock_duckdb_module = Mock()
+        mock_duckdb_module.__version__ = "1.2.2"
+        mock_duckdb_module.connect.return_value = mock_connection
+        mock_load_driver_module.return_value = mock_duckdb_module
+
+        with patch("benchbox.platforms.duckdb.duckdb", None):
+            adapter = DuckDBAdapter(
+                driver_package="duckdb",
+                driver_version_requested="1.2.2",
+                driver_version_resolved="1.2.2",
+                driver_runtime_strategy="isolated-site-packages",
+                driver_runtime_path="/tmp/runtime",
+            )
+
+        with patch.object(adapter, "handle_existing_database"):
+            with pytest.raises(RuntimeError, match="runtime version mismatch"):
+                adapter.create_connection()
+
     @patch("benchbox.platforms.duckdb.duckdb")
     def test_create_schema_with_constraints(self, mock_duckdb):
         """Test schema creation with centralized constraint configuration."""
@@ -249,12 +361,15 @@ class TestDuckDBAdapter:
     def test_load_data_with_benchmark_tables(self, mock_duckdb):
         """Test data loading with benchmark tables."""
         mock_connection = Mock()
-        # Mock execute to return different results based on query type
-        mock_result = Mock()
-        mock_result.fetchone.return_value = [100]
-        # pragma_table_info returns [(name,), ...] for each column
-        mock_result.fetchall.return_value = [("col1",), ("col2",)]
-        mock_connection.execute.return_value = mock_result
+        # Call sequence for pipe-delimited .tbl: pragma, COUNT before, INSERT, COUNT after
+        pragma_r = Mock()
+        pragma_r.fetchall.return_value = [("col1",), ("col2",)]
+        before_r = Mock()
+        before_r.fetchone.return_value = [0]
+        insert_r = Mock()
+        after_r = Mock()
+        after_r.fetchone.return_value = [100]
+        mock_connection.execute.side_effect = [pragma_r, before_r, insert_r, after_r]
         mock_duckdb.connect.return_value = mock_connection
 
         mock_benchmark = Mock()
@@ -297,11 +412,15 @@ class TestDuckDBAdapter:
     def test_load_data_with_parallel_files(self, mock_duckdb):
         """Test data loading with parallel data files."""
         mock_connection = Mock()
-        mock_result = Mock()
-        mock_result.fetchone.return_value = [200]
-        # pragma_table_info returns [(name,), ...] for each column
-        mock_result.fetchall.return_value = [("col1",), ("col2",)]
-        mock_connection.execute.return_value = mock_result
+        # Call sequence for pipe-delimited .tbl: pragma, COUNT before, INSERT, COUNT after
+        pragma_r = Mock()
+        pragma_r.fetchall.return_value = [("col1",), ("col2",)]
+        before_r = Mock()
+        before_r.fetchone.return_value = [0]
+        insert_r = Mock()
+        after_r = Mock()
+        after_r.fetchone.return_value = [200]
+        mock_connection.execute.side_effect = [pragma_r, before_r, insert_r, after_r]
         mock_duckdb.connect.return_value = mock_connection
 
         mock_benchmark = Mock()
@@ -376,12 +495,15 @@ class TestDuckDBAdapter:
     def test_load_data_with_sharded_zstd_files(self, mock_duckdb):
         """DuckDB adapter should handle '*.tbl.1.zst' file naming."""
         mock_connection = Mock()
-        mock_result = Mock()
-        # When counting rows after insert, return 123 rows
-        mock_result.fetchone.return_value = [123]
-        # pragma_table_info returns [(name,), ...] for each column
-        mock_result.fetchall.return_value = [("col1",), ("col2",)]
-        mock_connection.execute.return_value = mock_result
+        # Call sequence for pipe-delimited .tbl.1.zst: pragma, COUNT before, INSERT, COUNT after
+        pragma_r = Mock()
+        pragma_r.fetchall.return_value = [("col1",), ("col2",)]
+        before_r = Mock()
+        before_r.fetchone.return_value = [0]
+        insert_r = Mock()
+        after_r = Mock()
+        after_r.fetchone.return_value = [123]
+        mock_connection.execute.side_effect = [pragma_r, before_r, insert_r, after_r]
         mock_duckdb.connect.return_value = mock_connection
 
         mock_benchmark = Mock()
@@ -569,6 +691,22 @@ class TestDuckDBAdapter:
         assert metadata["duckdb_version"] == "0.9.2"
         assert "settings" in metadata
         assert "database_size" in metadata
+
+    @patch("benchbox.platforms.duckdb.duckdb")
+    def test_get_platform_info_prefers_live_connection_version(self, mock_duckdb):
+        """Platform info should prefer live connection runtime version when available."""
+        mock_connection = Mock()
+        version_result = Mock()
+        version_result.fetchone.return_value = ("v0.9.2",)
+        mock_connection.execute.return_value = version_result
+        mock_duckdb.__version__ = "1.4.3"
+
+        adapter = DuckDBAdapter()
+        info = adapter.get_platform_info(connection=mock_connection)
+
+        assert info["client_library_version"] == "1.4.3"
+        assert info["platform_version"] == "0.9.2"
+        assert info["driver_version_actual"] == "0.9.2"
 
     @patch("benchbox.platforms.duckdb.duckdb")
     def test_analyze_tables(self, mock_duckdb):

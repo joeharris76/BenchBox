@@ -6,12 +6,18 @@ can honour requested package versions before importing heavy dependencies.
 
 from __future__ import annotations
 
+import contextlib
+import importlib
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Iterable
 
 try:
     from importlib import metadata as importlib_metadata
@@ -19,6 +25,25 @@ except ImportError:  # pragma: no cover
     import importlib_metadata  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+
+class DriverRuntimeStrategy(str, Enum):
+    """Runtime selection strategy for platform drivers."""
+
+    CURRENT_PROCESS = "current-process"
+    ISOLATED_SITE_PACKAGES = "isolated-site-packages"
+    EXTERNAL_RUNTIME = "external-runtime"
+
+
+@dataclass(frozen=True)
+class DriverRuntimeLocation:
+    """Resolved runtime location for a package version."""
+
+    package: str
+    version: str
+    strategy: str
+    runtime_path: str | None = None
+    python_executable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -29,10 +54,182 @@ class DriverResolution:
     requested: str | None
     resolved: str | None
     auto_install_used: bool
+    actual: str | None = None
+    runtime_strategy: str = DriverRuntimeStrategy.CURRENT_PROCESS.value
+    runtime_path: str | None = None
+    runtime_python_executable: str | None = None
 
 
 def _normalize_package_name(package: str) -> str:
     return package.replace("_", "-")
+
+
+def _normalize_distribution_name(name: str) -> str:
+    """Normalize package/distribution names for comparisons."""
+    return re.sub(r"[-_.]+", "-", name.strip().lower())
+
+
+def _candidate_runtime_roots() -> list[Path]:
+    """Return configured roots that may contain isolated driver runtimes."""
+    configured = os.getenv("BENCHBOX_DRIVER_RUNTIME_ROOTS", "").strip()
+    roots: list[Path] = []
+
+    if configured:
+        for entry in configured.split(os.pathsep):
+            entry = entry.strip()
+            if entry:
+                roots.append(Path(entry))
+    else:
+        cwd = Path.cwd()
+        roots.extend(
+            [
+                cwd / "benchmark_runs" / "driver_envs",
+                # Compatibility root used by existing local benchmark matrices.
+                cwd / "benchmark_runs" / "duckdb_version_envs",
+            ]
+        )
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if root in seen:
+            continue
+        seen.add(root)
+        deduped.append(root)
+    return deduped
+
+
+def _iter_site_packages(venv_root: Path) -> Iterable[Path]:
+    """Yield site-packages directories for a virtual environment-like root."""
+    yield from venv_root.glob("lib/python*/site-packages")
+    windows_site_packages = venv_root / "Lib" / "site-packages"
+    if windows_site_packages.exists():
+        yield windows_site_packages
+
+
+def _find_distribution_version(site_packages: Path, package_name: str) -> str | None:
+    """Return the package version discovered in a site-packages directory."""
+    expected = _normalize_distribution_name(package_name)
+    for dist in importlib_metadata.distributions(path=[str(site_packages)]):
+        metadata_name = dist.metadata.get("Name") if dist.metadata else None
+        if not metadata_name:
+            continue
+        if _normalize_distribution_name(metadata_name) == expected:
+            return dist.version
+    return None
+
+
+def discover_isolated_runtime(
+    *,
+    package_name: str,
+    requested_version: str,
+) -> DriverRuntimeLocation | None:
+    """Discover an isolated runtime root that contains package==requested_version."""
+    requested = requested_version.strip()
+    if not requested:
+        return None
+
+    normalized_package = _normalize_package_name(package_name)
+    expected = _normalize_distribution_name(normalized_package)
+
+    for root in _candidate_runtime_roots():
+        if not root.exists():
+            continue
+        for candidate in root.iterdir():
+            if not candidate.is_dir():
+                continue
+            python_executable = candidate / "bin" / "python"
+            if not python_executable.exists():
+                python_executable = candidate / "Scripts" / "python.exe"
+            if not python_executable.exists():
+                python_executable = None
+
+            for site_packages in _iter_site_packages(candidate):
+                if not site_packages.exists():
+                    continue
+                version = _find_distribution_version(site_packages, expected)
+                if version == requested:
+                    return DriverRuntimeLocation(
+                        package=normalized_package,
+                        version=version,
+                        strategy=DriverRuntimeStrategy.ISOLATED_SITE_PACKAGES.value,
+                        runtime_path=str(site_packages),
+                        python_executable=str(python_executable) if python_executable else None,
+                    )
+    return None
+
+
+def _purge_module_tree(module_name: str) -> None:
+    """Remove a module and its submodules from sys.modules."""
+    prefix = f"{module_name}."
+    for loaded in list(sys.modules.keys()):
+        if loaded == module_name or loaded.startswith(prefix):
+            sys.modules.pop(loaded, None)
+
+
+def _module_origin(module: object) -> str | None:
+    return str(getattr(module, "__file__", "")) or None
+
+
+def _module_is_from_runtime(module: object, runtime_path: str) -> bool:
+    origin = _module_origin(module)
+    if not origin:
+        return False
+    try:
+        return Path(origin).resolve().is_relative_to(Path(runtime_path).resolve())
+    except Exception:
+        return False
+
+
+def load_driver_module(
+    *,
+    import_name: str,
+    resolution: DriverResolution,
+    strict_version_check: bool = True,
+):
+    """Materialize/import a driver module according to runtime resolution."""
+    if resolution.runtime_strategy != DriverRuntimeStrategy.ISOLATED_SITE_PACKAGES.value:
+        if resolution.auto_install_used:
+            _purge_module_tree(import_name)
+            importlib.invalidate_caches()
+        module = importlib.import_module(import_name)
+    else:
+        runtime_path = (resolution.runtime_path or "").strip()
+        if not runtime_path:
+            raise RuntimeError(
+                f"Runtime strategy '{resolution.runtime_strategy}' requires runtime_path for module '{import_name}'."
+            )
+        runtime_dir = Path(runtime_path)
+        if not runtime_dir.exists():
+            raise RuntimeError(f"Runtime path does not exist for module '{import_name}': {runtime_path}")
+
+        # Ensure the requested module comes from the isolated runtime.
+        _purge_module_tree(import_name)
+        sys.path.insert(0, runtime_path)
+        try:
+            module = importlib.import_module(import_name)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to import module '{import_name}' from isolated runtime '{runtime_path}'."
+            ) from exc
+        finally:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(runtime_path)
+
+        if not _module_is_from_runtime(module, runtime_path):
+            origin = _module_origin(module) or "unknown"
+            raise RuntimeError(
+                f"Module '{import_name}' was loaded from '{origin}', expected isolated runtime '{runtime_path}'."
+            )
+
+    if strict_version_check and resolution.requested:
+        actual = getattr(module, "__version__", None)
+        if actual and str(actual) != str(resolution.requested):
+            raise RuntimeError(
+                f"Module '{import_name}' loaded version {actual}, but requested version is {resolution.requested}."
+            )
+
+    return module
 
 
 def _get_installed_version(package: str) -> str | None:
@@ -89,7 +286,13 @@ def ensure_driver_version(
     """
 
     if not package_name:
-        return DriverResolution(package="", requested=requested_version, resolved=None, auto_install_used=False)
+        requested = (requested_version or "").strip() or None
+        if requested is not None:
+            raise RuntimeError(
+                "driver_version was requested, but this platform does not declare a driver package "
+                "for runtime isolation."
+            )
+        return DriverResolution(package="", requested=None, resolved=None, auto_install_used=False)
 
     normalized_package = _normalize_package_name(package_name)
     requested = (requested_version or "").strip() or None
@@ -115,6 +318,10 @@ def ensure_driver_version(
             requested=None,
             resolved=installed_version,
             auto_install_used=False,
+            actual=installed_version,
+            runtime_strategy=DriverRuntimeStrategy.CURRENT_PROCESS.value,
+            runtime_path=None,
+            runtime_python_executable=sys.executable,
         )
 
     # Requested version already satisfied.
@@ -124,6 +331,27 @@ def ensure_driver_version(
             requested=requested,
             resolved=installed_version,
             auto_install_used=False,
+            actual=installed_version,
+            runtime_strategy=DriverRuntimeStrategy.CURRENT_PROCESS.value,
+            runtime_path=None,
+            runtime_python_executable=sys.executable,
+        )
+
+    # Requested version may exist in an isolated runtime without mutating current env.
+    isolated_runtime = discover_isolated_runtime(
+        package_name=normalized_package,
+        requested_version=requested,
+    )
+    if isolated_runtime is not None:
+        return DriverResolution(
+            package=normalized_package,
+            requested=requested,
+            resolved=isolated_runtime.version,
+            actual=isolated_runtime.version,
+            auto_install_used=False,
+            runtime_strategy=isolated_runtime.strategy,
+            runtime_path=isolated_runtime.runtime_path,
+            runtime_python_executable=isolated_runtime.python_executable,
         )
 
     # Requested version missing or different.
@@ -140,9 +368,11 @@ def ensure_driver_version(
             + f"\nSuggested command: {hint}"
         )
 
-    # Attempt auto-install using uv; fall back to pip if uv missing.
+    # Attempt auto-install using uv, targeting the current interpreter's environment.
+    # --python sys.executable ensures uv installs into the running venv (e.g. uv tool envs
+    # where `pip` is absent and the default uv target may differ from sys.executable).
     commands_to_try = [
-        ["uv", "pip", "install", f"{normalized_package}=={requested}"],
+        ["uv", "pip", "install", "--python", sys.executable, f"{normalized_package}=={requested}"],
         [sys.executable, "-m", "pip", "install", f"{normalized_package}=={requested}"],
     ]
 
@@ -150,6 +380,7 @@ def ensure_driver_version(
     for command in commands_to_try:
         try:
             _run_install_command(command)
+            importlib.invalidate_caches()
             installed_version = _get_installed_version(normalized_package)
             if installed_version == requested:
                 return DriverResolution(
@@ -157,6 +388,10 @@ def ensure_driver_version(
                     requested=requested,
                     resolved=installed_version,
                     auto_install_used=True,
+                    actual=installed_version,
+                    runtime_strategy=DriverRuntimeStrategy.CURRENT_PROCESS.value,
+                    runtime_path=None,
+                    runtime_python_executable=sys.executable,
                 )
         except Exception as exc:  # pragma: no cover - exercised in tests via mocks
             last_error = exc

@@ -14,7 +14,7 @@ import importlib
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
-from benchbox.core.config import LibraryInfo, PlatformInfo
+from benchbox.core.schemas import LibraryInfo, PlatformInfo
 from benchbox.platforms.base import PlatformAdapter
 
 
@@ -98,7 +98,9 @@ class PlatformRegistry:
     _platform_aliases: dict[str, str] = {
         "sqlite3": "sqlite",
         "azure_synapse": "synapse",
-        "clickhouse:cloud": "clickhouse-cloud",  # Backward compatibility for deployment mode syntax
+        "fabric_lakehouse": "fabric-lakehouse",
+        # Fabric Warehouse: hyphen form is preferred CLI key; underscore form is legacy
+        "fabric-dw": "fabric_dw",
     }
 
     @classmethod
@@ -207,7 +209,7 @@ class PlatformRegistry:
                 "installation_command": "uv add polars",
                 "adoption": "established",
                 "supports": ["olap", "in_memory", "columnar", "dataframe"],
-                "driver_package": None,
+                "driver_package": "polars",
                 "capabilities": {"supports_sql": False, "supports_dataframe": True, "default_mode": "dataframe"},
             },
             "motherduck": {
@@ -319,7 +321,7 @@ class PlatformRegistry:
                             "requires_network": True,
                             "default_for_platform": True,
                             "dependencies": ["clickhouse-connect"],
-                            "auth_methods": ["password"],
+                            "auth_methods": ["password", "oauth"],
                         },
                     },
                 },
@@ -340,7 +342,7 @@ class PlatformRegistry:
                 "capabilities": {"supports_sql": True, "supports_dataframe": False, "default_mode": "sql"},
             },
             "databricks": {
-                "display_name": "Databricks",
+                "display_name": "Databricks SQL",
                 "description": "Lakehouse platform • Distributed • Spark-based",
                 "category": "cloud",
                 "libraries": [{"name": "databricks.sql", "required": True, "import_name": "databricks.sql"}],
@@ -515,8 +517,8 @@ class PlatformRegistry:
                         },
                         "cloud": {
                             "mode": "managed",
-                            "display_name": "Timescale Cloud",
-                            "description": "Timescale Cloud managed service",
+                            "display_name": "TigerData",
+                            "description": "TigerData managed PostgreSQL service",
                             "requires_credentials": True,
                             "requires_cloud_storage": False,
                             "requires_network": True,
@@ -527,8 +529,85 @@ class PlatformRegistry:
                     },
                 },
             },
+            "pg-mooncake": {
+                "display_name": "pg_mooncake",
+                "description": "Columnstore PostgreSQL • Parquet/Iceberg • DuckDB Execution",
+                "category": "olap",
+                "libraries": [{"name": "psycopg2", "required": True}],
+                "requirements": ["psycopg2-binary>=2.9.0"],
+                "installation_command": "uv add psycopg2-binary",
+                "adoption": "emerging",
+                "supports": ["olap", "columnstore", "analytics"],
+                "driver_package": "psycopg2-binary",
+                "notes": "PostgreSQL extension adding native columnstore tables (Parquet/Iceberg) with DuckDB execution. Requires pg_mooncake on server. Conflicts with standalone pg_duckdb (shared libduckdb.so).",
+                "capabilities": {
+                    "supports_sql": True,
+                    "supports_dataframe": False,
+                    "default_mode": "sql",
+                    "platform_family": "pg_mooncake",
+                    "conflicts_with": ["pg-duckdb"],
+                    "default_deployment": "self-hosted",
+                    "deployment_modes": {
+                        "self-hosted": {
+                            "mode": "self-hosted",
+                            "display_name": "pg_mooncake Self-Hosted",
+                            "description": "Self-hosted PostgreSQL with pg_mooncake extension",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": False,
+                            "requires_network": True,
+                            "default_for_platform": True,
+                            "dependencies": ["psycopg2-binary"],
+                            "auth_methods": ["password"],
+                        },
+                    },
+                },
+            },
+            "pg-duckdb": {
+                "display_name": "pg_duckdb",
+                "description": "DuckDB-accelerated PostgreSQL • Vectorized OLAP • MotherDuck",
+                "category": "olap",
+                "libraries": [{"name": "psycopg2", "required": True}],
+                "requirements": ["psycopg2-binary>=2.9.0"],
+                "installation_command": "uv add psycopg2-binary",
+                "adoption": "emerging",
+                "supports": ["olap", "analytics"],
+                "driver_package": "psycopg2-binary",
+                "notes": "PostgreSQL extension embedding DuckDB vectorized execution. Requires pg_duckdb 1.0+ on server. Conflicts with pg_mooncake (shared libduckdb.so).",
+                "capabilities": {
+                    "supports_sql": True,
+                    "supports_dataframe": False,
+                    "default_mode": "sql",
+                    "platform_family": "pg_duckdb",
+                    "conflicts_with": ["pg-mooncake"],
+                    "default_deployment": "self-hosted",
+                    "deployment_modes": {
+                        "self-hosted": {
+                            "mode": "self-hosted",
+                            "display_name": "pg_duckdb Self-Hosted",
+                            "description": "Self-hosted PostgreSQL with pg_duckdb extension",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": False,
+                            "requires_network": True,
+                            "default_for_platform": True,
+                            "dependencies": ["psycopg2-binary"],
+                            "auth_methods": ["password"],
+                        },
+                        "motherduck": {
+                            "mode": "managed",
+                            "display_name": "pg_duckdb + MotherDuck",
+                            "description": "pg_duckdb with MotherDuck cloud offload for hybrid queries",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": False,
+                            "requires_network": True,
+                            "default_for_platform": False,
+                            "dependencies": ["psycopg2-binary"],
+                            "auth_methods": ["token"],
+                        },
+                    },
+                },
+            },
             "synapse": {
-                "display_name": "Azure Synapse",
+                "display_name": "Azure Synapse Analytics",
                 "description": "Cloud data warehouse • Dedicated SQL Pool • Azure MPP",
                 "category": "cloud",
                 "libraries": [
@@ -545,8 +624,8 @@ class PlatformRegistry:
                 "capabilities": {"supports_sql": True, "supports_dataframe": False, "default_mode": "sql"},
             },
             "fabric_dw": {
-                "display_name": "Fabric Warehouse",
-                "description": "Fabric Warehouse • OneLake • Delta Lake native",
+                "display_name": "Microsoft Fabric Warehouse",
+                "description": "Microsoft Fabric Warehouse • OneLake • Delta Lake native",
                 "category": "cloud",
                 "libraries": [
                     {"name": "pyodbc", "required": True},
@@ -610,6 +689,116 @@ class PlatformRegistry:
                     },
                 },
             },
+            "starrocks": {
+                "display_name": "StarRocks",
+                "description": "Columnar analytics engine • Distributed • Fast OLAP",
+                "category": "analytical",
+                "libraries": [
+                    {"name": "pymysql", "required": True, "import_name": "pymysql"},
+                ],
+                "requirements": ["pymysql>=1.1.0"],
+                "installation_command": "uv add pymysql",
+                "adoption": "emerging",
+                "supports": ["olap", "columnar", "distributed", "mpp"],
+                "driver_package": "pymysql",
+                "capabilities": {
+                    "supports_sql": True,
+                    "supports_dataframe": False,
+                    "default_mode": "sql",
+                    "platform_family": "starrocks",
+                    "default_deployment": "self-hosted",
+                    "deployment_modes": {
+                        "self-hosted": {
+                            "mode": "self-hosted",
+                            "display_name": "StarRocks Self-Hosted",
+                            "description": "Self-hosted StarRocks cluster",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": False,
+                            "requires_network": True,
+                            "default_for_platform": True,
+                            "dependencies": ["pymysql"],
+                            "auth_methods": ["password"],
+                        },
+                    },
+                },
+            },
+            "databend": {
+                "display_name": "Databend",
+                "description": "Cloud-native OLAP • Rust • Snowflake-compatible",
+                "category": "cloud",
+                "libraries": [
+                    {"name": "databend_driver", "required": True, "import_name": "databend_driver"},
+                ],
+                "requirements": ["databend-driver>=0.28.0"],
+                "installation_command": "uv add databend-driver",
+                "adoption": "emerging",
+                "supports": ["olap", "cloud", "columnar", "object_storage", "snowflake_compatible"],
+                "driver_package": "databend-driver",
+                "notes": "Cloud-native Rust-based data warehouse with Snowflake-compatible SQL. Compute/storage separation on object storage (S3, GCS, Azure Blob). Uses Snowflake dialect as sqlglot translation proxy.",
+                "capabilities": {
+                    "supports_sql": True,
+                    "supports_dataframe": False,
+                    "default_mode": "sql",
+                    "platform_family": "databend",
+                    "default_deployment": "cloud",
+                    "deployment_modes": {
+                        "cloud": {
+                            "mode": "managed",
+                            "display_name": "Databend Cloud",
+                            "description": "Databend Cloud managed service",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": True,
+                            "requires_network": True,
+                            "default_for_platform": True,
+                            "dependencies": ["databend-driver"],
+                            "auth_methods": ["password"],
+                        },
+                        "self-hosted": {
+                            "mode": "self-hosted",
+                            "display_name": "Databend Self-Hosted",
+                            "description": "User-managed Databend cluster with object storage",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": True,
+                            "requires_network": True,
+                            "default_for_platform": False,
+                            "dependencies": ["databend-driver"],
+                            "auth_methods": ["password"],
+                        },
+                    },
+                },
+            },
+            "doris": {
+                "display_name": "Apache Doris",
+                "description": "MPP OLAP • Real-time analytics • MySQL protocol",
+                "category": "distributed",
+                "libraries": [{"name": "pymysql", "required": True}],
+                "requirements": ["pymysql>=1.0.0"],
+                "installation_command": "uv add pymysql",
+                "adoption": "emerging",
+                "supports": ["olap", "mpp", "columnar", "real-time", "vectorized"],
+                "driver_package": "pymysql",
+                "notes": "Apache Doris 2.0+ with vectorized execution. MySQL protocol on port 9030, Stream Load on port 8030. SQLGlot 'doris' dialect.",
+                "capabilities": {
+                    "supports_sql": True,
+                    "supports_dataframe": False,
+                    "default_mode": "sql",
+                    "platform_family": "doris",
+                    "default_deployment": "self-hosted",
+                    "deployment_modes": {
+                        "self-hosted": {
+                            "mode": "self-hosted",
+                            "display_name": "Apache Doris Self-Hosted",
+                            "description": "Self-hosted Apache Doris cluster",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": False,
+                            "requires_network": True,
+                            "default_for_platform": True,
+                            "dependencies": ["pymysql"],
+                            "auth_methods": ["password"],
+                        },
+                    },
+                },
+            },
             "influxdb": {
                 "display_name": "InfluxDB",
                 "description": "Time series database • FlightSQL • Arrow-native",
@@ -626,8 +815,40 @@ class PlatformRegistry:
                 "notes": "InfluxDB 3.x time series database with native SQL support via FlightSQL. Built on Apache Arrow, DataFusion, and Parquet. Optimized for TSBS DevOps workloads.",
                 "capabilities": {"supports_sql": True, "supports_dataframe": False, "default_mode": "sql"},
             },
+            "questdb": {
+                "display_name": "QuestDB",
+                "description": "Time-series database • PG wire protocol • High-performance ingestion",
+                "category": "timeseries",
+                "libraries": [{"name": "psycopg2", "required": True}, {"name": "requests", "required": True}],
+                "requirements": ["psycopg2-binary>=2.9.0", "requests>=2.28.0"],
+                "installation_command": "uv add benchbox --extra questdb",
+                "adoption": "emerging",
+                "supports": ["timeseries", "olap", "columnar", "high_throughput"],
+                "driver_package": "psycopg2-binary",
+                "notes": "QuestDB 7.0+ time-series database. PostgreSQL wire protocol for queries, REST API for data import. Optimized for fast ingestion and time-series analytics.",
+                "capabilities": {
+                    "supports_sql": True,
+                    "supports_dataframe": False,
+                    "default_mode": "sql",
+                    "platform_family": "questdb",
+                    "default_deployment": "self-hosted",
+                    "deployment_modes": {
+                        "self-hosted": {
+                            "mode": "self-hosted",
+                            "display_name": "QuestDB Self-Hosted",
+                            "description": "Self-hosted QuestDB server (Docker recommended)",
+                            "requires_credentials": True,
+                            "requires_cloud_storage": False,
+                            "requires_network": True,
+                            "default_for_platform": True,
+                            "dependencies": ["psycopg2-binary"],
+                            "auth_methods": ["password"],
+                        },
+                    },
+                },
+            },
             "athena": {
-                "display_name": "AWS Athena",
+                "display_name": "Amazon Athena",
                 "description": "Serverless SQL • S3 data lake • Pay-per-query",
                 "category": "cloud",
                 "libraries": [
@@ -688,8 +909,8 @@ class PlatformRegistry:
                 "capabilities": {"supports_sql": True, "supports_dataframe": True, "default_mode": "sql"},
             },
             "dataproc": {
-                "display_name": "GCP Dataproc",
-                "description": "Managed Spark • GCP clusters • Per-second billing",
+                "display_name": "Google Cloud Dataproc",
+                "description": "Managed Spark • Google Cloud clusters • Per-second billing",
                 "category": "cloud",
                 "libraries": [
                     {"name": "google-cloud-dataproc", "required": True},
@@ -700,11 +921,11 @@ class PlatformRegistry:
                 "adoption": "niche",
                 "supports": ["olap", "spark", "cluster", "gcs", "hive"],
                 "driver_package": "google-cloud-dataproc",
-                "notes": "GCP managed Spark service. Per-second billing with preemptible VM support. Supports persistent and ephemeral clusters. Uses Hive Metastore for table metadata.",
+                "notes": "Google Cloud managed Spark service. Per-second billing with preemptible VM support. Supports persistent and ephemeral clusters. Uses Hive Metastore for table metadata.",
                 "capabilities": {"supports_sql": True, "supports_dataframe": True, "default_mode": "sql"},
             },
             "dataproc-serverless": {
-                "display_name": "GCP Dataproc Serverless",
+                "display_name": "Google Cloud Dataproc Serverless",
                 "description": "Serverless Spark • No cluster management • Auto-scaling",
                 "category": "cloud",
                 "libraries": [
@@ -716,7 +937,7 @@ class PlatformRegistry:
                 "adoption": "niche",
                 "supports": ["olap", "spark", "serverless", "gcs", "hive"],
                 "driver_package": "google-cloud-dataproc",
-                "notes": "GCP Dataproc Serverless for fully managed Spark. No cluster management required. Sub-minute startup, auto-scaling, per-second billing. Uses Batch Controller API.",
+                "notes": "Google Cloud Dataproc Serverless for fully managed Spark. No cluster management required. Sub-minute startup, auto-scaling, per-second billing. Uses Batch Controller API.",
                 "capabilities": {"supports_sql": True, "supports_dataframe": True, "default_mode": "sql"},
             },
             "fabric-spark": {
@@ -736,8 +957,24 @@ class PlatformRegistry:
                 "notes": "Microsoft Fabric SaaS Spark with OneLake storage. Uses Livy API for session management. Entra ID (Azure AD) authentication. Capacity Units billing model.",
                 "capabilities": {"supports_sql": True, "supports_dataframe": True, "default_mode": "sql"},
             },
+            "fabric-lakehouse": {
+                "display_name": "Microsoft Fabric Lakehouse SQL",
+                "description": "Read-only T-SQL endpoint • Lakehouse analytics",
+                "category": "cloud",
+                "libraries": [
+                    {"name": "pyodbc", "required": True},
+                    {"name": "azure-identity", "required": True},
+                ],
+                "requirements": ["pyodbc>=4.0.39", "azure-identity>=1.15.0"],
+                "installation_command": "uv add benchbox --extra fabric",
+                "adoption": "niche",
+                "supports": ["olap", "cloud", "read_only", "delta", "onelake"],
+                "driver_package": "pyodbc",
+                "notes": "Fabric Lakehouse SQL Analytics Endpoint is read-only. Use fabric-spark for generate/load phases and fabric-lakehouse for query phases.",
+                "capabilities": {"supports_sql": True, "supports_dataframe": False, "default_mode": "sql"},
+            },
             "synapse-spark": {
-                "display_name": "Azure Synapse Spark",
+                "display_name": "Azure Synapse Analytics Spark",
                 "description": "Enterprise Spark • ADLS Gen2 • Spark pools",
                 "category": "cloud",
                 "libraries": [
@@ -767,6 +1004,51 @@ class PlatformRegistry:
                 "driver_package": "pyspark",
                 "notes": "Apache Spark distributed SQL engine. Supports local, standalone, YARN, and Kubernetes modes. Use 'pyspark' for DataFrame API benchmarking.",
                 "capabilities": {"supports_sql": True, "supports_dataframe": False, "default_mode": "sql"},
+            },
+            "lakesail": {
+                "display_name": "LakeSail Sail",
+                "description": "Spark-compatible SQL • Rust/DataFusion • Spark Connect",
+                "category": "analytical",
+                "libraries": [
+                    {"name": "pyspark", "required": True},
+                ],
+                "requirements": ["pyspark>=3.4.0"],
+                "installation_command": "uv add pyspark",
+                "adoption": "emerging",
+                "supports": ["olap", "spark_compatible", "datafusion", "rust", "batch"],
+                "driver_package": "pyspark",
+                "notes": "LakeSail Sail is a Rust-based drop-in Spark replacement built on DataFusion. Connects via Spark Connect protocol using standard PySpark client. 4x faster than Apache Spark on TPC-H SF100.",
+                "capabilities": {
+                    "supports_sql": True,
+                    "supports_dataframe": True,
+                    "default_mode": "sql",
+                    "platform_family": "spark",
+                    "default_deployment": "local",
+                    "deployment_modes": {
+                        "local": {
+                            "mode": "local",
+                            "display_name": "LakeSail Local",
+                            "description": "Single-node multi-threaded execution",
+                            "requires_credentials": False,
+                            "requires_cloud_storage": False,
+                            "requires_network": False,
+                            "default_for_platform": True,
+                            "dependencies": ["pyspark"],
+                            "auth_methods": [],
+                        },
+                        "distributed": {
+                            "mode": "self-hosted",
+                            "display_name": "LakeSail Distributed",
+                            "description": "Distributed cluster of Rust workers",
+                            "requires_credentials": False,
+                            "requires_cloud_storage": False,
+                            "requires_network": True,
+                            "default_for_platform": False,
+                            "dependencies": ["pyspark"],
+                            "auth_methods": [],
+                        },
+                    },
+                },
             },
             "snowpark-connect": {
                 "display_name": "Snowpark Connect for Spark",
@@ -1336,6 +1618,31 @@ class PlatformRegistry:
         )
 
     @classmethod
+    def get_platform_conflicts(cls, platform_name: str) -> list[str]:
+        """Get list of platforms that conflict with the given platform.
+
+        Some PostgreSQL extensions share libraries (e.g., pg_duckdb and
+        pg_mooncake share libduckdb.so) and cannot coexist in the same
+        PostgreSQL instance.
+
+        Args:
+            platform_name: Name of the platform (aliases are resolved automatically)
+
+        Returns:
+            List of conflicting platform names, or empty list if none.
+        """
+        if not cls._platform_metadata:
+            cls._platform_metadata = cls._build_platform_metadata()
+
+        canonical_name = cls.resolve_platform_name(platform_name)
+        metadata = cls._platform_metadata.get(canonical_name)
+        if metadata is None:
+            return []
+
+        caps = metadata.get("capabilities", {})
+        return list(caps.get("conflicts_with", []))
+
+    @classmethod
     def supports_mode(cls, platform_name: str, mode: str) -> bool:
         """Check if platform supports a specific execution mode.
 
@@ -1576,6 +1883,13 @@ def auto_register_platforms() -> None:
         pass
 
     try:
+        from benchbox.platforms.starrocks import StarRocksAdapter
+
+        PlatformRegistry.register_adapter("starrocks", StarRocksAdapter)
+    except ImportError:
+        pass
+
+    try:
         from benchbox.platforms.sqlite import SQLiteAdapter
 
         PlatformRegistry.register_adapter("sqlite", SQLiteAdapter)
@@ -1639,6 +1953,23 @@ def auto_register_platforms() -> None:
         pass
 
     try:
+        from benchbox.platforms.pg_duckdb import PgDuckDBAdapter
+
+        PlatformRegistry.register_adapter("pg-duckdb", PgDuckDBAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from benchbox.platforms.pg_mooncake import PgMooncakeAdapter
+
+        PlatformRegistry.register_adapter("pg-mooncake", PgMooncakeAdapter)
+        from benchbox.platforms.questdb import QuestDBAdapter
+
+        PlatformRegistry.register_adapter("questdb", QuestDBAdapter)
+    except ImportError:
+        pass
+
+    try:
         from benchbox.platforms.azure_synapse import AzureSynapseAdapter
 
         PlatformRegistry.register_adapter("synapse", AzureSynapseAdapter)
@@ -1656,6 +1987,20 @@ def auto_register_platforms() -> None:
         from benchbox.platforms.firebolt import FireboltAdapter
 
         PlatformRegistry.register_adapter("firebolt", FireboltAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from benchbox.platforms.databend import DatabendAdapter
+
+        PlatformRegistry.register_adapter("databend", DatabendAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from benchbox.platforms.doris import DorisAdapter
+
+        PlatformRegistry.register_adapter("doris", DorisAdapter)
     except ImportError:
         pass
 
@@ -1723,6 +2068,13 @@ def auto_register_platforms() -> None:
         pass
 
     try:
+        from benchbox.platforms.fabric_lakehouse import FabricLakehouseAdapter
+
+        PlatformRegistry.register_adapter("fabric-lakehouse", FabricLakehouseAdapter)
+    except ImportError:
+        pass
+
+    try:
         from benchbox.platforms.azure import SynapseSparkAdapter
 
         PlatformRegistry.register_adapter("synapse-spark", SynapseSparkAdapter)
@@ -1733,6 +2085,13 @@ def auto_register_platforms() -> None:
         from benchbox.platforms.spark import SparkAdapter
 
         PlatformRegistry.register_adapter("spark", SparkAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from benchbox.platforms.lakesail import LakeSailAdapter
+
+        PlatformRegistry.register_adapter("lakesail", LakeSailAdapter)
     except ImportError:
         pass
 

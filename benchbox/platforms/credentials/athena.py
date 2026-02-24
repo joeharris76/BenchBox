@@ -218,20 +218,10 @@ def validate_athena_credentials(
     if not creds:
         return False, "No credentials found"
 
-    # Check for required fields
-    if not creds.get("s3_staging_dir") and not creds.get("s3_output_location"):
-        return False, "S3 staging directory or output location is required"
+    preflight_error = _check_athena_prerequisites(creds)
+    if preflight_error:
+        return False, preflight_error
 
-    # Check for AWS authentication
-    has_profile = bool(creds.get("aws_profile"))
-    has_keys = bool(creds.get("aws_access_key_id") and creds.get("aws_secret_access_key"))
-    has_env = bool(os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"))
-    has_default_profile = os.path.exists(os.path.expanduser("~/.aws/credentials"))
-
-    if not any([has_profile, has_keys, has_env, has_default_profile]):
-        return False, "No AWS authentication configured. Provide profile or access keys."
-
-    # Try to import pyathena
     try:
         from pyathena import connect as athena_connect
     except ImportError:
@@ -246,15 +236,47 @@ def validate_athena_credentials(
 
         return False, f"boto3 not installed. Run: {get_install_command('athena')}"
 
-    region = creds.get("region", "us-east-1")
-    workgroup = creds.get("workgroup", "primary")
-    s3_output = creds.get("s3_output_location") or creds.get("s3_staging_dir")
+    connect_kwargs = _build_athena_connect_kwargs(creds)
 
-    # Build connection kwargs
+    try:
+        if console:
+            console.print("[dim]Testing Athena connection...[/dim]")
+
+        conn = athena_connect(**connect_kwargs)
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        return True, None
+
+    except Exception as e:
+        return False, _classify_athena_error(str(e), connect_kwargs.get("work_group", "primary"))
+
+
+def _check_athena_prerequisites(creds: dict) -> Optional[str]:
+    """Check required Athena credential fields and AWS authentication availability."""
+    if not creds.get("s3_staging_dir") and not creds.get("s3_output_location"):
+        return "S3 staging directory or output location is required"
+
+    has_profile = bool(creds.get("aws_profile"))
+    has_keys = bool(creds.get("aws_access_key_id") and creds.get("aws_secret_access_key"))
+    has_env = bool(os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"))
+    has_default_profile = os.path.exists(os.path.expanduser("~/.aws/credentials"))
+
+    if not any([has_profile, has_keys, has_env, has_default_profile]):
+        return "No AWS authentication configured. Provide profile or access keys."
+
+    return None
+
+
+def _build_athena_connect_kwargs(creds: dict) -> dict:
+    """Build pyathena connection keyword arguments from credentials."""
     connect_kwargs = {
-        "s3_staging_dir": s3_output,
-        "region_name": region,
-        "work_group": workgroup,
+        "s3_staging_dir": creds.get("s3_output_location") or creds.get("s3_staging_dir"),
+        "region_name": creds.get("region", "us-east-1"),
+        "work_group": creds.get("workgroup", "primary"),
     }
 
     if creds.get("aws_access_key_id") and creds.get("aws_secret_access_key"):
@@ -263,38 +285,25 @@ def validate_athena_credentials(
     elif creds.get("aws_profile"):
         connect_kwargs["profile_name"] = creds["aws_profile"]
 
-    try:
-        if console:
-            console.print("[dim]Testing Athena connection...[/dim]")
+    return connect_kwargs
 
-        conn = athena_connect(**connect_kwargs)
-        cursor = conn.cursor()
 
-        # Test basic query
-        cursor.execute("SELECT 1")
-        cursor.fetchone()
+def _classify_athena_error(error_msg: str, workgroup: str) -> str:
+    """Classify Athena connection errors into user-friendly messages."""
+    _error_patterns = [
+        (("Access Denied", "AccessDenied"), "Access denied. Check S3 bucket permissions and IAM policies."),
+        (("InvalidAccessKeyId",), "Invalid AWS Access Key ID."),
+        (("SignatureDoesNotMatch",), "Invalid AWS Secret Access Key."),
+        (("NoSuchBucket",), "S3 bucket does not exist. Check the bucket name."),
+    ]
+    for patterns, message in _error_patterns:
+        if any(p in error_msg for p in patterns):
+            return message
 
-        cursor.close()
-        conn.close()
+    if "workgroup" in error_msg.lower() and "not found" in error_msg.lower():
+        return f"Workgroup '{workgroup}' not found. Check workgroup name."
 
-        return True, None
-
-    except Exception as e:
-        error_msg = str(e)
-
-        # Make error more user-friendly
-        if "Access Denied" in error_msg or "AccessDenied" in error_msg:
-            return False, "Access denied. Check S3 bucket permissions and IAM policies."
-        elif "InvalidAccessKeyId" in error_msg:
-            return False, "Invalid AWS Access Key ID."
-        elif "SignatureDoesNotMatch" in error_msg:
-            return False, "Invalid AWS Secret Access Key."
-        elif "workgroup" in error_msg.lower() and "not found" in error_msg.lower():
-            return False, f"Workgroup '{workgroup}' not found. Check workgroup name."
-        elif "NoSuchBucket" in error_msg:
-            return False, "S3 bucket does not exist. Check the bucket name."
-        else:
-            return False, f"Connection failed: {error_msg}"
+    return f"Connection failed: {error_msg}"
 
 
 def _auto_detect_athena(console: Union[Console, QuietConsoleProxy]) -> Optional[dict]:

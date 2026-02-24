@@ -20,9 +20,17 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime
     has_mermaid = False
 
+try:
+    import ablog  # noqa: F401
+
+    has_ablog = True
+except ImportError:  # pragma: no cover - handled at runtime
+    has_ablog = False
+
 
 @pytest.mark.skipif(build_main is None, reason="Sphinx is not installed in the test environment")
 @pytest.mark.skipif(not has_mermaid, reason="Sphinx extension missing: sphinxcontrib.mermaid not installed")
+@pytest.mark.skipif(not has_ablog, reason="Sphinx extension missing: ablog not installed")
 def test_sphinx_docs_build(tmp_path: Path) -> None:
     """Build the docs with the dummy builder to validate the navigation graph."""
 

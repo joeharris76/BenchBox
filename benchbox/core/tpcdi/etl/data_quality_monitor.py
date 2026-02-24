@@ -57,7 +57,6 @@ class DataQualityRule:
     threshold_operator: str = ">="  # '>', '>=', '<', '<=', '==', '!=', 'BETWEEN', 'IN', 'REGEX'
     expected_values: Optional[list[Any]] = None
     custom_sql: Optional[str] = None
-    rule_sql: Optional[str] = None  # Alias for custom_sql for backward compatibility
     expected_result: Optional[Any] = None  # For test compatibility
 
     # Execution settings

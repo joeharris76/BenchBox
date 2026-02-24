@@ -14,6 +14,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
@@ -467,21 +468,46 @@ class MaintenanceOperations:
 
         return self._execute_batched_insert(connection, "WEB_SALES", columns, rows_to_insert, 34)
 
-    def _insert_store_returns(self, connection: Any, estimated_rows: int) -> int:
-        """Insert new store returns data that reference valid store sales.
+    def _insert_returns_generic(
+        self,
+        connection: Any,
+        estimated_rows: int,
+        *,
+        sales_table: str,
+        returns_table: str,
+        sales_select_columns: str,
+        returns_columns: str,
+        num_returns_columns: int,
+        row_generator: Callable[[tuple], tuple],
+    ) -> int:
+        """Generic helper for inserting returns data that references valid sales.
 
         Per TPC-DS spec, returns must reference parent sales transactions.
+        This method encapsulates the shared algorithm used by all three return
+        channel insert operations (store, catalog, web).
+
+        Args:
+            connection: Database connection
+            estimated_rows: Number of return rows to generate
+            sales_table: Source sales table name (e.g. "STORE_SALES")
+            returns_table: Target returns table name (e.g. "STORE_RETURNS")
+            sales_select_columns: Comma-separated SELECT columns for the sales query
+            returns_columns: Comma-separated column names for the INSERT
+            num_returns_columns: Number of columns in a returns row
+            row_generator: Callback that converts a sales record tuple into a returns row tuple
+
+        Returns:
+            Number of rows inserted
         """
-        self.logger.info(f"Inserting {estimated_rows} rows into STORE_RETURNS")
+        self.logger.info(f"Inserting {estimated_rows} rows into {returns_table}")
 
         # Get platform-specific parameter placeholder
         placeholder = self._get_parameter_placeholder(connection)
 
-        # Query existing store_sales to get valid ticket numbers and items
+        # Query existing sales to get valid parent records
         query_sql = f"""
-        SELECT SS_TICKET_NUMBER, SS_ITEM_SK, SS_CUSTOMER_SK, SS_CDEMO_SK,
-               SS_HDEMO_SK, SS_ADDR_SK, SS_STORE_SK, SS_QUANTITY
-        FROM STORE_SALES
+        SELECT {sales_select_columns}
+        FROM {sales_table}
         ORDER BY RANDOM()
         LIMIT {placeholder}
         """
@@ -490,123 +516,92 @@ class MaintenanceOperations:
             cursor = connection.execute(query_sql, (estimated_rows,))
             sales_records = cursor.fetchall()
         except Exception as e:
-            self.logger.error(f"Failed to query store_sales for returns: {e}")
+            self.logger.error(f"Failed to query {sales_table.lower()} for returns: {e}")
             raise
 
         if not sales_records:
-            self.logger.warning("No store_sales records found to generate returns from")
+            self.logger.warning(f"No {sales_table.lower()} records found to generate returns from")
             return 0
 
         # Generate returns based on actual sales
         rows_to_insert = []
         for sale in sales_records:
-            row = self._generate_store_returns_from_sale(sale)
+            row = row_generator(sale)
             rows_to_insert.append(row)
 
         # Use batched multi-row INSERT for efficiency
-        columns = """SR_RETURNED_DATE_SK, SR_RETURN_TIME_SK, SR_ITEM_SK, SR_CUSTOMER_SK,
+        return self._execute_batched_insert(
+            connection, returns_table, returns_columns, rows_to_insert, num_returns_columns
+        )
+
+    def _insert_store_returns(self, connection: Any, estimated_rows: int) -> int:
+        """Insert new store returns data that reference valid store sales.
+
+        Per TPC-DS spec, returns must reference parent sales transactions.
+        """
+        return self._insert_returns_generic(
+            connection,
+            estimated_rows,
+            sales_table="STORE_SALES",
+            returns_table="STORE_RETURNS",
+            sales_select_columns="""SS_TICKET_NUMBER, SS_ITEM_SK, SS_CUSTOMER_SK, SS_CDEMO_SK,
+               SS_HDEMO_SK, SS_ADDR_SK, SS_STORE_SK, SS_QUANTITY""",
+            returns_columns="""SR_RETURNED_DATE_SK, SR_RETURN_TIME_SK, SR_ITEM_SK, SR_CUSTOMER_SK,
             SR_CDEMO_SK, SR_HDEMO_SK, SR_ADDR_SK, SR_STORE_SK, SR_REASON_SK,
             SR_TICKET_NUMBER, SR_RETURN_QUANTITY, SR_RETURN_AMT, SR_RETURN_TAX,
             SR_RETURN_AMT_INC_TAX, SR_FEE, SR_RETURN_SHIP_COST, SR_REFUNDED_CASH,
-            SR_REVERSED_CHARGE, SR_STORE_CREDIT, SR_NET_LOSS"""
-
-        return self._execute_batched_insert(connection, "STORE_RETURNS", columns, rows_to_insert, 20)
+            SR_REVERSED_CHARGE, SR_STORE_CREDIT, SR_NET_LOSS""",
+            num_returns_columns=20,
+            row_generator=self._generate_store_returns_from_sale,
+        )
 
     def _insert_catalog_returns(self, connection: Any, estimated_rows: int) -> int:
         """Insert new catalog returns data that reference valid catalog sales.
 
         Per TPC-DS spec, returns must reference parent sales transactions.
         """
-        self.logger.info(f"Inserting {estimated_rows} rows into CATALOG_RETURNS")
-
-        # Get platform-specific parameter placeholder
-        placeholder = self._get_parameter_placeholder(connection)
-
-        # Query existing catalog_sales to get valid order numbers
-        query_sql = f"""
-        SELECT CS_ORDER_NUMBER, CS_ITEM_SK, CS_BILL_CUSTOMER_SK, CS_BILL_CDEMO_SK,
+        return self._insert_returns_generic(
+            connection,
+            estimated_rows,
+            sales_table="CATALOG_SALES",
+            returns_table="CATALOG_RETURNS",
+            sales_select_columns="""CS_ORDER_NUMBER, CS_ITEM_SK, CS_BILL_CUSTOMER_SK, CS_BILL_CDEMO_SK,
                CS_BILL_HDEMO_SK, CS_BILL_ADDR_SK, CS_CALL_CENTER_SK, CS_CATALOG_PAGE_SK,
-               CS_SHIP_MODE_SK, CS_WAREHOUSE_SK, CS_QUANTITY
-        FROM CATALOG_SALES
-        ORDER BY RANDOM()
-        LIMIT {placeholder}
-        """
-
-        try:
-            cursor = connection.execute(query_sql, (estimated_rows,))
-            sales_records = cursor.fetchall()
-        except Exception as e:
-            self.logger.error(f"Failed to query catalog_sales for returns: {e}")
-            raise
-
-        if not sales_records:
-            self.logger.warning("No catalog_sales records found to generate returns from")
-            return 0
-
-        # Generate returns based on actual sales
-        rows_to_insert = []
-        for sale in sales_records:
-            row = self._generate_catalog_returns_from_sale(sale)
-            rows_to_insert.append(row)
-
-        # Use batched multi-row INSERT for efficiency
-        columns = """CR_RETURNED_DATE_SK, CR_RETURNED_TIME_SK, CR_ITEM_SK, CR_REFUNDED_CUSTOMER_SK,
+               CS_SHIP_MODE_SK, CS_WAREHOUSE_SK, CS_QUANTITY""",
+            returns_columns="""CR_RETURNED_DATE_SK, CR_RETURNED_TIME_SK, CR_ITEM_SK, CR_REFUNDED_CUSTOMER_SK,
             CR_REFUNDED_CDEMO_SK, CR_REFUNDED_HDEMO_SK, CR_REFUNDED_ADDR_SK,
             CR_RETURNING_CUSTOMER_SK, CR_RETURNING_CDEMO_SK, CR_RETURNING_HDEMO_SK,
             CR_RETURNING_ADDR_SK, CR_CALL_CENTER_SK, CR_CATALOG_PAGE_SK,
             CR_SHIP_MODE_SK, CR_WAREHOUSE_SK, CR_REASON_SK, CR_ORDER_NUMBER,
             CR_RETURN_QUANTITY, CR_RETURN_AMOUNT, CR_RETURN_TAX, CR_RETURN_AMT_INC_TAX,
             CR_FEE, CR_RETURN_SHIP_COST, CR_REFUNDED_CASH, CR_REVERSED_CHARGE,
-            CR_STORE_CREDIT, CR_NET_LOSS"""
-
-        return self._execute_batched_insert(connection, "CATALOG_RETURNS", columns, rows_to_insert, 27)
+            CR_STORE_CREDIT, CR_NET_LOSS""",
+            num_returns_columns=27,
+            row_generator=self._generate_catalog_returns_from_sale,
+        )
 
     def _insert_web_returns(self, connection: Any, estimated_rows: int) -> int:
         """Insert new web returns data that reference valid web sales.
 
         Per TPC-DS spec, returns must reference parent sales transactions.
         """
-        self.logger.info(f"Inserting {estimated_rows} rows into WEB_RETURNS")
-
-        # Get platform-specific parameter placeholder
-        placeholder = self._get_parameter_placeholder(connection)
-
-        # Query existing web_sales to get valid order numbers
-        query_sql = f"""
-        SELECT WS_ORDER_NUMBER, WS_ITEM_SK, WS_BILL_CUSTOMER_SK, WS_BILL_CDEMO_SK,
-               WS_BILL_HDEMO_SK, WS_BILL_ADDR_SK, WS_WEB_PAGE_SK, WS_QUANTITY
-        FROM WEB_SALES
-        ORDER BY RANDOM()
-        LIMIT {placeholder}
-        """
-
-        try:
-            cursor = connection.execute(query_sql, (estimated_rows,))
-            sales_records = cursor.fetchall()
-        except Exception as e:
-            self.logger.error(f"Failed to query web_sales for returns: {e}")
-            raise
-
-        if not sales_records:
-            self.logger.warning("No web_sales records found to generate returns from")
-            return 0
-
-        # Generate returns based on actual sales
-        rows_to_insert = []
-        for sale in sales_records:
-            row = self._generate_web_returns_from_sale(sale)
-            rows_to_insert.append(row)
-
-        # Use batched multi-row INSERT for efficiency
-        columns = """WR_RETURNED_DATE_SK, WR_RETURNED_TIME_SK, WR_ITEM_SK, WR_REFUNDED_CUSTOMER_SK,
+        return self._insert_returns_generic(
+            connection,
+            estimated_rows,
+            sales_table="WEB_SALES",
+            returns_table="WEB_RETURNS",
+            sales_select_columns="""WS_ORDER_NUMBER, WS_ITEM_SK, WS_BILL_CUSTOMER_SK, WS_BILL_CDEMO_SK,
+               WS_BILL_HDEMO_SK, WS_BILL_ADDR_SK, WS_WEB_PAGE_SK, WS_QUANTITY""",
+            returns_columns="""WR_RETURNED_DATE_SK, WR_RETURNED_TIME_SK, WR_ITEM_SK, WR_REFUNDED_CUSTOMER_SK,
             WR_REFUNDED_CDEMO_SK, WR_REFUNDED_HDEMO_SK, WR_REFUNDED_ADDR_SK,
             WR_RETURNING_CUSTOMER_SK, WR_RETURNING_CDEMO_SK, WR_RETURNING_HDEMO_SK,
             WR_RETURNING_ADDR_SK, WR_WEB_PAGE_SK, WR_REASON_SK, WR_ORDER_NUMBER,
             WR_RETURN_QUANTITY, WR_RETURN_AMT, WR_RETURN_TAX, WR_RETURN_AMT_INC_TAX,
             WR_FEE, WR_RETURN_SHIP_COST, WR_REFUNDED_CASH, WR_REVERSED_CHARGE,
-            WR_ACCOUNT_CREDIT, WR_NET_LOSS"""
-
-        return self._execute_batched_insert(connection, "WEB_RETURNS", columns, rows_to_insert, 24)
+            WR_ACCOUNT_CREDIT, WR_NET_LOSS""",
+            num_returns_columns=24,
+            row_generator=self._generate_web_returns_from_sale,
+        )
 
     def _update_customer(self, connection: Any, estimated_rows: int) -> int:
         """Update customer data."""

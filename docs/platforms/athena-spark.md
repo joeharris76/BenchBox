@@ -60,6 +60,12 @@ benchbox run --platform athena-spark --benchmark tpch --scale 1.0 \
   --platform-option s3_staging_dir=s3://my-bucket/benchbox \
   --platform-option region=eu-west-1
 
+# With specific Spark engine version
+benchbox run --platform athena-spark --benchmark tpch --scale 1.0 \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox \
+  --platform-option "engine_version=PySpark engine version 3"
+
 # With custom DPU configuration
 benchbox run --platform athena-spark --benchmark tpch --scale 1.0 \
   --platform-option workgroup=my-spark-workgroup \
@@ -81,11 +87,29 @@ benchbox run --platform athena-spark --benchmark tpch --dry-run ./preview \
 | `s3_staging_dir` | *required* | S3 path for data staging |
 | `region` | us-east-1 | AWS region |
 | `database` | benchbox | Glue Data Catalog database |
+| `engine_version` | (workgroup default) | Spark engine version (e.g. `PySpark engine version 3`) |
 | `coordinator_dpu_size` | 1 | Coordinator DPU size |
 | `max_concurrent_dpus` | 20 | Maximum concurrent DPUs |
 | `default_executor_dpu_size` | 1 | Default executor DPU size |
 | `session_idle_timeout_minutes` | 15 | Session idle timeout |
 | `timeout_minutes` | 60 | Calculation timeout |
+| `driver_version` | (latest) | Pin the Python driver package version (e.g. `1.2.0`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific pyathena Version
+
+```bash
+benchbox run --platform athena-spark --benchmark tpch \
+  --platform-option driver_version=3.0.0 \
+  --platform-option driver_auto_install=true \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox
+```
+
+The driver package for Athena Spark is `pyathena`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Python API
 

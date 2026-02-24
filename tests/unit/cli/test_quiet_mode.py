@@ -90,6 +90,24 @@ def test_adapter_uses_quiet_console_not_local_console():
     assert adapter_module.quiet_console is quiet_console
 
 
+@pytest.mark.parametrize(
+    ("module_path", "attr_name"),
+    [
+        ("benchbox.cli.commands.results", "console"),
+        ("benchbox.cli.commands.report", "console"),
+        ("benchbox.cli.commands.show_plan", "console"),
+        ("benchbox.cli.commands.compare_plans", "console"),
+        ("benchbox.cli.commands.plan_history", "console"),
+    ],
+)
+def test_cli_commands_use_shared_quiet_console(module_path: str, attr_name: str) -> None:
+    """Ensure migrated CLI command modules share centralized quiet-aware console."""
+    import importlib
+
+    module = importlib.import_module(module_path)
+    assert getattr(module, attr_name) is quiet_console
+
+
 def test_quiet_console_proxy_delegates_when_not_quiet():
     """Ensure quiet_console passes output through when quiet mode is off."""
     set_quiet(False)

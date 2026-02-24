@@ -22,6 +22,7 @@ from mcp.types import ToolAnnotations
 
 from benchbox.core.results.loader import ResultLoadError, UnsupportedSchemaError, load_result_file
 from benchbox.mcp.errors import ErrorCode, make_error
+from benchbox.mcp.tools.path_utils import resolve_result_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,10 @@ EXPORT_ANNOTATIONS = ToolAnnotations(
     openWorldHint=False,
 )
 
-# Default results directory
-DEFAULT_RESULTS_DIR = Path("benchmark_runs/results")
 
-
-def register_results_tools(mcp: FastMCP) -> None:
+def register_results_tools(mcp: FastMCP, *, results_dir: Path) -> None:
     """Register results tools with the MCP server."""
+    configured_results_dir = Path(results_dir)
 
     @mcp.tool(annotations=RESULTS_READONLY_ANNOTATIONS)
     def get_results(
@@ -76,10 +75,10 @@ def register_results_tools(mcp: FastMCP) -> None:
         """
         # If no result_file, list recent runs
         if result_file is None or format == "list":
-            return _list_recent_runs_impl(limit, platform, benchmark)
+            return _list_recent_runs_impl(limit, platform, benchmark, configured_results_dir)
 
         # Get results for specific file
-        results = _get_results_impl(result_file, include_queries)
+        results = _get_results_impl(result_file, include_queries, results_dir=configured_results_dir)
         if "error" in results:
             return results
 
@@ -88,7 +87,7 @@ def register_results_tools(mcp: FastMCP) -> None:
         if format_lower == "details":
             return results
         elif format_lower in ("json", "csv", "html"):
-            return _export_results_impl(results, result_file, format_lower, output_path)
+            return _export_results_impl(results, result_file, format_lower, output_path, configured_results_dir)
         elif format_lower in ("text", "markdown"):
             return _export_summary_impl(results, format_lower)
         else:
@@ -103,10 +102,9 @@ def _list_recent_runs_impl(
     limit: int,
     platform: str | None,
     benchmark: str | None,
+    results_dir: Path,
 ) -> dict[str, Any]:
     """List recent benchmark runs."""
-    results_dir = DEFAULT_RESULTS_DIR
-
     if not results_dir.exists():
         return {"runs": [], "count": 0, "message": f"No results directory found at {results_dir}"}
 
@@ -169,17 +167,18 @@ def _list_recent_runs_impl(
     }
 
 
-def _get_results_impl(result_file: str, include_queries: bool = True) -> dict[str, Any]:
+def _get_results_impl(result_file: str, include_queries: bool = True, *, results_dir: Path) -> dict[str, Any]:
     """Core implementation for getting benchmark results."""
-    results_dir = DEFAULT_RESULTS_DIR
-    file_path = results_dir / result_file
+    if ".." in result_file or result_file.startswith("/") or result_file.startswith("\\"):
+        return make_error(
+            ErrorCode.VALIDATION_ERROR,
+            "Invalid result file path",
+            details={"requested_file": result_file},
+        )
 
-    if not file_path.exists():
-        if not result_file.endswith(".json"):
-            result_file += ".json"
-        file_path = results_dir / result_file
+    file_path = resolve_result_file_path(result_file, results_dir)
 
-    if not file_path.exists():
+    if file_path is None or not file_path.exists():
         return make_error(
             ErrorCode.RESOURCE_NOT_FOUND,
             f"Result file not found: {result_file}",
@@ -221,6 +220,7 @@ def _export_results_impl(
     result_file: str,
     format: str,
     output_path: str | None,
+    results_dir: Path,
 ) -> dict[str, Any]:
     """Export results to JSON, CSV, or HTML format."""
     content: str = ""
@@ -261,18 +261,15 @@ def _export_results_impl(
                 suggestion="Use a relative path without '..' components",
             )
 
-        output_file = DEFAULT_RESULTS_DIR / output_path
+        output_file = results_dir / output_path
         try:
-            results_dir_resolved = DEFAULT_RESULTS_DIR.resolve()
-            output_file_resolved = output_file.resolve()
-            if not str(output_file_resolved).startswith(str(results_dir_resolved)):
-                return make_error(
-                    ErrorCode.VALIDATION_ERROR,
-                    "Output path escapes allowed directory",
-                    details={"path": output_path},
-                )
-        except Exception:
-            pass
+            output_file.resolve().relative_to(results_dir.resolve())
+        except ValueError:
+            return make_error(
+                ErrorCode.VALIDATION_ERROR,
+                "Output path escapes allowed directory",
+                details={"path": output_path},
+            )
 
         try:
             output_file.parent.mkdir(parents=True, exist_ok=True)

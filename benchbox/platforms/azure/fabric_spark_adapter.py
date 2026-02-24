@@ -40,14 +40,12 @@ from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
-        ForeignKeyConfiguration,
         PlatformOptimizationConfiguration,
-        PrimaryKeyConfiguration,
         UnifiedTuningConfiguration,
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkStaging,
     SparkConfigOptimizer,
@@ -136,6 +134,8 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
     - OneLake storage separate
     """
 
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
+
     # Fabric API endpoints
     FABRIC_API_BASE = "https://api.fabric.microsoft.com/v1"
     ONELAKE_DFS_BASE = "https://onelake.dfs.fabric.microsoft.com"
@@ -198,7 +198,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
             )
             self._staging = CloudSparkStaging.from_uri(staging_uri)
         except Exception as e:
-            logger.warning(f"Failed to initialize OneLake staging: {e}")
+            logger.warning("Failed to initialize OneLake staging: %s", e)
 
         # Credential (lazy initialization)
         self._credential: Any = None
@@ -312,7 +312,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         if self.spark_pool_name:
             session_config["name"] = f"benchbox-{self.spark_pool_name}"
 
-        logger.info(f"Creating Livy session in workspace {self.workspace_id}")
+        logger.info("Creating Livy session in workspace %s", self.workspace_id)
 
         response = requests.post(
             self.livy_endpoint,
@@ -331,7 +331,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         self._wait_for_session_state(session_id, [LivySessionState.IDLE])
         self._session_created_by_us = True
 
-        logger.info(f"Livy session created: {session_id}")
+        logger.info("Livy session created: %s", session_id)
         return session_id
 
     def _wait_for_session_state(
@@ -398,9 +398,19 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
                         # Wait for it to become idle
                         self._wait_for_session_state(self._session_id, [LivySessionState.IDLE])
                         return self._session_id
+                    # Session is in a terminal state (ERROR, DEAD, KILLED) — close it
+                    logger.warning("Session %s is in state %s, closing", self._session_id, session.get("state"))
+                    try:
+                        requests.delete(session_url, headers=self._get_headers(), timeout=30)
+                    except Exception:
+                        pass
             except Exception as e:
-                logger.warning(f"Session {self._session_id} is invalid: {e}")
-                self._session_id = None
+                logger.warning("Session %s is invalid: %s", self._session_id, e)
+                try:
+                    requests.delete(session_url, headers=self._get_headers(), timeout=30)
+                except Exception:
+                    pass
+            self._session_id = None
 
         # Create new session
         self._session_id = self._create_session()
@@ -519,7 +529,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
 
             if response.status_code == 200:
                 workspace = response.json()
-                logger.info(f"Connected to Fabric workspace: {workspace.get('displayName', self.workspace_id)}")
+                logger.info("Connected to Fabric workspace: %s", workspace.get("displayName", self.workspace_id))
                 return {
                     "status": "connected",
                     "workspace_id": self.workspace_id,
@@ -544,70 +554,82 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         except requests.exceptions.RequestException as e:
             raise ConfigurationError(f"Failed to connect to Fabric: {e}") from e
 
-    def create_schema(self, schema_name: str | None = None) -> None:
+    def create_schema(self, benchmark: Any, connection: Any) -> float:
         """Create schema in Lakehouse.
 
         Fabric Lakehouse manages schemas automatically through Delta tables.
-        This method ensures the database context is set.
+        This method ensures the database context is set. The connection
+        parameter is accepted for interface compatibility but unused; sessions
+        are managed internally via the Livy API.
 
         Args:
-            schema_name: Database/schema name.
+            benchmark: Benchmark instance (provides schema/database name).
+            connection: Database connection (unused — Livy sessions are internal).
+
+        Returns:
+            Time taken to create schema in seconds.
         """
-        database = schema_name or "default"
+        start_time = mono_time()
+        database = getattr(benchmark, "name", None) or "default"
 
-        # In Fabric Lakehouse, we just need to ensure we can create tables
-        # The lakehouse automatically manages the schema
-        logger.info(f"Using Lakehouse schema: {database}")
+        logger.info("Using Lakehouse schema: %s", database)
 
-        # Optionally create the database if it doesn't exist
         if database != "default":
             self._execute_statement(
                 f"CREATE DATABASE IF NOT EXISTS {database}",
                 kind="sql",
             )
 
+        return elapsed_seconds(start_time)
+
     def load_data(
         self,
-        tables: list[str],
-        source_dir: Path | str,
-        file_format: str = "parquet",
-        **kwargs: Any,
-    ) -> dict[str, str]:
+        benchmark: Any,
+        connection: Any,
+        data_dir: Path,
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
         """Upload benchmark data to OneLake and create Delta tables.
 
+        The connection parameter is accepted for interface compatibility but
+        unused; sessions are managed internally via the Livy API.
+
         Args:
-            tables: List of table names to load.
-            source_dir: Local directory containing table data files.
-            file_format: Data file format (default: parquet).
-            **kwargs: Additional options.
+            benchmark: Benchmark instance (provides table names via benchmark.tables).
+            connection: Database connection (unused — Livy sessions are internal).
+            data_dir: Directory containing data files.
 
         Returns:
-            Dict mapping table names to OneLake URIs.
+            Tuple of (table_row_counts, load_time_seconds, per_table_timings).
         """
-        source_path = Path(source_dir)
-        if not source_path.exists():
-            raise ConfigurationError(f"Source directory not found: {source_dir}")
+        start_time = mono_time()
 
-        # Upload data to OneLake using staging infrastructure
-        if self._staging:
-            # Check if tables already exist
-            if self._staging.tables_exist(tables):
-                logger.info("Tables already exist in OneLake, skipping upload")
-            else:
-                logger.info(f"Uploading {len(tables)} tables to OneLake")
-                self._staging.upload_tables(
-                    tables=tables,
-                    source_dir=source_path,
-                    file_format=file_format,
-                )
+        tables = list(benchmark.tables.keys()) if hasattr(benchmark, "tables") and benchmark.tables else []
+        source_path = Path(data_dir)
+
+        if not source_path.exists():
+            raise ConfigurationError(f"Source directory not found: {data_dir}")
+
+        if self._staging is None:
+            raise ConfigurationError(
+                "OneLake staging is unavailable; data upload cannot proceed. "
+                "Check Azure credentials and network connectivity."
+            )
+
+        if self._staging.tables_exist(tables):
+            logger.info("Tables already exist in OneLake, skipping upload")
+        else:
+            logger.info("Uploading %d tables to OneLake", len(tables))
+            self._staging.upload_tables(
+                tables=tables,
+                source_dir=source_path,
+                file_format="parquet",
+            )
 
         # Create Delta tables from uploaded data
-        table_uris = {}
+        per_table_timings: dict[str, Any] = {}
         for table in tables:
+            tbl_start = mono_time()
             table_uri = f"{self.onelake_path}/Files/benchbox/tables/{table}"
-            table_uris[table] = table_uri
-
-            # Create Delta table from Parquet files
             create_sql = f"""
                 CREATE TABLE IF NOT EXISTS {table}
                 USING DELTA
@@ -615,43 +637,63 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
             """
             try:
                 self._execute_statement(create_sql, kind="sql")
-                logger.debug(f"Created Delta table: {table}")
+                per_table_timings[table] = elapsed_seconds(tbl_start)
+                logger.debug("Created Delta table: %s", table)
             except Exception as e:
-                logger.warning(f"Failed to create table {table}: {e}")
+                logger.warning("Failed to create table %s: %s", table, e)
 
-        return table_uris
+        return {}, elapsed_seconds(start_time), per_table_timings or None
 
     def execute_query(
         self,
+        connection: Any,
         query: str,
-        **kwargs: Any,
+        query_id: str | None = None,
+        benchmark_type: str | None = None,
+        scale_factor: float | None = None,
+        validate_row_count: bool = True,
+        stream_id: int | None = None,
     ) -> dict[str, Any]:
         """Execute a SQL query via Livy.
 
+        The connection parameter is accepted for interface compatibility but
+        unused; sessions are managed internally via the Livy API.
+
         Args:
+            connection: Database connection (unused — Livy sessions are internal).
             query: SQL query to execute.
-            **kwargs: Additional options.
+            query_id: Query identifier for result tracking.
+            benchmark_type: Benchmark type (unused, for interface compatibility).
+            scale_factor: Scale factor (unused, for interface compatibility).
+            validate_row_count: Whether to validate row counts (unused for Spark).
+            stream_id: Stream identifier for multi-stream benchmarks.
 
         Returns:
-            Dict with query results.
+            Dict with query results matching the standard PlatformAdapter contract.
         """
         start_time = mono_time()
 
-        result = self._execute_statement(query, kind="sql")
-
-        execution_time = elapsed_seconds(start_time)
-
-        # Parse result data
-        data = result.get("data", {})
-        schema = data.get("schema", {})
-
-        return {
-            "success": True,
-            "execution_time_seconds": execution_time,
-            "row_count": len(data.get("values", [])),
-            "columns": [f.get("name") for f in schema.get("fields", [])],
-            "data": data.get("values", []),
-        }
+        try:
+            result = self._execute_statement(query, kind="sql")
+            data = result.get("data", {})
+            values = data.get("values", []) if isinstance(data, dict) else []
+            return {
+                "query_id": query_id,
+                "stream_id": stream_id,
+                "status": "SUCCESS",
+                "execution_time_seconds": elapsed_seconds(start_time),
+                "rows_returned": len(values),
+            }
+        except Exception as exc:
+            return {
+                "query_id": query_id,
+                "stream_id": stream_id,
+                "status": "FAILED",
+                "execution_time_seconds": elapsed_seconds(start_time),
+                "rows_returned": 0,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            }
 
     def close(self) -> None:
         """Clean up resources and close Livy session."""
@@ -663,9 +705,9 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
                     headers=self._get_headers(),
                     timeout=30,
                 )
-                logger.info(f"Closed Livy session: {self._session_id}")
+                logger.info("Closed Livy session: %s", self._session_id)
             except Exception as e:
-                logger.warning(f"Failed to close session: {e}")
+                logger.warning("Failed to close session: %s", e)
             finally:
                 self._session_id = None
 
@@ -683,19 +725,25 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
 
     def configure_for_benchmark(
         self,
-        benchmark: str,
+        connection: Any,
+        benchmark_type: str,
         scale_factor: float | None = None,
         **options: Any,
     ) -> None:
         """Configure adapter for specific benchmark.
 
+        The connection parameter is accepted for interface compatibility but
+        unused; sessions are managed internally via the Livy API.
+
         Args:
-            benchmark: Benchmark name (tpch, tpcds, ssb).
-            scale_factor: Data scale factor.
+            connection: Database connection (unused — Livy sessions are internal).
+            benchmark_type: Benchmark name (tpch, tpcds, ssb).
+            scale_factor: Data scale factor (updates internal scale if provided).
             **options: Additional benchmark options.
         """
-        self._benchmark_type = benchmark.lower()
-        self._scale_factor = scale_factor or 1.0
+        self._benchmark_type = benchmark_type.lower()
+        if scale_factor is not None:
+            self._scale_factor = scale_factor
 
         # Get optimized Spark configuration
         if self._benchmark_type == "tpch":
@@ -720,9 +768,8 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
                 platform=CloudPlatform.FABRIC,
             )
 
-        # Convert SparkConfig to dict
         self._spark_config = config.to_dict()
-        logger.info(f"Configured for {benchmark} at SF={self._scale_factor}")
+        logger.info("Configured for %s at SF=%s", benchmark_type, self._scale_factor)
 
     def apply_platform_tuning(
         self,
@@ -737,36 +784,19 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
         if hasattr(config, "spark_config") and config.spark_config:
             self._spark_config.update(config.spark_config)
 
-    def apply_constraint_configuration(
-        self,
-        primary_keys: list[PrimaryKeyConfiguration] | None = None,
-        foreign_keys: list[ForeignKeyConfiguration] | None = None,
-    ) -> None:
-        """Apply constraint configuration (no-op for Spark).
-
-        Spark does not enforce primary/foreign key constraints.
-
-        Args:
-            primary_keys: Primary key configurations (ignored).
-            foreign_keys: Foreign key configurations (ignored).
-        """
-        # Spark doesn't enforce constraints, but we log for visibility
-        if primary_keys:
-            logger.debug(f"Ignoring {len(primary_keys)} primary key constraints (Spark no-op)")
-        if foreign_keys:
-            logger.debug(f"Ignoring {len(foreign_keys)} foreign key constraints (Spark no-op)")
-
     def apply_unified_tuning(
         self,
-        config: UnifiedTuningConfiguration,
+        unified_config: UnifiedTuningConfiguration,
+        connection: Any,
     ) -> None:
         """Apply unified tuning configuration.
 
         Args:
-            config: Unified tuning configuration.
+            unified_config: Unified tuning configuration.
+            connection: Database connection (unused — Livy sessions are internal).
         """
-        if hasattr(config, "platform_optimization"):
-            self.apply_platform_tuning(config.platform_optimization)
+        if hasattr(unified_config, "platform_optimization"):
+            self.apply_platform_tuning(unified_config.platform_optimization)
 
     # apply_primary_keys, apply_foreign_keys, apply_platform_optimizations,
     # and apply_constraint_configuration are inherited from SparkTuningMixin

@@ -9,7 +9,11 @@ import pytest
 from benchbox.platforms.pyspark.sql_adapter import PySparkSQLAdapter
 from tests.unit.platforms.pyspark.conftest import PYSPARK_SQL_SKIP_REASON, PYSPARK_SQL_TESTS_SKIPPED
 
-pytestmark = pytest.mark.skipif(PYSPARK_SQL_TESTS_SKIPPED, reason=PYSPARK_SQL_SKIP_REASON)
+pytestmark = [
+    pytest.mark.medium,
+    pytest.mark.xdist_group("pyspark"),
+    pytest.mark.skipif(PYSPARK_SQL_TESTS_SKIPPED, reason=PYSPARK_SQL_SKIP_REASON),
+]
 
 
 class _MiniBenchmark:

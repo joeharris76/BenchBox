@@ -23,7 +23,7 @@ Usage:
 
     # Check if data already exists
     if staging.tables_exist(tables):
-        print("Data already staged, skipping upload")
+        emit("Data already staged, skipping upload")
 
 Copyright 2026 Joe Harris / BenchBox Project
 

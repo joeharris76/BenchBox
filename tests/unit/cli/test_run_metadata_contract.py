@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from benchbox.core.results.driver_metadata import apply_driver_metadata
+
+pytestmark = pytest.mark.fast
+
+
+def test_apply_driver_metadata_prefers_adapter_values() -> None:
+    result = SimpleNamespace(
+        driver_package=None,
+        driver_version_requested=None,
+        driver_version_resolved=None,
+        driver_version_actual=None,
+        driver_runtime_strategy=None,
+        driver_runtime_path=None,
+        driver_runtime_python_executable=None,
+        driver_auto_install=False,
+        execution_metadata={},
+    )
+
+    db_config = SimpleNamespace(
+        driver_package="duckdb",
+        driver_version="1.0.0",
+        driver_version_resolved=None,
+        driver_version_actual=None,
+        driver_runtime_strategy=None,
+        driver_runtime_path=None,
+        driver_runtime_python_executable=None,
+        driver_auto_install=True,
+    )
+    adapter = SimpleNamespace(
+        driver_package="duckdb",
+        driver_version_requested="1.1.0",
+        driver_version_resolved="1.1.0",
+        driver_version_actual="1.1.0",
+        driver_runtime_strategy="isolated-site-packages",
+        driver_runtime_path="/tmp/runtime",
+        driver_runtime_python_executable="/tmp/runtime/bin/python",
+        driver_auto_install_used=True,
+    )
+
+    apply_driver_metadata(result, database_config=db_config, platform_adapter=adapter)
+
+    assert result.driver_version_resolved == "1.1.0"
+    assert result.driver_runtime_strategy == "isolated-site-packages"
+    assert result.execution_metadata["driver_version_resolved"] == "1.1.0"
+    assert result.execution_metadata["driver_auto_install_used"] is True
+
+
+def test_apply_driver_metadata_config_only_when_no_adapter() -> None:
+    """When adapter is None, only config values are used."""
+    result = SimpleNamespace(
+        driver_package=None,
+        driver_version_requested=None,
+        driver_version_resolved=None,
+        driver_version_actual=None,
+        driver_runtime_strategy=None,
+        driver_runtime_path=None,
+        driver_runtime_python_executable=None,
+        driver_auto_install=False,
+        execution_metadata={},
+    )
+
+    db_config = SimpleNamespace(
+        driver_package="snowflake-connector-python",
+        driver_version="3.5.0",
+        driver_version_resolved="3.5.0",
+        driver_version_actual=None,
+        driver_runtime_strategy=None,
+        driver_runtime_path=None,
+        driver_runtime_python_executable=None,
+        driver_auto_install=False,
+    )
+
+    apply_driver_metadata(result, database_config=db_config, platform_adapter=None)
+
+    assert result.driver_package == "snowflake-connector-python"
+    assert result.driver_version_requested == "3.5.0"
+    assert result.driver_version_resolved == "3.5.0"
+    assert result.driver_version_actual is None
+    assert result.driver_runtime_strategy is None
+
+
+def test_apply_driver_metadata_all_none_leaves_defaults() -> None:
+    """When both adapter and config have None values, defaults are preserved."""
+    result = SimpleNamespace(
+        driver_package=None,
+        driver_version_requested=None,
+        driver_version_resolved=None,
+        driver_version_actual=None,
+        driver_runtime_strategy=None,
+        driver_runtime_path=None,
+        driver_runtime_python_executable=None,
+        driver_auto_install=False,
+        execution_metadata={},
+    )
+
+    adapter = SimpleNamespace(
+        driver_package=None,
+        driver_version_requested=None,
+        driver_version_resolved=None,
+        driver_version_actual=None,
+        driver_runtime_strategy=None,
+        driver_runtime_path=None,
+        driver_runtime_python_executable=None,
+        driver_auto_install_used=False,
+    )
+
+    db_config = SimpleNamespace(
+        driver_package=None,
+        driver_version=None,
+        driver_version_resolved=None,
+        driver_version_actual=None,
+        driver_runtime_strategy=None,
+        driver_runtime_path=None,
+        driver_runtime_python_executable=None,
+        driver_auto_install=False,
+    )
+
+    apply_driver_metadata(result, database_config=db_config, platform_adapter=adapter)
+
+    assert result.driver_package is None
+    assert result.driver_version_requested is None
+    assert result.driver_version_resolved is None
+    assert result.driver_version_actual is None
+    assert result.driver_auto_install is False

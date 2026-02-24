@@ -12,17 +12,17 @@ from benchbox.cli.platform_hooks import (
     PlatformOptionSpec,
     parse_bool,
 )
-from benchbox.core.config import DatabaseConfig
 from benchbox.core.platform_registry import PlatformInfo, PlatformRegistry
+from benchbox.core.schemas import DatabaseConfig
 
 
 def _parse_clickhouse_mode(value: str) -> str:
     normalized = value.strip().lower()
     if normalized in {"server"}:
         return "server"
-    if normalized in {"local", "embedded"}:
+    if normalized in {"local"}:
         return "local"
-    raise PlatformOptionError(f"Invalid ClickHouse mode '{value}'. Expected 'server', 'local', or 'embedded'.")
+    raise PlatformOptionError(f"Invalid ClickHouse mode '{value}'. Expected 'server' or 'local'.")
 
 
 def _parse_int(value: str) -> int:
@@ -44,11 +44,12 @@ def _register_clickhouse() -> None:
     PlatformHookRegistry.register_option_specs(
         "clickhouse",
         PlatformOptionSpec(
-            name="mode",
+            name="deployment_mode",
             parser=_parse_clickhouse_mode,
             default="server",
-            help="Connection mode for ClickHouse (server or local).",
+            help="Deployment mode for ClickHouse (server or local).",
             choices=["server", "local"],
+            aliases=("mode",),
         ),
         PlatformOptionSpec(
             name="host",
@@ -97,7 +98,7 @@ def _register_clickhouse() -> None:
     ) -> DatabaseConfig:
         name = info.display_name if info else "ClickHouse"
         # Ensure local mode has a sensible default path
-        if options.get("mode") == "local" and not options.get("data_path"):
+        if options.get("deployment_mode") == "local" and not options.get("data_path"):
             db_dir = Path.cwd() / "benchmark_runs" / "databases"
             db_dir.mkdir(parents=True, exist_ok=True)
             options["data_path"] = str(db_dir / "clickhouse_local.chdb")

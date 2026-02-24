@@ -84,7 +84,7 @@ class TestTPCPerformanceDuckDB:
 
         # Test TPC-DS benchmark initialization
         tpcds_start = time.time()
-        TPCDSBenchmark(scale_factor=0.01, output_dir=self.temp_dir)
+        TPCDSBenchmark(scale_factor=1.0, output_dir=self.temp_dir)
         tpcds_time = time.time() - tpcds_start
 
         # Benchmark initialization should be fast

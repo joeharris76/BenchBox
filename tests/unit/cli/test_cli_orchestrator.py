@@ -14,8 +14,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from benchbox.cli.orchestrator import BenchmarkOrchestrator
-from benchbox.core.config import BenchmarkConfig, SystemProfile
 from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, SystemProfile
 
 pytestmark = pytest.mark.fast
 
@@ -123,7 +123,8 @@ class TestBenchmarkOrchestrator:
         mock_lifecycle.return_value = mock_benchmark.create_enhanced_benchmark_result("duckdb", [])
 
         with patch.object(self.orchestrator, "_get_benchmark_instance", return_value=mock_benchmark):
-            result = self.orchestrator.execute_benchmark(config, system_profile, database_config)
+            with patch.object(self.orchestrator, "_get_platform_config", return_value={}):
+                result = self.orchestrator.execute_benchmark(config, system_profile, database_config)
 
         # Verify result
         assert isinstance(result, BenchmarkResults)
@@ -132,6 +133,66 @@ class TestBenchmarkOrchestrator:
 
         # Verify platform adapter was called
         mock_get_adapter.assert_called_once()
+
+    @patch("benchbox.cli.orchestrator.run_benchmark_lifecycle")
+    @patch("benchbox.cli.orchestrator.get_platform_adapter")
+    def test_execute_benchmark_enriches_driver_metadata_on_canonical_path(self, mock_get_adapter, mock_lifecycle):
+        """Driver metadata is propagated on orchestrator/lifecycle path."""
+        config = BenchmarkConfig(name="tpch", display_name="TPC-H", scale_factor=0.01)
+        system_profile = Mock(spec=SystemProfile)
+        system_profile.cpu_cores_logical = 8
+        system_profile.memory_total_gb = 16
+
+        database_config = DatabaseConfig(
+            type="duckdb",
+            name="DuckDB",
+            driver_package="duckdb",
+            driver_version="1.0.0",
+            driver_auto_install=True,
+        )
+
+        mock_benchmark = Mock()
+        mock_benchmark._name = "tpch"
+        mock_benchmark.scale_factor = 0.01
+        mock_benchmark.generate_data.return_value = {"customer": "customer.csv"}
+
+        mock_result = BenchmarkResults(
+            benchmark_name="TPC-H",
+            platform="duckdb",
+            scale_factor=0.01,
+            execution_id="test123",
+            timestamp=datetime.now(),
+            duration_seconds=1.0,
+            query_definitions={},
+            total_queries=1,
+            successful_queries=1,
+            failed_queries=0,
+            total_execution_time=1.0,
+            average_query_time=1.0,
+            validation_status="PASSED",
+            validation_details={},
+            execution_metadata={},
+        )
+
+        mock_adapter = Mock()
+        mock_adapter.driver_package = "duckdb"
+        mock_adapter.driver_version_requested = "1.1.0"
+        mock_adapter.driver_version_resolved = "1.1.0"
+        mock_adapter.driver_version_actual = "1.1.0"
+        mock_adapter.driver_runtime_strategy = "isolated-site-packages"
+        mock_adapter.driver_runtime_path = "/tmp/runtime"
+        mock_adapter.driver_runtime_python_executable = "/tmp/runtime/bin/python"
+        mock_adapter.driver_auto_install_used = True
+        mock_get_adapter.return_value = mock_adapter
+        mock_lifecycle.return_value = mock_result
+
+        with patch.object(self.orchestrator, "_get_benchmark_instance", return_value=mock_benchmark):
+            result = self.orchestrator.execute_benchmark(config, system_profile, database_config)
+
+        assert result.driver_version_resolved == "1.1.0"
+        assert result.driver_runtime_strategy == "isolated-site-packages"
+        assert result.execution_metadata["driver_version_resolved"] == "1.1.0"
+        assert result.execution_metadata["driver_auto_install_used"] is True
 
     def test_execute_benchmark_data_only_mode(self):
         """Test data-only benchmark execution."""
@@ -320,9 +381,8 @@ class TestBenchmarkOrchestrator:
         config = self.orchestrator._get_platform_config(database_config, system_profile)
 
         # Verify configuration includes all expected elements
-        # connection_params are flattened at top level (legacy compatibility)
-        assert config["host"] == "localhost"
-        assert config["port"] == 5432
+        assert config["connection_params"]["host"] == "localhost"
+        assert config["connection_params"]["port"] == 5432
         # options dict is included nested
         assert config["options"]["tuning_enabled"] is True
         assert config["options"]["force_recreate"] is False
@@ -456,8 +516,7 @@ class TestBenchmarkOrchestratorErrorHandling:
 
         config = self.orchestrator._get_platform_config(database_config, None)
 
-        # connection_params are flattened at top level (legacy compatibility)
-        assert config["host"] == "localhost"
+        assert config["connection_params"]["host"] == "localhost"
         # options are nested
         assert config["options"]["tuning_enabled"] is True
         # database_path is NOT set by get_platform_config() - it's handled by adapter's from_config()

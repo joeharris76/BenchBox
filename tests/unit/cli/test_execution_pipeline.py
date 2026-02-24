@@ -15,7 +15,7 @@ from benchbox.cli.execution_pipeline import (
     ExecutionContext,
     ExecutionPipeline,
 )
-from benchbox.core.config import (
+from benchbox.core.schemas import (
     BenchmarkConfig,
     DatabaseConfig,
     RunConfig,

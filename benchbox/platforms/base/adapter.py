@@ -24,6 +24,7 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,8 @@ from benchbox.core.constants import (
 from benchbox.core.errors import PlanCaptureError, SerializationError
 from benchbox.core.operations import OperationExecutor
 from benchbox.core.results.builder import normalize_benchmark_id
+from benchbox.core.results.models import QUERY_RUN_TYPE_MEASUREMENT, QUERY_RUN_TYPE_WARMUP
+from benchbox.core.results.schema import compute_plan_capture_stats
 from benchbox.platforms.base.models import (
     ConnectionConfig,
     DataGenerationPhase,
@@ -55,6 +58,7 @@ from benchbox.platforms.base.models import (
 )
 from benchbox.platforms.base.utils import is_non_interactive
 from benchbox.utils.clock import elapsed_seconds, mono_time
+from benchbox.utils.input_validation import validate_sql_identifier
 from benchbox.utils.printing import quiet_console
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings
 
@@ -79,6 +83,7 @@ try:
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
         TableTuning,
+        TuningColumn,
         TuningType,
         UnifiedTuningConfiguration,
     )
@@ -86,6 +91,7 @@ except ImportError:
     # Handle case where tuning module is not available
     BenchmarkTunings = None
     TableTuning = None
+    TuningColumn = None
     TuningType = None
     UnifiedTuningConfiguration = None
     PrimaryKeyConfiguration = None
@@ -104,12 +110,81 @@ except ImportError:
 EnhancedBenchmarkResults = BenchmarkResults
 
 
+class DriverIsolationCapability(Enum):
+    """Declares whether a platform adapter supports isolated driver runtime binding.
+
+    This replaces the implicit ``getattr(cls, "supports_driver_runtime_isolation", False)``
+    pattern with an explicit, discoverable capability declaration.
+
+    Values:
+        SUPPORTED: Adapter supports isolated-site-packages runtime binding with live
+            version verification (e.g. DuckDB, DataFusion).
+        NOT_APPLICABLE: Isolation is meaningless for this platform — no versioned driver
+            package (e.g. SQLite, DataFrame-only platforms, SDK-based cloud services).
+        NOT_FEASIBLE: Platform has a driver package but isolation is blocked by technical
+            constraints (e.g. JVM-backed, native C driver, shared library conflicts).
+        FEASIBLE_CLIENT_ONLY: Client package can be isolated, but it only controls the
+            Python client version — engine version is managed independently by the
+            remote service (e.g. Snowflake, BigQuery, Redshift).
+    """
+
+    SUPPORTED = "supported"
+    NOT_APPLICABLE = "not_applicable"
+    NOT_FEASIBLE = "not_feasible"
+    FEASIBLE_CLIENT_ONLY = "feasible_client_only"
+
+
+# Capability-specific remediation messages for unsupported isolation requests.
+_ISOLATION_REMEDIATION = {
+    DriverIsolationCapability.NOT_APPLICABLE: (
+        "This platform has no versioned driver package. Driver version isolation is not applicable."
+    ),
+    DriverIsolationCapability.NOT_FEASIBLE: (
+        "This platform's driver has technical constraints that prevent isolated runtime binding "
+        "(e.g. JVM dependency, native C library, shared library conflicts). "
+        "Install the requested driver version into the active environment instead."
+    ),
+    DriverIsolationCapability.FEASIBLE_CLIENT_ONLY: (
+        "This platform's Python client can be version-isolated, but the client version is independent "
+        "from the engine/service version. Install the requested client version into the active "
+        "environment, or omit driver_version to use the current client."
+    ),
+}
+
+
+def check_isolation_capability(
+    adapter_class: type,
+    platform_name: str,
+    runtime_strategy: str,
+) -> None:
+    """Check whether an adapter supports the requested runtime isolation strategy.
+
+    Raises RuntimeError with capability-specific remediation guidance if the adapter
+    does not support the requested isolation strategy.
+    """
+    capability = getattr(adapter_class, "driver_isolation_capability", DriverIsolationCapability.NOT_APPLICABLE)
+    if runtime_strategy != "isolated-site-packages" or capability == DriverIsolationCapability.SUPPORTED:
+        return
+
+    remediation = _ISOLATION_REMEDIATION.get(capability, "Driver version isolation is not supported.")
+    raise RuntimeError(
+        f"Platform '{platform_name}' requested runtime strategy '{runtime_strategy}', "
+        f"but adapter '{adapter_class.__name__}' does not support isolated driver runtime binding "
+        f"(capability: {capability.value}). {remediation}"
+    )
+
+
 class PlatformAdapter(VerbosityMixin, ABC):
     """Abstract base class for database platform adapters.
 
     This interface defines the contract that all platform adapters must implement
     to provide database-specific optimizations for benchmark execution.
     """
+
+    # Explicit capability declaration for driver version isolation.
+    # Subclasses should override this class variable to declare their capability.
+    # Default is NOT_APPLICABLE — adapters that support isolation must opt in.
+    driver_isolation_capability: DriverIsolationCapability = DriverIsolationCapability.NOT_APPLICABLE
 
     def __init__(self, **config):
         """Initialize the platform adapter with configuration.
@@ -137,6 +212,15 @@ class PlatformAdapter(VerbosityMixin, ABC):
         # Track iteration counts for plan_first_n
         self._plan_capture_iteration_counts: dict[str, int] = {}
         self.tuning_enabled = config.get("tuning_enabled", False)
+        # Driver runtime contract metadata (set by adapter factory / runtime resolution).
+        self.driver_package = config.get("driver_package")
+        self.driver_version_requested = config.get("driver_version") or config.get("driver_version_requested")
+        self.driver_version_resolved = config.get("driver_version_resolved")
+        self.driver_version_actual = config.get("driver_version_actual")
+        self.driver_runtime_strategy = config.get("driver_runtime_strategy")
+        self.driver_runtime_path = config.get("driver_runtime_path")
+        self.driver_runtime_python_executable = config.get("driver_runtime_python_executable")
+        self.driver_auto_install_used = bool(config.get("driver_auto_install", False))
 
         # Unified tuning configuration support
         self.unified_tuning_configuration = config.get("unified_tuning_configuration")
@@ -156,6 +240,8 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
         # Track latest throughput metrics for phase construction
         self._last_throughput_test_result = None
+        self._sorted_ingestion_applied_tables: list[str] = []
+        self._sorted_ingestion_total_apply_seconds: float = 0.0
         self._reset_plan_capture_stats()
 
     def _reset_plan_capture_stats(self) -> None:
@@ -657,7 +743,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
         should override to provide richer details, but tests may instantiate
         lightweight adapters without implementing this method.
         """
-        return {
+        platform_info = {
             "platform_type": self.platform_name.lower(),
             "platform_name": self.platform_name,
             "platform_version": "unknown",
@@ -668,6 +754,17 @@ class PlatformAdapter(VerbosityMixin, ABC):
             "client_library_version": None,
             "embedded_library_version": None,
         }
+        if self.driver_package:
+            platform_info["driver_package"] = self.driver_package
+        if self.driver_version_requested:
+            platform_info["driver_version_requested"] = self.driver_version_requested
+        if self.driver_version_resolved:
+            platform_info["driver_version_resolved"] = self.driver_version_resolved
+        if self.driver_version_actual:
+            platform_info["driver_version_actual"] = self.driver_version_actual
+        if self.driver_runtime_strategy:
+            platform_info["driver_runtime_strategy"] = self.driver_runtime_strategy
+        return platform_info
 
     @property
     def dialect(self) -> str | None:
@@ -925,6 +1022,200 @@ class PlatformAdapter(VerbosityMixin, ABC):
             self.log_very_verbose("No unified tuning configuration provided")
         return None
 
+    def get_sorted_ingestion_capability(self) -> dict[str, Any]:
+        """Return sorted-ingestion capability metadata for the current platform."""
+        cloud_method_matrix = {
+            "snowflake": ["ctas"],
+            "databricks": ["ctas", "z_order", "liquid_clustering"],
+            "bigquery": ["ctas"],
+            "redshift": ["ctas", "vacuum_sort"],
+            "athena": ["ctas"],
+            "azure synapse": ["ctas"],
+            "clickhouse cloud": [],
+        }
+
+        platform_key = self.platform_name.strip().lower()
+        methods = cloud_method_matrix.get(platform_key, ["ctas"])
+        is_cloud = platform_key in cloud_method_matrix
+        return {
+            "platform": self.platform_name,
+            "is_cloud_platform": is_cloud,
+            "supports_sorted_ingestion": bool(methods),
+            "supported_methods": methods,
+        }
+
+    def resolve_sorted_ingestion_strategy(self) -> tuple[str, str]:
+        """Resolve sorted-ingestion mode/method with capability guardrails."""
+        capability = self.get_sorted_ingestion_capability()
+        supported_methods = capability["supported_methods"]
+
+        effective_config = self.get_effective_tuning_configuration()
+        platform_optimizations = getattr(effective_config, "platform_optimizations", None)
+
+        mode = getattr(platform_optimizations, "sorted_ingestion_mode", "off")
+        method = getattr(platform_optimizations, "sorted_ingestion_method", "auto")
+
+        if mode == "off":
+            return "off", "auto"
+
+        if method != "auto" and method not in supported_methods:
+            raise ValueError(
+                f"Sorted ingestion method '{method}' is not supported for platform '{self.platform_name}'."
+            )
+
+        if not supported_methods:
+            if mode == "force":
+                raise ValueError(f"Sorted ingestion mode 'force' is not supported for platform '{self.platform_name}'.")
+            return "off", "none"
+
+        resolved_method = method if method != "auto" else supported_methods[0]
+        return mode, resolved_method
+
+    def get_sorted_ingestion_metadata(self) -> dict[str, Any]:
+        """Return configured/resolved sorted-ingestion metadata for result reporting."""
+        effective_config = self.get_effective_tuning_configuration()
+        platform_optimizations = getattr(effective_config, "platform_optimizations", None)
+        configured_mode = getattr(platform_optimizations, "sorted_ingestion_mode", "off")
+        configured_method = getattr(platform_optimizations, "sorted_ingestion_method", "auto")
+
+        resolved_mode: str | None = None
+        resolved_method: str | None = None
+        resolution_error: str | None = None
+        try:
+            resolved_mode, resolved_method = self.resolve_sorted_ingestion_strategy()
+        except Exception as exc:  # pragma: no cover - defensive metadata path
+            resolution_error = str(exc)
+
+        applied_tables = getattr(self, "_sorted_ingestion_applied_tables", [])
+        total_apply_seconds = getattr(self, "_sorted_ingestion_total_apply_seconds", 0.0)
+        unique_tables = sorted(set(applied_tables))
+        return {
+            "configured_mode": configured_mode,
+            "configured_method": configured_method,
+            "resolved_mode": resolved_mode,
+            "resolved_method": resolved_method,
+            "capability": self.get_sorted_ingestion_capability(),
+            "applied_tables": unique_tables,
+            "applied_table_count": len(unique_tables),
+            "total_apply_seconds": total_apply_seconds,
+            "resolution_error": resolution_error,
+        }
+
+    def apply_ctas_sort(self, table_name: str, tuning_config: Any, connection: Any) -> bool:
+        """Apply CTAS-based sorting after a table load when sorting is configured.
+
+        This shared implementation performs table-tuning lookup, sort-column extraction,
+        identifier validation, dry-run SQL capture, and execution. Platform adapters
+        enable CTAS sorting by overriding _build_ctas_sort_sql(); adapters that return
+        ``None`` are treated as unsupported and safely skipped.
+        """
+        sort_columns = self._resolve_ctas_sort_columns(table_name, tuning_config)
+        if sort_columns is None:
+            return False
+
+        validated_table = validate_sql_identifier(table_name, "table name")
+        sorted_columns = sorted(sort_columns, key=lambda column: column.order)
+        for column in sorted_columns:
+            validate_sql_identifier(column.name, "sort column")
+        ctas_sort_sql = self._build_ctas_sort_sql(validated_table, sorted_columns)
+
+        if ctas_sort_sql is None:
+            self.logger.debug(f"{self.platform_name} does not support CTAS sort for {table_name}; skipping")
+            return False
+
+        statements = ctas_sort_sql if isinstance(ctas_sort_sql, list) else [ctas_sort_sql]
+        return self._execute_ctas_sort(table_name, validated_table, sorted_columns, statements, connection)
+
+    def _resolve_ctas_sort_columns(self, table_name: str, tuning_config: Any) -> list | None:
+        """Resolve sort columns for CTAS sort, returning None if not applicable."""
+        if not tuning_config:
+            self.logger.debug(f"No tuning config provided for {table_name}; skipping CTAS sort")
+            return None
+
+        table_tunings = getattr(tuning_config, "table_tunings", None)
+        if not table_tunings:
+            self.logger.debug(f"No table tunings configured for {table_name}; skipping CTAS sort")
+            return None
+
+        # Case-insensitive lookup so table-name casing differences don't skip tuning.
+        table_tuning = None
+        for configured_name, configured_tuning in table_tunings.items():
+            if configured_name.lower() == table_name.lower():
+                table_tuning = configured_tuning
+                break
+
+        if not table_tuning:
+            self.logger.debug(f"Table {table_name} not present in tuning config; skipping CTAS sort")
+            return None
+
+        if TuningType is None:
+            self.logger.debug("TuningType unavailable; skipping CTAS sort")
+            return None
+
+        sort_columns = table_tuning.get_columns_by_type(TuningType.SORTING)
+        if not sort_columns:
+            self.logger.debug(f"No sort columns for {table_name}; skipping CTAS sort")
+            return None
+
+        return sort_columns
+
+    def _execute_ctas_sort(
+        self, table_name: str, validated_table: str, sorted_columns: list, statements: list[str], connection: Any
+    ) -> bool:
+        """Execute CTAS sort statements or capture them in dry-run mode."""
+        apply_start = mono_time()
+        if not hasattr(self, "_sorted_ingestion_applied_tables"):
+            self._sorted_ingestion_applied_tables = []
+        if not hasattr(self, "_sorted_ingestion_total_apply_seconds"):
+            self._sorted_ingestion_total_apply_seconds = 0.0
+        if self.dry_run_mode:
+            for statement in statements:
+                self.capture_sql(statement, "ctas_sort", validated_table)
+            self._sorted_ingestion_applied_tables.append(validated_table)
+            return True
+
+        for statement in statements:
+            self._execute_sql_statement(connection, statement)
+        self._sorted_ingestion_applied_tables.append(validated_table)
+        self._sorted_ingestion_total_apply_seconds += elapsed_seconds(apply_start)
+        sorted_col_names = ", ".join(column.name for column in sorted_columns)
+        self.log_verbose(f"Applied CTAS sorting to {table_name}: {sorted_col_names}")
+        return True
+
+    @staticmethod
+    def _execute_sql_statement(connection: Any, statement: str) -> None:
+        """Execute a SQL statement against execute()-style or cursor()-style connections."""
+        execute_method = getattr(connection, "execute", None)
+        if callable(execute_method):
+            execute_method(statement)
+            return
+
+        cursor_method = getattr(connection, "cursor", None)
+        if callable(cursor_method):
+            cursor = cursor_method()
+            try:
+                cursor.execute(statement)
+            finally:
+                close_method = getattr(cursor, "close", None)
+                if callable(close_method):
+                    close_method()
+            return
+
+        raise TypeError("Connection must provide execute() or cursor().execute() for CTAS sort")
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | list[str] | None:
+        """Build CTAS SQL used by apply_ctas_sort for this platform.
+
+        Platforms opt in by overriding this hook and returning SQL that rewrites
+        ``table_name`` ordered by ``sort_columns``. The default implementation
+        returns ``None``, which indicates CTAS sorting is unsupported. Adapters
+        may return either a single SQL statement or a list of statements.
+
+        ``sort_columns`` is pre-sorted by ``apply_ctas_sort`` (ascending by
+        ``column.order``). Implementations must not sort again.
+        """
+        return None
+
     @abstractmethod
     def apply_platform_optimizations(self, platform_config: PlatformOptimizationConfiguration, connection: Any) -> None:
         """Apply platform-specific optimizations.
@@ -957,7 +1248,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
         Returns:
             The unified tuning configuration, or None if no tuning is configured
         """
-        return self.unified_tuning_configuration
+        return getattr(self, "unified_tuning_configuration", None)
 
     def validate_tuning_configuration_for_platform(self) -> list[str]:
         """Validate the current tuning configuration against this platform's capabilities.
@@ -2372,6 +2663,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             "data_validation_failed": True,
             "validation_details": validation_phase.validation_details,
             "benchbox_version": "0.1.0",
+            "sorted_ingestion": self.get_sorted_ingestion_metadata(),
         }
 
         # Calculate basic metrics
@@ -2435,6 +2727,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                         status="SUCCESS" if query_result.get("success", True) else "FAILED",
                         rows_returned=query_result.get("result_count"),
                         error_message=query_result.get("error"),
+                        run_type=self._infer_query_result_run_type(query_result),
                     )
                 )
 
@@ -2518,10 +2811,185 @@ class PlatformAdapter(VerbosityMixin, ABC):
                     status=result.get("status", "UNKNOWN"),
                     rows_returned=result.get("rows_returned"),
                     error_message=result.get("error"),
+                    run_type=result.get("run_type", QUERY_RUN_TYPE_MEASUREMENT),
                 )
             )
 
         return query_executions
+
+    def _setup_reused_database_phases(self, benchmark, connection: Any) -> tuple:
+        """Set up phases when database is being reused (skip schema creation and data loading).
+
+        Returns:
+            Tuple of (schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, tuning_metadata_saved)
+        """
+        quiet_console.print("✅ Database being reused - skipping schema creation and data loading")
+        schema_time = 0.0
+        schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
+        loading_time = 0.0
+        table_stats = {}
+        if hasattr(benchmark, "get_schema"):
+            schema = benchmark.get_schema()
+            if isinstance(schema, dict):
+                self.logger.debug(f"Collecting table stats for {len(schema)} tables from reused database")
+                for table_name in schema:
+                    try:
+                        count = self.get_table_row_count(connection, table_name)
+                        table_stats[table_name] = count
+                        self.logger.debug(f"Table {table_name}: {count} rows")
+                    except Exception as e:
+                        self.logger.warning(f"Could not get row count for {table_name}: {e}")
+                        table_stats[table_name] = 0
+        data_loading_phase = self._create_enhanced_data_loading_phase(table_stats, loading_time, None)
+        tuning_metadata_saved = False
+        return schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, tuning_metadata_saved
+
+    def _setup_fresh_database_phases(self, benchmark, connection: Any, effective_tuning_config) -> tuple:
+        """Set up phases for fresh database (schema creation, tuning, data loading).
+
+        Returns:
+            Tuple of (schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, tuning_metadata_saved)
+        """
+        quiet_console.print("Creating database schema...")
+        schema_time = self.create_schema(benchmark, connection)
+        schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
+
+        tuning_metadata_saved = False
+        if self.tuning_enabled and effective_tuning_config:
+            quiet_console.print("Applying unified tuning configuration...")
+            self.apply_unified_tuning(effective_tuning_config, connection)
+            quiet_console.print("✅ Unified tuning configuration applied")
+
+            quiet_console.print("Saving tuning metadata...")
+            tuning_metadata_saved = self.save_tuning_metadata(connection)
+            if tuning_metadata_saved:
+                quiet_console.print("✅ Tuning metadata saved")
+            else:
+                quiet_console.print("⚠️ Failed to save tuning metadata")
+
+        quiet_console.print("Loading benchmark data...")
+        data_dir = Path(benchmark.output_dir) if hasattr(benchmark, "output_dir") else Path(".")
+        table_stats, loading_time, per_table_timings = self.load_data(benchmark, connection, data_dir)
+        quiet_console.print(f"✅ Data loading completed in {loading_time:.2f}s")
+        data_loading_phase = self._create_enhanced_data_loading_phase(table_stats, loading_time, per_table_timings)
+        return schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, tuning_metadata_saved
+
+    def _check_validation_failure(self, validation_phase) -> bool:
+        """Check if validation failed and log details. Returns True if validation failed."""
+        if (
+            validation_phase.row_count_validation == "FAILED"
+            or validation_phase.schema_validation == "FAILED"
+            or validation_phase.data_integrity_checks == "FAILED"
+        ):
+            quiet_console.print("❌ Data validation failed - benchmark execution halted")
+            if validation_phase.validation_details:
+                details = validation_phase.validation_details
+                if "empty_tables" in details and details["empty_tables"]:
+                    quiet_console.print(f"⚠️  Empty tables detected: {', '.join(details['empty_tables'])}")
+                if "missing_tables" in details and details["missing_tables"]:
+                    quiet_console.print(f"⚠️  Missing tables: {', '.join(details['missing_tables'])}")
+                if "inaccessible_tables" in details and details["inaccessible_tables"]:
+                    quiet_console.print(f"⚠️  Inaccessible tables: {', '.join(details['inaccessible_tables'])}")
+            return True
+        return False
+
+    def _build_execution_phases(self, query_results, query_executions, run_config, setup_phase) -> tuple:
+        """Build power/throughput test phases and return execution phases with metrics.
+
+        Returns:
+            Tuple of (execution_phases, total_exec_time)
+        """
+        from datetime import datetime
+
+        successful_queries = len([r for r in query_results if r["status"] == "SUCCESS"])
+        total_exec_time = sum(r["execution_time_seconds"] for r in query_results if r["status"] == "SUCCESS")
+        avg_time = total_exec_time / max(successful_queries, 1)
+
+        if self.capture_plans:
+            total_queries_executed = len(query_results)
+            summary_message = f"Query plans: {self.query_plans_captured}/{total_queries_executed} captured"
+            if self.plan_capture_failures:
+                summary_message = f"{summary_message}, {self.plan_capture_failures} failed"
+            log_fn = self.logger.warning if self.plan_capture_failures else self.logger.info
+            log_fn(summary_message)
+
+        execution_type = run_config.get("test_execution_type", "standard")
+
+        power_at_size_value = 0.0
+        if getattr(self, "_last_power_test_result", None) is not None:
+            power_at_size_value = getattr(self._last_power_test_result, "power_at_size", 0.0) or 0.0
+            self._last_power_test_result = None
+
+        power_test_phase = None
+        if execution_type not in {"throughput"}:
+            power_test_phase = PowerTestPhase(
+                start_time=datetime.now().isoformat(),
+                end_time=datetime.now().isoformat(),
+                duration_ms=int(total_exec_time * 1000),
+                query_executions=query_executions,
+                geometric_mean_time=avg_time,
+                power_at_size=power_at_size_value,
+            )
+
+        throughput_test_phase = None
+        if getattr(self, "_last_throughput_test_result", None) is not None:
+            throughput_test_phase = self._create_throughput_phase(self._last_throughput_test_result)
+            self._last_throughput_test_result = None
+
+        execution_phases = ExecutionPhases(
+            setup=setup_phase,
+            power_test=power_test_phase,
+            throughput_test=throughput_test_phase,
+        )
+        return execution_phases, total_exec_time, power_test_phase, throughput_test_phase
+
+    def _build_execution_metadata(self, run_config: dict) -> tuple:
+        """Build execution metadata and system profile.
+
+        Returns:
+            Tuple of (execution_metadata, system_profile, anonymous_machine_id)
+        """
+        try:
+            from benchbox.core.results.anonymization import (
+                AnonymizationConfig,
+                AnonymizationManager,
+            )
+            from benchbox.utils.system_info import get_system_info
+
+            anonymization_manager = AnonymizationManager(AnonymizationConfig())
+            system_info = get_system_info()
+            system_profile = system_info.to_dict()
+            anonymous_machine_id = anonymization_manager.get_anonymous_machine_id()
+        except ImportError:
+            system_profile = None
+            anonymous_machine_id = None
+
+        execution_metadata = {
+            "benchmark_type": run_config.get("benchmark_type", "olap"),
+            "query_subset": run_config.get("query_subset"),
+            "categories": run_config.get("categories"),
+            "connection_config_hash": self._hash_connection_config(run_config.get("connection", {})),
+            "python_version": platform.python_version(),
+            "benchbox_version": "0.1.0",
+            "mode": "sql",
+            "benchmark_id": run_config.get("benchmark") or run_config.get("benchmark_name"),
+            "run_config": {
+                "compression": {
+                    "type": run_config.get("compression_type"),
+                    "level": run_config.get("compression_level"),
+                }
+                if run_config.get("compression_type")
+                else None,
+                "seed": run_config.get("seed"),
+                "phases": run_config.get("phases"),
+                "query_subset": run_config.get("query_subset"),
+                "platform_options": run_config.get("platform_options"),
+                "tuning_mode": run_config.get("tuning_mode"),
+                "tuning_config": run_config.get("tuning_config"),
+            },
+            "sorted_ingestion": self.get_sorted_ingestion_metadata(),
+        }
+        return execution_metadata, system_profile, anonymous_machine_id
 
     def run_enhanced_benchmark(self, benchmark, **run_config) -> EnhancedBenchmarkResults:
         """Run complete benchmark with enhanced phase tracking."""
@@ -2538,20 +3006,8 @@ class PlatformAdapter(VerbosityMixin, ABC):
             self.plan_capture_timeout_seconds = int(run_config.get("plan_capture_timeout_seconds"))
 
         try:
-            # Step 1: Data generation phase
+            # Step 1: Data generation phase (handled by run_benchmark_lifecycle before this call)
             data_generation_phase = self._create_enhanced_data_generation_phase(benchmark)
-
-            # Ensure data exists (generate if needed)
-            has_tables = getattr(benchmark, "tables", None) or getattr(
-                getattr(benchmark, "_impl", None), "tables", None
-            )
-            if not has_tables:
-                quiet_console.print("Generating benchmark data...")
-                data_gen_start = mono_time()
-                benchmark.generate_data()
-                quiet_console.print(f"✅ Data generation completed in {elapsed_seconds(data_gen_start):.2f}s")
-                # Refresh data generation phase with actual generation
-                data_generation_phase = self._create_enhanced_data_generation_phase(benchmark)
 
             # Step 2: Create connection
             quiet_console.print(f"Connecting to {self.platform_name}...")
@@ -2569,87 +3025,38 @@ class PlatformAdapter(VerbosityMixin, ABC):
                     raise ValueError(f"Invalid tuning configuration: {'; '.join(tuning_errors)}")
                 quiet_console.print("✅ Unified tuning configuration validated")
 
-            # Step 4: Schema creation phase
+            # Step 4: Schema creation and data loading
             self.log_verbose(f"Checking database_was_reused flag before schema creation: {self.database_was_reused}")
             if self.database_was_reused:
-                quiet_console.print("✅ Database being reused - skipping schema creation and data loading")
-                schema_time = 0.0
-                schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
-                loading_time = 0.0
-                # Get existing table stats for display
-                table_stats = {}
-                if hasattr(benchmark, "get_schema"):
-                    schema = benchmark.get_schema()
-                    if isinstance(schema, dict):
-                        self.logger.debug(f"Collecting table stats for {len(schema)} tables from reused database")
-                        for table_name in schema:
-                            try:
-                                count = self.get_table_row_count(connection, table_name)
-                                table_stats[table_name] = count
-                                self.logger.debug(f"Table {table_name}: {count} rows")
-                            except Exception as e:
-                                self.logger.warning(f"Could not get row count for {table_name}: {e}")
-                                table_stats[table_name] = 0
-                data_loading_phase = self._create_enhanced_data_loading_phase(table_stats, loading_time, None)
-                tuning_metadata_saved = False  # Skip tuning for reused databases
+                (
+                    schema_time,
+                    schema_creation_phase,
+                    loading_time,
+                    table_stats,
+                    data_loading_phase,
+                    tuning_metadata_saved,
+                ) = self._setup_reused_database_phases(benchmark, connection)
             else:
-                quiet_console.print("Creating database schema...")
-                schema_time = self.create_schema(benchmark, connection)
-                schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
+                (
+                    schema_time,
+                    schema_creation_phase,
+                    loading_time,
+                    table_stats,
+                    data_loading_phase,
+                    tuning_metadata_saved,
+                ) = self._setup_fresh_database_phases(benchmark, connection, effective_tuning_config)
 
-                # Step 5: Apply tunings if enabled
-                tuning_metadata_saved = False
-                if self.tuning_enabled and effective_tuning_config:
-                    quiet_console.print("Applying unified tuning configuration...")
-                    self.apply_unified_tuning(effective_tuning_config, connection)
-                    quiet_console.print("✅ Unified tuning configuration applied")
-
-                    # Save tuning metadata for future validation
-                    quiet_console.print("Saving tuning metadata...")
-                    tuning_metadata_saved = self.save_tuning_metadata(connection)
-                    if tuning_metadata_saved:
-                        quiet_console.print("✅ Tuning metadata saved")
-                    else:
-                        quiet_console.print("⚠️ Failed to save tuning metadata")
-
-                # Step 6: Data loading phase
-                quiet_console.print("Loading benchmark data...")
-                data_dir = Path(benchmark.output_dir) if hasattr(benchmark, "output_dir") else Path(".")
-                table_stats, loading_time, per_table_timings = self.load_data(benchmark, connection, data_dir)
-                quiet_console.print(f"✅ Data loading completed in {loading_time:.2f}s")
-                data_loading_phase = self._create_enhanced_data_loading_phase(
-                    table_stats, loading_time, per_table_timings
-                )
-
-            # Step 7: Validation phase
+            # Step 5: Validation phase
             quiet_console.print("Validating benchmark data...")
             validation_phase = self._create_enhanced_validation_phase(benchmark, connection, table_stats)
 
-            # Prepare tuning information early (before potential validation failure)
             tunings_applied_dict = None
             tuning_validation_status = "NOT_APPLICABLE"
-
             if self.tuning_enabled and effective_tuning_config:
                 tunings_applied_dict = effective_tuning_config.to_dict()
                 tuning_validation_status = "APPLIED" if tuning_metadata_saved else "FAILED_TO_SAVE"
 
-            # Check if validation failed - if so, stop execution
-            if (
-                validation_phase.row_count_validation == "FAILED"
-                or validation_phase.schema_validation == "FAILED"
-                or validation_phase.data_integrity_checks == "FAILED"
-            ):
-                quiet_console.print("❌ Data validation failed - benchmark execution halted")
-                if validation_phase.validation_details:
-                    details = validation_phase.validation_details
-                    if "empty_tables" in details and details["empty_tables"]:
-                        quiet_console.print(f"⚠️  Empty tables detected: {', '.join(details['empty_tables'])}")
-                    if "missing_tables" in details and details["missing_tables"]:
-                        quiet_console.print(f"⚠️  Missing tables: {', '.join(details['missing_tables'])}")
-                    if "inaccessible_tables" in details and details["inaccessible_tables"]:
-                        quiet_console.print(f"⚠️  Inaccessible tables: {', '.join(details['inaccessible_tables'])}")
-
-                # Create a failed benchmark result
+            if self._check_validation_failure(validation_phase):
                 return self._create_failed_benchmark_result(
                     benchmark,
                     validation_phase,
@@ -2664,40 +3071,24 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
             quiet_console.print("✅ Data validation passed")
 
-            # Step 8: Apply optimizations
+            # Step 6: Apply optimizations and execute queries
             benchmark_type = run_config.get("benchmark_type", "olap")
             self.configure_for_benchmark(connection, benchmark_type)
 
-            # Step 9: Execute queries based on test execution type
             test_execution_type = run_config.get("test_execution_type", "standard")
             quiet_console.print(f"Executing benchmark queries ({test_execution_type} mode)...")
             self._last_throughput_test_result = None
             query_results = self._execute_queries_by_type(benchmark, connection, run_config)
 
             # Get queries for definitions
-            if hasattr(self, "get_target_dialect") and hasattr(benchmark, "get_queries"):
-                try:
-                    import inspect
-
-                    sig = inspect.signature(benchmark.get_queries)
-                    if "dialect" in sig.parameters:
-                        queries = benchmark.get_queries(dialect=self.get_target_dialect())
-                    else:
-                        queries = benchmark.get_queries()
-                except Exception:
-                    queries = benchmark.get_queries()
-            else:
-                queries = benchmark.get_queries()
-
-            # Create query definitions and executions
+            queries = self._get_dialect_queries(benchmark)
             stream_id = "standard"
             self._extract_query_definitions(benchmark, queries, stream_id)
             query_executions = self._create_standard_execution_phase(query_results, stream_id)
 
-            # Step 10: Compile enhanced results
+            # Step 7: Compile enhanced results
             total_duration = elapsed_seconds(start_time)
 
-            # Create setup phase
             setup_phase = SetupPhase(
                 data_generation=data_generation_phase,
                 schema_creation=schema_creation_phase,
@@ -2705,104 +3096,16 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 validation=validation_phase,
             )
 
-            # Calculate summary metrics first
-            successful_queries = len([r for r in query_results if r["status"] == "SUCCESS"])
-            total_exec_time = sum(r["execution_time_seconds"] for r in query_results if r["status"] == "SUCCESS")
-            avg_time = total_exec_time / max(successful_queries, 1)
-            if self.capture_plans:
-                total_queries_executed = len(query_results)
-                summary_message = f"Query plans: {self.query_plans_captured}/{total_queries_executed} captured"
-                if self.plan_capture_failures:
-                    summary_message = f"{summary_message}, {self.plan_capture_failures} failed"
-                log_fn = self.logger.warning if self.plan_capture_failures else self.logger.info
-                log_fn(summary_message)
-
-            # Create power/throughput test phases based on execution mode
-            from datetime import datetime
-
-            execution_type = run_config.get("test_execution_type", "standard")
-
-            # Extract cached power test metrics
-            power_at_size_value = 0.0
-            if getattr(self, "_last_power_test_result", None) is not None:
-                power_at_size_value = getattr(self._last_power_test_result, "power_at_size", 0.0) or 0.0
-                self._last_power_test_result = None
-
-            power_test_phase = None
-            if execution_type not in {"throughput"}:
-                power_test_phase = PowerTestPhase(
-                    start_time=datetime.now().isoformat(),
-                    end_time=datetime.now().isoformat(),
-                    duration_ms=int(total_exec_time * 1000),
-                    query_executions=query_executions,
-                    geometric_mean_time=avg_time,
-                    power_at_size=power_at_size_value,
-                )
-
-            throughput_test_phase = None
-            if getattr(self, "_last_throughput_test_result", None) is not None:
-                throughput_test_phase = self._create_throughput_phase(self._last_throughput_test_result)
-                self._last_throughput_test_result = None
-
-            # Create execution phases
-            execution_phases = ExecutionPhases(
-                setup=setup_phase,
-                power_test=power_test_phase,
-                throughput_test=throughput_test_phase,
+            execution_phases, total_exec_time, power_test_phase, throughput_test_phase = self._build_execution_phases(
+                query_results, query_executions, run_config, setup_phase
             )
 
-            # Collect platform info
             platform_info = self.get_platform_info(connection)
+            execution_metadata, system_profile, anonymous_machine_id = self._build_execution_metadata(run_config)
 
-            # Tuning information already prepared earlier
-
-            # Get system profile and execution metadata
-            try:
-                from benchbox.core.results.anonymization import (
-                    AnonymizationConfig,
-                    AnonymizationManager,
-                )
-                from benchbox.utils.system_info import get_system_info
-
-                anonymization_manager = AnonymizationManager(AnonymizationConfig())
-                system_info = get_system_info()
-                # Convert to dict for compatibility
-                system_profile = system_info.to_dict()
-                anonymous_machine_id = anonymization_manager.get_anonymous_machine_id()
-            except ImportError:
-                system_profile = None
-                anonymous_machine_id = None
-
-            execution_metadata = {
-                "benchmark_type": run_config.get("benchmark_type", "olap"),
-                "query_subset": run_config.get("query_subset"),
-                "categories": run_config.get("categories"),
-                "connection_config_hash": self._hash_connection_config(run_config.get("connection", {})),
-                "python_version": platform.python_version(),
-                "benchbox_version": "0.1.0",
-                "mode": "sql",
-                "benchmark_id": run_config.get("benchmark") or run_config.get("benchmark_name"),
-                "run_config": {
-                    "compression": {
-                        "type": run_config.get("compression_type"),
-                        "level": run_config.get("compression_level"),
-                    }
-                    if run_config.get("compression_type")
-                    else None,
-                    "seed": run_config.get("seed"),
-                    "phases": run_config.get("phases"),
-                    "query_subset": run_config.get("query_subset"),
-                    "platform_options": run_config.get("platform_options"),
-                    "tuning_mode": run_config.get("tuning_mode"),
-                    "tuning_config": run_config.get("tuning_config"),
-                },
-            }
-
-            # Calculate additional metrics needed
             total_rows_loaded = sum(table_stats.values()) if table_stats else 0
             data_size_mb = self._calculate_data_size(benchmark.output_dir) if hasattr(benchmark, "output_dir") else 0.0
 
-            # Use centralized benchmark result creation method
             resource_snapshot = self._collect_resource_utilization()
             performance_summary = self._summarize_performance_characteristics(
                 query_results=query_results,
@@ -2810,16 +3113,22 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 total_rows_loaded=total_rows_loaded,
             )
 
-            # Extract TPC metrics from phases for result propagation
             power_at_size = power_test_phase.power_at_size if power_test_phase else None
             throughput_at_size = throughput_test_phase.throughput_at_size if throughput_test_phase else None
 
-            # Calculate composite metric if both power and throughput are available
             import math
 
             qph_at_size = None
             if power_at_size and power_at_size > 0 and throughput_at_size and throughput_at_size > 0:
                 qph_at_size = math.sqrt(power_at_size * throughput_at_size)
+
+            execution_type = run_config.get("test_execution_type", "standard")
+
+            _plans_captured, _failures, _plan_errors = compute_plan_capture_stats(
+                query_results,
+                self.capture_plans,
+                existing_errors=list(self.plan_capture_errors),
+            )
 
             return benchmark.create_enhanced_benchmark_result(
                 platform=self.platform_name,
@@ -2828,10 +3137,9 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 phases=execution_phases,
                 resource_utilization=resource_snapshot,
                 performance_characteristics=performance_summary,
-                query_plans_captured=self.query_plans_captured,
-                plan_capture_failures=self.plan_capture_failures,
-                plan_capture_errors=list(self.plan_capture_errors),
-                # Override defaults with platform-specific data
+                query_plans_captured=_plans_captured,
+                plan_capture_failures=_failures,
+                plan_capture_errors=_plan_errors,
                 execution_id=execution_id,
                 duration_seconds=total_duration,
                 data_loading_time=loading_time,
@@ -2847,7 +3155,6 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 anonymous_machine_id=anonymous_machine_id,
                 validation_status=self._determine_overall_validation_status(validation_phase),
                 validation_details=validation_phase.validation_details,
-                # TPC metrics
                 power_at_size=power_at_size,
                 throughput_at_size=throughput_at_size,
                 qph_at_size=qph_at_size,
@@ -2876,16 +3183,44 @@ class PlatformAdapter(VerbosityMixin, ABC):
         test_execution_type = run_config.get("test_execution_type", "standard")
 
         if test_execution_type == "power":
-            return self._execute_power_test(benchmark, connection, run_config)
+            return self._ensure_query_results_run_type(self._execute_power_test(benchmark, connection, run_config))
         elif test_execution_type == "throughput":
-            return self._execute_throughput_test(benchmark, connection, run_config)
+            return self._ensure_query_results_run_type(self._execute_throughput_test(benchmark, connection, run_config))
         elif test_execution_type == "maintenance":
-            return self._execute_maintenance_test(benchmark, connection, run_config)
+            return self._ensure_query_results_run_type(
+                self._execute_maintenance_test(benchmark, connection, run_config)
+            )
         elif test_execution_type == "combined":
-            return self._execute_combined_test(benchmark, connection, run_config)
+            return self._ensure_query_results_run_type(self._execute_combined_test(benchmark, connection, run_config))
         else:
             # Standard execution
-            return self._execute_all_queries(benchmark, connection, run_config)
+            return self._ensure_query_results_run_type(self._execute_all_queries(benchmark, connection, run_config))
+
+    @staticmethod
+    def _infer_query_result_run_type(result: dict[str, Any]) -> str:
+        """Infer run_type for compatibility when producer output is incomplete."""
+        explicit_run_type = result.get("run_type")
+        if explicit_run_type:
+            return str(explicit_run_type)
+
+        if result.get("is_warmup"):
+            return QUERY_RUN_TYPE_WARMUP
+
+        iteration = result.get("iteration")
+        if iteration is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                if int(iteration) == 0:
+                    return QUERY_RUN_TYPE_WARMUP
+
+        return QUERY_RUN_TYPE_MEASUREMENT
+
+    @staticmethod
+    def _ensure_query_results_run_type(query_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Ensure all query result rows include explicit run_type."""
+        for result in query_results:
+            if isinstance(result, dict) and ("run_type" not in result or not result.get("run_type")):
+                result["run_type"] = PlatformAdapter._infer_query_result_run_type(result)
+        return query_results
 
     def _execute_power_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
         """Execute Power Test with warmup + iterations for all benchmarks.
@@ -2962,8 +3297,15 @@ class PlatformAdapter(VerbosityMixin, ABC):
             return self._execute_all_queries(benchmark, connection, run_config)
 
     def _execute_combined_test(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
-        """Execute combined TPC test (Power + Throughput + Maintenance)."""
+        """Execute requested combined TPC phases.
+
+        Defaults to all query phases (power, throughput, maintenance) when no
+        explicit phase list is provided.
+        """
         console = quiet_console
+        requested_phases = set((run_config.get("options") or {}).get("requested_phases") or [])
+        if not requested_phases:
+            requested_phases = {"power", "throughput", "maintenance"}
 
         # Detect benchmark type and route to appropriate implementation
         benchmark_name = getattr(benchmark, "_name", type(benchmark).__name__.lower())
@@ -2977,47 +3319,53 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 benchmark_name = "tpcds"
 
         if "tpcds" in benchmark_name.lower():
-            console.print("[blue]Running combined TPC-DS test (Power + Throughput + Maintenance)[/blue]")
+            console.print("[blue]Running combined TPC-DS test[/blue]")
 
             # Execute each test phase
             all_results = []
 
             # Phase 1: Power Test
-            console.print("[cyan]Phase 1: Power Test[/cyan]")
-            power_results = self._execute_tpcds_power_test(benchmark, connection, run_config)
-            all_results.extend(power_results)
+            if "power" in requested_phases:
+                console.print("[cyan]Phase: Power Test[/cyan]")
+                power_results = self._execute_tpcds_power_test(benchmark, connection, run_config)
+                all_results.extend(power_results)
 
             # Phase 2: Throughput Test
-            console.print("[cyan]Phase 2: Throughput Test[/cyan]")
-            throughput_results = self._execute_tpcds_throughput_test(benchmark, connection, run_config)
-            all_results.extend(throughput_results)
+            if "throughput" in requested_phases:
+                console.print("[cyan]Phase: Throughput Test[/cyan]")
+                throughput_results = self._execute_tpcds_throughput_test(benchmark, connection, run_config)
+                all_results.extend(throughput_results)
 
             # Phase 3: Maintenance Test
-            console.print("[cyan]Phase 3: Maintenance Test[/cyan]")
-            maintenance_results = self._execute_tpcds_maintenance_test(benchmark, connection, run_config)
-            all_results.extend(maintenance_results)
+            if "maintenance" in requested_phases:
+                console.print("[cyan]Phase: Maintenance Test[/cyan]")
+                maintenance_results = self._execute_tpcds_maintenance_test(benchmark, connection, run_config)
+                all_results.extend(maintenance_results)
 
             return all_results
         elif "tpch" in benchmark_name.lower():
-            console.print("[blue]Running combined TPC-H test (Power + Throughput + Maintenance)[/blue]")
+            console.print("[blue]Running combined TPC-H test[/blue]")
 
             # Execute each test phase
             all_results = []
 
             # Phase 1: Power Test
-            console.print("[cyan]Phase 1: Power Test[/cyan]")
-            power_results = self._execute_tpch_power_test(benchmark, connection, run_config)
-            all_results.extend(power_results)
+            if "power" in requested_phases:
+                console.print("[cyan]Phase: Power Test[/cyan]")
+                power_results = self._execute_tpch_power_test(benchmark, connection, run_config)
+                all_results.extend(power_results)
 
             # Phase 2: Throughput Test
-            console.print("[cyan]Phase 2: Throughput Test[/cyan]")
-            throughput_results = self._execute_tpch_throughput_test(benchmark, connection, run_config)
-            all_results.extend(throughput_results)
+            if "throughput" in requested_phases:
+                console.print("[cyan]Phase: Throughput Test[/cyan]")
+                throughput_results = self._execute_tpch_throughput_test(benchmark, connection, run_config)
+                all_results.extend(throughput_results)
 
             # Phase 3: Maintenance Test
-            console.print("[cyan]Phase 3: Maintenance Test[/cyan]")
-            maintenance_results = self._execute_tpch_maintenance_test(benchmark, connection, run_config)
-            all_results.extend(maintenance_results)
+            if "maintenance" in requested_phases:
+                console.print("[cyan]Phase: Maintenance Test[/cyan]")
+                maintenance_results = self._execute_tpch_maintenance_test(benchmark, connection, run_config)
+                all_results.extend(maintenance_results)
 
             return all_results
         else:
@@ -3025,44 +3373,35 @@ class PlatformAdapter(VerbosityMixin, ABC):
             console.print("[yellow]  Falling back to standard query execution[/yellow]")
             return self._execute_all_queries(benchmark, connection, run_config)
 
-    def _execute_all_queries(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
-        """Execute all benchmark queries and collect results."""
-
-        console = quiet_console
-
-        # Get queries with platform-specific dialect translation if supported
+    def _get_dialect_queries(self, benchmark) -> dict:
+        """Get queries with platform-specific dialect translation if supported."""
         if hasattr(self, "get_target_dialect") and hasattr(benchmark, "get_queries"):
             try:
-                # Check if benchmark supports dialect and base_dialect parameters
                 import inspect
 
                 sig = inspect.signature(benchmark.get_queries)
                 params = sig.parameters
                 target = self.get_target_dialect()
 
-                # Detect benchmark family for base dialect selection
                 bname = getattr(benchmark, "_name", type(benchmark).__name__).lower()
                 bench_family = "tpcds" if "tpcds" in bname else ("tpch" if "tpch" in bname else "generic")
                 base = self.get_tpc_base_dialect(bench_family)
 
                 if "dialect" in params and "base_dialect" in params:
-                    queries = benchmark.get_queries(dialect=target, base_dialect=base)
+                    return benchmark.get_queries(dialect=target, base_dialect=base)
                 elif "dialect" in params:
-                    queries = benchmark.get_queries(dialect=target)
+                    return benchmark.get_queries(dialect=target)
                 else:
-                    queries = benchmark.get_queries()
+                    return benchmark.get_queries()
             except Exception:
-                queries = benchmark.get_queries()
-        else:
-            queries = benchmark.get_queries()
+                return benchmark.get_queries()
+        return benchmark.get_queries()
 
-        results = []
-        benchmark_name = benchmark._name if hasattr(benchmark, "_name") else type(benchmark).__name__
-
+    def _filter_queries(self, queries: dict, benchmark, benchmark_name: str, run_config: dict) -> dict:
+        """Filter queries by subset or category from run_config."""
         query_subset = run_config.get("query_subset")
         categories = run_config.get("categories")
 
-        # Validate that query_subset and categories are not both specified (conflict)
         if query_subset and categories:
             raise ValueError(
                 "Cannot specify both 'query_subset' and 'categories'. "
@@ -3071,42 +3410,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
 
         try:
             if query_subset:
-                # Validate query IDs against available queries
-                invalid_queries = []
-                for i, query_id in enumerate(query_subset):
-                    query_id_str = str(query_id)
-                    if query_id_str not in queries and query_id not in queries:
-                        invalid_queries.append(query_id_str)
-                    # Memory leak protection: limit validation errors to 10
-                    if len(invalid_queries) >= 10:
-                        remaining = len(query_subset) - i - 1
-                        if remaining > 0:
-                            invalid_queries.append(f"...and {remaining} more")
-                        break
-
-                if invalid_queries:
-                    available_queries = sorted(str(k) for k in queries.keys())
-                    # Limit displayed available queries for readability
-                    if len(available_queries) > 20:
-                        available_display = ", ".join(available_queries[:20]) + ", ..."
-                    else:
-                        available_display = ", ".join(available_queries)
-                    raise ValueError(
-                        f"Invalid query IDs specified: {', '.join(invalid_queries)}. "
-                        f"Available queries for {benchmark_name}: {available_display}"
-                    )
-
-                # Filter queries while preserving user-specified order
-                ordered_queries = {}
-                for query_id in query_subset:
-                    query_id_str = str(query_id)
-                    # Try both string and original format as keys
-                    if query_id_str in queries:
-                        ordered_queries[query_id_str] = queries[query_id_str]
-                    elif query_id in queries:
-                        ordered_queries[query_id] = queries[query_id]
-                queries = ordered_queries
-
+                queries = self._apply_query_subset(queries, query_subset, benchmark_name)
             elif categories:
                 filtered_queries = {}
                 for category in categories:
@@ -3114,11 +3418,146 @@ class PlatformAdapter(VerbosityMixin, ABC):
                         cat_queries = benchmark.get_queries_by_category(category)
                         filtered_queries.update(cat_queries)
                 queries = filtered_queries
-
         except ValueError as e:
-            # Re-raise ValueError with better context for debugging
             raise RuntimeError(f"Query filtering failed: {e}") from e
 
+        return queries
+
+    def _apply_query_subset(self, queries: dict, query_subset: list, benchmark_name: str) -> dict:
+        """Validate and apply query subset filtering while preserving user-specified order."""
+        invalid_queries = []
+        for i, query_id in enumerate(query_subset):
+            query_id_str = str(query_id)
+            if query_id_str not in queries and query_id not in queries:
+                invalid_queries.append(query_id_str)
+            if len(invalid_queries) >= 10:
+                remaining = len(query_subset) - i - 1
+                if remaining > 0:
+                    invalid_queries.append(f"...and {remaining} more")
+                break
+
+        if invalid_queries:
+            available_queries = sorted(str(k) for k in queries.keys())
+            if len(available_queries) > 20:
+                available_display = ", ".join(available_queries[:20]) + ", ..."
+            else:
+                available_display = ", ".join(available_queries)
+            raise ValueError(
+                f"Invalid query IDs specified: {', '.join(invalid_queries)}. "
+                f"Available queries for {benchmark_name}: {available_display}"
+            )
+
+        ordered_queries = {}
+        for query_id in query_subset:
+            query_id_str = str(query_id)
+            if query_id_str in queries:
+                ordered_queries[query_id_str] = queries[query_id_str]
+            elif query_id in queries:
+                ordered_queries[query_id] = queries[query_id]
+        return ordered_queries
+
+    def _execute_single_query(self, benchmark, connection: Any, query_id: str, query_sql: str) -> dict[str, Any]:
+        """Execute a single query or operation and return the result dict."""
+        if isinstance(benchmark, OperationExecutor):
+            return self._execute_operation_query(benchmark, connection, query_id)
+
+        benchmark_type = self._get_benchmark_type(benchmark)
+        scale_factor = getattr(benchmark, "scale_factor", None)
+        return self.execute_query(
+            connection,
+            query_sql,
+            query_id,
+            benchmark_type=benchmark_type,
+            scale_factor=scale_factor,
+            validate_row_count=self.enable_validation,
+        )
+
+    def _execute_operation_query(self, benchmark, connection: Any, query_id: str) -> dict[str, Any]:
+        """Execute a benchmark operation (INSERT/UPDATE/DELETE) and return result dict."""
+        op_kwargs: dict[str, Any] = {}
+        op_kwargs["platform_key"] = self.get_target_dialect()
+
+        if hasattr(self, "preprocess_operation_sql") and hasattr(benchmark, "get_operation"):
+            operation = benchmark.get_operation(str(query_id))
+            preprocessed = self.preprocess_operation_sql(str(query_id), operation)
+            if preprocessed is not None:
+                op_kwargs["sql_override"] = preprocessed
+
+        op_result = benchmark.execute_operation(query_id, connection, **op_kwargs)
+        op_status = getattr(op_result, "status", None) or ("SUCCESS" if op_result.success else "FAILED")
+
+        return {
+            "query_id": str(query_id),
+            "status": op_status,
+            "execution_time_seconds": op_result.write_duration_ms / 1000.0,
+            "rows_returned": op_result.rows_affected if op_result.rows_affected > 0 else 0,
+            "error": op_result.error,
+            "validation_time": op_result.validation_duration_ms / 1000.0,
+            "validation_passed": op_result.validation_passed,
+            "cleanup_time": op_result.cleanup_duration_ms / 1000.0,
+        }
+
+    def _log_query_result(self, result: dict[str, Any], index: int, total: int, query_id: str) -> None:
+        """Log the result of a single query execution to console."""
+        console = quiet_console
+        status = result.get("status", "SUCCESS")
+
+        if status == "FAILED":
+            error_msg = result.get("error", "Unknown error")
+            error_preview = error_msg[:80] + "..." if len(error_msg) > 80 else error_msg
+            console.print(f"[red]❌ Query {index}/{total}: {query_id} FAILED - {error_preview}[/red]")
+        elif status == "SKIPPED":
+            skip_reason = result.get("error", "Operation not supported on this platform")
+            reason_preview = skip_reason[:80] + "..." if len(skip_reason) > 80 else skip_reason
+            console.print(f"[yellow]⏭️ Query {index}/{total}: {query_id} SKIPPED - {reason_preview}[/yellow]")
+        else:
+            execution_time = result.get("execution_time_seconds", 0)
+            rows_returned = result.get("rows_returned", 0)
+            time_display = self._format_execution_time(execution_time)
+            validation_status = result.get("row_count_validation_status")
+
+            if validation_status == "PASSED":
+                console.print(
+                    f"[green]✅ Query {index}/{total}: {query_id} completed in {time_display} ({rows_returned:,} rows) [validation: PASSED][/green]"
+                )
+            elif validation_status == "SKIPPED":
+                console.print(
+                    f"[green]✅ Query {index}/{total}: {query_id} completed in {time_display} ({rows_returned:,} rows) [validation: SKIPPED][/green]"
+                )
+            else:
+                console.print(
+                    f"[green]✅ Query {index}/{total}: {query_id} completed in {time_display} ({rows_returned:,} rows)[/green]"
+                )
+
+    def _log_execution_summary(self, results: list[dict[str, Any]], total_queries: int, cancelled: bool) -> None:
+        """Log the final execution summary to console."""
+        console = quiet_console
+        if cancelled:
+            console.print(f"[yellow]Benchmark cancelled. Processed {len(results)}/{total_queries} queries.[/yellow]")
+            return
+
+        successful = len([r for r in results if r.get("status") == "SUCCESS"])
+        skipped = len([r for r in results if r.get("status") == "SKIPPED"])
+        failed = len([r for r in results if r.get("status") == "FAILED"])
+        if failed > 0:
+            console.print(
+                f"[yellow]Completed {total_queries} queries: {successful} passed, {skipped} skipped, {failed} failed.[/yellow]"
+            )
+        elif skipped > 0:
+            console.print(f"[green]Completed {total_queries} queries: {successful} passed, {skipped} skipped.[/green]")
+        else:
+            console.print(f"[green]Completed all {total_queries} queries.[/green]")
+
+    def _execute_all_queries(self, benchmark, connection: Any, run_config: dict) -> list[dict[str, Any]]:
+        """Execute all benchmark queries and collect results."""
+
+        console = quiet_console
+
+        queries = self._get_dialect_queries(benchmark)
+        benchmark_name = benchmark._name if hasattr(benchmark, "_name") else type(benchmark).__name__
+        queries = self._filter_queries(queries, benchmark, benchmark_name, run_config)
+
+        results = []
         total_queries = len(queries)
 
         # Set up cancellation handler
@@ -3147,86 +3586,13 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 console.print(f"[blue]Executing query {i}/{total_queries}: {query_id}[/blue]")
 
                 try:
-                    # Check if benchmark implements OperationExecutor interface
-                    # This is for benchmarks that execute discrete operations (INSERT/UPDATE/DELETE/etc.)
-                    # rather than just read-only queries
-                    if isinstance(benchmark, OperationExecutor):
-                        # Build kwargs for operation execution
-                        op_kwargs: dict[str, Any] = {}
-                        op_kwargs["platform_key"] = self.get_target_dialect()
+                    result = self._execute_single_query(benchmark, connection, query_id, query_sql)
 
-                        # Allow adapter subclasses to preprocess operation SQL
-                        if hasattr(self, "preprocess_operation_sql") and hasattr(benchmark, "get_operation"):
-                            operation = benchmark.get_operation(str(query_id))
-                            preprocessed = self.preprocess_operation_sql(str(query_id), operation)
-                            if preprocessed is not None:
-                                op_kwargs["sql_override"] = preprocessed
-
-                        op_result = benchmark.execute_operation(query_id, connection, **op_kwargs)
-                        op_status = getattr(op_result, "status", None) or ("SUCCESS" if op_result.success else "FAILED")
-
-                        # Convert OperationResult to standard query result format
-                        result = {
-                            "query_id": str(query_id),
-                            "status": op_status,
-                            "execution_time_seconds": op_result.write_duration_ms / 1000.0,  # Convert to seconds
-                            "rows_returned": op_result.rows_affected if op_result.rows_affected > 0 else 0,
-                            "error": op_result.error,
-                            "validation_time": op_result.validation_duration_ms / 1000.0,
-                            "validation_passed": op_result.validation_passed,
-                            "cleanup_time": op_result.cleanup_duration_ms / 1000.0,
-                        }
-                    else:
-                        # Standard query execution
-                        # Extract benchmark metadata for row count validation
-                        benchmark_type = self._get_benchmark_type(benchmark)
-                        scale_factor = getattr(benchmark, "scale_factor", None)
-
-                        result = self.execute_query(
-                            connection,
-                            query_sql,
-                            query_id,
-                            benchmark_type=benchmark_type,
-                            scale_factor=scale_factor,
-                            validate_row_count=self.enable_validation,
-                        )
+                    if "run_type" not in result or not result.get("run_type"):
+                        result["run_type"] = QUERY_RUN_TYPE_MEASUREMENT
 
                     results.append(result)
-
-                    # Show result with appropriate color based on status
-                    execution_time = result.get("execution_time_seconds", 0)
-                    rows_returned = result.get("rows_returned", 0)
-                    time_display = self._format_execution_time(execution_time)
-                    status = result.get("status", "SUCCESS")
-                    validation_status = result.get("row_count_validation_status")
-
-                    # Check if query or validation failed
-                    if status == "FAILED":
-                        error_msg = result.get("error", "Unknown error")
-                        # Truncate error message for console display
-                        error_preview = error_msg[:80] + "..." if len(error_msg) > 80 else error_msg
-                        console.print(f"[red]❌ Query {i}/{total_queries}: {query_id} FAILED - {error_preview}[/red]")
-                    elif status == "SKIPPED":
-                        skip_reason = result.get("error", "Operation not supported on this platform")
-                        reason_preview = skip_reason[:80] + "..." if len(skip_reason) > 80 else skip_reason
-                        console.print(
-                            f"[yellow]⏭️ Query {i}/{total_queries}: {query_id} SKIPPED - {reason_preview}[/yellow]"
-                        )
-                    else:
-                        # Query succeeded - show with validation info if available
-                        if validation_status == "PASSED":
-                            console.print(
-                                f"[green]✅ Query {i}/{total_queries}: {query_id} completed in {time_display} ({rows_returned:,} rows) [validation: PASSED][/green]"
-                            )
-                        elif validation_status == "SKIPPED":
-                            console.print(
-                                f"[green]✅ Query {i}/{total_queries}: {query_id} completed in {time_display} ({rows_returned:,} rows) [validation: SKIPPED][/green]"
-                            )
-                        else:
-                            # No validation or unknown status
-                            console.print(
-                                f"[green]✅ Query {i}/{total_queries}: {query_id} completed in {time_display} ({rows_returned:,} rows)[/green]"
-                            )
+                    self._log_query_result(result, i, total_queries, query_id)
 
                 except PlanCaptureError:
                     # Strict plan capture failure should halt the benchmark execution
@@ -3238,6 +3604,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
                         "execution_time_seconds": 0.0,
                         "rows_returned": 0,
                         "error": str(e),
+                        "run_type": QUERY_RUN_TYPE_MEASUREMENT,
                     }
                     results.append(error_result)
                     console.print(f"[red]❌ Query {i}/{total_queries}: {query_id} failed - {str(e)[:100]}[/red]")
@@ -3248,22 +3615,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
             if hasattr(signal, "SIGTERM"):
                 signal.signal(signal.SIGTERM, original_sigterm)
 
-        if cancelled:
-            console.print(f"[yellow]Benchmark cancelled. Processed {len(results)}/{total_queries} queries.[/yellow]")
-        else:
-            successful = len([r for r in results if r.get("status") == "SUCCESS"])
-            skipped = len([r for r in results if r.get("status") == "SKIPPED"])
-            failed = len([r for r in results if r.get("status") == "FAILED"])
-            if failed > 0:
-                console.print(
-                    f"[yellow]Completed {total_queries} queries: {successful} passed, {skipped} skipped, {failed} failed.[/yellow]"
-                )
-            elif skipped > 0:
-                console.print(
-                    f"[green]Completed {total_queries} queries: {successful} passed, {skipped} skipped.[/green]"
-                )
-            else:
-                console.print(f"[green]Completed all {total_queries} queries.[/green]")
+        self._log_execution_summary(results, total_queries, cancelled)
 
         return results
 

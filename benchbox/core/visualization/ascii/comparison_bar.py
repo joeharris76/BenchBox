@@ -128,10 +128,13 @@ class ASCIIComparisonBar(ASCIIChartBase):
             lines.append(subtitle)
         lines.append(self._render_horizontal_line(width))
 
-        # Assign palette colors to baseline and comparison
+        # Assign palette colors and fill patterns to baseline and comparison
         palette = list(DEFAULT_PALETTE)
         baseline_color = palette[0]
         comparison_color = palette[1]
+        no_color = not self.options.use_color
+        baseline_fill = self.options.get_series_fill(0)
+        comparison_fill = self.options.get_series_fill(1)
 
         # Render each query pair
         for i, d in enumerate(self.data):
@@ -144,14 +147,16 @@ class ASCIIComparisonBar(ASCIIChartBase):
                 pct_change = 0.0
 
             # Baseline bar (first line)
-            b_bar = self._render_bar(d.baseline_value, max_value, bar_width, blocks, truncate_threshold)
+            b_fill = baseline_fill if no_color else None
+            b_bar = self._render_bar(d.baseline_value, max_value, bar_width, blocks, truncate_threshold, b_fill)
             b_bar_colored = colors.colorize(b_bar, fg_color=baseline_color)
             b_value = self._format_value(d.baseline_value)
             b_name = colors.colorize(baseline_short.ljust(name_display_len), fg_color=baseline_color)
             lines.append(f"{label} {b_name} {b_bar_colored} {b_value.rjust(value_width)}")
 
             # Comparison bar (second line) with percentage annotation
-            c_bar = self._render_bar(d.comparison_value, max_value, bar_width, blocks, truncate_threshold)
+            c_fill = comparison_fill if no_color else None
+            c_bar = self._render_bar(d.comparison_value, max_value, bar_width, blocks, truncate_threshold, c_fill)
             c_bar_colored = colors.colorize(c_bar, fg_color=comparison_color)
             c_value = self._format_value(d.comparison_value)
             c_name = colors.colorize(comparison_short.ljust(name_display_len), fg_color=comparison_color)
@@ -167,17 +172,26 @@ class ASCIIComparisonBar(ASCIIChartBase):
 
         # Scale note
         lines.append(self._render_horizontal_line(width))
+        scale_char = baseline_fill if no_color else blocks[-1]
         scale_value = max_value / bar_width
         unit = self._extract_unit(self.metric_label)
-        lines.append(f"each {blocks[-1]} {self._format_approx()} {self._format_value(scale_value)}{unit}")
+        lines.append(f"each {scale_char} {self._format_approx()} {self._format_value(scale_value)}{unit}")
 
-        # Legend
-        b_marker = colors.colorize("■", fg_color=baseline_color)
-        c_marker = colors.colorize("■", fg_color=comparison_color)
-        green = colors.colorize("improvement", fg_color="#66a61e")
-        red = colors.colorize("regression", fg_color="#d95f02")
-        lines.append(f"  {b_marker} {baseline_short}  {c_marker} {comparison_short}")
-        lines.append(f"  {green} (negative %)  {red} (positive %)")
+        # Legend with distinct markers
+        b_marker_char = self.options.get_series_marker(0)
+        c_marker_char = self.options.get_series_marker(1)
+        b_marker = colors.colorize(b_marker_char, fg_color=baseline_color)
+        c_marker = colors.colorize(c_marker_char, fg_color=comparison_color)
+        if no_color:
+            down_arrow = "\u2193" if self.options.use_unicode else "v"
+            up_arrow = "\u2191" if self.options.use_unicode else "^"
+            lines.append(f"  {b_marker} {baseline_short}  {c_marker} {comparison_short}")
+            lines.append(f"  {down_arrow} improvement (negative %)  {up_arrow} regression (positive %)")
+        else:
+            green = colors.colorize("improvement", fg_color="#66a61e")
+            red = colors.colorize("regression", fg_color="#d95f02")
+            lines.append(f"  {b_marker} {baseline_short}  {c_marker} {comparison_short}")
+            lines.append(f"  {green} (negative %)  {red} (positive %)")
 
         return "\n".join(lines)
 
@@ -188,8 +202,15 @@ class ASCIIComparisonBar(ASCIIChartBase):
         bar_width: int,
         blocks: str,
         truncate_threshold: float | None,
+        fill_char: str | None = None,
     ) -> str:
-        """Render a single bar with 1/8 block precision and optional truncation."""
+        """Render a single bar with 1/8 block precision and optional truncation.
+
+        Args:
+            fill_char: Override fill character for no-color mode. When set,
+                       uses this character instead of blocks[-1] for full blocks
+                       and skips sub-character partial rendering.
+        """
         if not math.isfinite(value) or value <= 0:
             return " " * bar_width
 
@@ -204,9 +225,10 @@ class ASCIIComparisonBar(ASCIIChartBase):
         full_blocks = bar_chars // 8
         partial = bar_chars % 8
 
-        bar = blocks[-1] * full_blocks
+        fc = fill_char or blocks[-1]
+        bar = fc * full_blocks
         if partial > 0 and full_blocks < bar_width:
-            bar += blocks[partial]
+            bar += fc if fill_char else blocks[partial]
 
         if truncated:
             # Add overflow indicator (Unicode: warning sign, ASCII: exclamation)
@@ -220,17 +242,24 @@ class ASCIIComparisonBar(ASCIIChartBase):
         return bar
 
     def _format_annotation(self, pct_change: float, colors: TerminalColors) -> str:
-        """Format inline percentage change annotation with color."""
+        """Format inline percentage change annotation with color or structural symbols."""
         if abs(pct_change) < self.STABLE_THRESHOLD_PCT:
             return ""
 
+        no_color = not self.options.use_color
         if pct_change > 0:
             # Regression (slower)
+            arrow = "\u2191" if self.options.use_unicode else "^"
             text = f"  +{pct_change:.1f}%"
+            if no_color:
+                return f"{text} {arrow}"
             return colors.colorize(text, fg_color="#d95f02")
         else:
             # Improvement (faster)
+            arrow = "\u2193" if self.options.use_unicode else "v"
             text = f"  {pct_change:.1f}%"
+            if no_color:
+                return f"{text} {arrow}"
             return colors.colorize(text, fg_color="#66a61e")
 
     @staticmethod

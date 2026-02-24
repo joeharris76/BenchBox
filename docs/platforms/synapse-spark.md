@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
 
-# Azure Synapse Spark Platform
+# Azure Synapse Analytics Spark Platform
 
 ```{tags} intermediate, guide, synapse-spark, cloud-platform
 ```

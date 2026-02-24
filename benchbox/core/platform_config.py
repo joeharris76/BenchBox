@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from benchbox.core.config import DatabaseConfig, SystemProfile
+from benchbox.core.schemas import DatabaseConfig, SystemProfile
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +59,6 @@ def get_platform_config(
             "Tuning configuration passed to platform adapter: %s",
             type(tuning_config).__name__,
         )
-
-    # Legacy: Also check for connection_params (for backward compatibility)
-    if hasattr(database_config, "connection_params") and database_config.connection_params:
-        platform_config.update(database_config.connection_params)
 
     if system_profile:
         total_memory_gb = getattr(system_profile, "memory_total_gb", 4)

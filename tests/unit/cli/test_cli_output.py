@@ -18,7 +18,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from benchbox.cli.output import ConsoleResultFormatter, ResultExporter
-from benchbox.core.config import QueryResult
+from benchbox.core.schemas import QueryResult
 from benchbox.platforms.base import BenchmarkResults
 
 pytestmark = pytest.mark.fast
@@ -730,7 +730,7 @@ class TestResultExporter:
         current_result.execution_id = "exec_other"
         current_path = self.exporter.export_result(current_result, formats=["json"])["json"]
 
-        # Corrupt baseline to simulate legacy v1.x export (remove 'version' key, add old 'schema_version')
+        # Corrupt baseline to simulate unsupported non-v2 shape (remove canonical version).
         baseline_data = json.loads(baseline_path.read_text())
         del baseline_data["version"]
         baseline_data["schema_version"] = "1.1"
@@ -738,8 +738,8 @@ class TestResultExporter:
 
         comparison = self.exporter.compare_results(baseline_path, current_path)
 
-        # Comparison proceeds but shows version mismatch
-        assert comparison["baseline_version"] == "1.1"
+        # Comparison proceeds but reports missing canonical version as unknown
+        assert comparison["baseline_version"] == "unknown"
         assert comparison["current_version"] == "2.1"
 
     def test_export_comparison_report(self):

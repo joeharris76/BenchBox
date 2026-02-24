@@ -94,7 +94,7 @@ class TimeoutManager:
             >>> with manager.timeout_context(60, "benchmark_run") as ctx:
             ...     result = run_benchmark()
             >>> if ctx.timed_out:
-            ...     print("Operation timed out")
+            ...     emit("Operation timed out")
         """
         timeout = timeout_seconds or self.default_timeout_seconds
         context = _TimeoutContext(timeout, operation_name)
@@ -182,7 +182,7 @@ def run_with_timeout(
     Example:
         >>> result, timed_out = run_with_timeout(slow_query, 30, "query_1")
         >>> if timed_out:
-        ...     print("Query timed out")
+        ...     emit("Query timed out")
     """
     result_container: dict[str, Any] = {"result": None, "exception": None}
 

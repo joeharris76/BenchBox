@@ -73,6 +73,19 @@ benchbox run --platform duckdb --benchmark tpch --scale 1.0 \
 | `memory_limit` | (auto) | Maximum memory usage |
 | `temp_directory` | (auto) | Temp file location |
 | `enable_progress_bar` | true | Show query progress |
+| `driver_version` | (latest) | Pin the DuckDB Python package version (e.g. `1.2.0`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific DuckDB Version
+
+```bash
+benchbox run --platform duckdb --benchmark tpch \
+  --platform-option driver_version=1.4.3 \
+  --platform-option driver_auto_install=true
+```
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Usage Examples
 

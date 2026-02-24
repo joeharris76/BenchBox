@@ -21,11 +21,7 @@ from pathlib import Path
 
 import pytest
 
-# Mark all tests as tpcds and unit tests
-pytestmark_list = [
-    pytest.mark.tpcds,
-    pytest.mark.unit,
-]
+# Markers are merged with the skipif below in pytestmark
 
 
 def get_dsdgen_path() -> Path | None:
@@ -55,8 +51,32 @@ def get_dsdgen_path() -> Path | None:
     return None
 
 
+def _dsdgen_has_filter_support() -> bool:
+    """Check if the dsdgen binary supports the -FILTER flag (patched binary)."""
+    dsdgen = get_dsdgen_path()
+    if dsdgen is None:
+        return False
+    try:
+        result = subprocess.run([str(dsdgen), "-help"], capture_output=True, text=True, timeout=5)
+        help_text = result.stdout + result.stderr
+        return "FILTER" in help_text and "_FILTER" not in help_text
+    except Exception:
+        return False
+
+
 def get_tpcds_tools_dir() -> Path | None:
-    """Get path to TPC-DS tools directory (for tpcds.dst)."""
+    """Get path to TPC-DS tools directory containing tpcds.idx.
+
+    Prefers the binary directory (which contains the pre-compiled tpcds.idx)
+    over the source tools directory (which only has tpcds.dst).
+    """
+    dsdgen = get_dsdgen_path()
+    if dsdgen is not None:
+        binary_dir = dsdgen.parent
+        if (binary_dir / "tpcds.idx").exists():
+            return binary_dir
+
+    # Fallback to source tools directory
     current = Path(__file__).resolve()
     for parent in current.parents:
         if (parent / "benchbox").is_dir():
@@ -67,10 +87,14 @@ def get_tpcds_tools_dir() -> Path | None:
 
 
 # Skip all tests if dsdgen not available
-pytestmark = pytest.mark.skipif(
-    get_dsdgen_path() is None,
-    reason="dsdgen binary not available for this platform",
-)
+pytestmark = [
+    pytest.mark.tpcds,
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        get_dsdgen_path() is None,
+        reason="dsdgen binary not available for this platform",
+    ),
+]
 
 
 class TestDsdgenFilterFlag:

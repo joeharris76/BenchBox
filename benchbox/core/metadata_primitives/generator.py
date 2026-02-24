@@ -625,6 +625,33 @@ class MetadataGenerator:
         }
         return density_map.get(density, 0)
 
+    # SQL templates for finding objects by prefix; None means unsupported → return [].
+    # Keyed by (object_type, dialect_normalized); missing keys fall through to defaults below.
+    _OBJECT_SQL: dict[tuple[str, str], str | None] = {
+        ("table", "clickhouse"): (
+            "SELECT name FROM system.tables WHERE database = currentDatabase() AND name LIKE '{prefix}%'"
+        ),
+        ("view", "clickhouse"): None,  # ClickHouse view discovery is limited
+        ("view", "duckdb"): "SELECT view_name FROM duckdb_views() WHERE view_name LIKE '{prefix}%'",
+        ("role", "postgresql"): "SELECT rolname FROM pg_roles WHERE rolname LIKE '{prefix}%'",
+        ("role", "postgres"): "SELECT rolname FROM pg_roles WHERE rolname LIKE '{prefix}%'",
+        ("role", "redshift"): "SELECT rolname FROM pg_roles WHERE rolname LIKE '{prefix}%'",
+        ("role", "clickhouse"): "SELECT name FROM system.roles WHERE name LIKE '{prefix}%'",
+        ("role", "synapse"): ("SELECT name FROM sys.database_principals WHERE type = 'R' AND name LIKE '{prefix}%'"),
+        ("role", "fabric"): ("SELECT name FROM sys.database_principals WHERE type = 'R' AND name LIKE '{prefix}%'"),
+        ("role", "duckdb"): None,  # limited role introspection; tracked via GeneratedMetadata
+        ("role", "snowflake"): None,  # SHOW ROLES is not easily queryable
+        ("role", "databricks"): None,  # Unity Catalog roles are not easily queryable
+    }
+    # Default SQL for object types not in the per-dialect map above.
+    _OBJECT_SQL_DEFAULT: dict[str, str] = {
+        "table": (
+            "SELECT table_name FROM information_schema.tables"
+            " WHERE table_name LIKE '{prefix}%' AND table_type = 'BASE TABLE'"
+        ),
+        "view": "SELECT table_name FROM information_schema.views WHERE table_name LIKE '{prefix}%'",
+    }
+
     def _find_objects_with_prefix(
         self,
         connection: Any,
@@ -643,65 +670,19 @@ class MetadataGenerator:
         Returns:
             List of matching object names
         """
-        sql: str | None = None
+        d = dialect.lower()
+        key = (object_type, d)
+        if key in self._OBJECT_SQL:
+            template = self._OBJECT_SQL[key]
+        elif object_type in self._OBJECT_SQL_DEFAULT:
+            template = self._OBJECT_SQL_DEFAULT[object_type]
+        else:
+            return []
 
-        if object_type == "table":
-            if dialect.lower() == "clickhouse":
-                sql = f"""
-                    SELECT name FROM system.tables
-                    WHERE database = currentDatabase()
-                    AND name LIKE '{prefix}%'
-                """
-            else:
-                sql = f"""
-                    SELECT table_name FROM information_schema.tables
-                    WHERE table_name LIKE '{prefix}%'
-                    AND table_type = 'BASE TABLE'
-                """
-        elif object_type == "view":
-            if dialect.lower() == "clickhouse":
-                return []  # ClickHouse view discovery is limited
-            elif dialect.lower() == "duckdb":
-                sql = f"""
-                    SELECT view_name FROM duckdb_views()
-                    WHERE view_name LIKE '{prefix}%'
-                """
-            else:
-                sql = f"""
-                    SELECT table_name FROM information_schema.views
-                    WHERE table_name LIKE '{prefix}%'
-                """
-        elif object_type == "role":
-            d = dialect.lower()
-            if d in ("postgresql", "postgres", "redshift"):
-                sql = f"""
-                    SELECT rolname FROM pg_roles
-                    WHERE rolname LIKE '{prefix}%'
-                """
-            elif d == "clickhouse":
-                sql = f"""
-                    SELECT name FROM system.roles
-                    WHERE name LIKE '{prefix}%'
-                """
-            elif d in ("synapse", "fabric"):
-                sql = f"""
-                    SELECT name FROM sys.database_principals
-                    WHERE type = 'R' AND name LIKE '{prefix}%'
-                """
-            elif d == "duckdb":
-                # DuckDB has limited role introspection
-                # Return empty - roles will be tracked via GeneratedMetadata
-                return []
-            elif d == "snowflake":
-                # Snowflake uses SHOW ROLES which is not easily queryable
-                return []
-            elif d == "databricks":
-                # Databricks Unity Catalog roles are not easily queryable
-                return []
-            else:
-                # Unknown platform - return empty
-                return []
+        if template is None:
+            return []
 
+        sql = template.format(prefix=prefix)
         if sql is None:
             return []
 

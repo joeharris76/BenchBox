@@ -612,8 +612,8 @@ class MetadataPrimitivesBenchmark(BaseBenchmark):
             >>> result = benchmark.run_complexity_benchmark(
             ...     conn, "duckdb", "wide_tables", iterations=3
             ... )
-            >>> print(f"Setup: {result.setup_time_ms:.1f}ms")
-            >>> print(f"Queries: {result.benchmark_result.total_queries}")
+            >>> emit(f"Setup: {result.setup_time_ms:.1f}ms")
+            >>> emit(f"Queries: {result.benchmark_result.total_queries}")
         """
         if isinstance(config, str):
             config = get_complexity_preset(config)

@@ -468,7 +468,7 @@ class TestDataCache:
         assert isinstance(cache.cache_dir, Path)
 
         path = cache.get_cache_path("tpch", 1.0, DataFormat.PARQUET)
-        assert path == Path("tmp/cache") / "tpch" / "sf_1.0" / "parquet" / DATAFRAME_CACHE_VERSION
+        assert path == Path("tmp/cache") / "tpch_sf1" / "parquet" / DATAFRAME_CACHE_VERSION
 
     def test_default_cache_uses_runtime_cwd(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         """Default cache path should resolve from current CWD at DataCache construction time."""
@@ -484,8 +484,7 @@ class TestDataCache:
 
             path = cache.get_cache_path("tpch", 1.0, DataFormat.PARQUET)
 
-            assert "tpch" in str(path)
-            assert "sf_1.0" in str(path)
+            assert "tpch_sf1" in str(path)
             assert "parquet" in str(path)
             assert DATAFRAME_CACHE_VERSION in str(path)
 

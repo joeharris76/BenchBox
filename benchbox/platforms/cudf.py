@@ -21,7 +21,7 @@ from benchbox.core.gpu import (
 )
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +229,8 @@ class CuDFAdapter(PlatformAdapter):
         >>> conn.register_table("data", cudf.read_csv("data.csv"))
         >>> result = conn.execute("SELECT * FROM data WHERE value > 100")
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     @property
     def platform_name(self) -> str:

@@ -120,7 +120,7 @@ class TestGetResultsList:
         """Returns empty list when results directory doesn't exist."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path / "nonexistent")
         tools = {}
         if hasattr(server, "_tool_manager"):
             tool_dict = getattr(server._tool_manager, "_tools", {})
@@ -128,8 +128,7 @@ class TestGetResultsList:
                 tools[name] = tool.fn
 
         fn = tools["get_results"]
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path / "nonexistent"):
-            result = fn()  # result_file=None -> list mode
+        result = fn()  # result_file=None -> list mode
 
         assert result["runs"] == []
         assert result["count"] == 0
@@ -141,12 +140,11 @@ class TestGetResultsList:
         data = _make_benchmark_result(platform="duckdb", benchmark="tpch")
         _make_result_file(tmp_path, "run1.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         tool_dict = getattr(server._tool_manager, "_tools", {})
         fn = tool_dict["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn()
+        result = fn()
 
         assert result["count"] == 1
         assert result["runs"][0]["platform"] == "duckdb"
@@ -160,11 +158,10 @@ class TestGetResultsList:
         _make_result_file(tmp_path, "duckdb_run.json", _make_benchmark_result(platform="duckdb"))
         _make_result_file(tmp_path, "sqlite_run.json", _make_benchmark_result(platform="sqlite"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(platform="duckdb")
+        result = fn(platform="duckdb")
 
         assert result["count"] == 1
         assert result["runs"][0]["platform"] == "duckdb"
@@ -176,11 +173,10 @@ class TestGetResultsList:
         _make_result_file(tmp_path, "tpch_run.json", _make_benchmark_result(benchmark="tpch"))
         _make_result_file(tmp_path, "tpcds_run.json", _make_benchmark_result(benchmark="tpcds"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(benchmark="tpcds")
+        result = fn(benchmark="tpcds")
 
         assert result["count"] == 1
         assert result["runs"][0]["benchmark"] == "tpcds"
@@ -192,11 +188,10 @@ class TestGetResultsList:
         for i in range(5):
             _make_result_file(tmp_path, f"run_{i}.json", _make_benchmark_result())
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(limit=2)
+        result = fn(limit=2)
 
         assert result["count"] == 2
         assert result["total_available"] == 5
@@ -208,11 +203,10 @@ class TestGetResultsList:
         data = _make_benchmark_result(summary={"total_queries": 22, "total_runtime_ms": 5000})
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn()
+        result = fn()
 
         assert result["runs"][0]["summary"]["total_queries"] == 22
         assert result["runs"][0]["summary"]["total_runtime_ms"] == 5000
@@ -224,11 +218,10 @@ class TestGetResultsList:
         (tmp_path / "bad.json").write_text("not json {{")
         _make_result_file(tmp_path, "good.json", _make_benchmark_result())
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn()
+        result = fn()
 
         assert result["count"] == 1
 
@@ -238,15 +231,29 @@ class TestGetResultsList:
 
         _make_result_file(tmp_path, "run.json", _make_benchmark_result())
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(platform="duckdb", benchmark="tpch", limit=5)
+        result = fn(platform="duckdb", benchmark="tpch", limit=5)
 
         assert result["filters_applied"]["platform"] == "duckdb"
         assert result["filters_applied"]["benchmark"] == "tpch"
         assert result["filters_applied"]["limit"] == 5
+
+    def test_explicit_results_dir_override_takes_precedence(self, tmp_path, monkeypatch):
+        """Server-level results_dir override should be used by tools."""
+        from benchbox.mcp import create_server
+
+        override_dir = tmp_path / "override_results"
+        override_dir.mkdir(parents=True)
+        _make_result_file(override_dir, "override.json", _make_benchmark_result(platform="duckdb"))
+
+        server = create_server(results_dir=override_dir)
+        fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
+        result = fn()
+
+        assert result["count"] == 1
+        assert result["runs"][0]["file"] == "override.json"
 
 
 class TestGetResultsExport:
@@ -260,14 +267,50 @@ class TestGetResultsExport:
         data = _make_benchmark_result()
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="yaml")
+        result = fn(result_file="run.json", format="yaml")
 
         assert result["error"] is True
         assert result["error_code"] == "VALIDATION_INVALID_FORMAT"
+
+    def test_details_preserves_query_run_type(self, tmp_path):
+        """Details mode should preserve per-query run_type tags in payloads."""
+        from benchbox.mcp import create_server
+
+        data = _make_benchmark_result(
+            queries=[
+                {"query_id": "Q1", "runtime_ms": 10, "status": "success"},
+                {"query_id": "Q1", "runtime_ms": 12, "status": "success"},
+            ]
+        )
+        data["queries"][0]["run_type"] = "warmup"
+        data["queries"][0]["iter"] = 0
+        _make_result_file(tmp_path, "run.json", data)
+
+        server = create_server(results_dir=tmp_path)
+        fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
+
+        result = fn(result_file="run.json", format="details")
+
+        assert result["queries"][0]["run_type"] == "warmup"
+        assert result["queries"][1]["run_type"] == "measurement"
+
+    def test_details_excludes_queries_when_include_queries_false(self, tmp_path):
+        """include_queries=False should omit per-query rows from details output."""
+        from benchbox.mcp import create_server
+
+        data = _make_benchmark_result()
+        _make_result_file(tmp_path, "run.json", data)
+
+        server = create_server(results_dir=tmp_path)
+        fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
+
+        result = fn(result_file="run.json", format="details", include_queries=False)
+
+        assert "queries" not in result
+        assert "summary" in result
 
     def test_json_export(self, tmp_path):
         """JSON export returns formatted JSON content."""
@@ -276,11 +319,10 @@ class TestGetResultsExport:
         data = _make_benchmark_result()
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="json")
+        result = fn(result_file="run.json", format="json")
 
         assert result["status"] == "exported"
         assert result["format"] == "json"
@@ -294,11 +336,10 @@ class TestGetResultsExport:
         data = _make_benchmark_result()
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="csv")
+        result = fn(result_file="run.json", format="csv")
 
         assert result["status"] == "exported"
         assert result["format"] == "csv"
@@ -312,11 +353,10 @@ class TestGetResultsExport:
         data = _make_benchmark_result(queries=[])
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="csv")
+        result = fn(result_file="run.json", format="csv")
 
         assert result["content"] == "query_id,runtime_ms,status\n"
 
@@ -327,11 +367,10 @@ class TestGetResultsExport:
         data = _make_benchmark_result(summary={"total_queries": 3, "total_runtime_ms": 350})
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="html")
+        result = fn(result_file="run.json", format="html")
 
         assert result["status"] == "exported"
         assert result["format"] == "html"
@@ -346,11 +385,10 @@ class TestGetResultsExport:
         data = _make_benchmark_result()
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="json", output_path="export.json")
+        result = fn(result_file="run.json", format="json", output_path="export.json")
 
         assert result["status"] == "exported"
         assert "output_path" in result
@@ -363,11 +401,10 @@ class TestGetResultsExport:
         data = _make_benchmark_result()
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="json", output_path="../escape.json")
+        result = fn(result_file="run.json", format="json", output_path="../escape.json")
 
         assert result["error"] is True
         assert result["error_code"] == "VALIDATION_ERROR"
@@ -379,11 +416,10 @@ class TestGetResultsExport:
         data = _make_benchmark_result()
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="json", output_path="/tmp/evil.json")
+        result = fn(result_file="run.json", format="json", output_path="/tmp/evil.json")
 
         assert result["error"] is True
 
@@ -391,11 +427,10 @@ class TestGetResultsExport:
         """Missing source file propagates error."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="missing.json", format="json")
+        result = fn(result_file="missing.json", format="json")
 
         assert result["error"] is True
 
@@ -410,11 +445,10 @@ class TestGetResultsSummary:
         data = _make_benchmark_result(summary={"total_queries": 3, "total_runtime_ms": 350})
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="markdown")
+        result = fn(result_file="run.json", format="markdown")
 
         assert result["format"] == "markdown"
         assert "# Benchmark Results" in result["content"]
@@ -428,11 +462,10 @@ class TestGetResultsSummary:
         data = _make_benchmark_result(summary={"total_queries": 3, "total_runtime_ms": 350})
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="run.json", format="text")
+        result = fn(result_file="run.json", format="text")
 
         assert result["format"] == "text"
         assert "Benchmark Results:" in result["content"]
@@ -443,11 +476,10 @@ class TestGetResultsSummary:
         """Missing result file propagates error from _get_results_impl."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["get_results"].fn
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(result_file="nonexistent.json", format="text")
+        result = fn(result_file="nonexistent.json", format="text")
 
         assert result["error"] is True
 
@@ -464,11 +496,10 @@ class TestAnalyzeResultsCompare:
         """Returns error when baseline file doesn't exist."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="compare", file1="missing.json", file2="also_missing.json")
+        result = fn(analysis="compare", file1="missing.json", file2="also_missing.json")
 
         assert result["error"] is True
         assert result["error_code"] == "RESOURCE_NOT_FOUND"
@@ -480,11 +511,10 @@ class TestAnalyzeResultsCompare:
 
         _make_result_file(tmp_path, "baseline.json", _make_benchmark_result())
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="compare", file1="baseline.json", file2="missing.json")
+        result = fn(analysis="compare", file1="baseline.json", file2="missing.json")
 
         assert result["error"] is True
         assert result["error_code"] == "RESOURCE_NOT_FOUND"
@@ -509,11 +539,10 @@ class TestAnalyzeResultsCompare:
         _make_result_file(tmp_path, "baseline.json", baseline)
         _make_result_file(tmp_path, "comparison.json", comparison)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="compare", file1="baseline.json", file2="comparison.json", threshold_percent=10.0)
+        result = fn(analysis="compare", file1="baseline.json", file2="comparison.json", threshold_percent=10.0)
 
         assert "1" in result["regressions"]
         assert result["summary"]["regressions"] >= 1
@@ -535,11 +564,10 @@ class TestAnalyzeResultsCompare:
         _make_result_file(tmp_path, "baseline.json", baseline)
         _make_result_file(tmp_path, "comparison.json", comparison)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="compare", file1="baseline.json", file2="comparison.json")
+        result = fn(analysis="compare", file1="baseline.json", file2="comparison.json")
 
         assert "1" in result["improvements"]
         assert result["summary"]["improvements"] >= 1
@@ -561,11 +589,10 @@ class TestAnalyzeResultsCompare:
         _make_result_file(tmp_path, "baseline.json", baseline)
         _make_result_file(tmp_path, "comparison.json", comparison)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="compare", file1="baseline.json", file2="comparison.json")
+        result = fn(analysis="compare", file1="baseline.json", file2="comparison.json")
 
         assert result["summary"]["stable"] >= 1
 
@@ -578,11 +605,10 @@ class TestAnalyzeResultsCompare:
         _make_result_file(tmp_path, "b.json", baseline)
         _make_result_file(tmp_path, "c.json", comparison)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="compare", file1="b.json", file2="c.json")
+        result = fn(analysis="compare", file1="b.json", file2="c.json")
 
         assert "baseline_file" in result
         assert "current_file" in result
@@ -597,11 +623,10 @@ class TestAnalyzeResultsCompare:
         _make_result_file(tmp_path, "run1.json", _make_benchmark_result())
         _make_result_file(tmp_path, "run2.json", _make_benchmark_result())
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="compare", file1="run1", file2="run2")
+        result = fn(analysis="compare", file1="run1", file2="run2")
 
         assert "error" not in result
 
@@ -613,11 +638,10 @@ class TestAnalyzeResultsRegressions:
         """Returns no_data when results directory doesn't exist."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path / "nonexistent")
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path / "nonexistent"):
-            result = fn(analysis="regressions")
+        result = fn(analysis="regressions")
 
         assert result["status"] == "no_data"
         assert result["regressions"] == []
@@ -628,11 +652,10 @@ class TestAnalyzeResultsRegressions:
 
         _make_result_file(tmp_path, "only_one.json", _make_benchmark_result())
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="regressions")
+        result = fn(analysis="regressions")
 
         assert result["status"] == "insufficient_data"
 
@@ -659,11 +682,10 @@ class TestAnalyzeResultsRegressions:
         )
         _make_result_file(tmp_path, "newer.json", newer)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="regressions")
+        result = fn(analysis="regressions")
 
         assert result["status"] == "completed"
         assert result["summary"]["regressions"] >= 1
@@ -692,11 +714,10 @@ class TestAnalyzeResultsRegressions:
         )
         _make_result_file(tmp_path, "newer.json", newer)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="regressions")
+        result = fn(analysis="regressions")
 
         assert result["summary"]["improvements"] >= 1
 
@@ -712,11 +733,10 @@ class TestAnalyzeResultsRegressions:
         os.utime(duckdb_file, (time.time() - 50, time.time() - 50))
         _make_result_file(tmp_path, "duckdb2.json", _make_benchmark_result(platform="duckdb"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="regressions", platform="duckdb")
+        result = fn(analysis="regressions", platform="duckdb")
 
         assert result["status"] == "completed"
         assert result["comparison"]["baseline"]["platform"] == "duckdb"
@@ -743,11 +763,10 @@ class TestAnalyzeResultsRegressions:
         )
         _make_result_file(tmp_path, "newer.json", newer)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="regressions")
+        result = fn(analysis="regressions")
 
         # Verify critical regressions are detected
         assert result["status"] == "completed"
@@ -778,17 +797,15 @@ class TestAnalyzeResultsRegressions:
         )
         _make_result_file(tmp_path, "newer.json", newer)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
         # At 10% threshold, 8% is stable
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result_10 = fn(analysis="regressions", threshold_percent=10.0)
+        result_10 = fn(analysis="regressions", threshold_percent=10.0)
         assert result_10["summary"]["regressions"] == 0
 
         # At 5% threshold, 8% is a regression
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result_5 = fn(analysis="regressions", threshold_percent=5.0)
+        result_5 = fn(analysis="regressions", threshold_percent=5.0)
         assert result_5["summary"]["regressions"] == 1
 
 
@@ -799,11 +816,10 @@ class TestAnalyzeResultsTrends:
         """Invalid metric returns validation error."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends", metric="invalid_metric")
+        result = fn(analysis="trends", metric="invalid_metric")
 
         assert result["error"] is True
         assert result["error_code"] == "VALIDATION_ERROR"
@@ -812,11 +828,10 @@ class TestAnalyzeResultsTrends:
         """Returns no_data when results directory doesn't exist."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path / "nonexistent")
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path / "nonexistent"):
-            result = fn(analysis="trends")
+        result = fn(analysis="trends")
 
         assert result["status"] == "no_data"
 
@@ -835,11 +850,10 @@ class TestAnalyzeResultsTrends:
             f = _make_result_file(tmp_path, f"run_{i}.json", data)
             os.utime(f, (time.time() - (300 - i * 100), time.time() - (300 - i * 100)))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends")
+        result = fn(analysis="trends")
 
         assert result["status"] == "success"
         assert len(result["data_points"]) == 3
@@ -871,11 +885,10 @@ class TestAnalyzeResultsTrends:
         )
         _make_result_file(tmp_path, "run2.json", data2)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends", metric="geometric_mean")
+        result = fn(analysis="trends", metric="geometric_mean")
 
         # Geometric mean of [100, 400] = sqrt(40000) = 200
         assert result["data_points"][0]["metric"] == "geometric_mean"
@@ -898,11 +911,10 @@ class TestAnalyzeResultsTrends:
         os.utime(f, (time.time() - 10, time.time() - 10))
         _make_result_file(tmp_path, "run2.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends", metric="total_time")
+        result = fn(analysis="trends", metric="total_time")
 
         assert result["data_points"][0]["value"] == 300.0
 
@@ -922,11 +934,10 @@ class TestAnalyzeResultsTrends:
             f = _make_result_file(tmp_path, f"run_{i}.json", data)
             os.utime(f, (time.time() - (300 - i * 100), time.time() - (300 - i * 100)))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends")
+        result = fn(analysis="trends")
 
         assert result["summary"]["trend_direction"] == "degrading"
 
@@ -946,11 +957,10 @@ class TestAnalyzeResultsTrends:
             f = _make_result_file(tmp_path, f"run_{i}.json", data)
             os.utime(f, (time.time() - (300 - i * 100), time.time() - (300 - i * 100)))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends")
+        result = fn(analysis="trends")
 
         assert result["summary"]["trend_direction"] == "improving"
 
@@ -970,11 +980,10 @@ class TestAnalyzeResultsTrends:
             f = _make_result_file(tmp_path, f"run_{i}.json", data)
             os.utime(f, (time.time() - (500 - i * 100), time.time() - (500 - i * 100)))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends", limit=3)
+        result = fn(analysis="trends", limit=3)
 
         assert len(result["data_points"]) == 3
 
@@ -984,11 +993,10 @@ class TestAnalyzeResultsTrends:
 
         _make_result_file(tmp_path, "run.json", _make_benchmark_result(platform="duckdb"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="trends", platform="snowflake")
+        result = fn(analysis="trends", platform="snowflake")
 
         assert result["status"] == "no_matching_data"
 
@@ -1000,11 +1008,10 @@ class TestAnalyzeResultsAggregate:
         """Invalid group_by returns validation error."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate", group_by="invalid")
+        result = fn(analysis="aggregate", group_by="invalid")
 
         assert result["error"] is True
         assert result["error_code"] == "VALIDATION_ERROR"
@@ -1013,11 +1020,10 @@ class TestAnalyzeResultsAggregate:
         """Returns no_data when results directory doesn't exist."""
         from benchbox.mcp import create_server
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path / "nonexistent")
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path / "nonexistent"):
-            result = fn(analysis="aggregate")
+        result = fn(analysis="aggregate")
 
         assert result["status"] == "no_data"
 
@@ -1028,11 +1034,10 @@ class TestAnalyzeResultsAggregate:
         _make_result_file(tmp_path, "duckdb1.json", _make_benchmark_result(platform="duckdb"))
         _make_result_file(tmp_path, "sqlite1.json", _make_benchmark_result(platform="sqlite"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate", group_by="platform")
+        result = fn(analysis="aggregate", group_by="platform")
 
         assert result["status"] == "success"
         assert "duckdb" in result["aggregates"]
@@ -1048,11 +1053,10 @@ class TestAnalyzeResultsAggregate:
         _make_result_file(tmp_path, "tpch.json", _make_benchmark_result(benchmark="tpch"))
         _make_result_file(tmp_path, "tpcds.json", _make_benchmark_result(benchmark="tpcds"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate", group_by="benchmark")
+        result = fn(analysis="aggregate", group_by="benchmark")
 
         assert "tpch" in result["aggregates"]
         assert "tpcds" in result["aggregates"]
@@ -1064,11 +1068,10 @@ class TestAnalyzeResultsAggregate:
         _make_result_file(tmp_path, "day1.json", _make_benchmark_result(timestamp="2026-01-15T10:00:00"))
         _make_result_file(tmp_path, "day2.json", _make_benchmark_result(timestamp="2026-01-16T10:00:00"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate", group_by="date")
+        result = fn(analysis="aggregate", group_by="date")
 
         assert result["status"] == "success"
         assert "2026-01-15" in result["aggregates"]
@@ -1087,11 +1090,10 @@ class TestAnalyzeResultsAggregate:
         )
         _make_result_file(tmp_path, "run.json", data)
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate", group_by="platform")
+        result = fn(analysis="aggregate", group_by="platform")
 
         stats = result["aggregates"]["duckdb"]["query_stats"]
         assert stats["mean_ms"] == 200.0  # (100+200+300)/3
@@ -1105,11 +1107,10 @@ class TestAnalyzeResultsAggregate:
         _make_result_file(tmp_path, "duckdb.json", _make_benchmark_result(platform="duckdb"))
         _make_result_file(tmp_path, "sqlite.json", _make_benchmark_result(platform="sqlite"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate", platform="duckdb", group_by="platform")
+        result = fn(analysis="aggregate", platform="duckdb", group_by="platform")
 
         assert "duckdb" in result["aggregates"]
         assert "sqlite" not in result["aggregates"]
@@ -1120,11 +1121,10 @@ class TestAnalyzeResultsAggregate:
 
         _make_result_file(tmp_path, "run.json", _make_benchmark_result(platform="duckdb"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate", platform="snowflake")
+        result = fn(analysis="aggregate", platform="snowflake")
 
         assert result["status"] == "no_matching_data"
 
@@ -1135,11 +1135,10 @@ class TestAnalyzeResultsAggregate:
         _make_result_file(tmp_path, "run1.json", _make_benchmark_result(platform="duckdb"))
         _make_result_file(tmp_path, "run2.json", _make_benchmark_result(platform="sqlite"))
 
-        server = create_server()
+        server = create_server(results_dir=tmp_path)
         fn = getattr(server._tool_manager, "_tools", {})["analyze_results"].fn
 
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", tmp_path):
-            result = fn(analysis="aggregate")
+        result = fn(analysis="aggregate")
 
         assert result["summary"]["total_groups"] == 2
         assert result["summary"]["total_runs"] == 2

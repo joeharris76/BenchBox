@@ -17,25 +17,13 @@ from mcp.types import TextContent
 logger = logging.getLogger(__name__)
 
 
-def register_all_prompts(mcp: FastMCP) -> None:
-    """Register all MCP prompts with the server.
+def _build_analyze_results_prompt(benchmark: str, platform: str, focus: str | None) -> str:
+    """Build the analyze_results prompt text."""
+    focus_text = ""
+    if focus:
+        focus_text = f"\nPay special attention to {focus} in your analysis."
 
-    Args:
-        mcp: The FastMCP server instance to register prompts with.
-    """
-
-    @mcp.prompt()
-    def analyze_results(
-        benchmark: str = "tpch",
-        platform: str = "duckdb",
-        focus: str | None = None,
-    ) -> list[TextContent]:
-        """Analyze benchmark results. (benchmark=tpch, platform=duckdb, focus=optional)"""
-        focus_text = ""
-        if focus:
-            focus_text = f"\nPay special attention to {focus} in your analysis."
-
-        prompt = f"""Analyze the {benchmark.upper()} benchmark results on {platform}.
+    return f"""Analyze the {benchmark.upper()} benchmark results on {platform}.
 
 Please use the following tools to gather data:
 1. list_recent_runs(platform="{platform}", benchmark="{benchmark}") - Find recent runs
@@ -49,18 +37,12 @@ Based on the results, provide:
 
 Format your analysis with clear sections and include specific timing data."""
 
-        return [TextContent(type="text", text=prompt)]
 
-    @mcp.prompt()
-    def compare_platforms(
-        benchmark: str = "tpch",
-        platforms: str = "duckdb,polars-df",
-        scale_factor: float = 0.01,
-    ) -> list[TextContent]:
-        """Compare performance across platforms. (benchmark=tpch, platforms=duckdb,polars-df, scale_factor=0.01)"""
-        platform_list = [p.strip() for p in platforms.split(",")]
+def _build_compare_platforms_prompt(benchmark: str, platforms: str, scale_factor: float) -> str:
+    """Build the compare_platforms prompt text."""
+    platform_list = [p.strip() for p in platforms.split(",")]
 
-        prompt = f"""Compare {benchmark.upper()} benchmark performance across these platforms:
+    return f"""Compare {benchmark.upper()} benchmark performance across these platforms:
 {", ".join(platform_list)}
 
 Scale Factor: {scale_factor}
@@ -79,17 +61,11 @@ Provide a comprehensive comparison including:
 
 Use tables and specific metrics to support your analysis."""
 
-        return [TextContent(type="text", text=prompt)]
 
-    @mcp.prompt()
-    def identify_regressions(
-        baseline_run: str | None = None,
-        comparison_run: str | None = None,
-        threshold_percent: float = 10.0,
-    ) -> list[TextContent]:
-        """Find performance regressions between runs. (baseline_run, comparison_run, threshold_percent=10)"""
-        if baseline_run and comparison_run:
-            prompt = f"""Analyze performance regressions between two benchmark runs.
+def _build_regressions_prompt(baseline_run: str | None, comparison_run: str | None, threshold_percent: float) -> str:
+    """Build the identify_regressions prompt text."""
+    if baseline_run and comparison_run:
+        return f"""Analyze performance regressions between two benchmark runs.
 
 Baseline: {baseline_run}
 Comparison: {comparison_run}
@@ -105,8 +81,8 @@ Provide analysis including:
 3. **Root Cause Analysis**: Possible reasons for each regression
 4. **Improvement Opportunities**: Any queries that got faster (to understand what helped)
 5. **Action Items**: Specific steps to investigate/fix regressions"""
-        else:
-            prompt = f"""Identify performance regressions in recent benchmark runs.
+
+    return f"""Identify performance regressions in recent benchmark runs.
 
 Regression Threshold: {threshold_percent}%
 
@@ -120,16 +96,10 @@ Provide analysis including:
 2. **Trend Analysis**: Is performance improving or declining over time?
 3. **Action Items**: Recommended next steps for investigation"""
 
-        return [TextContent(type="text", text=prompt)]
 
-    @mcp.prompt()
-    def benchmark_planning(
-        use_case: str = "testing",
-        platforms: str | None = None,
-        time_budget_minutes: int = 30,
-    ) -> list[TextContent]:
-        """Plan a benchmark strategy. (use_case=testing|production|comparison, platforms, time_budget_minutes=30)"""
-        prompt = f"""Help plan a benchmark strategy for the following requirements:
+def _build_benchmark_planning_prompt(use_case: str, platforms: str | None, time_budget_minutes: int) -> str:
+    """Build the benchmark_planning prompt text."""
+    return f"""Help plan a benchmark strategy for the following requirements:
 
 Use Case: {use_case}
 Time Budget: {time_budget_minutes} minutes
@@ -153,26 +123,20 @@ Consider tradeoffs between:
 - Time constraints
 - Resource availability"""
 
-        return [TextContent(type="text", text=prompt)]
 
-    @mcp.prompt()
-    def troubleshoot_failure(
-        error_message: str | None = None,
-        platform: str | None = None,
-        benchmark: str | None = None,
-    ) -> list[TextContent]:
-        """Diagnose benchmark failures. (error_message, platform, benchmark)"""
-        context = []
-        if error_message:
-            context.append(f"Error Message: {error_message}")
-        if platform:
-            context.append(f"Platform: {platform}")
-        if benchmark:
-            context.append(f"Benchmark: {benchmark}")
+def _build_troubleshoot_prompt(error_message: str | None, platform: str | None, benchmark: str | None) -> str:
+    """Build the troubleshoot_failure prompt text."""
+    context = []
+    if error_message:
+        context.append(f"Error Message: {error_message}")
+    if platform:
+        context.append(f"Platform: {platform}")
+    if benchmark:
+        context.append(f"Benchmark: {benchmark}")
 
-        context_str = "\n".join(context) if context else "No specific context provided"
+    context_str = "\n".join(context) if context else "No specific context provided"
 
-        prompt = f"""Troubleshoot a benchmark failure with the following context:
+    return f"""Troubleshoot a benchmark failure with the following context:
 
 {context_str}
 
@@ -194,21 +158,14 @@ Provide:
 3. **Resolution**: Step-by-step fix instructions
 4. **Prevention**: How to avoid this issue in the future"""
 
-        return [TextContent(type="text", text=prompt)]
 
-    @mcp.prompt()
-    def benchmark_run(
-        platform: str = "duckdb",
-        benchmark: str = "tpch",
-        scale_factor: float = 0.01,
-        queries: str | None = None,
-    ) -> list[TextContent]:
-        """Execute a planned benchmark. (platform=duckdb, benchmark=tpch, scale_factor=0.01, queries=optional)"""
-        queries_text = ""
-        if queries:
-            queries_text = f"\nQuery subset: {queries}"
+def _build_benchmark_run_prompt(platform: str, benchmark: str, scale_factor: float, queries: str | None) -> str:
+    """Build the benchmark_run prompt text."""
+    queries_text = ""
+    if queries:
+        queries_text = f"\nQuery subset: {queries}"
 
-        prompt = f"""Execute a benchmark with the following configuration:
+    return f"""Execute a benchmark with the following configuration:
 
 Platform: {platform}
 Benchmark: {benchmark.upper()}
@@ -229,19 +186,14 @@ After execution, provide:
 
 If any step fails, provide diagnostic information and suggest fixes."""
 
-        return [TextContent(type="text", text=prompt)]
 
-    @mcp.prompt()
-    def platform_tuning(
-        platform: str = "duckdb",
-        workload: str | None = None,
-    ) -> list[TextContent]:
-        """Get tuning recommendations for a platform. (platform=duckdb, workload=optional)"""
-        workload_text = ""
-        if workload:
-            workload_text = f"\nWorkload characteristics: {workload}"
+def _build_platform_tuning_prompt(platform: str, workload: str | None) -> str:
+    """Build the platform_tuning prompt text."""
+    workload_text = ""
+    if workload:
+        workload_text = f"\nWorkload characteristics: {workload}"
 
-        prompt = f"""Provide tuning recommendations for {platform} platform.{workload_text}
+    return f"""Provide tuning recommendations for {platform} platform.{workload_text}
 
 Use these tools to gather information:
 1. system_profile() - Get system resources (CPU, memory, disk)
@@ -275,6 +227,79 @@ Format recommendations as:
 
 Include example configuration snippets where applicable."""
 
-        return [TextContent(type="text", text=prompt)]
+
+def register_all_prompts(mcp: FastMCP) -> None:
+    """Register all MCP prompts with the server.
+
+    Args:
+        mcp: The FastMCP server instance to register prompts with.
+    """
+
+    @mcp.prompt()
+    def analyze_results(
+        benchmark: str = "tpch",
+        platform: str = "duckdb",
+        focus: str | None = None,
+    ) -> list[TextContent]:
+        """Analyze benchmark results. (benchmark=tpch, platform=duckdb, focus=optional)"""
+        return [TextContent(type="text", text=_build_analyze_results_prompt(benchmark, platform, focus))]
+
+    @mcp.prompt()
+    def compare_platforms(
+        benchmark: str = "tpch",
+        platforms: str = "duckdb,polars-df",
+        scale_factor: float = 0.01,
+    ) -> list[TextContent]:
+        """Compare performance across platforms. (benchmark=tpch, platforms=duckdb,polars-df, scale_factor=0.01)"""
+        return [TextContent(type="text", text=_build_compare_platforms_prompt(benchmark, platforms, scale_factor))]
+
+    @mcp.prompt()
+    def identify_regressions(
+        baseline_run: str | None = None,
+        comparison_run: str | None = None,
+        threshold_percent: float = 10.0,
+    ) -> list[TextContent]:
+        """Find performance regressions between runs. (baseline_run, comparison_run, threshold_percent=10)"""
+        return [
+            TextContent(type="text", text=_build_regressions_prompt(baseline_run, comparison_run, threshold_percent))
+        ]
+
+    @mcp.prompt()
+    def benchmark_planning(
+        use_case: str = "testing",
+        platforms: str | None = None,
+        time_budget_minutes: int = 30,
+    ) -> list[TextContent]:
+        """Plan a benchmark strategy. (use_case=testing|production|comparison, platforms, time_budget_minutes=30)"""
+        return [
+            TextContent(type="text", text=_build_benchmark_planning_prompt(use_case, platforms, time_budget_minutes))
+        ]
+
+    @mcp.prompt()
+    def troubleshoot_failure(
+        error_message: str | None = None,
+        platform: str | None = None,
+        benchmark: str | None = None,
+    ) -> list[TextContent]:
+        """Diagnose benchmark failures. (error_message, platform, benchmark)"""
+        return [TextContent(type="text", text=_build_troubleshoot_prompt(error_message, platform, benchmark))]
+
+    @mcp.prompt()
+    def benchmark_run(
+        platform: str = "duckdb",
+        benchmark: str = "tpch",
+        scale_factor: float = 0.01,
+        queries: str | None = None,
+    ) -> list[TextContent]:
+        """Execute a planned benchmark. (platform=duckdb, benchmark=tpch, scale_factor=0.01, queries=optional)"""
+        return [TextContent(type="text", text=_build_benchmark_run_prompt(platform, benchmark, scale_factor, queries))]
+
+    @mcp.prompt()
+    def platform_tuning(
+        platform: str = "duckdb",
+        workload: str | None = None,
+    ) -> list[TextContent]:
+        """Get tuning recommendations for a platform. (platform=duckdb, workload=optional)"""
+        return [TextContent(type="text", text=_build_platform_tuning_prompt(platform, workload))]
 
     logger.info("Registered MCP prompts")

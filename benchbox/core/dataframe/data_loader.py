@@ -59,7 +59,7 @@ from benchbox.utils.file_format import (
     has_trailing_delimiter,
     strip_compression_suffix,
 )
-from benchbox.utils.path_utils import get_benchmark_runs_dataframe_path
+from benchbox.utils.path_utils import get_benchmark_runs_dataframe_path, get_benchmark_runs_datagen_path
 
 if TYPE_CHECKING:
     from benchbox.core.tpch.schema import Table
@@ -70,6 +70,11 @@ logger = logging.getLogger(__name__)
 # Unified with SQL datagen under benchmark_runs/datagen/ for data reuse.
 DEFAULT_CACHE_DIR = Path("benchmark_runs") / "datagen"
 DATAFRAME_CACHE_VERSION = "v2"
+
+# Format subdirectory names that belong to the DataFrame cache layer.
+# Used by clear_cache() to selectively remove cached conversions without
+# destroying raw datagen output (e.g. .tbl files) in the same directory.
+_KNOWN_FORMAT_DIRS = frozenset(f.value for f in DataFormat)  # {"csv", "parquet", "arrow"}
 
 
 class ConversionStatus(Enum):
@@ -304,18 +309,7 @@ class FormatConverter:
                 column_names=actual_column_names if actual_column_names else None,
             )
             parse_options = pv.ParseOptions(delimiter=delimiter)
-            # Build explicit column types for PyArrow if provided
-            arrow_column_types = None
-            if column_types:
-                import pyarrow as pa
-
-                type_lookup = {
-                    "date32": pa.date32(),
-                    "int64": pa.int64(),
-                    "float64": pa.float64(),
-                    "string": pa.string(),
-                }
-                arrow_column_types = {col: type_lookup.get(dtype, pa.string()) for col, dtype in column_types.items()}
+            arrow_column_types = FormatConverter._resolve_arrow_types(column_types)
 
             convert_options = pv.ConvertOptions(
                 auto_dict_encode=True,
@@ -324,28 +318,9 @@ class FormatConverter:
             )
 
             logger.debug(f"Reading {source_path}")
-            compression_type = detect_compression(source_path)
-            if compression_type:
-                manager = CompressionManager()
-                try:
-                    compressor = manager.get_compressor(compression_type)
-                    with compressor.open_for_read(source_path, mode="rb") as stream:
-                        table = pv.read_csv(
-                            stream,
-                            read_options=read_options,
-                            parse_options=parse_options,
-                            convert_options=convert_options,
-                        )
-                except CompressionError as err:
-                    logger.error(f"Failed to read compressed file {source_path}: {err}")
-                    return ConversionStatus.FAILED, 0
-            else:
-                table = pv.read_csv(
-                    source_path,
-                    read_options=read_options,
-                    parse_options=parse_options,
-                    convert_options=convert_options,
-                )
+            table = FormatConverter._read_csv_source(source_path, read_options, parse_options, convert_options, pv)
+            if table is None:
+                return ConversionStatus.FAILED, 0
 
             if is_tbl_file and column_names and has_trailing:
                 table = table.select(column_names)
@@ -360,30 +335,7 @@ class FormatConverter:
             # Ensure target directory exists
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Build Parquet write options
-            write_kwargs: dict[str, Any] = {
-                "compression": compression,
-                "use_dictionary": True,
-            }
-
-            # Apply write_config options to Parquet writer
-            if write_config:
-                # Row group size
-                if write_config.row_group_size is not None:
-                    write_kwargs["row_group_size"] = write_config.row_group_size
-
-                # Compression level (PyArrow uses compression_level kwarg)
-                if write_config.compression_level is not None:
-                    write_kwargs["compression_level"] = write_config.compression_level
-
-                # Dictionary columns (use_dictionary can be list of column names)
-                if write_config.dictionary_columns:
-                    write_kwargs["use_dictionary"] = write_config.dictionary_columns
-                elif write_config.skip_dictionary_columns:
-                    # Exclude specific columns from dictionary encoding
-                    all_cols = set(table.column_names)
-                    dict_cols = list(all_cols - set(write_config.skip_dictionary_columns))
-                    write_kwargs["use_dictionary"] = dict_cols
+            write_kwargs = FormatConverter._build_write_kwargs(compression, write_config, table)
 
             # Write Parquet
             logger.debug(f"Writing {target_path}")
@@ -397,6 +349,74 @@ class FormatConverter:
         except Exception as e:
             logger.error(f"Conversion failed for {source_path}: {e}")
             return ConversionStatus.FAILED, 0
+
+    @staticmethod
+    def _resolve_arrow_types(column_types: dict[str, str] | None) -> dict[str, Any] | None:
+        """Convert string type names to PyArrow types for explicit column typing."""
+        if not column_types:
+            return None
+        import pyarrow as pa
+
+        type_lookup = {
+            "date32": pa.date32(),
+            "int64": pa.int64(),
+            "float64": pa.float64(),
+            "string": pa.string(),
+        }
+        return {col: type_lookup.get(dtype, pa.string()) for col, dtype in column_types.items()}
+
+    @staticmethod
+    def _build_write_kwargs(compression: str, write_config: Any, table: Any) -> dict[str, Any]:
+        """Build Parquet write keyword arguments from compression and write config."""
+        write_kwargs: dict[str, Any] = {
+            "compression": compression,
+            "use_dictionary": True,
+        }
+        if not write_config:
+            return write_kwargs
+
+        if write_config.row_group_size is not None:
+            write_kwargs["row_group_size"] = write_config.row_group_size
+        if write_config.compression_level is not None:
+            write_kwargs["compression_level"] = write_config.compression_level
+        if write_config.dictionary_columns:
+            write_kwargs["use_dictionary"] = write_config.dictionary_columns
+        elif write_config.skip_dictionary_columns:
+            all_cols = set(table.column_names)
+            write_kwargs["use_dictionary"] = list(all_cols - set(write_config.skip_dictionary_columns))
+
+        return write_kwargs
+
+    @staticmethod
+    def _read_csv_source(
+        source_path: Path, read_options: Any, parse_options: Any, convert_options: Any, pv: Any
+    ) -> Any:
+        """Read a CSV/TBL source file, handling compression transparently.
+
+        Returns:
+            PyArrow Table on success, None on failure.
+        """
+        compression_type = detect_compression(source_path)
+        if compression_type:
+            manager = CompressionManager()
+            try:
+                compressor = manager.get_compressor(compression_type)
+                with compressor.open_for_read(source_path, mode="rb") as stream:
+                    return pv.read_csv(
+                        stream,
+                        read_options=read_options,
+                        parse_options=parse_options,
+                        convert_options=convert_options,
+                    )
+            except CompressionError as err:
+                logger.error(f"Failed to read compressed file {source_path}: {err}")
+                return None
+        return pv.read_csv(
+            source_path,
+            read_options=read_options,
+            parse_options=parse_options,
+            convert_options=convert_options,
+        )
 
     @staticmethod
     def _apply_write_config(
@@ -447,21 +467,22 @@ class DataCache:
     Override with the ``BENCHBOX_CACHE_DIR`` environment variable or the
     ``cache_dir`` constructor parameter.
 
-    Cache structure:
+    Cache structure (nested inside canonical datagen directories):
         benchmark_runs/datagen/
-          tpch/
-            sf_1.0/
-              parquet/
-                v2/
-                  _manifest.json
-                  customer.parquet
-                  lineitem.parquet
-                  ...
-            sf_0.01/
-              parquet/
-                v2/
-                  ...
-          tpcds/
+          tpch_sf1/
+            nation.tbl              ← raw generated data (not managed by cache)
+            _datagen_manifest.json  ← SQL datagen manifest (not managed by cache)
+            parquet/                ← cached format conversions
+              v2/
+                _manifest.json
+                customer.parquet
+                lineitem.parquet
+                ...
+          tpch_sf001/
+            parquet/
+              v2/
+                ...
+          tpcds_sf1/
             ...
     """
 
@@ -483,6 +504,10 @@ class DataCache:
     def get_cache_path(self, benchmark: str, scale_factor: float, format: DataFormat) -> Path:
         """Get the cache path for a benchmark/SF/format combination.
 
+        The cache is nested inside the canonical flat datagen directory
+        (e.g. ``tpch_sf001/parquet/v2/``), reusing the same naming
+        convention as SQL generators via :func:`get_benchmark_runs_datagen_path`.
+
         Args:
             benchmark: Benchmark name (tpch, tpcds)
             scale_factor: Scale factor
@@ -491,8 +516,8 @@ class DataCache:
         Returns:
             Path to cache directory
         """
-        sf_str = f"sf_{scale_factor}"
-        return self.cache_dir / benchmark / sf_str / format.value / self.cache_version
+        base = get_benchmark_runs_datagen_path(benchmark, scale_factor, self.cache_dir)
+        return base / format.value / self.cache_version
 
     def get_manifest_path(self, benchmark: str, scale_factor: float, format: DataFormat) -> Path:
         """Get the manifest file path.
@@ -633,7 +658,11 @@ class DataCache:
         scale_factor: float | None = None,
         format: DataFormat | None = None,
     ) -> int:
-        """Clear cached data.
+        """Clear cached DataFrame format conversions.
+
+        Only removes format-specific subdirectories (parquet/, csv/, arrow/)
+        from datagen directories, preserving raw generated data files (.tbl,
+        _datagen_manifest.json, etc.) that may coexist in the same directory.
 
         Args:
             benchmark: Optional benchmark to clear (clears all if None)
@@ -641,38 +670,51 @@ class DataCache:
             format: Optional format to clear
 
         Returns:
-            Number of files removed
+            Number of items removed
         """
         if not self.cache_dir.exists():
             return 0
 
         removed = 0
 
-        if benchmark is None:
-            # Clear entire cache
-            shutil.rmtree(self.cache_dir, ignore_errors=True)
-            removed = -1  # Indicate full clear
-        elif scale_factor is None:
-            # Clear specific benchmark
-            benchmark_dir = self.cache_dir / benchmark
-            if benchmark_dir.exists():
-                shutil.rmtree(benchmark_dir, ignore_errors=True)
-                removed = -1
-        elif format is None:
-            # Clear specific SF
-            sf_dir = self.cache_dir / benchmark / f"sf_{scale_factor}"
-            if sf_dir.exists():
-                shutil.rmtree(sf_dir, ignore_errors=True)
-                removed = -1
-        else:
-            # Clear specific format
+        if format is not None and benchmark is not None and scale_factor is not None:
+            # Case 4: Clear specific format version directory
             cache_path = self.get_cache_path(benchmark, scale_factor, format)
             if cache_path.exists():
                 for f in cache_path.iterdir():
                     f.unlink()
                     removed += 1
                 cache_path.rmdir()
+        elif benchmark is not None and scale_factor is not None:
+            # Case 3: Clear all format conversions for a specific benchmark+SF
+            base = get_benchmark_runs_datagen_path(benchmark, scale_factor, self.cache_dir)
+            removed += self._remove_format_subdirs(base)
+        elif benchmark is not None:
+            # Case 2: Clear all SFs for a specific benchmark
+            for child in self.cache_dir.iterdir():
+                if child.is_dir() and child.name.startswith(f"{benchmark}_sf"):
+                    removed += self._remove_format_subdirs(child)
+        else:
+            # Case 1: Clear all cached format conversions across all benchmarks
+            for child in self.cache_dir.iterdir():
+                if child.is_dir():
+                    removed += self._remove_format_subdirs(child)
 
+        return removed
+
+    def _remove_format_subdirs(self, base_dir: Path) -> int:
+        """Remove only known format subdirectories from a datagen directory.
+
+        Preserves raw data files (.tbl, manifests, etc.) while removing
+        cached format conversions (parquet/, csv/, arrow/).
+        """
+        if not base_dir.exists():
+            return 0
+        removed = 0
+        for child in base_dir.iterdir():
+            if child.is_dir() and child.name in _KNOWN_FORMAT_DIRS:
+                shutil.rmtree(child, ignore_errors=True)
+                removed += 1
         return removed
 
 
@@ -819,14 +861,22 @@ class DataFrameDataLoader:
         # Determine target format
         target_format = self.get_optimal_format(scale_factor)
 
-        # Check if source is already in target format
+        # Resolve write config before the format check so sort_by can force conversion.
+        effective_write_config = write_config or self.write_config
+
+        # Check if source is already in target format.
+        # Skip conversion unless write_config requests physical layout changes (e.g. sort_by),
+        # which must be applied even when source is already in the target format.
         source_format = self._detect_source_format(source_files)
-        if source_format == target_format:
+        needs_layout_transform = bool(effective_write_config and effective_write_config.sort_by)
+        if source_format == target_format and not needs_layout_transform:
             logger.info(f"Source data already in {target_format.value} format")
             return source_files
-
-        # Use provided write_config or fall back to instance config
-        effective_write_config = write_config or self.write_config
+        if source_format == target_format and needs_layout_transform:
+            logger.info(
+                f"Source data is already in {target_format.value} format but sort_by is configured; "
+                "routing through conversion pipeline to apply physical sort."
+            )
 
         # Check cache
         first_entry = next(iter(source_files.values()))
@@ -1069,70 +1119,21 @@ class DataFrameDataLoader:
         converted_files: dict[str, Path | list[Path]] = {}
         table_metadata: dict[str, dict[str, Any]] = {}
 
+        benchmark_delimiter = getattr(benchmark, "csv_delimiter", None)
+        if benchmark_delimiter is None:
+            impl = getattr(benchmark, "_impl", None)
+            if impl is not None:
+                benchmark_delimiter = getattr(impl, "csv_delimiter", None)
+
         for table_name, source_path in source_files.items():
             source_list = source_path if isinstance(source_path, list) else [source_path]
-
-            # Get column names and types from schema
             column_names = schema_info.get(table_name)
             column_types = pyarrow_types.get(table_name)
-
-            # Get table-specific write config (filter sort columns that exist in this table)
             table_write_config = self._get_table_write_config(write_config, table_name, column_names)
 
-            converted_list: list[Path] = []
-            table_entries: list[dict[str, Any]] = []
-
-            # Determine CSV delimiter: check benchmark for override, then infer from format
-            benchmark_delimiter = getattr(benchmark, "csv_delimiter", None)
-            if benchmark_delimiter is None:
-                impl = getattr(benchmark, "_impl", None)
-                if impl is not None:
-                    benchmark_delimiter = getattr(impl, "csv_delimiter", None)
-
-            for source_entry in source_list:
-                format_type = detect_data_format(source_entry)
-                delimiter = "|" if format_type == "tbl" else (benchmark_delimiter or ",")
-
-                stripped_name = strip_compression_suffix(source_entry).name
-                if format_type == "tbl":
-                    # Handle both .tbl (TPC-H) and .dat (TPC-DS) extensions
-                    base_name = stripped_name.replace(".tbl", "", 1).replace(".dat", "", 1)
-                elif format_type == "csv":
-                    base_name = stripped_name.replace(".csv", "", 1)
-                else:
-                    base_name = Path(stripped_name).stem
-
-                target_path = cache_path / f"{base_name}.parquet"
-
-                status, row_count = FormatConverter.convert_csv_to_parquet(
-                    source_path=source_entry,
-                    target_path=target_path,
-                    column_names=column_names,
-                    delimiter=delimiter,
-                    write_config=table_write_config,
-                    column_types=column_types,
-                )
-
-                if status == ConversionStatus.SUCCESS:
-                    converted_list.append(target_path)
-                    table_entries.append(
-                        {
-                            "file": target_path.name,
-                            "row_count": row_count,
-                            "source": source_entry.name,
-                        }
-                    )
-                else:
-                    logger.error(f"Failed to convert {table_name}, using source file")
-                    converted_list.append(source_entry)
-                    table_entries.append(
-                        {
-                            "file": source_entry.name,
-                            "row_count": 0,
-                            "source": source_entry.name,
-                            "status": "FAILED",
-                        }
-                    )
+            converted_list, table_entries = self._convert_table_files(
+                table_name, source_list, column_names, column_types, table_write_config, benchmark_delimiter, cache_path
+            )
 
             if len(converted_list) == 1:
                 converted_files[table_name] = converted_list[0]
@@ -1166,6 +1167,55 @@ class DataFrameDataLoader:
         self._prune_cache_leaf_files(cache_path, tracked_files)
 
         return converted_files
+
+    def _convert_table_files(
+        self,
+        table_name: str,
+        source_list: list[Path],
+        column_names: list[str] | None,
+        column_types: dict[str, str] | None,
+        table_write_config: DataFrameWriteConfiguration | None,
+        benchmark_delimiter: str | None,
+        cache_path: Path,
+    ) -> tuple[list[Path], list[dict[str, Any]]]:
+        """Convert a single table's source files to Parquet."""
+        converted_list: list[Path] = []
+        table_entries: list[dict[str, Any]] = []
+
+        for source_entry in source_list:
+            format_type = detect_data_format(source_entry)
+            delimiter = "|" if format_type == "tbl" else (benchmark_delimiter or ",")
+
+            stripped_name = strip_compression_suffix(source_entry).name
+            if format_type == "tbl":
+                base_name = stripped_name.replace(".tbl", "", 1).replace(".dat", "", 1)
+            elif format_type == "csv":
+                base_name = stripped_name.replace(".csv", "", 1)
+            else:
+                base_name = Path(stripped_name).stem
+
+            target_path = cache_path / f"{base_name}.parquet"
+
+            status, row_count = FormatConverter.convert_csv_to_parquet(
+                source_path=source_entry,
+                target_path=target_path,
+                column_names=column_names,
+                delimiter=delimiter,
+                write_config=table_write_config,
+                column_types=column_types,
+            )
+
+            if status == ConversionStatus.SUCCESS:
+                converted_list.append(target_path)
+                table_entries.append({"file": target_path.name, "row_count": row_count, "source": source_entry.name})
+            else:
+                logger.error(f"Failed to convert {table_name}, using source file")
+                converted_list.append(source_entry)
+                table_entries.append(
+                    {"file": source_entry.name, "row_count": 0, "source": source_entry.name, "status": "FAILED"}
+                )
+
+        return converted_list, table_entries
 
     def _prune_cache_leaf_files(self, cache_path: Path, tracked_files: set[str]) -> int:
         """Prune untracked leaf files from a cache directory.

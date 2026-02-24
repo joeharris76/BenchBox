@@ -12,8 +12,8 @@ Example:
     >>> from benchbox.core.tuning.generators.clickhouse import ClickHouseDDLGenerator
     >>> generator = ClickHouseDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
-    >>> print(clauses.partition_by)  # "toYYYYMM(l_shipdate)"
-    >>> print(clauses.sort_by)       # "l_orderkey, l_linenumber"
+    >>> emit(clauses.partition_by)  # "toYYYYMM(l_shipdate)"
+    >>> emit(clauses.sort_by)       # "l_orderkey, l_linenumber"
 
 Copyright 2026 Joe Harris / BenchBox Project
 
@@ -31,6 +31,7 @@ from benchbox.core.tuning.ddl_generator import (
     ColumnDefinition,
     TuningClauses,
 )
+from benchbox.core.tuning.type_mapping import map_sql_type_with_fallback
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -39,6 +40,36 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+CLICKHOUSE_TYPE_MAPPING: dict[str, str] = {
+    # Integer types
+    "INTEGER": "Int32",
+    "INT": "Int32",
+    "BIGINT": "Int64",
+    "SMALLINT": "Int16",
+    "TINYINT": "Int8",
+    # Floating point
+    "FLOAT": "Float32",
+    "DOUBLE": "Float64",
+    "REAL": "Float32",
+    "DOUBLE PRECISION": "Float64",
+    # Decimal
+    "DECIMAL": "Decimal(18, 2)",
+    "NUMERIC": "Decimal(18, 2)",
+    # String types
+    "VARCHAR": "String",
+    "CHAR": "FixedString(255)",
+    "TEXT": "String",
+    "STRING": "String",
+    # Date/time
+    "DATE": "Date",
+    "TIMESTAMP": "DateTime",
+    "DATETIME": "DateTime",
+    "TIME": "String",  # ClickHouse has no native TIME type
+    # Boolean
+    "BOOLEAN": "Bool",
+    "BOOL": "Bool",
+}
 
 
 class MergeTreeEngine(str, Enum):
@@ -300,40 +331,7 @@ class ClickHouseDDLGenerator(BaseDDLGenerator):
         Returns:
             ClickHouse-specific type name.
         """
-        type_mapping = {
-            # Integer types
-            "INTEGER": "Int32",
-            "INT": "Int32",
-            "BIGINT": "Int64",
-            "SMALLINT": "Int16",
-            "TINYINT": "Int8",
-            # Floating point
-            "FLOAT": "Float32",
-            "DOUBLE": "Float64",
-            "REAL": "Float32",
-            "DOUBLE PRECISION": "Float64",
-            # Decimal
-            "DECIMAL": "Decimal(18, 2)",
-            "NUMERIC": "Decimal(18, 2)",
-            # String types
-            "VARCHAR": "String",
-            "CHAR": "FixedString(255)",
-            "TEXT": "String",
-            "STRING": "String",
-            # Date/time
-            "DATE": "Date",
-            "TIMESTAMP": "DateTime",
-            "DATETIME": "DateTime",
-            "TIME": "String",  # ClickHouse has no native TIME type
-            # Boolean
-            "BOOLEAN": "Bool",
-            "BOOL": "Bool",
-        }
-
-        # Check for type with precision (e.g., "DECIMAL(15,2)")
-        base_type = sql_type.split("(")[0].upper().strip()
-
-        return type_mapping.get(base_type, sql_type)
+        return map_sql_type_with_fallback(sql_type, CLICKHOUSE_TYPE_MAPPING)
 
 
 __all__ = [

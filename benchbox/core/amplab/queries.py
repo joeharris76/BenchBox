@@ -16,10 +16,12 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-from typing import Any, Optional
+from typing import Any
+
+from benchbox.core.query_manager import ParameterizedQueryManager
 
 
-class AMPLabQueryManager:
+class AMPLabQueryManager(ParameterizedQueryManager):
     """Manager for AMPLab benchmark queries."""
 
     def __init__(self) -> None:
@@ -154,46 +156,6 @@ LIMIT {limit_rows};
 """
 
         return queries
-
-    def get_query(self, query_id: str, params: Optional[dict[str, Any]] = None) -> str:
-        """Get an AMPLab benchmark query with parameters.
-
-        Args:
-            query_id: Query identifier (1, 2, 3, etc.)
-            params: Optional parameter values. If None, uses defaults.
-
-        Returns:
-            SQL query with parameters replaced
-
-        Raises:
-            ValueError: If query_id is invalid
-        """
-        if query_id not in self._queries:
-            available = ", ".join(sorted(self._queries.keys()))
-            raise ValueError(f"Invalid query ID: {query_id}. Available: {available}")
-
-        template = self._queries[query_id]
-
-        if params is None:
-            params = self._generate_default_params(query_id)
-        else:
-            # Merge with defaults for any missing parameters
-            defaults = self._generate_default_params(query_id)
-            defaults.update(params)
-            params = defaults
-
-        return template.format(**params)
-
-    def get_all_queries(self) -> dict[str, str]:
-        """Get all AMPLab queries with default parameters.
-
-        Returns:
-            Dictionary mapping query IDs to parameterized SQL
-        """
-        result = {}
-        for query_id in self._queries:
-            result[query_id] = self.get_query(query_id)
-        return result
 
     def _generate_default_params(self, query_id: str) -> dict[str, Any]:
         """Generate default parameters for a query.

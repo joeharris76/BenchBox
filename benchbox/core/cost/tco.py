@@ -290,7 +290,7 @@ class TCOCalculator:
         ...     projection_years=5,
         ...     growth_config=growth,
         ... )
-        >>> print(f"5-year TCO: ${projection.total_tco:,.2f}")
+        >>> emit(f"5-year TCO: ${projection.total_tco:,.2f}")
     """
 
     def __init__(self) -> None:

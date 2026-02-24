@@ -23,12 +23,17 @@ class PlatformInfoInput:
     """
 
     name: str  # "DuckDB", "DataFusion", "Polars", etc.
-    platform_version: str | None = None  # Platform version string
+    platform_version: str | None = None  # Platform version string (legacy: may be driver or engine)
     client_library_version: str | None = None  # Client library version string
     execution_mode: str = "sql"  # "sql" or "dataframe"
     connection_mode: str | None = None  # "in-memory", "file", "remote", etc.
     family: str | None = None  # "expression" (Polars) or "pandas" (Pandas-like)
     config: dict[str, Any] = field(default_factory=dict)
+    # Engine/service version metadata (separate from Python driver/client version).
+    # For coupled platforms (DuckDB, DataFusion): same as platform_version.
+    # For decoupled platforms (Snowflake, BigQuery, etc.): the remote engine version.
+    engine_version: str | None = None
+    engine_version_source: str | None = None  # Provenance: how the engine version was obtained
 
 
 @runtime_checkable
@@ -232,4 +237,6 @@ def merge_platform_info(
         connection_mode=base_info.connection_mode,
         family=base_info.family,
         config=merged_config,
+        engine_version=base_info.engine_version,
+        engine_version_source=base_info.engine_version_source,
     )

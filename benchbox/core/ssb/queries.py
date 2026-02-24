@@ -18,10 +18,12 @@ For more information see:
 - https://www.cs.umb.edu/~poneil/StarSchemaB.PDF
 """
 
-from typing import Any, Optional
+from typing import Any
+
+from benchbox.core.query_manager import ParameterizedQueryManager
 
 
-class SSBQueryManager:
+class SSBQueryManager(ParameterizedQueryManager):
     """Manager for Star Schema Benchmark queries."""
 
     def __init__(self) -> None:
@@ -201,46 +203,6 @@ ORDER BY d_year, s_city, p_brand1;
 """
 
         return queries
-
-    def get_query(self, query_id: str, params: Optional[dict[str, Any]] = None) -> str:
-        """Get a parameterized SSB query.
-
-        Args:
-            query_id: Query identifier (Q1.1, Q1.2, etc.)
-            params: Optional parameter values. If None, uses defaults.
-
-        Returns:
-            SQL query with parameters replaced
-
-        Raises:
-            ValueError: If query_id is invalid
-        """
-        if query_id not in self._queries:
-            available = ", ".join(sorted(self._queries.keys()))
-            raise ValueError(f"Invalid query ID: {query_id}. Available: {available}")
-
-        template = self._queries[query_id]
-
-        if params is None:
-            params = self._generate_default_params(query_id)
-        else:
-            # Merge with defaults for any missing parameters
-            defaults = self._generate_default_params(query_id)
-            defaults.update(params)
-            params = defaults
-
-        return template.format(**params)
-
-    def get_all_queries(self) -> dict[str, str]:
-        """Get all SSB queries with default parameters.
-
-        Returns:
-            Dictionary mapping query IDs to parameterized SQL
-        """
-        result = {}
-        for query_id in self._queries:
-            result[query_id] = self.get_query(query_id)
-        return result
 
     def _generate_default_params(self, query_id: str) -> dict[str, Any]:
         """Generate default parameters for a query.

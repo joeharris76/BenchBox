@@ -114,7 +114,7 @@ class TestGetDataFrameRequirements:
         """Test requirements for pandas-df."""
         req = get_dataframe_requirements("pandas-df")
 
-        assert "dataframe-pandas" in req.lower()
+        assert "--extra pandas" in req.lower()
 
     def test_unknown_platform_requirements(self):
         """Test requirements for unknown platform."""

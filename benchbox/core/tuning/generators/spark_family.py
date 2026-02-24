@@ -10,7 +10,7 @@ Example:
     >>> from benchbox.core.tuning.generators.spark_family import DeltaDDLGenerator
     >>> generator = DeltaDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
-    >>> print(generator.generate_create_table_ddl("lineitem", columns, clauses))
+    >>> emit(generator.generate_create_table_ddl("lineitem", columns, clauses))
     CREATE TABLE lineitem (...)
     USING DELTA
     PARTITIONED BY (l_shipdate)

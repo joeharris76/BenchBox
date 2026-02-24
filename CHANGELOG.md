@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-02-23
+
+### Added
+
+- **Driver version pinning** - New `--platform-option driver_version=X.Y.Z` flag to pin any
+  platform's Python driver to a specific version. Pair with `driver_auto_install=true` to have
+  BenchBox install the requested version automatically via `uv`. All platforms support these
+  options; the active driver version is now displayed in the run announcement line.
+- **Bulk multi-shard table loading** - New `load_table_bulk()` interface on `FileFormatHandler`
+  lets the DataLoader ingest multi-shard tables in a single native call instead of
+  row-by-row iteration. DuckDB (CSV, Parquet) and ClickHouse Native handlers are the first
+  implementations; benchmark runs with sharded TPC-DS data are measurably faster.
+- **Greyscale / no-color ASCII chart fallbacks** - All seven ASCII chart types now have
+  fill-pattern and glyph-based differentiation when color is unavailable (e.g. CI logs,
+  `NO_COLOR`, piped output). `ASCIIBarChart` uses Unicode fill blocks, `ASCIIComparisonBar`
+  uses hatch patterns, and the heatmap cell shading is legible without ANSI colors. A
+  standardized `no_color` detection path is shared across all chart renderers, and
+  ASCII-only rendering is covered by new unit tests.
+- **Five new ASCII chart types** - Percentile ladder, stacked bar, sparkline table, CDF
+  (cumulative distribution), rank table, and normalized speedup (log₂-scaled baseline
+  comparison). All types are registered in the chart registry, accessible via CLI and MCP,
+  and included in the flagship/default chart templates.
+- **Post-run summary charts** - Charts are automatically generated and displayed in the
+  terminal after every benchmark run and included in MCP `run_benchmark` responses.
+- **Three new chart template bundles** - `latency_deep_dive`, `regression_triage`, and
+  `executive_summary` template sets added alongside the existing default and flagship bundles.
+- `fabric-dw` as a preferred CLI alias for `fabric_dw` platform
+
+### Fixed
+
+- **Driver auto-install version switching** - `sys.modules` and metadata caching could return
+  stale package metadata after `driver_auto_install` swapped in a different driver version,
+  causing the wrong version to be used for the remainder of the run. The module cache is
+  now invalidated on version switch.
+- **DataFrame cache path mismatch** - DataFrame mode cached generated data under a different
+  directory structure than SQL mode, forcing redundant data generation when switching between
+  modes on the same scale factor. Both modes now share a flat directory layout.
+- **ClickHouse zstd double-decompression** - `ClickHouseNativeHandler` was applying manual
+  zstd decompression on top of the driver's built-in decompression, corrupting data for
+  compressed bulk loads.
+- **Platform display names** - Corrected display names for Amazon Athena (was "AWS Athena"),
+  Google Cloud Dataproc (was "GCP Dataproc"), Microsoft Azure platforms, Databricks (now
+  "Databricks SQL"), and `adapter.get_platform_info()` propagated to match.
+- CLI warning logged when a platform option's default value is not in the declared choices list
+- Ranking normalization crash when all metric values are negative finite numbers
+- PySpark SIGINT handler hanging `pytest-xdist` workers in medium-speed test runs
+- `--validation-mode` CLI prompt crash when `spec.default` is not a string
+
+### Changed
+
+- **Four platform drivers moved to optional extras** — DuckDB (`benchbox[duckdb]`), Polars
+  (`benchbox[polars]`), ClickHouse Connect (`benchbox[clickhouse-connect]`), and psycopg2
+  (`benchbox[postgresql]`) are no longer hard dependencies. Users installing BenchBox now get
+  a leaner core and can pin each driver independently. `pip install benchbox[all]` restores
+  the previous behaviour.
+- All user-facing terminal output in the run pipeline now flows through `emit()`, making
+  `--quiet` suppression and output capture in tests consistent.
+- `BaseQueryCatalogMixin` and `TranslatableQueryMixin` extracted from duplicate query-catalog
+  implementations across benchmark classes.
+
 ## [0.1.2] - 2026-02-09
 
 ### Added

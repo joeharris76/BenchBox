@@ -164,7 +164,7 @@ class ResourceLimitMonitor:
         >>> # ... run benchmark ...
         >>> summary = monitor.stop()
         >>> if summary.warnings:
-        ...     print(f"Got {len(summary.warnings)} warnings")
+        ...     emit(f"Got {len(summary.warnings)} warnings")
     """
 
     def __init__(

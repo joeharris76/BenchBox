@@ -38,6 +38,6 @@ def test_clickhouse_requires_valid_mode(monkeypatch):
     from benchbox.platforms.clickhouse import ClickHouseAdapter
 
     with pytest.raises(ValueError) as excinfo:
-        ClickHouseAdapter(mode="invalid_mode")
+        ClickHouseAdapter(deployment_mode="invalid_mode")
 
     assert "Invalid ClickHouse deployment mode" in str(excinfo.value)

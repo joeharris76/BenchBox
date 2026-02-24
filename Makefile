@@ -1,7 +1,7 @@
 # BenchBox Makefile
 # This makefile provides commands for building, testing and development
 
-.PHONY: test test-unit test-integration test-tpch test-all test-fast test-medium test-slow test-pytest clean lint install develop coverage coverage-html coverage-report test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke test-local-matrix
+.PHONY: test test-unit test-integration test-tpch test-all test-fast test-medium test-slow test-pytest clean lint install develop coverage coverage-html coverage-report coverage-check test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke test-local-matrix complexity-check complexity-report duplicate-check duplicate-check-verbose duplicate-check-json
 
 # Primary test commands using pytest marker system
 test: test-fast
@@ -36,7 +36,7 @@ test-fast:
 	uv run -- python -m pytest -m "fast" --tb=short
 
 test-medium:
-	uv run -- python -m pytest -m "medium" --tb=short
+	uv run -- python -m pytest -m "medium" --tb=short --timeout=60
 
 test-slow:
 	uv run -- python -m pytest -m "slow" --tb=short -v
@@ -131,9 +131,19 @@ coverage-html:
 coverage-report:
 	uv run -- python -m pytest -c pytest-ci.ini --cov=benchbox --cov-report=xml:coverage.xml --cov-report=term-missing
 
+coverage-check:
+	uv run -- python scripts/check_module_coverage.py --coverage-xml coverage.xml --threshold 50
+
 coverage-per-file:
 	uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=json --cov-report=term-missing --cov-fail-under=50
 	uv run -- python scripts/check_per_file_coverage.py --min 50 --coverage-json coverage.json
+
+# Cyclomatic complexity checks
+complexity-check:
+	uv run -- python scripts/check_complexity.py
+
+complexity-report:
+	uv run -- python scripts/check_complexity.py --no-fail --top 30
 
 # Install and development
 install:
@@ -160,6 +170,16 @@ clean:
 lint:
 	uv run ruff check .
 
+# Duplicate code detection (AST structural clone detection)
+duplicate-check:
+	uv run -- python scripts/check_duplicate_code.py
+
+duplicate-check-verbose:
+	uv run -- python scripts/check_duplicate_code.py --verbose --top-n 30
+
+duplicate-check-json:
+	uv run -- python scripts/check_duplicate_code.py --json
+
 ##@ CI Local Equivalents
 # These targets mirror GitHub Actions workflows for local validation
 
@@ -176,7 +196,8 @@ ci-lint:
 # Coverage threshold set to 50% (current baseline); TODO: increase as coverage improves
 ci-test:
 	@echo "Running CI test suite..."
-	uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=term-missing --cov-fail-under=50
+	uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=xml:coverage.xml --cov-report=term-missing --cov-fail-under=50
+	uv run -- python scripts/check_module_coverage.py --coverage-xml coverage.xml --threshold 50
 	@echo "✅ CI test suite passed"
 
 # CI docs build - exact match for docs.yml workflow
@@ -374,6 +395,8 @@ help:
 	@echo "  make security-audit  Run pip-audit security check"
 	@echo "  make spellcheck      Run codespell on codebase"
 	@echo "  make docstring-coverage  Check docstring coverage with interrogate"
+	@echo "  make complexity-check    Check cyclomatic complexity (fails on violations)"
+	@echo "  make complexity-report   Report cyclomatic complexity (no failure)"
 	@echo ""
 	@echo "Parallel Testing:"
 	@echo "  make test-parallel   Run tests in parallel"
@@ -400,6 +423,7 @@ help:
 	@echo "  make typecheck-uv    Run type checking with uv (development)"
 	@echo "  make validate-imports Validate import structure and detect circular dependencies"
 	@echo "  make dependency-check Validate lock file against pyproject specs (ARGS='--matrix' to show summary)"
+	@echo "  make duplicate-check Detect duplicate code via AST structural hashing"
 	@echo "  make format          Format code with ruff"
 	@echo "  make clean           Remove build artifacts"
 	@echo "  make install         Install the package"

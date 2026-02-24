@@ -12,6 +12,8 @@ This guide summarizes the organization of the runtime-focused modules after the 
 - `benchbox/cli/presentation/`: light-weight presentation helpers (currently `system.py`).
 - `benchbox/cli/shared.py`: shared console helpers (`console`, `set_quiet_output`, `silence_output`).
 - `benchbox/cli/main.py`: thin compatibility layer that re-exports the new modules for legacy imports and tests.
+- `benchbox/cli/orchestrator.py`: canonical runtime bridge from CLI to core lifecycle (`run_benchmark_lifecycle`).
+- `benchbox/cli/execution_pipeline.py`: legacy compatibility/test module; not the default `benchbox run` runtime path.
 
 ### Extension notes
 
@@ -63,4 +65,3 @@ This guide summarizes the organization of the runtime-focused modules after the 
 ## File size guardrails
 
 A new automated test (`tests/system/test_module_size_thresholds.py`) watches the size of runtime-critical modules (CLI commands, benchmark orchestration, generators, and platform adapters). The guardrail enforces a default 1,200 line limit with an allowlist for modules that are intentionally larger. See the test file for configuration details.
-

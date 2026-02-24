@@ -114,6 +114,53 @@ BenchBox recognizes these environment variables:
 
 Each platform supports specific options via `--platform-option KEY=VALUE`:
 
+### Universal Keys (All Platforms)
+
+These keys are available for every platform:
+
+| Key | Description |
+|-----|-------------|
+| `driver_version` | Pin the Python driver package to a specific version (e.g. `1.2.0`). Useful for reproducing results or testing a specific connector release. |
+| `driver_auto_install` | When `true`, automatically installs the requested `driver_version` via uv if the package is not already present. |
+
+```{note}
+`uv run benchbox run` syncs the environment to `uv.lock` before Python starts, which
+can silently revert a version you installed manually. Use `driver_version` +
+`driver_auto_install=true` or `uv run --with "pkg==X"` to reliably test a specific
+version. See {ref}`driver-version-management` for the full guide.
+```
+
+Example: pin DuckDB driver and auto-install it:
+```bash
+benchbox run --platform duckdb --benchmark tpch \
+  --platform-option driver_version=1.2.0 \
+  --platform-option driver_auto_install=true
+```
+
+Example: pin Snowflake connector version:
+```bash
+benchbox run --platform snowflake --benchmark tpch \
+  --platform-option driver_version=3.12.0 \
+  --platform-option driver_auto_install=true \
+  --platform-option account=xy12345.us-east-1 \
+  --platform-option warehouse=COMPUTE_WH
+```
+
+### Athena Spark Engine Version
+
+For Athena Spark only, the Spark engine version can be explicitly selected:
+
+| Key | Description |
+|-----|-------------|
+| `engine_version` | Spark engine version string (e.g. `PySpark engine version 3`). Defaults to the workgroup's configured version. **Athena Spark only** - on other cloud platforms the engine version is auto-detected. |
+
+```bash
+benchbox run --platform athena-spark --benchmark tpch \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox \
+  --platform-option "engine_version=PySpark engine version 3"
+```
+
 ### ClickHouse Options
 
 - `mode=local`: Use local ClickHouse instance

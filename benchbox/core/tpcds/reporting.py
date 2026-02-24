@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from benchbox.utils.printing import emit
+
 from .benchmark import (
     BenchmarkResult,
     PhaseResult,
@@ -70,7 +72,7 @@ class TPCDSReportGenerator:
             Dictionary mapping report types to file paths
         """
         if self.verbose:
-            print(f"Generating TPC-DS benchmark reports in {self.reports_dir}")
+            emit(f"Generating TPC-DS benchmark reports in {self.reports_dir}")
 
         reports = {}
 
@@ -99,9 +101,9 @@ class TPCDSReportGenerator:
         reports["performance_summary"] = self._generate_performance_summary(result)
 
         if self.verbose:
-            print(f"Generated {len(reports)} reports:")
+            emit(f"Generated {len(reports)} reports:")
             for report_type, path in reports.items():
-                print(f"  - {report_type}: {path}")
+                emit(f"  - {report_type}: {path}")
 
         return reports
 

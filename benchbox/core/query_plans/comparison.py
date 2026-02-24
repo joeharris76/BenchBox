@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -73,6 +74,73 @@ class PlanComparison:
 
     # Summary
     summary: str = ""
+
+
+def _compare_scan(left: LogicalOperator, right: LogicalOperator, diffs: dict[str, Any]) -> None:
+    if left.table_name != right.table_name:
+        diffs["table_name"] = {"left": left.table_name, "right": right.table_name}
+
+
+def _compare_join(left: LogicalOperator, right: LogicalOperator, diffs: dict[str, Any]) -> None:
+    if left.join_type != right.join_type:
+        diffs["join_type"] = {
+            "left": get_join_type_str(left.join_type),
+            "right": get_join_type_str(right.join_type),
+        }
+
+
+def _compare_set_diff(left: LogicalOperator, right: LogicalOperator, diffs: dict[str, Any], attr: str) -> None:
+    """Compare an attribute as an unordered set (membership only, not position).
+
+    Use for attributes where order is irrelevant (filter_expressions, aggregation_functions).
+    For order-significant attributes (group_by_keys, projection_expressions), use direct ``!=``.
+    """
+    left_vals = set(getattr(left, attr) or [])
+    right_vals = set(getattr(right, attr) or [])
+    if left_vals != right_vals:
+        diffs[attr] = {
+            "left_only": sorted(left_vals - right_vals),
+            "right_only": sorted(right_vals - left_vals),
+        }
+
+
+def _compare_sort(left: LogicalOperator, right: LogicalOperator, diffs: dict[str, Any]) -> None:
+    if left.sort_keys != right.sort_keys:
+        diffs["sort_keys"] = {"left": left.sort_keys, "right": right.sort_keys}
+
+
+def _compare_aggregate(left: LogicalOperator, right: LogicalOperator, diffs: dict[str, Any]) -> None:
+    _compare_set_diff(left, right, diffs, "aggregation_functions")
+    # group_by_keys is order-significant (affects output row grouping)
+    if (left.group_by_keys or []) != (right.group_by_keys or []):
+        diffs["group_by_keys"] = {"left": left.group_by_keys, "right": right.group_by_keys}
+
+
+def _compare_limit(left: LogicalOperator, right: LogicalOperator, diffs: dict[str, Any]) -> None:
+    if left.limit_count != right.limit_count:
+        diffs["limit_count"] = {"left": left.limit_count, "right": right.limit_count}
+    if left.offset_count != right.offset_count:
+        diffs["offset_count"] = {"left": left.offset_count, "right": right.offset_count}
+
+
+def _compare_project(left: LogicalOperator, right: LogicalOperator, diffs: dict[str, Any]) -> None:
+    # projection_expressions is order-significant (affects output columns)
+    if (left.projection_expressions or []) != (right.projection_expressions or []):
+        diffs["projection_expressions"] = {
+            "left": left.projection_expressions,
+            "right": right.projection_expressions,
+        }
+
+
+_OPERATOR_COMPARATORS: dict[str, Callable[[LogicalOperator, LogicalOperator, dict[str, Any]], None]] = {
+    "Scan": _compare_scan,
+    "Join": _compare_join,
+    "Filter": lambda l, r, d: _compare_set_diff(l, r, d, "filter_expressions"),
+    "Aggregate": _compare_aggregate,
+    "Sort": _compare_sort,
+    "Limit": _compare_limit,
+    "Project": _compare_project,
+}
 
 
 class QueryPlanComparator:
@@ -304,45 +372,10 @@ class QueryPlanComparator:
         """
         diffs: dict[str, Any] = {}
 
-        # Get operator type as string for comparison
         op_type_str = get_operator_type_str(left.operator_type)
-
-        # Compare operator-specific properties based on type
-        if op_type_str == "Scan":
-            if left.table_name != right.table_name:
-                diffs["table_name"] = {"left": left.table_name, "right": right.table_name}
-
-        elif op_type_str == "Join":
-            if left.join_type != right.join_type:
-                diffs["join_type"] = {
-                    "left": get_join_type_str(left.join_type),
-                    "right": get_join_type_str(right.join_type),
-                }
-
-        elif op_type_str == "Filter":
-            # Compare filter expressions (as sets to ignore order)
-            left_filters = set(left.filter_expressions or [])
-            right_filters = set(right.filter_expressions or [])
-            if left_filters != right_filters:
-                diffs["filter_expressions"] = {
-                    "left_only": list(left_filters - right_filters),
-                    "right_only": list(right_filters - left_filters),
-                }
-
-        elif op_type_str == "Aggregate":
-            # Compare aggregation functions (as sets to ignore order)
-            left_aggs = set(left.aggregation_functions or [])
-            right_aggs = set(right.aggregation_functions or [])
-            if left_aggs != right_aggs:
-                diffs["aggregation_functions"] = {
-                    "left_only": list(left_aggs - right_aggs),
-                    "right_only": list(right_aggs - left_aggs),
-                }
-
-        elif op_type_str == "Sort":
-            # Compare sort keys
-            if left.sort_keys != right.sort_keys:
-                diffs["sort_keys"] = {"left": left.sort_keys, "right": right.sort_keys}
+        comparator = _OPERATOR_COMPARATORS.get(op_type_str)
+        if comparator:
+            comparator(left, right, diffs)
 
         # Compare generic properties dictionary
         left_props = left.properties or {}

@@ -28,7 +28,7 @@ BenchBox _loosely_ follows [Semantic Versioning](https://semver.org/) using the 
 - **MINOR** when we add backward-compatible changes _OR significantly expand functionality_.
 - **PATCH** when we make bug fixes or documentation updates, _bug-fixes may not be backward-compatible_.
 
-Current release: v0.1.2. Check your installation with `benchbox --version`, which also reports metadata consistency diagnostics pulled from `pyproject.toml` and documentation markers.
+Current release: v0.1.3. Check your installation with `benchbox --version`, which also reports metadata consistency diagnostics pulled from `pyproject.toml` and documentation markers.
 
 **For Developers**: See [Release Automation Guide](release/RELEASE_AUTOMATION.md) for the automated release process with reproducible builds and timestamp normalization.
 
@@ -42,7 +42,7 @@ Current release: v0.1.2. Check your installation with `benchbox --version`, whic
 - **Eighteen Benchmarks**: TPC-H, TPC-DS, TPC-DI, TPC-DS-OBT, TPC-H Skew, TPC-Havoc, SSB, AMPLab, JoinOrder, ClickBench, H2ODB, NYC Taxi, TSBS DevOps, CoffeeShop, TPC-H Data Vault, Read Primitives, Write Primitives, Transaction Primitives
 - **Cross-Database**: Same benchmarks work on any database platform
 - **DataFrame Mode**: Native DataFrame API benchmarking with Polars, Pandas, and 6 other libraries
-- **SQL Platforms** (31): DuckDB, MotherDuck, SQLite, DataFusion, PostgreSQL, TimescaleDB, Polars, ClickHouse, Firebolt, InfluxDB, Databricks, Snowflake, BigQuery, Redshift, Azure Synapse, Microsoft Fabric Warehouse, Trino, Starburst, Presto, Athena, Spark, PySpark, AWS Glue, Amazon EMR Serverless, Athena Spark, GCP Dataproc, GCP Dataproc Serverless, Microsoft Fabric Spark, Azure Synapse Spark, Snowpark Connect, Onehouse Quanton
+- **SQL Platforms** (31): DuckDB, MotherDuck, SQLite, DataFusion, PostgreSQL, TimescaleDB, Polars, ClickHouse, Firebolt, InfluxDB, Databricks SQL, Snowflake, BigQuery, Redshift, Azure Synapse Analytics, Microsoft Fabric Warehouse, Trino, Starburst, Presto, Amazon Athena, Spark, PySpark, AWS Glue, Amazon EMR Serverless, Amazon Athena for Apache Spark, Google Cloud Dataproc, Google Cloud Dataproc Serverless, Microsoft Fabric Spark, Azure Synapse Analytics Spark, Snowpark Connect, Onehouse Quanton
 - **DataFrame Platforms** (7): Polars-DF, Pandas-DF, DataFusion-DF, Modin-DF, Dask-DF, cuDF-DF (GPU), PySpark-DF
 - **Open Table Formats**: Delta Lake, Apache Iceberg, Apache Hudi (via Databricks, Quanton, Trino, Spark platforms)
 - **SQL Translation**: Automatic query conversion between SQL dialects
@@ -127,26 +127,32 @@ uv add benchbox
 
 **Alternative (pip-compatible):**
 ```bash
-uv pip install benchbox
+uv pip install "benchbox[duckdb]"
 # or
-python -m pip install benchbox
+python -m pip install "benchbox[duckdb]"
 # or
-pipx install benchbox
+pipx install "benchbox[duckdb]"
 ```
+
+> **Note:** DuckDB is an optional dependency as of v0.1.4. Use `benchbox[duckdb]` for DuckDB support or `benchbox[all]` for all platforms. A plain `pip install benchbox` installs the core package without any database driver.
 
 ### Optional Dependency Groups
 
 Extras unlock connectors and helpers for each platform. Quote the extras specification so shells like zsh do not expand the brackets.
 
+- `[duckdb]` – DuckDB (local analytics, default for most benchmarks)
+- `[polars]` – Polars DataFrame engine (in-memory columnar analytics)
+- `[clickhouse-connect]` – ClickHouse Cloud HTTP connector (`clickhouse-connect`)
+- `[postgresql]` – PostgreSQL (`psycopg2-binary`)
 - `[cloud]` – Databricks, BigQuery, Redshift, Snowflake connectors (recommended starting point)
 - `[cloudstorage]` – Cloud storage helpers (`cloudpathlib`)
 - `[databricks]` – Databricks SQL Warehouses (`databricks-sql-connector`, `cloudpathlib`)
 - `[bigquery]` – Google BigQuery (`google-cloud-bigquery`, `google-cloud-storage`, `cloudpathlib`)
 - `[redshift]` – Amazon Redshift (`redshift-connector`, `boto3`, `cloudpathlib`)
 - `[snowflake]` – Snowflake Data Cloud (`snowflake-connector-python`, `cloudpathlib`)
-- `[clickhouse]` – ClickHouse Analytics (`clickhouse-driver`)
+- `[clickhouse]` – ClickHouse Analytics (`clickhouse-driver`, TCP binary protocol)
 - `[datafusion]` – Apache DataFusion OLAP Engine (`datafusion`, `pyarrow`)
-- `[all]` – Everything (all connectors, cloud tooling, ClickHouse, and DataFusion)
+- `[all]` – Everything (DuckDB, all connectors, cloud tooling, ClickHouse, and DataFusion)
 
 ### Installation Matrix
 
@@ -156,7 +162,7 @@ Choose the installation that matches your environment and requirements:
 
 | Use Case                        | Platforms Enabled                         | Extras           | Recommended Command (uv)                    | Alternative (pip-compatible)              |
 | ------------------------------- | ----------------------------------------- | ---------------- | ------------------------------------------- | ----------------------------------------- |
-| **Local development & testing** | DuckDB, SQLite                            | `(none)`         | `uv add benchbox`                           | `uv pip install benchbox`                 |
+| **Local development & testing** | DuckDB, SQLite                            | `[duckdb]`       | `uv add benchbox --extra duckdb`            | `uv pip install "benchbox[duckdb]"`       |
 | **Cloud storage helpers**       | S3, GCS, Azure path utilities             | `[cloudstorage]` | `uv add benchbox --extra cloudstorage`      | `uv pip install "benchbox[cloudstorage]"` |
 | **All cloud platforms**         | Databricks, BigQuery, Redshift, Snowflake | `[cloud]`        | `uv add benchbox --extra cloud`             | `uv pip install "benchbox[cloud]"`        |
 | **Everything included**         | All platforms + ClickHouse                | `[all]`          | `uv add benchbox --extra all`               | `uv pip install "benchbox[all]"`          |
@@ -166,12 +172,16 @@ Choose the installation that matches your environment and requirements:
 
 | Platform            | What's Included                     | Extras         | Recommended Command (uv)             | Alternative (pip-compatible)            |
 | ------------------- | ----------------------------------- | -------------- | ------------------------------------ | --------------------------------------- |
-| **Databricks**      | SQL Warehouses, Unity Catalog, DBFS | `[databricks]` | `uv add benchbox --extra databricks` | `uv pip install "benchbox[databricks]"` |
-| **Google BigQuery** | BigQuery, Cloud Storage             | `[bigquery]`   | `uv add benchbox --extra bigquery`   | `uv pip install "benchbox[bigquery]"`   |
-| **Amazon Redshift** | Redshift, S3 integration            | `[redshift]`   | `uv add benchbox --extra redshift`   | `uv pip install "benchbox[redshift]"`   |
-| **Snowflake**       | Snowflake Data Cloud                | `[snowflake]`  | `uv add benchbox --extra snowflake`  | `uv pip install "benchbox[snowflake]"`  |
-| **ClickHouse**      | ClickHouse Analytics                | `[clickhouse]` | `uv add benchbox --extra clickhouse` | `uv pip install "benchbox[clickhouse]"` |
-| **DataFusion**      | Apache DataFusion OLAP Engine       | `[datafusion]` | `uv add benchbox --extra datafusion` | `uv pip install "benchbox[datafusion]"` |
+| **DuckDB**              | Local analytics, TPC benchmarks          | `[duckdb]`              | `uv add benchbox --extra duckdb`              | `uv pip install "benchbox[duckdb]"`              |
+| **Polars**              | DataFrame engine, in-memory analytics    | `[polars]`              | `uv add benchbox --extra polars`              | `uv pip install "benchbox[polars]"`              |
+| **ClickHouse Cloud**    | ClickHouse Cloud (HTTP connector)        | `[clickhouse-connect]`  | `uv add benchbox --extra clickhouse-connect`  | `uv pip install "benchbox[clickhouse-connect]"`  |
+| **PostgreSQL**          | PostgreSQL-compatible databases          | `[postgresql]`          | `uv add benchbox --extra postgresql`          | `uv pip install "benchbox[postgresql]"`          |
+| **Databricks**          | SQL Warehouses, Unity Catalog, DBFS      | `[databricks]`          | `uv add benchbox --extra databricks`          | `uv pip install "benchbox[databricks]"`          |
+| **Google BigQuery**     | BigQuery, Cloud Storage                  | `[bigquery]`            | `uv add benchbox --extra bigquery`            | `uv pip install "benchbox[bigquery]"`            |
+| **Amazon Redshift**     | Redshift, S3 integration                 | `[redshift]`            | `uv add benchbox --extra redshift`            | `uv pip install "benchbox[redshift]"`            |
+| **Snowflake**           | Snowflake Data Cloud                     | `[snowflake]`           | `uv add benchbox --extra snowflake`           | `uv pip install "benchbox[snowflake]"`           |
+| **ClickHouse**          | ClickHouse Analytics (binary protocol)   | `[clickhouse]`          | `uv add benchbox --extra clickhouse`          | `uv pip install "benchbox[clickhouse]"`          |
+| **DataFusion**          | Apache DataFusion OLAP Engine            | `[datafusion]`          | `uv add benchbox --extra datafusion`          | `uv pip install "benchbox[datafusion]"`          |
 
 #### Advanced Combinations
 

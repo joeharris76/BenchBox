@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from benchbox.utils.clock import elapsed_seconds, mono_time
+from benchbox.utils.printing import emit
 
 logger = logging.getLogger(__name__)
 
@@ -1105,38 +1106,38 @@ class TPCDISpecificationValidator:
         Args:
             report: Compliance report to summarize
         """
-        print("\n" + "=" * 60)
-        print("TPC-DI SPECIFICATION COMPLIANCE REPORT")
-        print("=" * 60)
-        print(f"Timestamp: {report.timestamp}")
-        print(f"Overall Compliance: {'✅ COMPLIANT' if report.overall_compliance else '❌ NON-COMPLIANT'}")
-        print(f"Compliance Score: {report.compliance_score:.1f}%")
-        print(f"Total Checks: {report.total_checks}")
-        print(f"Passed: {report.passed_checks}, Failed: {report.failed_checks}")
+        emit("\n" + "=" * 60)
+        emit("TPC-DI SPECIFICATION COMPLIANCE REPORT")
+        emit("=" * 60)
+        emit(f"Timestamp: {report.timestamp}")
+        emit(f"Overall Compliance: {'✅ COMPLIANT' if report.overall_compliance else '❌ NON-COMPLIANT'}")
+        emit(f"Compliance Score: {report.compliance_score:.1f}%")
+        emit(f"Total Checks: {report.total_checks}")
+        emit(f"Passed: {report.passed_checks}, Failed: {report.failed_checks}")
 
-        print("\nCATEGORY SCORES:")
+        emit("\nCATEGORY SCORES:")
         for category, score in report.category_scores.items():
-            print(f"  {category}: {score:.1f}%")
+            emit(f"  {category}: {score:.1f}%")
 
-        print("\nISSUE SUMMARY:")
-        print(f"  Critical: {report.summary['critical_issues']}")
-        print(f"  High: {report.summary['high_issues']}")
-        print(f"  Medium: {report.summary['medium_issues']}")
-        print(f"  Low: {report.summary['low_issues']}")
+        emit("\nISSUE SUMMARY:")
+        emit(f"  Critical: {report.summary['critical_issues']}")
+        emit(f"  High: {report.summary['high_issues']}")
+        emit(f"  Medium: {report.summary['medium_issues']}")
+        emit(f"  Low: {report.summary['low_issues']}")
 
         if report.failed_checks > 0:
-            print("\nFAILED CHECKS:")
+            emit("\nFAILED CHECKS:")
             for result in report.check_results:
                 if not result.passed:
-                    print(f"  [{result.severity}] {result.check_name}: {result.message}")
+                    emit(f"  [{result.severity}] {result.check_name}: {result.message}")
 
         if report.summary["recommendations"]:
-            print("\nRECOMMENDATIONS:")
+            emit("\nRECOMMENDATIONS:")
             for i, recommendation in enumerate(report.summary["recommendations"][:5], 1):  # Top 5
                 if recommendation:
-                    print(f"  {i}. {recommendation}")
+                    emit(f"  {i}. {recommendation}")
 
-        print("=" * 60)
+        emit("=" * 60)
 
 
 def validate_tpcdi_benchmark_compliance(

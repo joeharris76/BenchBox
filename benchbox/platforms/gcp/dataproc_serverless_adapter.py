@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkConfigMixin,
     CloudSparkStaging,
@@ -116,6 +116,8 @@ class DataprocServerlessAdapter(CloudSparkConfigMixin, SparkTuningMixin, Platfor
     - No idle costs (unlike persistent clusters)
     - Pricing: ~$0.06/vCPU-hour, ~$0.0065/GB-hour
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     # CloudSparkConfigMixin: Uses Dataproc Serverless-optimized config
     cloud_platform = CloudPlatform.DATAPROC_SERVERLESS
@@ -225,7 +227,7 @@ class DataprocServerlessAdapter(CloudSparkConfigMixin, SparkTuningMixin, Platfor
         """
         return {
             "platform": "dataproc-serverless",
-            "display_name": "GCP Dataproc Serverless",
+            "display_name": "Google Cloud Dataproc Serverless",
             "vendor": "Google Cloud",
             "type": "serverless_spark",
             "project_id": self.project_id,

@@ -19,6 +19,7 @@ from benchbox.core.validation import (
     ValidationResult,
 )
 from benchbox.utils.file_format import get_delimiter_for_file
+from benchbox.utils.printing import emit
 
 from ..c_tools import TPCDSCTools
 from ..generator import TPCDSDataGenerator
@@ -29,6 +30,72 @@ from .results import (
     MaintenanceTestResult,
     ThroughputTestResult,
 )
+
+
+def _execute_single_stream(stream_id: int, stream_file: Path) -> dict[str, Any]:
+    """Execute a single TPC-DS stream file and return result metrics."""
+    import time
+
+    stream_start = time.time()
+    result: dict[str, Any] = {
+        "stream_id": stream_id,
+        "stream_file": str(stream_file),
+        "start_time": stream_start,
+        "end_time": 0.0,
+        "duration": 0.0,
+        "queries_executed": 0,
+        "queries_successful": 0,
+        "queries_failed": 0,
+        "success": False,
+        "error": None,
+    }
+
+    try:
+        if not stream_file.exists():
+            raise FileNotFoundError(f"Stream file {stream_file} not found")
+
+        with open(stream_file) as f:
+            stream_content = f.read()
+
+        query_lines = [
+            line for line in stream_content.split("\n") if line.strip().startswith("-- Query") and "Position" in line
+        ]
+
+        result["queries_executed"] = len(query_lines)
+        result["queries_successful"] = len(query_lines)
+        result["queries_failed"] = 0
+        result["success"] = True
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    finally:
+        result["end_time"] = time.time()
+        result["duration"] = result["end_time"] - result["start_time"]
+
+    return result
+
+
+def _aggregate_stream_results(stream_results: list[dict[str, Any]], start_time: float) -> dict[str, Any]:
+    """Aggregate individual stream results into a summary dict."""
+    import time
+
+    end_time = time.time()
+    return {
+        "start_time": start_time,
+        "end_time": end_time,
+        "total_duration": end_time - start_time,
+        "num_streams": len(stream_results),
+        "streams_executed": len(stream_results),
+        "streams_successful": len([r for r in stream_results if r.get("success", False)]),
+        "streams_failed": len([r for r in stream_results if not r.get("success", False)]),
+        "total_queries_executed": sum(r["queries_executed"] for r in stream_results),
+        "total_queries_successful": sum(r["queries_successful"] for r in stream_results),
+        "total_queries_failed": sum(r["queries_failed"] for r in stream_results),
+        "success": all(r.get("success", False) for r in stream_results),
+        "errors": [r["error"] for r in stream_results if r.get("error")],
+        "stream_results": stream_results,
+    }
 
 
 class TPCDSBenchmark(BaseBenchmark):
@@ -213,79 +280,89 @@ class TPCDSBenchmark(BaseBenchmark):
             ValueError: If the query_id is invalid
             TypeError: If query_id is not an integer
         """
-        # Validate query_id to match TPC-H patterns
+        self._validate_get_query_args(query_id, scale_factor, seed, id_range=(1, 99))
+
+        if params is None:
+            params = {}
+
+        actual_seed = seed if seed is not None else params.get("seed")
+        actual_scale_factor = (
+            scale_factor if scale_factor is not None else params.get("scale_factor", self.data_generator.scale_factor)
+        )
+
+        actual_seed = self._resolve_seed_from_stream_or_permutation(
+            actual_seed, query_id, params.get("stream_id"), params.get("permutation")
+        )
+
+        src = (base_dialect or "netezza").lower()
+        tgt = (dialect or src).lower()
+        query = self._generate_tpcds_query(query_id, variant, actual_seed, actual_scale_factor, src)
+        return self.translate_query_text(query, src, tgt)
+
+    @staticmethod
+    def _validate_get_query_args(
+        query_id: int, scale_factor: Optional[float], seed: Optional[int], *, id_range: tuple[int, int]
+    ) -> None:
+        """Validate common get_query arguments."""
         if not isinstance(query_id, int):
             raise TypeError(f"query_id must be an integer, got {type(query_id).__name__}")
-        if not (1 <= query_id <= 99):
-            raise ValueError(f"Query ID must be 1-99, got {query_id}")
-
-        # Validate scale_factor if provided
+        lo, hi = id_range
+        if not (lo <= query_id <= hi):
+            raise ValueError(f"Query ID must be {lo}-{hi}, got {query_id}")
         if scale_factor is not None:
             if not isinstance(scale_factor, (int, float)):
                 raise TypeError(f"scale_factor must be a number, got {type(scale_factor).__name__}")
             if scale_factor <= 0:
                 raise ValueError(f"scale_factor must be positive, got {scale_factor}")
-
-        # Validate seed if provided
         if seed is not None and not isinstance(seed, int):
             raise TypeError(f"seed must be an integer, got {type(seed).__name__}")
 
-        if params is None:
-            params = {}
-
-        # Extract parameters from both params dict and direct arguments
-        # Direct arguments take precedence
-        actual_seed = seed if seed is not None else params.get("seed")
-        actual_scale_factor = (
-            scale_factor if scale_factor is not None else params.get("scale_factor", self.data_generator.scale_factor)
-        )
-        stream_id = params.get("stream_id")
-        permutation = params.get("permutation")
-
-        # Handle stream/permutation logic
+    @staticmethod
+    def _resolve_seed_from_stream_or_permutation(
+        actual_seed: Optional[int], query_id: int, stream_id: Optional[int], permutation: Optional[list]
+    ) -> Optional[int]:
+        """Derive seed from stream_id or permutation if no explicit seed is set."""
         if stream_id is not None:
-            # Use stream_id as seed if no explicit seed provided
             if actual_seed is None:
-                actual_seed = stream_id
-        elif permutation is not None:
-            # Use position-based seed if no explicit seed provided
-            if actual_seed is None:
-                try:
-                    position = permutation.index(query_id)
-                    actual_seed = position
-                except ValueError:
-                    pass
+                return stream_id
+        elif permutation is not None and actual_seed is None:
+            try:
+                return permutation.index(query_id)
+            except ValueError:
+                pass
+        return actual_seed
 
-        # Generate using base dialect via dsqgen
-        src = (base_dialect or "netezza").lower()
-        tgt = (dialect or src).lower()
+    def _generate_tpcds_query(
+        self,
+        query_id: int,
+        variant: Optional[str],
+        actual_seed: Optional[int],
+        actual_scale_factor: float,
+        src: str,
+    ) -> str:
+        """Generate a TPC-DS query, optionally for a specific variant."""
         if variant is not None:
-            # Generate variant using dsqgen directly (e.g., '14a')
             composite_id = f"{query_id}{variant}"
             try:
-                query = self.query_manager.dsqgen.generate(  # type: ignore[attr-defined]
+                return self.query_manager.dsqgen.generate(  # type: ignore[attr-defined]
                     composite_id,
                     seed=actual_seed,
                     scale_factor=actual_scale_factor,
                     dialect=src,
                 )
             except AttributeError:
-                # Fallback if query_manager doesn't expose dsqgen (shouldn't happen with current implementation)
-                query = self.query_manager.get_query(
+                return self.query_manager.get_query(
                     query_id,
                     seed=actual_seed,
                     scale_factor=actual_scale_factor,
                     dialect=src,
                 )
-        else:
-            query = self.query_manager.get_query(
-                query_id,
-                seed=actual_seed,
-                scale_factor=actual_scale_factor,
-                dialect=src,
-            )
-        # Always normalize through SQLGlot
-        return self.translate_query_text(query, src, tgt)
+        return self.query_manager.get_query(
+            query_id,
+            seed=actual_seed,
+            scale_factor=actual_scale_factor,
+            dialect=src,
+        )
 
     def _normalize_interval_syntax(self, query: str) -> str:
         """Convert Netezza interval syntax to standard SQL INTERVAL syntax.
@@ -392,33 +469,9 @@ class TPCDSBenchmark(BaseBenchmark):
 
     def get_available_tables(self) -> list[str]:
         """Get list of available tables."""
-        # Standard TPC-DS tables
-        return [
-            "call_center",
-            "catalog_page",
-            "catalog_sales",
-            "catalog_returns",
-            "customer",
-            "customer_address",
-            "customer_demographics",
-            "date_dim",
-            "household_demographics",
-            "income_band",
-            "inventory",
-            "item",
-            "promotion",
-            "reason",
-            "ship_mode",
-            "store",
-            "store_sales",
-            "store_returns",
-            "time_dim",
-            "warehouse",
-            "web_page",
-            "web_sales",
-            "web_returns",
-            "web_site",
-        ]
+        from benchbox.core.tpcds.constants import TPCDS_TABLE_NAMES
+
+        return list(TPCDS_TABLE_NAMES)
 
     def get_table_loading_order(self, available_tables: list[str]) -> list[str]:
         """Get the correct order for loading TPC-DS tables to respect foreign key dependencies.
@@ -429,41 +482,9 @@ class TPCDSBenchmark(BaseBenchmark):
         Returns:
             List of table names in the correct loading order
         """
-        # TPC-DS table loading order based on foreign key dependencies
-        tpcds_loading_order = [
-            # Basic dimension tables (no dependencies)
-            "date_dim",
-            "time_dim",
-            "income_band",
-            "reason",
-            "ship_mode",
-            # Location and address tables
-            "customer_address",
-            "customer_demographics",
-            "household_demographics",
-            # Business entity tables
-            "call_center",
-            "catalog_page",
-            "warehouse",
-            "web_site",
-            "web_page",
-            # Product and store tables
-            "item",
-            "store",
-            "promotion",
-            # Customer table (depends on address/demographics)
-            "customer",
-            # Fact tables (depend on dimension tables)
-            "inventory",
-            "store_sales",
-            "store_returns",
-            "catalog_sales",
-            "catalog_returns",
-            "web_sales",
-            "web_returns",
-            # Metadata table
-            "dbgen_version",
-        ]
+        from benchbox.core.tpcds.constants import TPCDS_TABLE_LOADING_ORDER
+
+        tpcds_loading_order = TPCDS_TABLE_LOADING_ORDER
 
         # Filter to only include tables that actually exist in available_tables
         ordered_tables = [t for t in tpcds_loading_order if t in available_tables]
@@ -585,7 +606,7 @@ class TPCDSBenchmark(BaseBenchmark):
             stream_files.append(stream_file)
 
         if self.verbose:
-            print(f"Generated {len(stream_files)} TPC-DS streams in {streams_output_dir}")
+            emit(f"Generated {len(stream_files)} TPC-DS streams in {streams_output_dir}")
 
         return stream_files
 
@@ -669,7 +690,7 @@ class TPCDSBenchmark(BaseBenchmark):
             except (ValueError, KeyError) as e:
                 # Stream doesn't exist or can't be generated - skip it
                 if self.verbose:
-                    print(f"Warning: Could not get info for stream {stream_id}: {e}")
+                    emit(f"Warning: Could not get info for stream {stream_id}: {e}")
                 continue
         return all_info
 
@@ -705,82 +726,24 @@ class TPCDSBenchmark(BaseBenchmark):
             # Use existing concurrent execution infrastructure
             concurrent_executor = ConcurrentQueryExecutor()
 
-            # Capture stream_files in a local variable for type narrowing
-            files = stream_files  # stream_files is guaranteed not to be None here
+            files = stream_files
 
-            # Factory function to create stream executors
             def stream_executor_factory(stream_id: int) -> Any:
                 class StreamExecutor:
-                    def __init__(self, benchmark, stream_file, conn, dialect):
-                        self.benchmark = benchmark
+                    def __init__(self, stream_file):
                         self.stream_file = stream_file
-                        self.connection = conn
-                        self.dialect = dialect
 
                     def run(self):
-                        return self._run_single_stream()
+                        return _execute_single_stream(stream_id, self.stream_file)
 
-                    def _run_single_stream(self):
-                        """Run a single stream file."""
-                        stream_start = time.time()
-                        result = {
-                            "stream_id": stream_id,
-                            "stream_file": str(self.stream_file),
-                            "start_time": stream_start,
-                            "end_time": 0.0,
-                            "duration": 0.0,
-                            "queries_executed": 0,
-                            "queries_successful": 0,
-                            "queries_failed": 0,
-                            "success": False,
-                            "error": None,
-                            "query_results": [],
-                        }
+                idx = stream_id if stream_id < len(files) else 0
+                return StreamExecutor(files[idx])
 
-                        try:
-                            if not self.stream_file.exists():
-                                raise FileNotFoundError(f"Stream file {self.stream_file} not found")
-
-                            # Parse stream file and count queries
-                            with open(self.stream_file) as f:
-                                stream_content = f.read()
-
-                            # Count queries by looking for query markers
-                            query_lines = [
-                                line
-                                for line in stream_content.split("\n")
-                                if line.strip().startswith("-- Query") and "Position" in line
-                            ]
-
-                            result["queries_executed"] = len(query_lines)
-                            result["queries_successful"] = len(query_lines)  # Simplified for basic implementation
-                            result["queries_failed"] = 0
-                            result["success"] = True
-
-                        except Exception as e:
-                            result["error"] = str(e)
-
-                        finally:
-                            result["end_time"] = time.time()
-                            result["duration"] = result["end_time"] - result["start_time"]
-
-                        return result
-
-                # Return the appropriate stream executor
-                if stream_id < len(files):
-                    return StreamExecutor(self, files[stream_id], connection, dialect)
-                else:
-                    # Fallback for extra stream IDs
-                    return StreamExecutor(self, files[0], connection, dialect)
-
-            # Use existing concurrent execution infrastructure if enabled
             if concurrent_executor.config.get("enabled", False):
                 concurrent_result = concurrent_executor.execute_concurrent_queries(
                     query_executor_factory=stream_executor_factory,
                     num_streams=len(stream_files),
                 )
-
-                # Convert to expected format
                 end_time = time.time()
                 return {
                     "start_time": start_time,
@@ -799,75 +762,9 @@ class TPCDSBenchmark(BaseBenchmark):
                 }
 
         # Sequential execution or single stream
-        stream_results = []
-        total_queries_executed = 0
-        total_queries_successful = 0
-        total_queries_failed = 0
+        stream_results = [_execute_single_stream(i, sf) for i, sf in enumerate(stream_files)]
 
-        for i, stream_file in enumerate(stream_files):
-            stream_start = time.time()
-            stream_result = {
-                "stream_id": i,
-                "stream_file": str(stream_file),
-                "start_time": stream_start,
-                "end_time": 0.0,
-                "duration": 0.0,
-                "queries_executed": 0,
-                "queries_successful": 0,
-                "queries_failed": 0,
-                "success": False,
-                "error": None,
-            }
-
-            try:
-                if not stream_file.exists():
-                    raise FileNotFoundError(f"Stream file {stream_file} not found")
-
-                # Parse stream file and count queries
-                with open(stream_file) as f:
-                    stream_content = f.read()
-
-                # Count queries by looking for query markers
-                query_lines = [
-                    line
-                    for line in stream_content.split("\n")
-                    if line.strip().startswith("-- Query") and "Position" in line
-                ]
-
-                stream_result["queries_executed"] = len(query_lines)
-                stream_result["queries_successful"] = len(query_lines)  # Simplified for basic implementation
-                stream_result["queries_failed"] = 0
-                stream_result["success"] = True
-
-            except Exception as e:
-                stream_result["error"] = str(e)
-
-            finally:
-                stream_result["end_time"] = time.time()
-                stream_result["duration"] = stream_result["end_time"] - stream_result["start_time"]
-
-            stream_results.append(stream_result)
-            total_queries_executed += stream_result["queries_executed"]
-            total_queries_successful += stream_result["queries_successful"]
-            total_queries_failed += stream_result["queries_failed"]
-
-        end_time = time.time()
-
-        return {
-            "start_time": start_time,
-            "end_time": end_time,
-            "total_duration": end_time - start_time,
-            "num_streams": len(stream_files),
-            "streams_executed": len(stream_files),
-            "streams_successful": len([r for r in stream_results if r["success"]]),
-            "streams_failed": len([r for r in stream_results if not r["success"]]),
-            "total_queries_executed": total_queries_executed,
-            "total_queries_successful": total_queries_successful,
-            "total_queries_failed": total_queries_failed,
-            "success": all(r["success"] for r in stream_results),
-            "errors": [r["error"] for r in stream_results if r["error"]],
-            "stream_results": stream_results,
-        }
+        return _aggregate_stream_results(stream_results, start_time)
 
     def _load_data(self, connection: _DatabaseConnection) -> None:
         """Load TPC-DS data into the database.
@@ -916,40 +813,10 @@ class TPCDSBenchmark(BaseBenchmark):
         total_rows = 0
         loaded_tables = 0
 
-        # Define the order of tables to load (respecting foreign key dependencies)
-        # Dimension tables first, then fact tables
-        table_load_order = [
-            # Basic dimension tables (no dependencies)
-            "date_dim",
-            "time_dim",
-            "income_band",
-            "reason",
-            "ship_mode",
-            # Location and address tables
-            "customer_address",
-            "customer_demographics",
-            "household_demographics",
-            # Business entity tables
-            "call_center",
-            "catalog_page",
-            "warehouse",
-            "web_site",
-            "web_page",
-            # Product and store tables
-            "item",
-            "store",
-            "promotion",
-            # Customer table (depends on address/demographics)
-            "customer",
-            # Fact tables (depend on dimension tables)
-            "inventory",
-            "store_sales",
-            "store_returns",
-            "catalog_sales",
-            "catalog_returns",
-            "web_sales",
-            "web_returns",
-        ]
+        from benchbox.core.tpcds.constants import TPCDS_TABLE_LOADING_ORDER
+
+        # Use canonical loading order (excludes dbgen_version metadata table)
+        table_load_order = [t for t in TPCDS_TABLE_LOADING_ORDER if t != "dbgen_version"]
 
         for table_name in table_load_order:
             if table_name not in self.tables:
@@ -1122,96 +989,21 @@ class TPCDSBenchmark(BaseBenchmark):
         try:
             # Phase 1: Power Test
             if power_test:
-                if self.verbose:
-                    logger.info("Running Power Test...")
-
-                try:
-                    power_result = self.run_power_test(
-                        connection=connection,
-                        dialect=dialect,
-                        verbose=self.verbose,
-                    )
-                    result["power_test_result"] = power_result
-
-                    if power_result.get("total_time", 0) > 0:
-                        result["power_at_size"] = power_result.get("power_at_size", 0.0)
-
-                    if self.verbose:
-                        logger.info(f"Power Test completed: Power@Size = {result['power_at_size']:.2f}")
-
-                except Exception as e:
-                    error_msg = f"Power Test failed: {e}"
-                    result["errors"].append(error_msg)
-                    result["success"] = False
-                    if self.verbose:
-                        logger.error(error_msg)
+                self._run_power_phase(connection, dialect, logger, result)
 
             # Phase 2: Throughput Test
             if throughput_test:
-                if self.verbose:
-                    logger.info("Running Throughput Test...")
-
-                try:
-                    throughput_result = self.run_throughput_test(
-                        connection_factory=connection_factory, num_streams=num_streams
-                    )
-                    result["throughput_test_result"] = throughput_result
-                    result["throughput_at_size"] = throughput_result.throughput_at_size
-
-                    if self.verbose:
-                        logger.info(f"Throughput Test completed: Throughput@Size = {result['throughput_at_size']:.2f}")
-
-                except Exception as e:
-                    error_msg = f"Throughput Test failed: {e}"
-                    result["errors"].append(error_msg)
-                    result["success"] = False
-                    if self.verbose:
-                        logger.error(error_msg)
+                self._run_throughput_phase(connection_factory, num_streams, logger, result)
 
             # Phase 3: Maintenance Test
             if maintenance_test:
-                if self.verbose:
-                    logger.info("Running Maintenance Test...")
-
-                try:
-                    maintenance_config = MaintenanceTestConfig(scale_factor=self.scale_factor, verbose=self.verbose)
-                    maintenance_result = self.run_maintenance_test(
-                        connection=connection,
-                        config=maintenance_config,
-                        dialect=dialect,
-                    )
-                    result["maintenance_test_result"] = maintenance_result
-
-                    if self.verbose:
-                        logger.info(
-                            f"Maintenance Test completed: {maintenance_result.successful_operations}/{maintenance_result.total_operations} operations successful"
-                        )
-
-                except Exception as e:
-                    error_msg = f"Maintenance Test failed: {e}"
-                    result["errors"].append(error_msg)
-                    result["success"] = False
-                    if self.verbose:
-                        logger.error(error_msg)
+                self._run_maintenance_phase(connection, dialect, logger, result)
 
             # Calculate QphDS@Size (geometric mean of Power@Size and Throughput@Size)
             if result["power_at_size"] > 0 and result["throughput_at_size"] > 0:
                 result["qphds_at_size"] = math.sqrt(result["power_at_size"] * result["throughput_at_size"])
 
-            benchmark_end_time = time.time()
-            result["total_time"] = benchmark_end_time - benchmark_start_time
-            result["end_time"] = datetime.now().isoformat()
-
-            if self.verbose:
-                logger.info("TPC-DS Official Benchmark completed!")
-                logger.info(f"Total time: {result['total_time']:.3f} seconds")
-                logger.info(f"Power@Size: {result['power_at_size']:.2f}")
-                logger.info(f"Throughput@Size: {result['throughput_at_size']:.2f}")
-                logger.info(f"QphDS@Size: {result['qphds_at_size']:.2f}")
-                logger.info(f"Success: {result['success']}")
-                if result["errors"]:
-                    logger.warning(f"Errors encountered: {len(result['errors'])}")
-
+            self._finalize_benchmark_result(result, benchmark_start_time, logger)
             return result
 
         except Exception as e:
@@ -1226,6 +1018,90 @@ class TPCDSBenchmark(BaseBenchmark):
                 logger.error(error_msg)
 
             return result
+
+    def _run_power_phase(self, connection: Any, dialect: str, logger: logging.Logger, result: dict[str, Any]) -> None:
+        """Execute the Power Test phase of the official benchmark."""
+        if self.verbose:
+            logger.info("Running Power Test...")
+        try:
+            power_result = self.run_power_test(
+                connection=connection,
+                dialect=dialect,
+                verbose=self.verbose,
+            )
+            result["power_test_result"] = power_result
+            if power_result.get("total_time", 0) > 0:
+                result["power_at_size"] = power_result.get("power_at_size", 0.0)
+            if self.verbose:
+                logger.info(f"Power Test completed: Power@Size = {result['power_at_size']:.2f}")
+        except Exception as e:
+            error_msg = f"Power Test failed: {e}"
+            result["errors"].append(error_msg)
+            result["success"] = False
+            if self.verbose:
+                logger.error(error_msg)
+
+    def _run_throughput_phase(
+        self, connection_factory: Any, num_streams: int, logger: logging.Logger, result: dict[str, Any]
+    ) -> None:
+        """Execute the Throughput Test phase of the official benchmark."""
+        if self.verbose:
+            logger.info("Running Throughput Test...")
+        try:
+            throughput_result = self.run_throughput_test(connection_factory=connection_factory, num_streams=num_streams)
+            result["throughput_test_result"] = throughput_result
+            result["throughput_at_size"] = throughput_result.throughput_at_size
+            if self.verbose:
+                logger.info(f"Throughput Test completed: Throughput@Size = {result['throughput_at_size']:.2f}")
+        except Exception as e:
+            error_msg = f"Throughput Test failed: {e}"
+            result["errors"].append(error_msg)
+            result["success"] = False
+            if self.verbose:
+                logger.error(error_msg)
+
+    def _run_maintenance_phase(
+        self, connection: Any, dialect: str, logger: logging.Logger, result: dict[str, Any]
+    ) -> None:
+        """Execute the Maintenance Test phase of the official benchmark."""
+        if self.verbose:
+            logger.info("Running Maintenance Test...")
+        try:
+            maintenance_config = MaintenanceTestConfig(scale_factor=self.scale_factor, verbose=self.verbose)
+            maintenance_result = self.run_maintenance_test(
+                connection=connection,
+                config=maintenance_config,
+                dialect=dialect,
+            )
+            result["maintenance_test_result"] = maintenance_result
+            if self.verbose:
+                logger.info(
+                    f"Maintenance Test completed: {maintenance_result.successful_operations}/{maintenance_result.total_operations} operations successful"
+                )
+        except Exception as e:
+            error_msg = f"Maintenance Test failed: {e}"
+            result["errors"].append(error_msg)
+            result["success"] = False
+            if self.verbose:
+                logger.error(error_msg)
+
+    def _finalize_benchmark_result(
+        self, result: dict[str, Any], benchmark_start_time: float, logger: logging.Logger
+    ) -> None:
+        """Finalize benchmark result with timing and summary logging."""
+        benchmark_end_time = time.time()
+        result["total_time"] = benchmark_end_time - benchmark_start_time
+        result["end_time"] = datetime.now().isoformat()
+
+        if self.verbose:
+            logger.info("TPC-DS Official Benchmark completed!")
+            logger.info(f"Total time: {result['total_time']:.3f} seconds")
+            logger.info(f"Power@Size: {result['power_at_size']:.2f}")
+            logger.info(f"Throughput@Size: {result['throughput_at_size']:.2f}")
+            logger.info(f"QphDS@Size: {result['qphds_at_size']:.2f}")
+            logger.info(f"Success: {result['success']}")
+            if result["errors"]:
+                logger.warning(f"Errors encountered: {len(result['errors'])}")
 
     def run_throughput_test(
         self,

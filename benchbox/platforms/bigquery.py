@@ -11,7 +11,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,14 +22,17 @@ if TYPE_CHECKING:
         ForeignKeyConfiguration,
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
+        TuningColumn,
         UnifiedTuningConfiguration,
     )
 
 from benchbox.utils.cloud_storage import get_cloud_path_info, is_cloud_path
 from benchbox.utils.file_format import detect_compression, get_delimiter_for_file
+from benchbox.utils.printing import emit
 
 from ..utils.dependencies import check_platform_dependencies, get_dependency_error_message
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
+from .base.data_loading import DataSourceResolver
 
 try:
     import google.auth
@@ -48,6 +50,8 @@ except ImportError:
 
 class BigQueryAdapter(PlatformAdapter):
     """BigQuery platform adapter with Cloud Storage integration."""
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -119,6 +123,19 @@ class BigQueryAdapter(PlatformAdapter):
                 "  - Set GOOGLE_APPLICATION_CREDENTIALS to service account JSON path\n"
                 "  - Or run 'gcloud auth application-default login'"
             )
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """Build opt-in sorted-ingestion SQL for BigQuery."""
+        mode, method = self.resolve_sorted_ingestion_strategy()
+        if mode == "off":
+            return None
+
+        raise ValueError(
+            "BigQuery sorted ingestion is not yet executable through this CTAS hook because "
+            "the BigQuery client path does not expose execute()/cursor(). Use CLUSTER BY today "
+            "or implement BigQuery query-job execution for method "
+            f"'{method}'."
+        )
 
     @staticmethod
     def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
@@ -892,240 +909,22 @@ class BigQueryAdapter(PlatformAdapter):
         if is_cloud_path(str(data_dir)):
             path_info = get_cloud_path_info(str(data_dir))
             logger.info(f"Loading data from cloud storage: {path_info['provider']} bucket '{path_info['bucket']}'")
-            print(f"  Loading data from {path_info['provider']} cloud storage")
+            emit(f"  Loading data from {path_info['provider']} cloud storage")
 
         start_time = mono_time()
         table_stats = {}
+        total_time = 0.0
 
         try:
-            # Get data files from benchmark or manifest fallback
-            if hasattr(benchmark, "tables") and benchmark.tables:
-                data_files = benchmark.tables
-            else:
-                # Manifest fallback
-                data_files = None
-                try:
-                    manifest_path = Path(data_dir) / "_datagen_manifest.json"
-                    if manifest_path.exists():
-                        with open(manifest_path) as f:
-                            manifest = json.load(f)
-                        tables = manifest.get("tables") or {}
-                        mapping = {}
-                        for table, entries in tables.items():
-                            if entries:
-                                # Collect ALL chunk files, not just the first one
-                                chunk_paths = []
-                                for entry in entries:
-                                    rel = entry.get("path")
-                                    if rel:
-                                        chunk_paths.append(Path(data_dir) / rel)
-                                if chunk_paths:
-                                    mapping[table] = chunk_paths
-                        if mapping:
-                            data_files = mapping
-                            logger.debug("Using data files from _datagen_manifest.json")
-                except Exception as e:
-                    logger.debug(f"Manifest fallback failed: {e}")
-                if not data_files:
-                    # No data files available - benchmark should have generated data first
-                    raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+            data_files = self._resolve_data_files(benchmark, data_dir)
+            self._validate_compression_support(data_files, benchmark)
 
-            # Check for incompatible compression format (BigQuery only supports gzip or uncompressed for CSV files)
-            for table_name, file_paths in data_files.items():
-                if not isinstance(file_paths, list):
-                    file_paths = [file_paths]
-                for file_path in file_paths:
-                    if detect_compression(file_path) == "zstd":
-                        benchmark_name = getattr(benchmark, "name", "unknown")
-                        scale_factor = getattr(benchmark, "scale_factor", "unknown")
-                        raise ValueError(
-                            f"\n❌ Incompatible data compression detected\n\n"
-                            f"BigQuery does not support Zstd (.zst) compression for CSV file loading.\n"
-                            f"Found Zstd file: {Path(file_path).name}\n\n"
-                            f"To fix this, regenerate the data with gzip compression:\n\n"
-                            f"  # Remove existing incompatible data\n"
-                            f"  rm -rf {benchmark.data_dir}\n\n"
-                            f"  # Regenerate with gzip compression\n"
-                            f"  benchbox run --platform bigquery --benchmark {benchmark_name} "
-                            f"--scale {scale_factor} --compression-type gzip\n\n"
-                            f"Or use uncompressed data (larger files, slower uploads):\n\n"
-                            f"  benchbox run --platform bigquery --benchmark {benchmark_name} "
-                            f"--scale {scale_factor} --no-compression\n"
-                        )
-
-            # Upload files to Cloud Storage if bucket is configured
             if self.storage_bucket:
-                # Create Storage client on-demand with same credentials as BigQuery client
-                params = self._get_connection_params()
-                credentials = self._load_credentials(params["credentials_path"])
-                storage_client = storage.Client(project=self.project_id, credentials=credentials)
-                bucket = storage_client.bucket(self.storage_bucket)
-
-                # Load data for each table (handle multi-chunk files)
-                for table_name, file_paths in data_files.items():
-                    # Normalize to list (data resolver should always return lists now)
-                    if not isinstance(file_paths, list):
-                        file_paths = [file_paths]
-
-                    # Filter out non-existent or empty files
-                    valid_files = []
-                    for file_path in file_paths:
-                        if is_cloud_path(str(file_path)):
-                            # For cloud paths, trust the generator created the file
-                            valid_files.append(file_path)
-                        else:
-                            file_path = Path(file_path)
-                            if file_path.exists() and file_path.stat().st_size > 0:
-                                valid_files.append(file_path)
-
-                    if not valid_files:
-                        self.logger.warning(f"Skipping {table_name} - no valid data files")
-                        table_stats[table_name] = 0
-                        continue
-
-                    logger.debug(f"Loading {table_name} from {len(valid_files)} file(s)")
-
-                    try:
-                        self.log_verbose(f"Loading data for table: {table_name}")
-                        load_start = mono_time()
-                        table_name_upper = table_name.upper()
-                        table_ref = connection.dataset(self.dataset_id).table(table_name_upper)
-
-                        # Load each file chunk
-                        for file_idx, file_path in enumerate(valid_files):
-                            file_path = Path(file_path)
-                            chunk_info = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
-
-                            # Detect file format to determine delimiter
-                            # TPC-H uses .tbl (pipe-delimited), TPC-DS uses .dat (pipe-delimited)
-                            # get_delimiter_for_file handles chunked files like customer.tbl.1 or customer.tbl.1.zst
-                            delimiter = get_delimiter_for_file(file_path)
-
-                            # Upload file directly to Cloud Storage with original compression and format
-                            # BigQuery supports compressed files and any delimiter natively
-                            # Preserve file extension so BigQuery can detect compression
-                            blob_name = f"{self.storage_prefix}/{table_name}_{file_idx}{file_path.suffix}"
-                            self.log_very_verbose(f"Uploading to Cloud Storage{chunk_info}: {blob_name}")
-                            blob = bucket.blob(blob_name)
-                            blob.upload_from_filename(str(file_path))
-
-                            # Load from Cloud Storage to BigQuery
-                            # First file truncates table, subsequent files append
-                            write_disposition = (
-                                bigquery.WriteDisposition.WRITE_TRUNCATE
-                                if file_idx == 0
-                                else bigquery.WriteDisposition.WRITE_APPEND
-                            )
-
-                            job_config = bigquery.LoadJobConfig(
-                                source_format=bigquery.SourceFormat.CSV,
-                                skip_leading_rows=0,
-                                autodetect=False,  # Use existing schema
-                                field_delimiter=delimiter,
-                                allow_quoted_newlines=True,
-                                write_disposition=write_disposition,
-                            )
-
-                            # Create load job
-                            uri = f"gs://{self.storage_bucket}/{blob_name}"
-                            load_job = connection.load_table_from_uri(uri, table_ref, job_config=job_config)
-                            load_job.result()  # Wait for completion
-
-                        # Get final row count after loading all chunks
-                        query = f"SELECT COUNT(*) FROM `{self.project_id}.{self.dataset_id}.{table_name_upper}`"
-                        query_job = connection.query(query)
-                        result = list(query_job.result())
-                        row_count = result[0][0] if result else 0
-
-                        table_stats[table_name_upper] = row_count
-
-                        load_time = elapsed_seconds(load_start)
-                        chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
-                        self.logger.info(
-                            f"✅ Loaded {row_count:,} rows into {table_name_upper}{chunk_info} in {load_time:.2f}s"
-                        )
-
-                    except Exception as e:
-                        self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
-                        table_stats[table_name.upper()] = 0
-
+                bucket = self._create_storage_bucket()
+                table_stats = self._load_tables_via_cloud_storage(connection, data_files, bucket)
             else:
-                # Direct loading without Cloud Storage (less efficient)
                 self.logger.warning("No Cloud Storage bucket configured, using direct loading")
-
-                for table_name, file_paths in data_files.items():
-                    # Normalize to list (handle both single paths and lists for TPC-H vs TPC-DS)
-                    if not isinstance(file_paths, list):
-                        file_paths = [file_paths]
-
-                    # Filter valid files
-                    valid_files = []
-                    for file_path in file_paths:
-                        file_path = Path(file_path)
-                        if file_path.exists() and file_path.stat().st_size > 0:
-                            valid_files.append(file_path)
-
-                    if not valid_files:
-                        self.logger.warning(f"Skipping {table_name} - no valid data files")
-                        table_stats[table_name.upper()] = 0
-                        continue
-
-                    try:
-                        self.log_verbose(f"Direct loading data for table: {table_name}")
-                        load_start = mono_time()
-                        table_name_upper = table_name.upper()
-
-                        # Load directly from local file(s)
-                        table_ref = connection.dataset(self.dataset_id).table(table_name_upper)
-
-                        # Load each chunk file
-                        for file_idx, file_path in enumerate(valid_files):
-                            chunk_info = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
-                            self.log_very_verbose(f"Loading {table_name}{chunk_info} from {file_path.name}")
-
-                            # Detect delimiter from filename (handle chunked files like customer.tbl.1)
-                            delimiter = get_delimiter_for_file(file_path)
-
-                            # Use WRITE_APPEND for subsequent chunks, WRITE_TRUNCATE for first
-                            write_disposition = (
-                                bigquery.WriteDisposition.WRITE_TRUNCATE
-                                if file_idx == 0
-                                else bigquery.WriteDisposition.WRITE_APPEND
-                            )
-
-                            job_config = bigquery.LoadJobConfig(
-                                source_format=bigquery.SourceFormat.CSV,
-                                # TPC-H uses .tbl files, TPC-DS uses .dat files - both are pipe-delimited
-                                field_delimiter=delimiter,
-                                skip_leading_rows=0,
-                                autodetect=False,
-                                write_disposition=write_disposition,
-                            )
-
-                            with open(file_path, "rb") as source_file:
-                                load_job = connection.load_table_from_file(
-                                    source_file, table_ref, job_config=job_config
-                                )
-
-                            load_job.result()
-
-                        # Get final row count after all chunks loaded
-                        query = f"SELECT COUNT(*) FROM `{self.project_id}.{self.dataset_id}.{table_name_upper}`"
-                        query_job = connection.query(query)
-                        result = list(query_job.result())
-                        row_count = result[0][0] if result else 0
-
-                        table_stats[table_name_upper] = row_count
-
-                        load_time = elapsed_seconds(load_start)
-                        chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
-                        self.logger.info(
-                            f"✅ Loaded {row_count:,} rows into {table_name_upper}{chunk_info} in {load_time:.2f}s"
-                        )
-
-                    except Exception as e:
-                        self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
-                        table_stats[table_name.upper()] = 0
+                table_stats = self._load_tables_direct(connection, data_files)
 
             total_time = elapsed_seconds(start_time)
             total_rows = sum(table_stats.values())
@@ -1137,6 +936,195 @@ class BigQueryAdapter(PlatformAdapter):
 
         # BigQuery doesn't provide detailed per-table timings yet
         return table_stats, total_time, None
+
+    def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
+        """Resolve benchmark data files from benchmark tables or manifest."""
+        resolver = DataSourceResolver()
+        data_source = resolver.resolve(benchmark, data_dir)
+        if not data_source or not data_source.tables:
+            raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+        return data_source.tables
+
+    @staticmethod
+    def _ensure_file_list(file_paths: Any) -> list[Any]:
+        """Normalize table file paths to a list."""
+        return file_paths if isinstance(file_paths, list) else [file_paths]
+
+    def _filter_valid_files(self, file_paths: Any, *, allow_cloud: bool) -> list[Path]:
+        """Filter valid file inputs for load operations."""
+        valid_files: list[Path] = []
+        for file_path in self._ensure_file_list(file_paths):
+            if allow_cloud and is_cloud_path(str(file_path)):
+                valid_files.append(Path(file_path))
+                continue
+            path = Path(file_path)
+            if path.exists() and path.stat().st_size > 0:
+                valid_files.append(path)
+        return valid_files
+
+    def _validate_compression_support(self, data_files: dict[str, Any], benchmark: Any) -> None:
+        """Reject unsupported compressed files for BigQuery CSV loads."""
+        for file_paths in data_files.values():
+            for file_path in self._ensure_file_list(file_paths):
+                if detect_compression(file_path) != "zstd":
+                    continue
+
+                benchmark_name = getattr(benchmark, "name", "unknown")
+                scale_factor = getattr(benchmark, "scale_factor", "unknown")
+                raise ValueError(
+                    f"\n❌ Incompatible data compression detected\n\n"
+                    f"BigQuery does not support Zstd (.zst) compression for CSV file loading.\n"
+                    f"Found Zstd file: {Path(file_path).name}\n\n"
+                    f"To fix this, regenerate the data with gzip compression:\n\n"
+                    f"  # Remove existing incompatible data\n"
+                    f"  rm -rf {benchmark.data_dir}\n\n"
+                    f"  # Regenerate with gzip compression\n"
+                    f"  benchbox run --platform bigquery --benchmark {benchmark_name} "
+                    f"--scale {scale_factor} --compression-type gzip\n\n"
+                    f"Or use uncompressed data (larger files, slower uploads):\n\n"
+                    f"  benchbox run --platform bigquery --benchmark {benchmark_name} "
+                    f"--scale {scale_factor} --no-compression\n"
+                )
+
+    def _create_storage_bucket(self) -> Any:
+        """Create a Google Cloud Storage bucket client."""
+        params = self._get_connection_params()
+        credentials = self._load_credentials(params["credentials_path"])
+        storage_client = storage.Client(project=self.project_id, credentials=credentials)
+        return storage_client.bucket(self.storage_bucket)
+
+    def _get_table_row_count(self, connection: Any, table_name_upper: str) -> int:
+        """Return current row count for a BigQuery table."""
+        query = f"SELECT COUNT(*) FROM `{self.project_id}.{self.dataset_id}.{table_name_upper}`"
+        query_job = connection.query(query)
+        result = list(query_job.result())
+        return result[0][0] if result else 0
+
+    def _load_table_via_cloud_storage(
+        self,
+        connection: Any,
+        bucket: Any,
+        table_name: str,
+        valid_files: list[Any],
+    ) -> int:
+        """Load one table through GCS staging."""
+        table_name_upper = table_name.upper()
+        table_ref = connection.dataset(self.dataset_id).table(table_name_upper)
+
+        for file_idx, file_path in enumerate(valid_files):
+            chunk_info = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
+            delimiter = get_delimiter_for_file(file_path)
+
+            blob_name = f"{self.storage_prefix}/{table_name}_{file_idx}{file_path.suffix}"
+            self.log_very_verbose(f"Uploading to Cloud Storage{chunk_info}: {blob_name}")
+            blob = bucket.blob(blob_name)
+            blob.upload_from_filename(str(file_path))
+
+            write_disposition = (
+                bigquery.WriteDisposition.WRITE_TRUNCATE if file_idx == 0 else bigquery.WriteDisposition.WRITE_APPEND
+            )
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.CSV,
+                skip_leading_rows=0,
+                autodetect=False,
+                field_delimiter=delimiter,
+                allow_quoted_newlines=True,
+                write_disposition=write_disposition,
+            )
+            uri = f"gs://{self.storage_bucket}/{blob_name}"
+            load_job = connection.load_table_from_uri(uri, table_ref, job_config=job_config)
+            load_job.result()
+
+        return self._get_table_row_count(connection, table_name_upper)
+
+    def _load_table_direct(self, connection: Any, table_name: str, valid_files: list[Path]) -> int:
+        """Load one table directly from local files."""
+        table_name_upper = table_name.upper()
+        table_ref = connection.dataset(self.dataset_id).table(table_name_upper)
+
+        for file_idx, file_path in enumerate(valid_files):
+            chunk_info = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
+            self.log_very_verbose(f"Loading {table_name}{chunk_info} from {file_path.name}")
+            delimiter = get_delimiter_for_file(file_path)
+            write_disposition = (
+                bigquery.WriteDisposition.WRITE_TRUNCATE if file_idx == 0 else bigquery.WriteDisposition.WRITE_APPEND
+            )
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.CSV,
+                field_delimiter=delimiter,
+                skip_leading_rows=0,
+                autodetect=False,
+                write_disposition=write_disposition,
+            )
+            with open(file_path, "rb") as source_file:
+                load_job = connection.load_table_from_file(source_file, table_ref, job_config=job_config)
+            load_job.result()
+
+        return self._get_table_row_count(connection, table_name_upper)
+
+    def _load_tables_via_cloud_storage(
+        self,
+        connection: Any,
+        data_files: dict[str, Any],
+        bucket: Any,
+    ) -> dict[str, int]:
+        """Load all tables using GCS staging."""
+        logger = logging.getLogger(__name__)
+        table_stats: dict[str, int] = {}
+
+        for table_name, file_paths in data_files.items():
+            valid_files = self._filter_valid_files(file_paths, allow_cloud=True)
+            if not valid_files:
+                self.logger.warning(f"Skipping {table_name} - no valid data files")
+                table_stats[table_name] = 0
+                continue
+
+            logger.debug(f"Loading {table_name} from {len(valid_files)} file(s)")
+            try:
+                self.log_verbose(f"Loading data for table: {table_name}")
+                load_start = mono_time()
+                row_count = self._load_table_via_cloud_storage(connection, bucket, table_name, valid_files)
+                table_name_upper = table_name.upper()
+                table_stats[table_name_upper] = row_count
+                chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
+                self.logger.info(
+                    f"✅ Loaded {row_count:,} rows into {table_name_upper}{chunk_info} in "
+                    f"{elapsed_seconds(load_start):.2f}s"
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
+                table_stats[table_name.upper()] = 0
+
+        return table_stats
+
+    def _load_tables_direct(self, connection: Any, data_files: dict[str, Any]) -> dict[str, int]:
+        """Load all tables directly from local files."""
+        table_stats: dict[str, int] = {}
+
+        for table_name, file_paths in data_files.items():
+            valid_files_any = self._filter_valid_files(file_paths, allow_cloud=False)
+            valid_files = [file_path for file_path in valid_files_any if isinstance(file_path, Path)]
+            if not valid_files:
+                self.logger.warning(f"Skipping {table_name} - no valid data files")
+                table_stats[table_name.upper()] = 0
+                continue
+
+            try:
+                self.log_verbose(f"Direct loading data for table: {table_name}")
+                load_start = mono_time()
+                row_count = self._load_table_direct(connection, table_name, valid_files)
+                table_name_upper = table_name.upper()
+                table_stats[table_name_upper] = row_count
+                chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
+                self.logger.info(
+                    f"✅ Loaded {row_count:,} rows into {table_name_upper}{chunk_info} in "
+                    f"{elapsed_seconds(load_start):.2f}s"
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
+                table_stats[table_name.upper()] = 0
+
+        return table_stats
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply BigQuery-specific optimizations based on benchmark type."""
@@ -1728,7 +1716,7 @@ def _build_bigquery_config(
     Returns:
         DatabaseConfig with credentials loaded and platform-specific fields at top-level
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

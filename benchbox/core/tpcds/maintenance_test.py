@@ -25,6 +25,21 @@ from benchbox.core.tpcds.maintenance_operations import (
 )
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
+# (op_upper, substring_in_table_upper) → MaintenanceOperationType
+_MAINTENANCE_OP_MAP: dict[tuple[str, str], MaintenanceOperationType] = {
+    ("INSERT", "STORE_SALES"): MaintenanceOperationType.INSERT_STORE_SALES,
+    ("INSERT", "CATALOG_SALES"): MaintenanceOperationType.INSERT_CATALOG_SALES,
+    ("INSERT", "WEB_SALES"): MaintenanceOperationType.INSERT_WEB_SALES,
+    ("INSERT", "STORE_RETURNS"): MaintenanceOperationType.INSERT_STORE_RETURNS,
+    ("INSERT", "CATALOG_RETURNS"): MaintenanceOperationType.INSERT_CATALOG_RETURNS,
+    ("INSERT", "WEB_RETURNS"): MaintenanceOperationType.INSERT_WEB_RETURNS,
+    ("UPDATE", "CUSTOMER"): MaintenanceOperationType.UPDATE_CUSTOMER,
+    ("UPDATE", "ITEM"): MaintenanceOperationType.UPDATE_ITEM,
+    ("UPDATE", "INVENTORY"): MaintenanceOperationType.UPDATE_INVENTORY,
+    ("DELETE", "SALES"): MaintenanceOperationType.DELETE_OLD_SALES,
+    ("DELETE", "RETURNS"): MaintenanceOperationType.DELETE_OLD_RETURNS,
+}
+
 
 @dataclass
 class TPCDSMaintenanceTestConfig:
@@ -158,72 +173,8 @@ class TPCDSMaintenanceTest:
                 self.logger.info(f"Maintenance operations: {config.maintenance_operations}")
                 self.logger.info(f"Scale factor: {config.scale_factor}")
 
-            # Execute maintenance operations
-            maintenance_tables = [
-                "catalog_sales",
-                "catalog_returns",
-                "web_sales",
-                "web_returns",
-                "store_sales",
-                "store_returns",
-                "inventory",
-            ]
-
-            for operation_id in range(config.maintenance_operations):
-                if config.verbose:
-                    self.logger.info(f"Executing maintenance operation {operation_id + 1}")
-
-                # Rotate through different types of operations
-                operation_type = ["INSERT", "UPDATE", "DELETE"][operation_id % 3]
-                table_name = maintenance_tables[operation_id % len(maintenance_tables)]
-
-                # Execute the maintenance operation
-                operation_result = self._execute_maintenance_operation(operation_type, table_name, operation_id)
-
-                result["operations"].append(operation_result)
-                result["total_operations"] += 1
-
-                if operation_type == "INSERT":
-                    result["insert_operations"] += 1
-                elif operation_type == "UPDATE":
-                    result["update_operations"] += 1
-                else:
-                    result["delete_operations"] += 1
-
-                if operation_result.success:
-                    result["successful_operations"] += 1
-                else:
-                    result["failed_operations"] += 1
-                    result["errors"].append(
-                        f"{operation_type} operation {operation_id + 1} on {table_name} failed: {operation_result.error}"
-                    )
-
-                # Wait for operation interval
-                if config.operation_interval > 0 and operation_id < config.maintenance_operations - 1:
-                    time.sleep(config.operation_interval)
-
-            # Calculate metrics
-            total_time = elapsed_seconds(start_time)
-            result["total_time"] = total_time
-            result["end_time"] = datetime.now().isoformat()
-
-            if total_time > 0:
-                result["overall_throughput"] = result["successful_operations"] / total_time
-
-            # TPC-DS success criteria: at least 90% of operations must succeed
-            if result["total_operations"] > 0:
-                success_rate = result["successful_operations"] / result["total_operations"]
-                result["success"] = success_rate >= 0.9
-            else:
-                result["success"] = False
-
-            if config.verbose:
-                self.logger.info(f"Maintenance Test completed in {total_time:.3f}s")
-                self.logger.info(
-                    f"Successful operations: {result['successful_operations']}/{result['total_operations']}"
-                )
-                self.logger.info(f"Success rate: {success_rate:.2%}")
-                self.logger.info(f"Overall throughput: {result['overall_throughput']:.2f} ops/sec")
+            self._run_maintenance_loop(config, result)
+            self._finalize_maintenance_result(config, result, start_time)
 
             return result
 
@@ -238,6 +189,67 @@ class TPCDSMaintenanceTest:
 
             return result
 
+    def _run_maintenance_loop(self, config: TPCDSMaintenanceTestConfig, result: dict[str, Any]) -> None:
+        """Execute all maintenance operations, accumulating results."""
+        _OP_TYPE_KEYS = {"INSERT": "insert_operations", "UPDATE": "update_operations", "DELETE": "delete_operations"}
+        maintenance_tables = [
+            "catalog_sales",
+            "catalog_returns",
+            "web_sales",
+            "web_returns",
+            "store_sales",
+            "store_returns",
+            "inventory",
+        ]
+
+        for operation_id in range(config.maintenance_operations):
+            if config.verbose:
+                self.logger.info(f"Executing maintenance operation {operation_id + 1}")
+
+            operation_type = ["INSERT", "UPDATE", "DELETE"][operation_id % 3]
+            table_name = maintenance_tables[operation_id % len(maintenance_tables)]
+
+            operation_result = self._execute_maintenance_operation(operation_type, table_name, operation_id)
+
+            result["operations"].append(operation_result)
+            result["total_operations"] += 1
+            result[_OP_TYPE_KEYS[operation_type]] += 1
+
+            if operation_result.success:
+                result["successful_operations"] += 1
+            else:
+                result["failed_operations"] += 1
+                result["errors"].append(
+                    f"{operation_type} operation {operation_id + 1} on {table_name} failed: {operation_result.error}"
+                )
+
+            if config.operation_interval > 0 and operation_id < config.maintenance_operations - 1:
+                time.sleep(config.operation_interval)
+
+    def _finalize_maintenance_result(
+        self, config: TPCDSMaintenanceTestConfig, result: dict[str, Any], start_time: float
+    ) -> None:
+        """Calculate metrics, apply TPC-DS success criteria, and log summary."""
+        total_time = elapsed_seconds(start_time)
+        result["total_time"] = total_time
+        result["end_time"] = datetime.now().isoformat()
+
+        if total_time > 0:
+            result["overall_throughput"] = result["successful_operations"] / total_time
+
+        if result["total_operations"] > 0:
+            success_rate = result["successful_operations"] / result["total_operations"]
+            result["success"] = success_rate >= 0.9
+        else:
+            success_rate = 0.0
+            result["success"] = False
+
+        if config.verbose:
+            self.logger.info(f"Maintenance Test completed in {total_time:.3f}s")
+            self.logger.info(f"Successful operations: {result['successful_operations']}/{result['total_operations']}")
+            self.logger.info(f"Success rate: {success_rate:.2%}")
+            self.logger.info(f"Overall throughput: {result['overall_throughput']:.2f} ops/sec")
+
     def _map_to_maintenance_operation_type(self, operation_type: str, table_name: str) -> MaintenanceOperationType:
         """Map generic operation type and table to specific MaintenanceOperationType.
 
@@ -250,35 +262,9 @@ class TPCDSMaintenanceTest:
         """
         op_upper = operation_type.upper()
         table_upper = table_name.upper()
-
-        # Map to specific operation types
-        if op_upper == "INSERT":
-            if "STORE_SALES" in table_upper:
-                return MaintenanceOperationType.INSERT_STORE_SALES
-            elif "CATALOG_SALES" in table_upper:
-                return MaintenanceOperationType.INSERT_CATALOG_SALES
-            elif "WEB_SALES" in table_upper:
-                return MaintenanceOperationType.INSERT_WEB_SALES
-            elif "STORE_RETURNS" in table_upper:
-                return MaintenanceOperationType.INSERT_STORE_RETURNS
-            elif "CATALOG_RETURNS" in table_upper:
-                return MaintenanceOperationType.INSERT_CATALOG_RETURNS
-            elif "WEB_RETURNS" in table_upper:
-                return MaintenanceOperationType.INSERT_WEB_RETURNS
-        elif op_upper == "UPDATE":
-            if "CUSTOMER" in table_upper:
-                return MaintenanceOperationType.UPDATE_CUSTOMER
-            elif "ITEM" in table_upper:
-                return MaintenanceOperationType.UPDATE_ITEM
-            elif "INVENTORY" in table_upper:
-                return MaintenanceOperationType.UPDATE_INVENTORY
-        elif op_upper == "DELETE":
-            if "SALES" in table_upper:
-                return MaintenanceOperationType.DELETE_OLD_SALES
-            elif "RETURNS" in table_upper:
-                return MaintenanceOperationType.DELETE_OLD_RETURNS
-
-        # Default to bulk load if no match
+        for (op_key, table_substr), op_type in _MAINTENANCE_OP_MAP.items():
+            if op_upper == op_key and table_substr in table_upper:
+                return op_type
         return MaintenanceOperationType.BULK_LOAD_SALES
 
     def _execute_maintenance_operation(
@@ -343,8 +329,9 @@ class TPCDSMaintenanceTest:
                 self.logger.error(f"{operation_type} operation on {table_name} failed: {e}")
 
         finally:
-            operation.end_time = time.time()
-            operation.duration = operation.end_time - operation.start_time
+            end_t = mono_time()
+            operation.end_time = end_t
+            operation.duration = elapsed_seconds(start_time, end_t)
 
         return operation
 
@@ -366,105 +353,28 @@ class TPCDSMaintenanceTest:
             if self.verbose:
                 self.logger.info("Starting TPC-DS data integrity validation")
 
-            # Check 1: catalog_returns must reference valid catalog_sales
-            orphaned_catalog_returns_sql = """
-                SELECT COUNT(*) as orphan_count
-                FROM catalog_returns cr
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM catalog_sales cs
-                    WHERE cs.cs_item_sk = cr.cr_item_sk
-                      AND cs.cs_order_number = cr.cr_order_number
-                )
-            """
-            try:
-                cursor = connection.execute(orphaned_catalog_returns_sql)
-                result = cursor.fetchone()
-                orphan_count = result[0] if result else 0
-
-                if orphan_count > 0:
-                    violations_found = True
-                    if self.verbose:
-                        self.logger.error(f"Integrity violation: {orphan_count} orphaned catalog_returns records")
-                elif self.verbose:
-                    self.logger.info("✓ No orphaned catalog_returns records")
-            except Exception as e:
-                if self.verbose:
-                    self.logger.warning(f"Could not check catalog_returns integrity: {e}")
-
-            # Check 2: web_returns must reference valid web_sales
-            orphaned_web_returns_sql = """
-                SELECT COUNT(*) as orphan_count
-                FROM web_returns wr
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM web_sales ws
-                    WHERE ws.ws_item_sk = wr.wr_item_sk
-                      AND ws.ws_order_number = wr.wr_order_number
-                )
-            """
-            try:
-                cursor = connection.execute(orphaned_web_returns_sql)
-                result = cursor.fetchone()
-                orphan_count = result[0] if result else 0
-
-                if orphan_count > 0:
-                    violations_found = True
-                    if self.verbose:
-                        self.logger.error(f"Integrity violation: {orphan_count} orphaned web_returns records")
-                elif self.verbose:
-                    self.logger.info("✓ No orphaned web_returns records")
-            except Exception as e:
-                if self.verbose:
-                    self.logger.warning(f"Could not check web_returns integrity: {e}")
-
-            # Check 3: store_returns must reference valid store_sales
-            orphaned_store_returns_sql = """
-                SELECT COUNT(*) as orphan_count
-                FROM store_returns sr
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM store_sales ss
-                    WHERE ss.ss_item_sk = sr.sr_item_sk
-                      AND ss.ss_ticket_number = sr.sr_ticket_number
-                )
-            """
-            try:
-                cursor = connection.execute(orphaned_store_returns_sql)
-                result = cursor.fetchone()
-                orphan_count = result[0] if result else 0
-
-                if orphan_count > 0:
-                    violations_found = True
-                    if self.verbose:
-                        self.logger.error(f"Integrity violation: {orphan_count} orphaned store_returns records")
-                elif self.verbose:
-                    self.logger.info("✓ No orphaned store_returns records")
-            except Exception as e:
-                if self.verbose:
-                    self.logger.warning(f"Could not check store_returns integrity: {e}")
-
-            # Check 4: Business rule - catalog_returns dates should be after catalog_sales dates
-            # (This is informational, not a hard constraint)
-            date_logic_sql = """
-                SELECT COUNT(*) as violation_count
-                FROM catalog_returns cr
-                JOIN catalog_sales cs
-                  ON cs.cs_item_sk = cr.cr_item_sk
-                 AND cs.cs_order_number = cr.cr_order_number
-                WHERE cr.cr_returned_date_sk < cs.cs_sold_date_sk
-            """
-            try:
-                cursor = connection.execute(date_logic_sql)
-                result = cursor.fetchone()
-                date_violation_count = result[0] if result else 0
-
-                if date_violation_count > 0:
-                    # This is a warning, not necessarily a critical violation
-                    if self.verbose:
-                        self.logger.info(
-                            f"Note: {date_violation_count} catalog_returns with return date before sale date"
-                        )
-            except Exception as e:
-                if self.verbose:
-                    self.logger.warning(f"Could not check date logic: {e}")
+            violations_found |= self._check_orphaned_returns(
+                connection,
+                "catalog_returns",
+                "catalog_sales",
+                "cs_item_sk",
+                "cr_item_sk",
+                "cs_order_number",
+                "cr_order_number",
+            )
+            violations_found |= self._check_orphaned_returns(
+                connection, "web_returns", "web_sales", "ws_item_sk", "wr_item_sk", "ws_order_number", "wr_order_number"
+            )
+            violations_found |= self._check_orphaned_returns(
+                connection,
+                "store_returns",
+                "store_sales",
+                "ss_item_sk",
+                "sr_item_sk",
+                "ss_ticket_number",
+                "sr_ticket_number",
+            )
+            self._check_return_date_logic(connection)
 
             connection.close()
 
@@ -481,6 +391,67 @@ class TPCDSMaintenanceTest:
             if self.verbose:
                 self.logger.error(f"Data integrity validation failed with exception: {e}")
             return False
+
+    def _check_orphaned_returns(
+        self,
+        connection: Any,
+        returns_table: str,
+        sales_table: str,
+        sales_item_col: str,
+        returns_item_col: str,
+        sales_order_col: str,
+        returns_order_col: str,
+    ) -> bool:
+        """Check for orphaned return records that don't reference valid sales.
+
+        Returns:
+            True if violations were found, False otherwise.
+        """
+        sql = f"""
+            SELECT COUNT(*) as orphan_count
+            FROM {returns_table} r
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {sales_table} s
+                WHERE s.{sales_item_col} = r.{returns_item_col}
+                  AND s.{sales_order_col} = r.{returns_order_col}
+            )
+        """
+        try:
+            cursor = connection.execute(sql)
+            result = cursor.fetchone()
+            orphan_count = result[0] if result else 0
+
+            if orphan_count > 0:
+                if self.verbose:
+                    self.logger.error(f"Integrity violation: {orphan_count} orphaned {returns_table} records")
+                return True
+            elif self.verbose:
+                self.logger.info(f"✓ No orphaned {returns_table} records")
+        except Exception as e:
+            if self.verbose:
+                self.logger.warning(f"Could not check {returns_table} integrity: {e}")
+        return False
+
+    def _check_return_date_logic(self, connection: Any) -> None:
+        """Check business rule: catalog_returns dates should be after catalog_sales dates."""
+        date_logic_sql = """
+            SELECT COUNT(*) as violation_count
+            FROM catalog_returns cr
+            JOIN catalog_sales cs
+              ON cs.cs_item_sk = cr.cr_item_sk
+             AND cs.cs_order_number = cr.cr_order_number
+            WHERE cr.cr_returned_date_sk < cs.cs_sold_date_sk
+        """
+        try:
+            cursor = connection.execute(date_logic_sql)
+            result = cursor.fetchone()
+            date_violation_count = result[0] if result else 0
+
+            if date_violation_count > 0 and self.verbose:
+                self.logger.info(f"Note: {date_violation_count} catalog_returns with return date before sale date")
+        except Exception as e:
+            if self.verbose:
+                self.logger.warning(f"Could not check date logic: {e}")
 
     def get_maintenance_statistics(self) -> dict[str, Any]:
         """Get statistics about TPC-DS maintenance operations.

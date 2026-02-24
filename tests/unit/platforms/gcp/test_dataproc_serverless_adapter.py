@@ -159,7 +159,7 @@ class TestDataprocServerlessAdapterPlatformInfo:
             info = adapter.get_platform_info()
 
             assert info["platform"] == "dataproc-serverless"
-            assert info["display_name"] == "GCP Dataproc Serverless"
+            assert info["display_name"] == "Google Cloud Dataproc Serverless"
             assert info["vendor"] == "Google Cloud"
             assert info["type"] == "serverless_spark"
             assert info["project_id"] == "my-project"
@@ -326,7 +326,7 @@ class TestDataprocServerlessAdapterRegistry:
         assert "dataproc-serverless" in all_metadata
         serverless_meta = all_metadata["dataproc-serverless"]
 
-        assert serverless_meta["display_name"] == "GCP Dataproc Serverless"
+        assert serverless_meta["display_name"] == "Google Cloud Dataproc Serverless"
         assert serverless_meta["category"] == "cloud"
         assert serverless_meta["capabilities"]["supports_sql"] is True
         assert serverless_meta["capabilities"]["supports_dataframe"] is True

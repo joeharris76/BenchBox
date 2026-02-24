@@ -63,6 +63,22 @@ benchbox run --platform postgresql --benchmark tpch --scale 1.0 \
 | `schema` | public | Target schema |
 | `work_mem` | 256MB | Working memory for sorts/hashes |
 | `enable_timescale` | false | Enable TimescaleDB features |
+| `driver_version` | (latest) | Pin the psycopg2-binary package version (e.g. `2.9.11`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific psycopg2 Version
+
+```bash
+benchbox run --platform postgresql --benchmark tpch \
+  --platform-option driver_version=2.9.11 \
+  --platform-option driver_auto_install=true \
+  --platform-option host=localhost
+```
+
+The driver package for PostgreSQL is `psycopg2-binary`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Usage Examples
 

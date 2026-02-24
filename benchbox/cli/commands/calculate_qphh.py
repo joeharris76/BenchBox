@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import math
-import sys
-from pathlib import Path
-
 import click
 
 from benchbox.cli.shared import console
@@ -86,119 +81,10 @@ def calculate_qphh(ctx, power_results, throughput_results, scale_factor, output_
     )
     console.print()
 
-    power_path = Path(power_results)
-    throughput_path = Path(throughput_results)
+    from benchbox.cli.commands.metrics import _compute_qphh_result, _emit_qphh_output
 
-    # Load result files
-    try:
-        with open(power_path, encoding="utf-8") as f:
-            power_data = json.load(f)
-
-        with open(throughput_path, encoding="utf-8") as f:
-            throughput_data = json.load(f)
-
-    except FileNotFoundError as e:
-        console.print(f"[red]Error: Result file not found: {e}[/red]")
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        console.print(f"[red]Error: Invalid JSON in result file: {e}[/red]")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected error loading files: {e}[/red]")
-        sys.exit(1)
-
-    # Extract scale factor
-    if scale_factor is None:
-        # Try to auto-detect from results
-        sf_power = power_data.get("environment", {}).get("scale_factor")
-        sf_throughput = throughput_data.get("environment", {}).get("scale_factor")
-
-        if sf_power and sf_throughput:
-            if sf_power != sf_throughput:
-                console.print(f"[red]Error: Scale factor mismatch: power={sf_power}, throughput={sf_throughput}[/red]")
-                sys.exit(1)
-            scale_factor = sf_power
-        else:
-            console.print("[red]Error: Could not auto-detect scale factor. Please specify --scale-factor[/red]")
-            sys.exit(1)
-
-    # Extract metrics if available (preferred)
-    power_metrics = power_data.get("summary", {}).get("tpc_metrics", {})
-    throughput_metrics = throughput_data.get("summary", {}).get("tpc_metrics", {})
-
-    power_time_ms = power_data.get("summary", {}).get("timing", {}).get("total_ms")
-    throughput_time_ms = throughput_data.get("summary", {}).get("timing", {}).get("total_ms")
-    power_time = (power_time_ms / 1000.0) if power_time_ms else None
-    throughput_time = (throughput_time_ms / 1000.0) if throughput_time_ms else None
-
-    power_at_size = power_metrics.get("power_at_size")
-    throughput_at_size = throughput_metrics.get("throughput_at_size")
-
-    # Fallback: derive metrics from query timings if needed
-    if power_at_size is None or throughput_at_size is None:
-        from benchbox.core.results.metrics import TPCMetricsCalculator
-
-        if power_at_size is None:
-            power_query_times = [
-                q["ms"] / 1000.0
-                for q in power_data.get("queries", [])
-                if q.get("run_type") == "measurement" and q.get("status") == "SUCCESS"
-            ]
-            if power_query_times:
-                power_at_size = TPCMetricsCalculator.calculate_power_at_size(power_query_times, scale_factor)
-
-        if throughput_at_size is None:
-            throughput_summary = throughput_data.get("summary", {}).get("queries", {})
-            total_queries = throughput_summary.get("total")
-            throughput_time = throughput_data.get("summary", {}).get("timing", {}).get("total_ms")
-            if total_queries and throughput_time:
-                num_streams = throughput_data.get("run", {}).get("streams", 1)
-                throughput_at_size = TPCMetricsCalculator.calculate_throughput_at_size(
-                    total_queries,
-                    throughput_time / 1000.0,
-                    scale_factor,
-                    num_streams,
-                )
-
-    if power_at_size is None or throughput_at_size is None:
-        console.print("[red]Error: Could not derive Power@Size or Throughput@Size from result files[/red]")
-        sys.exit(1)
-
-    # Extract number of streams for throughput test (best-effort)
-    num_streams = throughput_data.get("run", {}).get("streams") or throughput_data.get("environment", {}).get(
-        "num_streams", 1
-    )
-
-    # Calculate composite metric according to TPC-H specification
-    qphh_at_size = math.sqrt(power_at_size * throughput_at_size)
-
-    # Prepare output
-    result = {
-        "benchmark": "TPC-H",
-        "scale_factor": scale_factor,
-        "num_streams": num_streams,
-        "power_test_time": power_time,
-        "throughput_test_time": throughput_time,
-        "power_at_size": power_at_size,
-        "throughput_at_size": throughput_at_size,
-        "qphh_at_size": qphh_at_size,
-    }
-
-    # Format output
-    if output_format == "text":
-        output_text = _format_text_output(result)
-        if output_file:
-            Path(output_file).write_text(output_text, encoding="utf-8")
-            console.print(f"[green]Results saved to {output_file}[/green]")
-        else:
-            console.print(output_text)
-    elif output_format == "json":
-        output_json = json.dumps(result, indent=2)
-        if output_file:
-            Path(output_file).write_text(output_json, encoding="utf-8")
-            console.print(f"[green]Results saved to {output_file}[/green]")
-        else:
-            console.print(output_json)
+    result = _compute_qphh_result(power_results, throughput_results, scale_factor)
+    _emit_qphh_output(result, output_format, output_file)
 
 
 def _format_text_output(result: dict) -> str:

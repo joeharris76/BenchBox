@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from benchbox.utils.printing import emit
+
 # =============================================================================
 # Rule Severity Levels
 # =============================================================================
@@ -252,6 +254,8 @@ VALIDATED_EXCEPTIONS: dict[str, Sequence[str]] = {
     "_blog/free-trial-benchmarking/**/*.md": ["restricted_vendor"],
     # Technical blog posts discussing database technology in general
     "_blog/analytics-architecture/**/*.md": ["restricted_vendor"],
+    # Publishing guide intentionally uses negative examples to illustrate style violations
+    "_blog/PUBLISHING.md": ["platform_advocacy", "vague_claims", "marketing", "punctuation", "cliche", "hedging"],
 }
 
 # Inline ignore directive pattern: <!-- content-ok: category1, category2 -->
@@ -468,17 +472,14 @@ def _is_example_line(line: str, lines: list[str], line_idx: int) -> bool:
     """
     stripped = line.strip()
 
-    # Lines starting with ❌ are explicit "don't" examples
-    # Also handle "- ❌" bullet points
-    if stripped.startswith("❌") or stripped.startswith("- ❌"):
-        return True
-
-    # Lines in "Don't" table columns (markdown tables with | Don't | or | ❌ |)
-    if "| ❌" in line or "|❌" in line:
-        return True
-
-    # Quoted examples showing bad writing (> ❌ "...")
-    if stripped.startswith(">") and "❌" in stripped:
+    # Lines with explicit ❌ markers (bullet, table column, or blockquote).
+    if (
+        stripped.startswith("❌")
+        or stripped.startswith("- ❌")
+        or "| ❌" in line
+        or "|❌" in line
+        or (stripped.startswith(">") and "❌" in stripped)
+    ):
         return True
 
     # Table rows after a "| Don't |" or "| If you wrote |" header row
@@ -653,7 +654,7 @@ def validate_content(
 
             if verbose:
                 rel_path = file_path.relative_to(repo_root)
-                print(f"  Checking {rel_path}...")
+                emit(f"  Checking {rel_path}...")
 
             violations = validate_file(file_path, categories, repo_root)
             if violations:
@@ -684,15 +685,15 @@ def check_content_for_release(
     Returns:
         True if validation passed (no errors), False otherwise
     """
-    print("\n" + "=" * 60)
-    print("Content Validation (Docs & Blog)")
-    print("=" * 60)
-    print("Checking for style guide violations...\n")
+    emit("\n" + "=" * 60)
+    emit("Content Validation (Docs & Blog)")
+    emit("=" * 60)
+    emit("Checking for style guide violations...\n")
 
     result = validate_content(source, verbose=False)
 
     if len(result.violations) == 0:
-        print(result.summary())
+        emit(result.summary())
         return True
 
     # Group violations by severity
@@ -702,31 +703,31 @@ def check_content_for_release(
 
     # Show errors (always)
     if errors:
-        print(f"ERRORS ({len(errors)}) - Must fix before release:\n")
+        emit(f"ERRORS ({len(errors)}) - Must fix before release:\n")
         for violation in errors[:15]:
-            print(str(violation))
-            print()
+            emit(str(violation))
+            emit()
         if len(errors) > 15:
-            print(f"... and {len(errors) - 15} more errors\n")
+            emit(f"... and {len(errors) - 15} more errors\n")
 
     # Show warnings (unless errors_only)
     if warnings and not errors_only:
-        print(f"WARNINGS ({len(warnings)}) - Should fix:\n")
+        emit(f"WARNINGS ({len(warnings)}) - Should fix:\n")
         for violation in warnings[:10]:
-            print(str(violation))
-            print()
+            emit(str(violation))
+            emit()
         if len(warnings) > 10:
-            print(f"... and {len(warnings) - 10} more warnings\n")
+            emit(f"... and {len(warnings) - 10} more warnings\n")
 
     # Show suggestions count only
     if suggestions and not errors_only:
-        print(f"SUGGESTIONS ({len(suggestions)}) - Consider reviewing\n")
+        emit(f"SUGGESTIONS ({len(suggestions)}) - Consider reviewing\n")
 
-    print(result.summary())
-    print("\nSee _blog/BenchBox_Blog_Style_Guide.md for voice and style guidance.")
+    emit(result.summary())
+    emit("\nSee _blog/BenchBox_Blog_Style_Guide.md for voice and style guidance.")
 
     if auto_continue:
-        print("\n⚠️  Continuing despite violations (--auto-continue)")
+        emit("\n⚠️  Continuing despite violations (--auto-continue)")
         return True
 
     return result.passed

@@ -86,7 +86,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
 
-from .base import PlatformAdapter, ConnectionConfig
+from .base import DriverIsolationCapability, PlatformAdapter, ConnectionConfig
 
 # Import platform client library
 try:
@@ -103,10 +103,18 @@ logger = logging.getLogger(__name__)
 class NewDatabaseAdapter(PlatformAdapter):
     """NewDatabase platform adapter with performance optimizations."""
 
+    # Required: declare driver isolation capability (validated by CI tests).
+    # Choose one of:
+    #   SUPPORTED           - full driver isolation (DuckDB, DataFusion)
+    #   FEASIBLE_CLIENT_ONLY - client can be isolated but engine version is external
+    #   NOT_FEASIBLE        - technical constraints prevent isolation (JVM, C libs)
+    #   NOT_APPLICABLE      - no versioned driver package (e.g. SQLite, DataFrames)
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+
     def __init__(self, **config):
         super().__init__(**config)
         if newdatabase is None:
-            raise ImportError("NewDatabase client not installed. Install with: pip install newdatabase-python")
+            raise ImportError("NewDatabase client not installed. Install with: uv add newdatabase-python")
 
         # Platform-specific configuration
         self.host = config.get('host', 'localhost')
@@ -387,6 +395,33 @@ def _load_via_inserts(self, cursor, table_name: str, file_path: Path):
 ### Step 5: Implement Query Execution
 
 **Important**: Use standard DB API 2.0 cursor methods for query execution. BenchBox's `DatabaseConnection` wrapper handles both cursor patterns automatically, but adapter implementations should follow DB API 2.0 conventions.
+
+#### `execute_query` Variant Families (2026-02)
+
+`execute_query` is not one universal flow across SQL platforms. Use the
+family model below before deciding to consolidate logic.
+
+| Family | Representative adapters | Core flow | Consolidation status |
+|--------|--------------------------|-----------|----------------------|
+| DBAPI cursor + validation helper | `firebolt`, `presto`, `trino` | `cursor.execute()` -> `fetchall()` -> optional `QueryValidator` row-count check -> standardized result payload | Consolidated in `CursorValidationQueryExecutionMixin` (`benchbox/core/benchmark_mixins.py`) |
+| Spark SQL collect | `spark`, `lakesail` | `spark.sql(query)` -> `.collect()` -> optional row-count validation -> standardized result payload | Similar enough for shared helpers; keep session/config differences adapter-local |
+| Cloud Spark submit/wait/fetch job | `emr_serverless`, `dataproc`, `dataproc_serverless`, `athena_spark`, `glue`, `quanton` | Submit remote job/batch -> poll async state -> fetch JSON results from object storage or API | Intentionally distinct from DBAPI cursor flow; async control plane and artifact retrieval dominate behavior |
+| Livy statement API | `synapse_spark`, `fabric_spark` | Submit statement to Livy session -> poll statement state -> parse `data.values` payload | Keep as a separate family; may share Livy polling/parsing utilities |
+
+Engine-specific outliers should remain separate unless their full contracts are
+aligned:
+- `bigquery`: query jobs with bytes billed/slot metrics and table qualification.
+- `datafusion`: `SessionContext.sql().collect()` plus SQL compatibility rewrite
+  pipeline.
+- `databend`: explicit `USE <database>` and `query_iter` result streaming.
+- `motherduck`: legacy tuple-return API over DuckDB (`rows`, `execution_time`).
+- `influxdb`: time-series-specific tuple return
+  (`execution_time`, `row_count`, `query_plan`).
+
+**Rule of thumb**:
+- Consolidate only within the same family and same output contract.
+- Keep different transport/protocol families distinct, even if control flow
+  looks superficially similar.
 
 ```python
 def execute_query(self, connection: Any, query: str, query_id: str) -> Dict[str, Any]:

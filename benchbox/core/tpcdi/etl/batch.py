@@ -85,7 +85,7 @@ Example Usage:
 
     # Get processing statistics
     stats = processor.get_processing_statistics()
-    print(f"Success rate: {stats['success_rate']:.2%}")
+    emit(f"Success rate: {stats['success_rate']:.2%}")
 """
 
 import contextlib

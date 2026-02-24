@@ -52,7 +52,7 @@ Usage Example:
     else:
         # Upload needed - validation failed or no remote data
         if result.errors:
-            print(f"Validation errors: {result.errors}")
+            emit(f"Validation errors: {result.errors}")
         # Proceed with upload
 
 Output Example (verbose=True):

@@ -22,6 +22,7 @@ from benchbox.core.constants import (
 )
 from benchbox.core.platform_config import get_platform_config as _core_get_platform_config
 from benchbox.core.platform_registry import PlatformRegistry
+from benchbox.core.results.driver_metadata import apply_driver_metadata
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.runner.dataframe_runner import is_dataframe_execution
 from benchbox.core.runner.runner import (
@@ -148,6 +149,13 @@ class BenchmarkOrchestrator:
         self.console.print(f"[blue]Initializing {config.name} benchmark...[/blue]")
 
         try:
+            # Preserve the exact requested phases for downstream execution logic.
+            # This lets combined mode run only the phases the user asked for.
+            if phases_to_run:
+                options = dict(getattr(config, "options", {}) or {})
+                options["requested_phases"] = list(phases_to_run)
+                config.options = options
+
             # Resolve benchmark instance (keeps tests patchable)
             benchmark = self._get_benchmark_instance(config, system_profile)
             self.console.print(
@@ -315,6 +323,8 @@ class BenchmarkOrchestrator:
                 execution_context=execution_context,
             )
 
+            # Canonical runtime metadata enrichment for all `benchbox run` paths.
+            apply_driver_metadata(result, database_config=database_config, platform_adapter=adapter)
             return result
 
         except Exception as e:

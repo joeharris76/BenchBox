@@ -1,11 +1,11 @@
 <!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
 
-# GCP Dataproc Serverless Platform
+# Google Cloud Dataproc Serverless Platform
 
 ```{tags} intermediate, guide, dataproc-serverless, cloud-platform
 ```
 
-Dataproc Serverless is Google Cloud's fully managed Apache Spark service that eliminates cluster management entirely. You submit batches and GCP handles all infrastructure automatically with sub-minute startup times.
+Dataproc Serverless is Google Cloud's fully managed Apache Spark service that eliminates cluster management entirely. You submit batches and Google Cloud handles all infrastructure automatically with sub-minute startup times.
 
 ## Features
 
@@ -249,6 +249,6 @@ benchbox run --platform dataproc-serverless --benchmark tpch \
 
 ## Related
 
-- [GCP Dataproc](gcp-dataproc.md) - Cluster-based managed Spark
+- [Google Cloud Dataproc](gcp-dataproc.md) - Cluster-based managed Spark
 - [Apache Spark Platform](spark.md) - Local/cluster Spark usage
 - [Cloud Platforms Overview](cloud-platforms.rst) - All cloud platforms

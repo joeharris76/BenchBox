@@ -66,7 +66,6 @@ def aggregate(ctx, input_dir, output_file, benchmark, platform):
     input_path = Path(input_dir)
     output_path = Path(output_file)
 
-    # Find all JSON result files
     result_files = list(input_path.glob("**/*.json"))
 
     if not result_files:
@@ -75,79 +74,7 @@ def aggregate(ctx, input_dir, output_file, benchmark, platform):
 
     console.print(f"[blue]Found {len(result_files)} result files[/blue]")
 
-    # Load and aggregate results
-    aggregated_data = []
-
-    for result_file in result_files:
-        try:
-            with open(result_file, encoding="utf-8") as f:
-                data = json.load(f)
-
-            # Extract metadata from new schema
-            execution = data.get("execution", {})
-            benchmark_info = data.get("benchmark", {})
-            configuration = data.get("configuration", {})
-            results = data.get("results", {})
-
-            bm_name = benchmark_info.get("name", "unknown")
-            plat_name = execution.get("platform", "unknown")
-
-            # Apply filters
-            if benchmark and benchmark.lower() not in bm_name.lower():
-                continue
-
-            if platform and platform.lower() not in plat_name.lower():
-                continue
-
-            # Extract timing metrics
-            timestamp = execution.get("timestamp", "")
-            scale_factor = configuration.get("scale_factor", 0)
-            duration_ms = execution.get("duration_ms", 0)
-            total_time = duration_ms / 1000.0  # Convert to seconds
-
-            # Extract query timings from new schema
-            queries = results.get("queries", {})
-            query_details = queries.get("details", [])
-
-            if query_details:
-                # Extract timing from query details
-                times_ms = []
-                for q in query_details:
-                    if q.get("status") == "SUCCESS":
-                        timing = q.get("timing", {})
-                        exec_time_ms = timing.get("execution_ms", 0)
-                        if exec_time_ms > 0:
-                            times_ms.append(exec_time_ms)
-
-                if times_ms:
-                    geomean = statistics.geometric_mean(times_ms) if all(t > 0 for t in times_ms) else 0
-                    p50 = statistics.median(times_ms)
-                    p95 = statistics.quantiles(times_ms, n=20)[18] if len(times_ms) >= 20 else max(times_ms)
-                    p99 = statistics.quantiles(times_ms, n=100)[98] if len(times_ms) >= 100 else max(times_ms)
-                else:
-                    geomean = p50 = p95 = p99 = 0
-            else:
-                geomean = p50 = p95 = p99 = 0
-
-            aggregated_data.append(
-                {
-                    "timestamp": timestamp,
-                    "benchmark": bm_name,
-                    "platform": plat_name,
-                    "scale_factor": scale_factor,
-                    "total_time_s": total_time,
-                    "geometric_mean_ms": geomean,
-                    "p50_ms": p50,
-                    "p95_ms": p95,
-                    "p99_ms": p99,
-                    "num_queries": len(query_details),
-                    "file": result_file.name,
-                }
-            )
-
-        except Exception as e:
-            console.print(f"[yellow]Warning: Failed to process {result_file.name}: {e}[/yellow]")
-            continue
+    aggregated_data = _collect_aggregated_data(result_files, benchmark, platform)
 
     if not aggregated_data:
         console.print("[yellow]No results matched the filters[/yellow]")
@@ -157,10 +84,97 @@ def aggregate(ctx, input_dir, output_file, benchmark, platform):
             console.print(f"  Platform filter: {platform}")
         sys.exit(1)
 
-    # Sort by timestamp
     aggregated_data.sort(key=lambda x: x["timestamp"])
+    _write_aggregated_csv(output_path, aggregated_data)
 
-    # Write to CSV
+
+def _collect_aggregated_data(
+    result_files: list[Path],
+    benchmark: str | None,
+    platform: str | None,
+) -> list[dict]:
+    """Load and aggregate timing data from result files."""
+    aggregated_data: list[dict] = []
+
+    for result_file in result_files:
+        try:
+            with open(result_file, encoding="utf-8") as f:
+                data = json.load(f)
+
+            row = _extract_result_row(data, result_file)
+            if row is None:
+                continue
+
+            if benchmark and benchmark.lower() not in row["benchmark"].lower():
+                continue
+            if platform and platform.lower() not in row["platform"].lower():
+                continue
+
+            aggregated_data.append(row)
+
+        except Exception as e:
+            console.print(f"[yellow]Warning: Failed to process {result_file.name}: {e}[/yellow]")
+            continue
+
+    return aggregated_data
+
+
+def _extract_result_row(data: dict, result_file: Path) -> dict | None:
+    """Extract a single aggregation row from a result file's JSON data."""
+    execution = data.get("execution", {})
+    benchmark_info = data.get("benchmark", {})
+    configuration = data.get("configuration", {})
+    results = data.get("results", {})
+
+    bm_name = benchmark_info.get("name", "unknown")
+    plat_name = execution.get("platform", "unknown")
+
+    timestamp = execution.get("timestamp", "")
+    scale_factor = configuration.get("scale_factor", 0)
+    duration_ms = execution.get("duration_ms", 0)
+
+    query_details = results.get("queries", {}).get("details", [])
+    geomean, p50, p95, p99 = _compute_query_statistics(query_details)
+
+    return {
+        "timestamp": timestamp,
+        "benchmark": bm_name,
+        "platform": plat_name,
+        "scale_factor": scale_factor,
+        "total_time_s": duration_ms / 1000.0,
+        "geometric_mean_ms": geomean,
+        "p50_ms": p50,
+        "p95_ms": p95,
+        "p99_ms": p99,
+        "num_queries": len(query_details),
+        "file": result_file.name,
+    }
+
+
+def _compute_query_statistics(query_details: list[dict]) -> tuple[float, float, float, float]:
+    """Compute geometric mean, p50, p95, p99 from query details."""
+    if not query_details:
+        return 0, 0, 0, 0
+
+    times_ms = []
+    for q in query_details:
+        if q.get("status") == "SUCCESS":
+            exec_time_ms = q.get("timing", {}).get("execution_ms", 0)
+            if exec_time_ms > 0:
+                times_ms.append(exec_time_ms)
+
+    if not times_ms:
+        return 0, 0, 0, 0
+
+    geomean = statistics.geometric_mean(times_ms) if all(t > 0 for t in times_ms) else 0
+    p50 = statistics.median(times_ms)
+    p95 = statistics.quantiles(times_ms, n=20)[18] if len(times_ms) >= 20 else max(times_ms)
+    p99 = statistics.quantiles(times_ms, n=100)[98] if len(times_ms) >= 100 else max(times_ms)
+    return geomean, p50, p95, p99
+
+
+def _write_aggregated_csv(output_path: Path, aggregated_data: list[dict]) -> None:
+    """Write aggregated data to CSV file."""
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -179,7 +193,6 @@ def aggregate(ctx, input_dir, output_file, benchmark, platform):
                 "file",
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
             writer.writeheader()
             for row in aggregated_data:
                 writer.writerow(row)

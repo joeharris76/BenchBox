@@ -316,7 +316,7 @@ class TestBenchmarkLoader:
     def test_loader_creates_instance(self):
         """Benchmark loader should create working instance."""
         from benchbox.core.benchmark_loader import get_benchmark_instance
-        from benchbox.core.config import BenchmarkConfig
+        from benchbox.core.schemas import BenchmarkConfig
 
         config = BenchmarkConfig(
             name="nyctaxi",

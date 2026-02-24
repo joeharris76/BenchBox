@@ -50,7 +50,7 @@ def test_table_name_mapping_and_validation_helpers(tmp_path: Path, monkeypatch: 
     benchmark = _make_benchmark(tmp_path)
     assert benchmark._get_target_table_from_source_name("customer_2026.csv") == "DimCustomer"
     assert benchmark._get_target_table_from_source_name("unknown.csv") is None
-    assert benchmark._get_target_table_from_file("customer.txt") == "DimCustomer"
+    assert benchmark._get_target_table_from_source_name("customer.txt") == "DimCustomer"
 
     class _Backend:
         def __init__(self, **kwargs):

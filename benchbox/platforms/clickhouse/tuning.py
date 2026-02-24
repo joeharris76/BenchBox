@@ -63,7 +63,7 @@ class ClickHouseTuningMixin:
 
         # Apply server-wide memory limit override (server mode only - not supported in chdb)
         if (
-            self.mode == "server"
+            self.deployment_mode == "server"
             and hasattr(self, "max_server_memory_usage_ratio")
             and self.max_server_memory_usage_ratio
         ):
@@ -107,7 +107,7 @@ class ClickHouseTuningMixin:
             }
 
             # Include settings that may not exist in local ClickHouse
-            if self.mode != "local":
+            if self.deployment_mode != "local":
                 # These settings might not be available in local mode (server-only)
                 olap_settings.update(
                     {
@@ -268,7 +268,7 @@ class ClickHouseTuningMixin:
         }
 
         # Skip known incompatible settings in local mode
-        if self.mode == "local" and setting in local_incompatible_settings:
+        if self.deployment_mode == "local" and setting in local_incompatible_settings:
             self.logger.debug(f"Skipping {setting} in local mode (known incompatible)")
             return False
 
@@ -278,7 +278,7 @@ class ClickHouseTuningMixin:
             return True
         except Exception as e:
             # Suppress warnings for known problematic settings in local mode
-            if self.mode == "local" and setting in local_incompatible_settings:
+            if self.deployment_mode == "local" and setting in local_incompatible_settings:
                 self.logger.debug(f"Setting {setting} not available in local mode: {e}")
             else:
                 self.logger.warning(f"Failed to set {setting}: {e}")

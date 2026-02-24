@@ -14,6 +14,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from benchbox.core.results.models import (
+    QUERY_RUN_TYPE_MEASUREMENT,
+    QUERY_RUN_TYPE_WARMUP,
+)
+
 
 def normalize_query_id(query_id: str | int) -> str:
     """Normalize query ID to consistent format (numeric string without prefix).
@@ -91,7 +96,7 @@ class QueryResultInput:
     status: str  # "SUCCESS" or "FAILED"
     iteration: int = 1  # 0 = warmup, 1+ = measurement
     stream_id: int = 0  # TPC stream ID (0 = power test default)
-    run_type: str = "measurement"  # "warmup" or "measurement"
+    run_type: str = QUERY_RUN_TYPE_MEASUREMENT  # canonical values from core.results.models
     error_message: str | None = None
     # Optional extended metadata
     cost: float | None = None  # Cloud platform cost estimation
@@ -155,10 +160,12 @@ def normalize_query_result(
 
     run_type = raw_result.get("run_type") or raw_result.get("runType")
     if not run_type:
+        # Backward-compatibility fallback for historical artifacts and legacy
+        # producer paths. New producer code should stamp run_type explicitly.
         if raw_result.get("is_warmup") or int(iteration) == 0:
-            run_type = "warmup"
+            run_type = QUERY_RUN_TYPE_WARMUP
         else:
-            run_type = "measurement"
+            run_type = QUERY_RUN_TYPE_MEASUREMENT
 
     # Extract error message
     error_message = raw_result.get("error_message") or raw_result.get("error") or raw_result.get("message")

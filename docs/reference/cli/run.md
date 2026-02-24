@@ -87,6 +87,10 @@ benchbox run [OPTIONS]
 **Platform-Specific Configuration:**
 - `--platform-option KEY=VALUE`: Platform-specific option (can be used multiple times)
 - Use `benchbox platforms status <name>` to view platform details
+- Universal keys available on all platforms:
+  - `driver_version` - pin the Python driver package version (e.g. `1.2.0`)
+  - `driver_auto_install` - auto-install the requested driver via uv if missing (`true`/`false`)
+- Athena Spark only: `engine_version` - select Spark engine version (e.g. `PySpark engine version 3`); auto-detected on all other cloud platforms
 
 **Logging and Output:**
 - `--verbose`, `-v`: Enable verbose logging (use `-vv` for very verbose)
@@ -180,6 +184,17 @@ benchbox run --platform snowflake --benchmark tpcds \
 benchbox run --platform clickhouse --benchmark tpch \
   --platform-option mode=local \
   --platform-option secure=true
+
+# Pin driver version (any platform)
+benchbox run --platform duckdb --benchmark tpch \
+  --platform-option driver_version=1.2.0 \
+  --platform-option driver_auto_install=true
+
+# Athena Spark: select Spark engine version
+benchbox run --platform athena-spark --benchmark tpch --scale 1.0 \
+  --platform-option workgroup=my-spark-workgroup \
+  --platform-option s3_staging_dir=s3://my-bucket/benchbox \
+  --platform-option "engine_version=PySpark engine version 3"
 
 # Show platform details and capabilities
 benchbox platforms status clickhouse

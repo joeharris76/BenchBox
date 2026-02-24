@@ -11,11 +11,18 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from benchbox.base import BaseBenchmark
+from benchbox.core.benchmark_mixins import OperationCategoryFacadeMixin, QueryCategoryFacadeMixin, QueryFacadeMixin
 from benchbox.core.operations import OperationExecutor
 from benchbox.core.write_primitives.benchmark import WritePrimitivesBenchmark
 
 
-class WritePrimitives(BaseBenchmark, OperationExecutor):
+class WritePrimitives(
+    OperationCategoryFacadeMixin,
+    QueryCategoryFacadeMixin,
+    QueryFacadeMixin,
+    BaseBenchmark,
+    OperationExecutor,
+):
     """Write Primitives benchmark implementation.
 
     Tests fundamental write operations (INSERT, UPDATE, DELETE, BULK_LOAD,
@@ -86,43 +93,6 @@ class WritePrimitives(BaseBenchmark, OperationExecutor):
         """
         return self._impl.generate_data(tables)
 
-    def get_queries(self, dialect: Optional[str] = None) -> dict[str, str]:
-        """Get all write operation SQL.
-
-        Args:
-            dialect: Target SQL dialect for query translation. If None, returns original SQL.
-
-        Returns:
-            A dictionary mapping operation IDs to write SQL strings
-        """
-        return self._impl.get_queries(dialect=dialect)
-
-    def get_queries_by_category(self, category: str) -> dict[str, str]:
-        """Get write operation SQL filtered by category.
-
-        Args:
-            category: Operation category (insert, update, delete, ddl, transaction)
-
-        Returns:
-            Dictionary mapping operation IDs to write SQL for the category
-        """
-        return self._impl.get_queries_by_category(category)
-
-    def get_query(self, query_id: Union[int, str], **kwargs) -> str:
-        """Get a specific write operation SQL.
-
-        Args:
-            query_id: The ID of the operation to retrieve (e.g., 'insert_single_row')
-            **kwargs: Additional parameters
-
-        Returns:
-            The write SQL string
-
-        Raises:
-            ValueError: If the query_id is invalid
-        """
-        return self._impl.get_query(query_id, **kwargs)
-
     def get_operation(self, operation_id: str) -> Any:
         """Get a specific write operation.
 
@@ -141,25 +111,6 @@ class WritePrimitives(BaseBenchmark, OperationExecutor):
             Dictionary mapping operation IDs to WriteOperation objects
         """
         return self._impl.get_all_operations()
-
-    def get_operations_by_category(self, category: str) -> dict[str, Any]:
-        """Get operations filtered by category.
-
-        Args:
-            category: Category name (e.g., 'insert', 'update', 'delete')
-
-        Returns:
-            Dictionary mapping operation IDs to WriteOperation objects
-        """
-        return self._impl.get_operations_by_category(category)
-
-    def get_operation_categories(self) -> list[str]:
-        """Get list of available operation categories.
-
-        Returns:
-            List of category names
-        """
-        return self._impl.get_operation_categories()
 
     def get_schema(self, dialect: str = "standard") -> dict[str, dict]:
         """Get the Write Primitives schema (staging tables).

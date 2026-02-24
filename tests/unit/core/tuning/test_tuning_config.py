@@ -176,13 +176,6 @@ class TestPartitioningConfig:
         assert config.granularity == "MONTHLY"
         assert len(config.columns) == 1
 
-    def test_from_column_list(self) -> None:
-        """Test from_column_list for backward compatibility."""
-        columns = [TuningColumn(name="l_shipdate", type="DATE", order=1)]
-        config = PartitioningConfig.from_column_list(columns)
-        assert config.strategy == "RANGE"
-        assert config.columns == columns
-
 
 class TestSortKeyConfig:
     """Tests for SortKeyConfig class."""
@@ -235,13 +228,6 @@ class TestSortKeyConfig:
         assert config.style == "INTERLEAVED"
         assert len(config.columns) == 1
 
-    def test_from_column_list(self) -> None:
-        """Test from_column_list for backward compatibility."""
-        columns = [TuningColumn(name="l_orderkey", type="INTEGER", order=1)]
-        config = SortKeyConfig.from_column_list(columns)
-        assert config.style == "COMPOUND"
-        assert config.columns == columns
-
 
 class TestClusteringConfig:
     """Tests for ClusteringConfig class."""
@@ -287,10 +273,3 @@ class TestClusteringConfig:
         config = ClusteringConfig.from_dict(data)
         assert config.bucket_count == 64
         assert len(config.columns) == 1
-
-    def test_from_column_list(self) -> None:
-        """Test from_column_list for backward compatibility."""
-        columns = [TuningColumn(name="l_partkey", type="INTEGER", order=1)]
-        config = ClusteringConfig.from_column_list(columns)
-        assert config.bucket_count is None
-        assert config.columns == columns

@@ -115,6 +115,22 @@ except ImportError:
     PYSPARK_VERSION = None  # type: ignore[assignment]
     PySparkDataFrameAdapter = None  # type: ignore[assignment,misc]
 
+# LakeSail Sail adapter (optional - requires pyspark, uses Spark Connect)
+try:
+    from benchbox.platforms.dataframe.lakesail_df import (
+        LakeSailDataFrameAdapter,
+    )
+except ImportError:
+    LakeSailDataFrameAdapter = None  # type: ignore[assignment,misc]
+
+# DuckLake maintenance operations (optional - requires duckdb and pyarrow)
+# Import as submodule to ensure ducklake_maintenance is always accessible as an
+# attribute on this package (needed for mock.patch on Python 3.10).
+try:
+    from . import ducklake_maintenance as ducklake_maintenance  # noqa: F401
+except ImportError:
+    pass
+
 # PySpark maintenance operations (optional - requires pyspark and optionally delta-spark)
 try:
     from benchbox.platforms.dataframe.pyspark_maintenance import (
@@ -164,6 +180,8 @@ __all__ = [
     "PySparkDataFrameAdapter",
     "PYSPARK_AVAILABLE",
     "PYSPARK_VERSION",
+    # LakeSail
+    "LakeSailDataFrameAdapter",
     # PySpark Maintenance
     "PySparkMaintenanceOperations",
     "get_pyspark_maintenance_operations",

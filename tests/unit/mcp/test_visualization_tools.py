@@ -15,36 +15,36 @@ pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server r
 
 
 class TestResolveResultPath:
-    """Tests for _resolve_result_path helper."""
+    """Tests for resolve_result_file_path helper."""
 
-    def test_returns_none_for_nonexistent_file(self):
+    def test_returns_none_for_nonexistent_file(self, tmp_path):
         """Test that function returns None for files that don't exist."""
-        from benchbox.mcp.tools.visualization import _resolve_result_path
+        from benchbox.mcp.tools.path_utils import resolve_result_file_path
 
-        result = _resolve_result_path("definitely_not_a_real_file_xyz123.json")
+        result = resolve_result_file_path("definitely_not_a_real_file_xyz123.json", tmp_path)
         assert result is None
 
-    def test_rejects_path_traversal_with_dotdot(self):
+    def test_rejects_path_traversal_with_dotdot(self, tmp_path):
         """Test that path traversal attempts with .. are rejected."""
-        from benchbox.mcp.tools.visualization import _resolve_result_path
+        from benchbox.mcp.tools.path_utils import resolve_result_file_path
 
         # Various path traversal attempts
-        assert _resolve_result_path("../etc/passwd") is None
-        assert _resolve_result_path("..\\etc\\passwd") is None
-        assert _resolve_result_path("foo/../../../etc/passwd") is None
-        assert _resolve_result_path("valid/../../secret.json") is None
+        assert resolve_result_file_path("../etc/passwd", tmp_path) is None
+        assert resolve_result_file_path("..\\etc\\passwd", tmp_path) is None
+        assert resolve_result_file_path("foo/../../../etc/passwd", tmp_path) is None
+        assert resolve_result_file_path("valid/../../secret.json", tmp_path) is None
 
-    def test_rejects_absolute_paths(self):
+    def test_rejects_absolute_paths(self, tmp_path):
         """Test that absolute paths are rejected."""
-        from benchbox.mcp.tools.visualization import _resolve_result_path
+        from benchbox.mcp.tools.path_utils import resolve_result_file_path
 
-        assert _resolve_result_path("/etc/passwd") is None
-        assert _resolve_result_path("/tmp/result.json") is None
-        assert _resolve_result_path("\\Windows\\System32\\config") is None
+        assert resolve_result_file_path("/etc/passwd", tmp_path) is None
+        assert resolve_result_file_path("/tmp/result.json", tmp_path) is None
+        assert resolve_result_file_path("\\Windows\\System32\\config", tmp_path) is None
 
-    def test_allows_valid_filename_in_results_dir(self, tmp_path, monkeypatch):
+    def test_allows_valid_filename_in_results_dir(self, tmp_path):
         """Test that valid filenames within results dir are allowed."""
-        from benchbox.mcp.tools import visualization
+        from benchbox.mcp.tools.path_utils import resolve_result_file_path
 
         # Create a mock results directory
         results_dir = tmp_path / "benchmark_runs" / "results"
@@ -52,17 +52,14 @@ class TestResolveResultPath:
         test_file = results_dir / "test_result.json"
         test_file.write_text("{}")
 
-        # Patch DEFAULT_RESULTS_DIR
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
-
-        result = visualization._resolve_result_path("test_result.json")
+        result = resolve_result_file_path("test_result.json", results_dir)
         assert result is not None
         assert result.exists()
         assert result.name == "test_result.json"
 
-    def test_adds_json_extension_if_missing(self, tmp_path, monkeypatch):
+    def test_adds_json_extension_if_missing(self, tmp_path):
         """Test that .json extension is added if missing."""
-        from benchbox.mcp.tools import visualization
+        from benchbox.mcp.tools.path_utils import resolve_result_file_path
 
         # Create a mock results directory
         results_dir = tmp_path / "benchmark_runs" / "results"
@@ -70,10 +67,7 @@ class TestResolveResultPath:
         test_file = results_dir / "test_result.json"
         test_file.write_text("{}")
 
-        # Patch DEFAULT_RESULTS_DIR
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
-
-        result = visualization._resolve_result_path("test_result")
+        result = resolve_result_file_path("test_result", results_dir)
         assert result is not None
         assert result.name == "test_result.json"
 
@@ -112,21 +106,10 @@ class TestChartTypeDescriptions:
 
     def test_all_chart_types_documented(self):
         """Test that all chart types have descriptions."""
+        from benchbox.core.visualization.chart_types import ALL_CHART_TYPES
         from benchbox.mcp.tools.visualization import CHART_TYPE_DESCRIPTIONS
 
-        expected_types = {
-            "performance_bar",
-            "distribution_box",
-            "query_heatmap",
-            "query_histogram",
-            "cost_scatter",
-            "time_series",
-            "comparison_bar",
-            "diverging_bar",
-            "summary_box",
-        }
-
-        assert set(CHART_TYPE_DESCRIPTIONS.keys()) == expected_types
+        assert set(CHART_TYPE_DESCRIPTIONS.keys()) == set(ALL_CHART_TYPES)
 
     def test_descriptions_are_strings(self):
         """Test that all descriptions are non-empty strings."""
@@ -149,20 +132,10 @@ class TestGenerateChartValidation:
 
     def test_valid_chart_types(self):
         """Test that valid chart types are recognized."""
+        from benchbox.core.visualization.chart_types import ALL_CHART_TYPES
         from benchbox.mcp.tools.visualization import CHART_TYPE_DESCRIPTIONS
 
-        valid_types = {
-            "performance_bar",
-            "distribution_box",
-            "query_heatmap",
-            "query_histogram",
-            "cost_scatter",
-            "time_series",
-            "comparison_bar",
-            "diverging_bar",
-            "summary_box",
-        }
-        assert valid_types == set(CHART_TYPE_DESCRIPTIONS.keys())
+        assert set(ALL_CHART_TYPES) == set(CHART_TYPE_DESCRIPTIONS.keys())
 
 
 class TestGenerateChartSetValidation:
@@ -237,14 +210,11 @@ class TestToolRegistration:
 class TestSuggestCharts:
     """Tests for suggest_charts tool."""
 
-    def test_returns_suggestions_for_valid_results(self, tmp_path, monkeypatch):
+    def test_returns_suggestions_for_valid_results(self, tmp_path):
         """Test that suggest_charts returns appropriate suggestions."""
-        from benchbox.mcp.tools import visualization
-
         # Set up mock results directory
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         # Create mock result files with query data
         result1 = results_dir / "duckdb_result.json"
@@ -269,7 +239,7 @@ class TestSuggestCharts:
             }
         }""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         suggest_charts = tools.get("suggest_charts")
         assert suggest_charts is not None
 
@@ -312,13 +282,10 @@ class TestSuggestCharts:
         assert result["error"] is True
         assert "VALIDATION_ERROR" in result["error_code"]
 
-    def test_single_result_suggests_distribution_box_as_primary(self, tmp_path, monkeypatch):
+    def test_single_result_suggests_distribution_box_as_primary(self, tmp_path):
         """Test that single result file suggests distribution_box as primary (not heatmap)."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         # Create single result file with query data
         result1 = results_dir / "single_result.json"
@@ -336,7 +303,7 @@ class TestSuggestCharts:
             }
         }""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         suggest_charts = tools.get("suggest_charts")
         result = suggest_charts(result_files="single_result.json")
 
@@ -347,13 +314,10 @@ class TestSuggestCharts:
         assert "distribution_box" in chart_types
         assert result["data_profile"]["result_count"] == 1
 
-    def test_results_without_query_data_suggests_only_performance_bar(self, tmp_path, monkeypatch):
+    def test_results_without_query_data_suggests_only_performance_bar(self, tmp_path):
         """Test that results without query data only suggest performance_bar."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         # Create result file without query details
         result1 = results_dir / "no_queries.json"
@@ -367,7 +331,7 @@ class TestSuggestCharts:
             }
         }""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         suggest_charts = tools.get("suggest_charts")
         result = suggest_charts(result_files="no_queries.json")
 
@@ -378,13 +342,10 @@ class TestSuggestCharts:
         assert result["data_profile"]["total_queries"] == 0
         assert result["data_profile"]["has_cost_data"] is False
 
-    def test_results_with_cost_data_suggests_cost_scatter(self, tmp_path, monkeypatch):
+    def test_results_with_cost_data_suggests_cost_scatter(self, tmp_path):
         """Test that results with cost data include cost_scatter suggestion."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         # Create result file with cost data (cost_summary.total_cost is the expected field)
         result1 = results_dir / "with_cost.json"
@@ -399,7 +360,7 @@ class TestSuggestCharts:
             }
         }""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         suggest_charts = tools.get("suggest_charts")
         result = suggest_charts(result_files="with_cost.json")
 
@@ -407,13 +368,10 @@ class TestSuggestCharts:
         assert "cost_scatter" in chart_types
         assert result["data_profile"]["has_cost_data"] is True
 
-    def test_multiple_results_with_timestamps_suggests_time_series(self, tmp_path, monkeypatch):
+    def test_multiple_results_with_timestamps_suggests_time_series(self, tmp_path):
         """Test that 3+ results with timestamps include time_series suggestion."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         # Create 3 result files with timestamps (timestamp is in execution block)
         for i, ts in enumerate(["2026-01-26T10:00:00", "2026-01-27T10:00:00", "2026-01-28T10:00:00"]):
@@ -429,7 +387,7 @@ class TestSuggestCharts:
                 }}
             }}""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         suggest_charts = tools.get("suggest_charts")
         result = suggest_charts(result_files="run_0.json,run_1.json,run_2.json")
 
@@ -439,27 +397,16 @@ class TestSuggestCharts:
         assert result["data_profile"]["result_count"] == 3
 
 
-class TestDefaultPaths:
-    """Tests for default path constants."""
-
-    def test_default_charts_dir(self):
-        """Test default charts directory constant."""
-        from benchbox.mcp.tools.visualization import DEFAULT_CHARTS_DIR
-
-        assert Path("benchmark_runs/charts") == DEFAULT_CHARTS_DIR
-
-    def test_default_results_dir(self):
-        """Test default results directory constant."""
-        from benchbox.mcp.tools.visualization import DEFAULT_RESULTS_DIR
-
-        assert Path("benchmark_runs/results") == DEFAULT_RESULTS_DIR
-
-
-def _get_viz_tool_functions():
+def _get_viz_tool_functions(*, results_dir=None, charts_dir=None):
     """Create a fresh MCP server and extract visualization tool functions."""
     from benchbox.mcp import create_server
 
-    server = create_server()
+    kwargs = {}
+    if results_dir is not None:
+        kwargs["results_dir"] = results_dir
+    if charts_dir is not None:
+        kwargs["charts_dir"] = charts_dir
+    server = create_server(**kwargs)
     tools = {}
     if hasattr(server, "_tool_manager"):
         tool_dict = getattr(server._tool_manager, "_tools", {})
@@ -471,13 +418,10 @@ def _get_viz_tool_functions():
 class TestGenerateChartIntegration:
     """Integration-style tests for generate_chart tool (ASCII-only)."""
 
-    def test_generates_ascii_chart_with_valid_inputs(self, tmp_path, monkeypatch):
+    def test_generates_ascii_chart_with_valid_inputs(self, tmp_path):
         """Test ASCII chart generation with valid inputs."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         result_file = results_dir / "test_result.json"
         result_file.write_text("""{
@@ -490,7 +434,7 @@ class TestGenerateChartIntegration:
             }
         }""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         generate_chart = tools.get("generate_chart")
         assert generate_chart is not None
 
@@ -504,18 +448,15 @@ class TestGenerateChartIntegration:
         assert result["format"] == "ascii"
         assert "content" in result
 
-    def test_rejects_invalid_chart_type(self, tmp_path, monkeypatch):
+    def test_rejects_invalid_chart_type(self, tmp_path):
         """Test that invalid chart type is rejected."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         result_file = results_dir / "test_result.json"
         result_file.write_text("{}")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         generate_chart = tools.get("generate_chart")
         assert generate_chart is not None
 
@@ -527,13 +468,35 @@ class TestGenerateChartIntegration:
         assert result["error"] is True
         assert "VALIDATION_ERROR" in result["error_code"]
 
-    def test_generates_chart_with_multiple_files(self, tmp_path, monkeypatch):
-        """Test chart generation with multiple result files."""
-        from benchbox.mcp.tools import visualization
-
+    def test_rejects_pairwise_chart_without_two_results(self, tmp_path):
+        """Pairwise chart types require exactly two result files."""
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
+
+        result_file = results_dir / "test_result.json"
+        result_file.write_text("""{
+            "benchmark": {"name": "TPC-H", "scale_factor": 1},
+            "platform": {"name": "DuckDB"},
+            "config": {"mode": "sql"},
+            "results": {
+                "queries": {"details": [{"id": "Q1", "execution_time_ms": 100}]},
+                "timing": {"total_ms": 1000, "avg_ms": 100}
+            }
+        }""")
+
+        tools = _get_viz_tool_functions(results_dir=results_dir)
+        generate_chart = tools.get("generate_chart")
+        assert generate_chart is not None
+
+        result = generate_chart(result_files="test_result.json", chart_type="comparison_bar")
+
+        assert result["error"] is True
+        assert "VALIDATION_ERROR" in result["error_code"]
+
+    def test_generates_chart_with_multiple_files(self, tmp_path):
+        """Test chart generation with multiple result files."""
+        results_dir = tmp_path / "benchmark_runs" / "results"
+        results_dir.mkdir(parents=True)
 
         result_file1 = results_dir / "result1.json"
         result_file1.write_text("""{
@@ -556,7 +519,7 @@ class TestGenerateChartIntegration:
             }
         }""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         generate_chart = tools.get("generate_chart")
 
         result = generate_chart(
@@ -569,13 +532,10 @@ class TestGenerateChartIntegration:
         assert result["format"] == "ascii"
         assert len(result["source_files"]) == 2
 
-    def test_generates_chart_set_with_template(self, tmp_path, monkeypatch):
+    def test_generates_chart_set_with_template(self, tmp_path):
         """Test chart set generation using template parameter."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         result_file = results_dir / "test_result.json"
         result_file.write_text("""{
@@ -588,7 +548,7 @@ class TestGenerateChartIntegration:
             }
         }""")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         generate_chart = tools.get("generate_chart")
 
         result = generate_chart(
@@ -601,20 +561,22 @@ class TestGenerateChartIntegration:
         assert result["chart_count"] >= 1
         assert result["format"] == "ascii"
         assert "content" in result
+        assert "skipped_chart_types" in result
+        assert isinstance(result["skipped_chart_types"], list)
+        for skipped in result["skipped_chart_types"]:
+            assert "chart_type" in skipped
+            assert "reason" in skipped
 
 
 class TestGenerateChartErrorHandling:
     """Tests for generate_chart error handling."""
 
-    def test_returns_error_for_missing_files(self, tmp_path, monkeypatch):
+    def test_returns_error_for_missing_files(self, tmp_path):
         """Test that generate_chart returns error for missing result files."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         generate_chart = tools.get("generate_chart")
         assert generate_chart is not None
 
@@ -640,18 +602,15 @@ class TestGenerateChartErrorHandling:
         assert result["error"] is True
         assert "VALIDATION_ERROR" in result["error_code"]
 
-    def test_returns_error_for_invalid_template(self, tmp_path, monkeypatch):
+    def test_returns_error_for_invalid_template(self, tmp_path):
         """Test that generate_chart returns error for invalid template."""
-        from benchbox.mcp.tools import visualization
-
         results_dir = tmp_path / "benchmark_runs" / "results"
         results_dir.mkdir(parents=True)
-        monkeypatch.setattr(visualization, "DEFAULT_RESULTS_DIR", results_dir)
 
         result_file = results_dir / "test_result.json"
         result_file.write_text("{}")
 
-        tools = _get_viz_tool_functions()
+        tools = _get_viz_tool_functions(results_dir=results_dir)
         generate_chart = tools.get("generate_chart")
 
         result = generate_chart(

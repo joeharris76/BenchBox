@@ -79,3 +79,6 @@ unparseable
 
 # Code identifiers/aliases (intentional naming)
 asceding
+
+# Python unittest method names (codespell false positives)
+assertIn

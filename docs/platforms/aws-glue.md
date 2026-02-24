@@ -248,8 +248,8 @@ Minimum required IAM policy for the Glue job role:
 
 ## Comparison with Athena
 
-| Aspect | AWS Glue | AWS Athena |
-|--------|----------|------------|
+| Aspect | AWS Glue | Amazon Athena |
+|--------|----------|---------------|
 | Execution | Batch jobs (Spark) | Interactive queries (Trino) |
 | Billing | Per DPU-hour | Per TB scanned |
 | Startup | 30-60 seconds | Instant |
@@ -260,5 +260,5 @@ Minimum required IAM policy for the Glue job role:
 ## Related
 
 - [Apache Spark Platform](spark.md) - Local/cluster Spark usage
-- [AWS Athena Platform](athena.md) - Serverless Trino queries
+- [Amazon Athena Platform](athena.md) - Serverless Trino queries
 - [Cloud Platforms Overview](cloud-platforms.rst) - All cloud platforms

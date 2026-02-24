@@ -1,9 +1,27 @@
-"""
-Quiet-aware printing and console helpers for BenchBox CLI.
+"""Centralized, quiet-aware output helpers for BenchBox runtime surfaces.
 
-Provides a central place to control user-facing output. When quiet mode is
-enabled, all helpers become no-ops and a sink console is returned so that
-Rich-based rendering is suppressed.
+Policy:
+- All runtime user-facing output must flow through this module.
+- `quiet` mode (--quiet / -q) suppresses all normal user output.
+- MCP/tooling callers can force sink behavior via `get_quiet_console()` or
+  `silence_output(...)` to guard transitive stdout/stderr writes.
+
+Approved output patterns (in preference order):
+1. `emit(msg)` — primary interface for all user-facing text and Rich renderables.
+   Accepts any Rich-renderable (str, Panel, Table, Text, …) and respects quiet mode.
+   Use this everywhere unless one of the exceptions below applies.
+
+2. `console.print(...)` via module-level alias `console = quiet_console` — approved
+   for CLI command modules that need Rich keyword arguments (style=, justify=, end=,
+   markup=, highlight=) not exposed by emit(). The alias ensures quiet-mode fidelity
+   through QuietConsoleProxy.
+
+3. `self.console.print(...)` via constructor injection — approved for display/handler
+   classes that need to be testable in isolation (e.g. ExceptionHandler, DryRunDisplay,
+   BenchmarkOrchestrator). The injected console must default to `quiet_console`.
+
+Raw `print()`, `sys.stdout.write()`, and `logging.*` must NOT be used for
+user-facing messages; they bypass quiet mode and the centralized output channel.
 """
 
 from __future__ import annotations
@@ -73,9 +91,26 @@ def silence_output(enabled: bool = True) -> Iterator[None]:
 
 
 def info(msg: str) -> None:
-    if _QUIET:
+    emit(msg)
+
+
+def emit(msg: Any = "", *, quiet: bool | None = None) -> None:
+    """Emit user-facing output through the centralized console channel.
+
+    This is the primary interface for all user-facing output. It accepts any
+    value that Rich's Console.print() accepts, including plain strings, f-strings,
+    Rich renderables (Panel, Table, Text, Rule, …), and markup strings.
+
+    Args:
+        msg: Message or Rich renderable to print. Defaults to a blank line.
+        quiet: Per-call quiet override. If True, suppresses this call regardless
+            of the global quiet flag. If False, forces output even in quiet mode.
+            If None (default), defers to the global quiet policy set by set_quiet().
+    """
+    q = _QUIET if quiet is None else bool(quiet)
+    if q:
         return
-    get_console().print(msg)
+    get_console(quiet=False).print(msg)
 
 
 class QuietConsoleProxy:
@@ -105,21 +140,15 @@ quiet_console = QuietConsoleProxy()
 
 
 def warn(msg: str) -> None:
-    if _QUIET:
-        return
-    get_console().print(msg)
+    emit(msg)
 
 
 def error(msg: str) -> None:
-    if _QUIET:
-        return
-    get_console().print(msg)
+    emit(msg)
 
 
 def debug(msg: str) -> None:
-    if _QUIET:
-        return
-    get_console().print(msg)
+    emit(msg)
 
 
 def get_quiet_console() -> Console:

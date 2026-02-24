@@ -313,7 +313,7 @@ mysql_query = tpch.translate_query(1, "mysql")
 sqlite_query = tpch.translate_query(1, "sqlite")
 ```
 
-> **Note on Dialect Translation**: BenchBox can translate queries to many SQL dialects via SQLGlot, but this doesn't mean platform adapters exist for connecting to those databases. Currently supported platforms include: DuckDB, SQLite, PostgreSQL, ClickHouse, Databricks, BigQuery, Redshift, Snowflake, Trino, Presto, Athena, Firebolt, Azure Synapse, Microsoft Fabric, and more. See the [Platform Documentation](../platforms/index.md) for the full list.
+> **Note on Dialect Translation**: BenchBox can translate queries to many SQL dialects via SQLGlot, but this doesn't mean platform adapters exist for connecting to those databases. Currently supported platforms include: DuckDB, SQLite, PostgreSQL, ClickHouse, Databricks SQL, BigQuery, Redshift, Snowflake, Trino, Presto, Amazon Athena, Firebolt, Azure Synapse Analytics, Microsoft Fabric, and more. See the [Platform Documentation](../platforms/index.md) for the full list.
 
 ---
 

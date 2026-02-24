@@ -11,13 +11,13 @@ Microsoft Azure offers multiple analytics platforms for different workload patte
 
 | Platform | Type | Focus Area | Status in BenchBox |
 |----------|------|------------|-------------------|
-| **Microsoft Fabric** | Unified SaaS Platform | Data engineering, warehousing, BI, real-time analytics | **Supported** (Warehouse + Spark) |
+| **Microsoft Fabric** | Unified SaaS Platform | Data engineering, warehousing, BI, real-time analytics | **Supported** (Warehouse + Spark + Lakehouse SQL) |
 | **Azure Synapse Analytics** | Enterprise Data Warehouse | Data warehousing, big data analytics | **Supported** (SQL + Spark) |
 | **Azure Data Explorer** | Real-time Analytics Engine | Time-series, telemetry, streaming data | Under evaluation |
 
 ## Microsoft Fabric
 
-**Status:** Supported (Warehouse + Spark)
+**Status:** Supported (Warehouse + Spark + Lakehouse SQL)
 
 **Platform Type:** Unified SaaS data analytics platform
 
@@ -35,16 +35,17 @@ Microsoft Azure offers multiple analytics platforms for different workload patte
 - Self-service BI with Power BI integration
 
 **BenchBox Integration:**
-- Supports Fabric Warehouse items via T-SQL
+- Supports Microsoft Fabric Warehouse items via T-SQL
 - Entra ID authentication (service principal, default credential, interactive)
 - OneLake staging for bulk data loading via COPY INTO
 - Automatic query translation from standard SQL
 
-**BenchBox provides two adapters:**
-- `fabric_dw` - For Warehouse items via T-SQL
+**BenchBox provides three adapters:**
+- `fabric-dw` (or legacy `fabric_dw`) - For Warehouse items via T-SQL
 - `fabric-spark` - For Spark/Lakehouse workloads
+- `fabric-lakehouse` - For read-only SQL query benchmarking over Lakehouse tables
 
-See [Microsoft Fabric Platform Guide](microsoft-fabric.md) and [Fabric Spark Platform Guide](fabric-spark.md) for detailed usage.
+See [Microsoft Fabric Platform Guide](microsoft-fabric.md), [Fabric Spark Platform Guide](fabric-spark.md), and [Fabric Lakehouse SQL Guide](fabric-lakehouse.md) for detailed usage.
 
 ## Azure Synapse Analytics
 
@@ -106,7 +107,8 @@ See [Azure Synapse Spark Platform Guide](synapse-spark.md) for Spark-specific us
 
 ## Related Documentation
 
-- [Microsoft Fabric Platform Guide](microsoft-fabric.md) - Detailed Fabric Warehouse usage
+- [Microsoft Fabric Platform Guide](microsoft-fabric.md) - Detailed Microsoft Fabric Warehouse usage
 - [Fabric Spark Platform Guide](fabric-spark.md) - Spark workloads on Fabric
+- [Fabric Lakehouse SQL Guide](fabric-lakehouse.md) - Read-only SQL analytics endpoint
 - [Azure Synapse Spark Platform Guide](synapse-spark.md) - Spark pools on Synapse
 - [Development Roadmap](../development/roadmap.md) - Planned platform additions

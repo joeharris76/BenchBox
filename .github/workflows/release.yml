@@ -141,10 +141,15 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+          attestations: false
+          verbose: true
 
       - name: Publish to PyPI
         if: github.event.inputs.test_pypi != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: false
+          verbose: true
 
   # Create GitHub Release with build artifacts attached
   github-release:

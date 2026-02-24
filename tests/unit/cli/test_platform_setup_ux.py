@@ -16,7 +16,7 @@ from benchbox.cli.platform import (
     NumberedSelectPrompt,
     numbered_platform_select,
 )
-from benchbox.core.config import PlatformInfo
+from benchbox.core.schemas import PlatformInfo
 
 pytestmark = pytest.mark.fast
 

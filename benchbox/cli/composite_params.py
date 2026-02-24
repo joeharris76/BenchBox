@@ -71,6 +71,28 @@ class CompressionConfig:
         return cls(type=comp_type, level=level, enabled=(comp_type != "none"))
 
 
+def _split_plan_config_parts(value: str) -> list[str]:
+    """Split comma-separated key:value pairs, handling queries: which contains commas."""
+    parts: list[str] = []
+    current: list[str] = []
+    in_queries = False
+    for part in value.split(","):
+        if "queries:" in part:
+            in_queries = True
+            current.append(part)
+        elif in_queries and ":" not in part:
+            current.append(part)
+        else:
+            if current:
+                parts.append(",".join(current))
+                current = []
+                in_queries = False
+            parts.append(part)
+    if current:
+        parts.append(",".join(current))
+    return parts
+
+
 @dataclass
 class PlanCaptureConfig:
     """Parsed plan capture configuration."""
@@ -108,30 +130,7 @@ class PlanCaptureConfig:
 
         config = cls()
 
-        # Parse comma-separated key:value pairs
-        # Handle queries specially since they contain commas
-        parts = []
-        current = []
-        in_queries = False
-
-        for part in value.split(","):
-            if "queries:" in part:
-                in_queries = True
-                current.append(part)
-            elif in_queries and ":" not in part:
-                # This is a query ID, not a new key
-                current.append(part)
-            else:
-                if current:
-                    parts.append(",".join(current))
-                    current = []
-                    in_queries = False
-                parts.append(part)
-
-        if current:
-            parts.append(",".join(current))
-
-        for part in parts:
+        for part in _split_plan_config_parts(value):
             if not part.strip():
                 continue
 

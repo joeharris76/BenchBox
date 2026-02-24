@@ -390,48 +390,32 @@ def has_trailing_delimiter(
 
     if column_names is not None:
         expected = len(column_names)
+        checker = lambda line: len(line.rstrip("\n").split(delimiter)) > expected  # noqa: E731
+    else:
+        checker = lambda line: line.rstrip("\n").endswith(delimiter)  # noqa: E731
 
-        def _count_fields(line: str) -> int:
-            return len(line.rstrip("\n").split(delimiter))
+    return _check_first_nonempty_line(path, checker, CompressionError, CompressionManager)
 
-        compression_type = detect_compression(path)
-        try:
-            if compression_type:
-                manager = CompressionManager()
-                compressor = manager.get_compressor(compression_type)
-                with compressor.open_for_read(path, mode="rt") as handle:
-                    for line in handle:
-                        if line.strip():
-                            return _count_fields(line) > expected
-                return False
-            with path.open("rt", encoding="utf-8", errors="replace") as handle:
+
+def _check_first_nonempty_line(path: Path, checker, CompressionError, CompressionManager) -> bool:
+    """Read the first non-empty line from a (possibly compressed) file and apply checker."""
+    compression_type = detect_compression(path)
+    try:
+        if compression_type:
+            manager = CompressionManager()
+            compressor = manager.get_compressor(compression_type)
+            with compressor.open_for_read(path, mode="rt") as handle:
                 for line in handle:
                     if line.strip():
-                        return _count_fields(line) > expected
+                        return checker(line)
             return False
-        except (CompressionError, OSError):
-            return False
-    else:
-        # Schema-less fallback: check if first non-empty line ends with delimiter
-        compression_type = detect_compression(path)
-        try:
-            if compression_type:
-                manager = CompressionManager()
-                compressor = manager.get_compressor(compression_type)
-                with compressor.open_for_read(path, mode="rt") as handle:
-                    for line in handle:
-                        stripped = line.rstrip("\n")
-                        if stripped:
-                            return stripped.endswith(delimiter)
-                return False
-            with path.open("rt", encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    stripped = line.rstrip("\n")
-                    if stripped:
-                        return stripped.endswith(delimiter)
-            return False
-        except (CompressionError, OSError):
-            return False
+        with path.open("rt", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if line.strip():
+                    return checker(line)
+        return False
+    except Exception:
+        return False
 
 
 def get_column_names_with_trailing(column_names: list[str], has_trailing: bool) -> list[str]:

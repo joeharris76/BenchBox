@@ -22,7 +22,7 @@ Enhanced resource monitoring:
     >>> profiler.stop()
     >>> reporter = ResourceReporter()
     >>> report = reporter.generate_report(profiler.get_timeline())
-    >>> print(report.generate_text_report())
+    >>> emit(report.generate_text_report())
 """
 
 from .bottleneck import (

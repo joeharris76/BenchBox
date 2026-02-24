@@ -93,7 +93,7 @@ def test_duckdb_tpcds_power_runs(monkeypatch: pytest.MonkeyPatch, tmp_path) -> N
 
     monkeypatch.setattr(script.DuckDBAdapter, "run_benchmark", fake_run, raising=False)
 
-    script.run_example(scale_factor=0.01, force_regenerate=True)
+    script.run_example(scale_factor=1.0, force_regenerate=True)
 
     assert called["test_execution_type"] == "power"
 

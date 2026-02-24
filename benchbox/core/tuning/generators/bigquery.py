@@ -10,7 +10,7 @@ Example:
     >>> from benchbox.core.tuning.generators.bigquery import BigQueryDDLGenerator
     >>> generator = BigQueryDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
-    >>> print(generator.generate_create_table_ddl("lineitem", columns, clauses))
+    >>> emit(generator.generate_create_table_ddl("lineitem", columns, clauses))
     CREATE TABLE lineitem (
         l_orderkey INT64 NOT NULL,
         l_shipdate DATE,

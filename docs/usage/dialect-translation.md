@@ -77,10 +77,10 @@ mysql_query = tpch.translate_query(1, "mysql")
 - ✅ Apache Spark SQL - Requires `pyspark`
 - ✅ AWS Glue - Requires `boto3`
 - ✅ EMR Serverless - Requires `boto3`
-- ✅ GCP Dataproc - Requires `google-cloud-dataproc`
+- ✅ Google Cloud Dataproc - Requires `google-cloud-dataproc`
 
 *Azure Platforms*:
-- ✅ Azure Synapse - Requires `pyodbc` + `azure-identity`
+- ✅ Azure Synapse Analytics - Requires `pyodbc` + `azure-identity`
 - ✅ Microsoft Fabric Warehouse - Requires `pyodbc` + `azure-identity`
 - ✅ Athena - Requires `pyathena`
 - ✅ Firebolt - Requires `firebolt-sdk`

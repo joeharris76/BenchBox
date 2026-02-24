@@ -14,6 +14,7 @@ import yaml
 
 from benchbox.utils.database_naming import generate_database_filename
 from benchbox.utils.output_path import normalize_output_root
+from benchbox.utils.printing import emit
 
 
 def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -366,7 +367,7 @@ def load_platform_config(platform: str, config_path: Optional[str] = None, verbo
             source = f"default file: {config_file}"
         else:
             if verbose:
-                print("Platform config using built-in defaults")
+                emit("Platform config using built-in defaults")
             return config
 
     try:
@@ -386,11 +387,11 @@ def load_platform_config(platform: str, config_path: Optional[str] = None, verbo
                 config.update(settings_config)
 
                 if verbose:
-                    print(f"Platform config loaded from {source}")
+                    emit(f"Platform config loaded from {source}")
     except Exception as e:
         if verbose:
-            print(f"Warning: Failed to load platform config from {config_file}: {e}")
-            print(f"Using built-in defaults for {platform}")
+            emit(f"Warning: Failed to load platform config from {config_file}: {e}")
+            emit(f"Using built-in defaults for {platform}")
 
     return config
 
@@ -414,8 +415,8 @@ def load_tuning_config(
         config_file = Path(f"examples/tunings/{platform}/{benchmark}_{tuning_mode}.yaml")
         if not config_file.exists():
             if verbose:
-                print(f"Warning: Tuning config not found: {config_file}")
-                print("Proceeding without tuning configuration")
+                emit(f"Warning: Tuning config not found: {config_file}")
+                emit("Proceeding without tuning configuration")
             return None
         source = f"auto-selected: {config_file}"
     else:
@@ -430,11 +431,11 @@ def load_tuning_config(
             config = yaml.safe_load(f)
             if verbose and config:
                 tuning_type = config.get("_metadata", {}).get("configuration_type", "unknown")
-                print(f"Tuning config loaded from {source} (type: {tuning_type})")
+                emit(f"Tuning config loaded from {source} (type: {tuning_type})")
             return config
     except Exception as e:
         if verbose:
-            print(f"Warning: Failed to load tuning config from {config_file}: {e}")
+            emit(f"Warning: Failed to load tuning config from {config_file}: {e}")
         return None
 
 
@@ -471,7 +472,7 @@ def merge_all_configs(
     defaults = get_builtin_defaults(platform, benchmark)
     config.update(defaults)
     if verbose:
-        print("✅ Applied built-in defaults")
+        emit("✅ Applied built-in defaults")
 
     # 2. Apply platform configuration
     platform_config = load_platform_config(platform, platform_config_path, verbose)
@@ -491,7 +492,7 @@ def merge_all_configs(
         # Map CLI --scale to internal scale_factor
         config["scale_factor"] = config["scale"]
     if verbose:
-        print("✅ Applied CLI arguments")
+        emit("✅ Applied CLI arguments")
 
     # Add convenience fields
     config["platform"] = platform

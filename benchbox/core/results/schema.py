@@ -71,6 +71,28 @@ PHASE_KEY_ORDER = [
     "power_test",
     "throughput_test",
 ]
+DRIVER_METADATA_KEYS = (
+    "driver_package",
+    "driver_version_requested",
+    "driver_version_resolved",
+    "driver_version_actual",
+    "driver_runtime_strategy",
+    "driver_runtime_path",
+    "driver_runtime_python_executable",
+)
+ENGINE_VERSION_KEYS = (
+    "engine_version",
+    "engine_version_source",
+)
+
+# Maps driver metadata source keys to their result JSON destination keys.
+_DRIVER_PLATFORM_KEYS = [
+    ("driver_package", "driver_package"),
+    ("driver_version_requested", "driver_requested_version"),
+    ("driver_version_resolved", "driver_resolved_version"),
+    ("driver_version_actual", "driver_actual_version"),
+    ("driver_runtime_strategy", "driver_runtime_strategy"),
+]
 
 
 def order_dict(d: dict[str, Any], key_order: list[str]) -> dict[str, Any]:
@@ -218,74 +240,8 @@ def build_result_payload(result: BenchmarkResults) -> dict[str, Any]:
         {"id": "1", "ms": 189.2, "rows": 4, "iter": 1}
         {"id": "11", "ms": 376.8, "rows": 91, "stream": 1}
     """
-    # Extract query timing data
-    query_times_ms: list[float] = []
-    queries_list: list[dict[str, Any]] = []
-    failed_count = 0
-    errors_list: list[dict[str, Any]] = []
-
-    # Determine if we have multi-iteration or multi-stream runs
-    iterations_set: set[int] = set()
-    streams_set: set[int] = set()
-
-    # Normalize all query results to dictionaries first
-    normalized_results = [_normalize_query_result(qr) for qr in (result.query_results or [])]
-
-    for qr in normalized_results:
-        iteration = qr.get("iteration", 1)
-        stream_id = qr.get("stream_id", 0)
-        if iteration is not None:
-            iterations_set.add(int(iteration))
-        if stream_id is not None:
-            streams_set.add(int(stream_id))
-
-    for qr in normalized_results:
-        raw_id = qr.get("query_id") or qr.get("id") or qr.get("query") or ""
-        query_id = normalize_query_id(raw_id)
-        status = qr.get("status", "UNKNOWN")
-
-        # Get execution time in ms, preferring canonical seconds key.
-        exec_time_ms = qr.get("execution_time_ms")
-        exec_time_seconds = qr.get("execution_time_seconds")
-        if exec_time_ms is None and exec_time_seconds is not None:
-            exec_time_ms = float(exec_time_seconds) * 1000.0
-
-        rows = qr.get("rows_returned") or qr.get("rows") or qr.get("result_count")
-        iteration = int(qr.get("iteration", 1))
-        stream_id = int(qr.get("stream_id", 0))
-        run_type = qr.get("run_type")
-        if not run_type:
-            run_type = "warmup" if iteration == 0 else "measurement"
-
-        if status == "SUCCESS":
-            if exec_time_ms is not None and run_type == "measurement":
-                query_times_ms.append(exec_time_ms)
-        else:
-            failed_count += 1
-            error_entry = {
-                "phase": "query",
-                "query_id": str(query_id),
-            }
-            error_type = (
-                qr.get("error_type") or qr.get("error_message", "").split(":")[0]
-                if qr.get("error_message")
-                else "UnknownError"
-            )
-            error_entry["type"] = error_type or "UnknownError"
-            error_entry["message"] = qr.get("error_message") or qr.get("error") or "Query failed"
-            errors_list.append(error_entry)
-
-        entry: dict[str, Any] = {"id": str(query_id)}
-        if exec_time_ms is not None:
-            entry["ms"] = round(exec_time_ms, 1)
-        if rows is not None:
-            entry["rows"] = rows
-        entry["iter"] = iteration
-        entry["stream"] = stream_id
-        entry["run_type"] = run_type
-        entry["status"] = status
-
-        queries_list.append(order_dict(entry, QUERY_KEY_ORDER))
+    # Extract query data
+    query_times_ms, queries_list, errors_list, iterations_set, streams_set = _build_query_results_section(result)
 
     # Compute timing statistics
     measurement_queries = [q for q in queries_list if q.get("run_type") == "measurement"]
@@ -293,85 +249,11 @@ def build_result_payload(result: BenchmarkResults) -> dict[str, Any]:
     successful_queries = len([q for q in measurement_queries if q.get("status") == "SUCCESS"])
     failed_count = total_queries - successful_queries
 
-    timing_stats = _compute_timing_stats(query_times_ms)
-
-    # Build summary block
-    summary: dict[str, Any] = {
-        "queries": {
-            "total": total_queries,
-            "passed": successful_queries,
-            "failed": failed_count,
-        },
-        "timing": timing_stats,
-    }
-
-    # Add data loading stats if available
-    if result.total_rows_loaded or result.data_loading_time:
-        data_stats: dict[str, Any] = {}
-        if result.total_rows_loaded:
-            data_stats["rows_loaded"] = result.total_rows_loaded
-        if result.data_loading_time:
-            data_stats["load_time_ms"] = round(result.data_loading_time * 1000, 1)
-        if data_stats:
-            summary["data"] = data_stats
-
-    # Add validation status
-    if result.validation_status:
-        summary["validation"] = result.validation_status.lower()
-
-    # Add TPC metrics if available
-    tpc_metrics = _build_tpc_metrics(result)
-    if tpc_metrics:
-        summary["tpc_metrics"] = tpc_metrics
-
-    # Build run block
-    run: dict[str, Any] = {
-        "id": result.execution_id,
-        "timestamp": result.timestamp.isoformat() if result.timestamp else datetime.now().isoformat(),
-        "total_duration_ms": round(result.duration_seconds * 1000),
-        "query_time_ms": round(sum(query_times_ms)),
-    }
-
-    # Always include iterations and streams
-    run["iterations"] = max(iterations_set) if iterations_set else 1
-    run["streams"] = max(streams_set) if streams_set else 1
-    if result.query_subset:
-        run["query_subset"] = result.query_subset
-
-    # Build benchmark block
-    benchmark_name = _shorten_benchmark_name(result.benchmark_name)
-    benchmark: dict[str, Any] = {
-        "id": result.benchmark_id,
-        "name": benchmark_name,
-        "scale_factor": result.scale_factor,
-        "test_type": result.test_execution_type,
-    }
-
-    # Build platform block
-    platform_name = str(result.platform).replace(" (DataFrame)", "")
-    platform: dict[str, Any] = {"name": platform_name}
-    if result.platform_info:
-        version = result.platform_info.get("platform_version") or result.platform_info.get("version")
-        client_version = result.platform_info.get("client_library_version")
-        platform["version"] = version or "unknown"
-        platform["client_version"] = client_version or "unknown"
-        variant = result.platform_info.get("variant")
-        if variant:
-            platform["variant"] = variant
-
-        # Add platform config (cleaned)
-        config = _extract_platform_config(result.platform_info)
-        if config:
-            platform["config"] = config
-    if "version" not in platform:
-        platform["version"] = "unknown"
-    if "client_version" not in platform:
-        platform["client_version"] = "unknown"
-
-    # Add tuning summary if available
-    tuning = _build_tuning_summary(result)
-    if tuning:
-        platform["tuning"] = tuning
+    summary = _build_summary_section(result, query_times_ms, total_queries, successful_queries, failed_count)
+    run = _build_run_section(result, query_times_ms, iterations_set, streams_set)
+    benchmark = _build_benchmark_section(result)
+    driver_metadata = _collect_driver_metadata(result)
+    platform = _build_platform_section(result, driver_metadata)
 
     # Build environment block
     environment = _build_environment_block(result.system_profile)
@@ -411,7 +293,193 @@ def build_result_payload(result: BenchmarkResults) -> dict[str, Any]:
         errors_list.sort(key=lambda e: (e.get("phase", ""), e.get("query_id", ""), e.get("type", "")))
         payload["errors"] = errors_list
 
-    # Add cost summary if available
+    _add_cost_section(payload, result)
+    _add_execution_section(payload, result, driver_metadata)
+
+    return order_dict(payload, CANONICAL_KEY_ORDER)
+
+
+def _build_query_results_section(
+    result: BenchmarkResults,
+) -> tuple[list[float], list[dict[str, Any]], list[dict[str, Any]], set[int], set[int]]:
+    """Extract and normalize query results into timing data, query list, and errors."""
+    query_times_ms: list[float] = []
+    queries_list: list[dict[str, Any]] = []
+    errors_list: list[dict[str, Any]] = []
+    iterations_set: set[int] = set()
+    streams_set: set[int] = set()
+
+    normalized_results = [_normalize_query_result(qr) for qr in (result.query_results or [])]
+
+    for qr in normalized_results:
+        iteration = qr.get("iteration", 1)
+        stream_id = qr.get("stream_id", 0)
+        if iteration is not None:
+            iterations_set.add(int(iteration))
+        if stream_id is not None:
+            streams_set.add(int(stream_id))
+
+    for qr in normalized_results:
+        raw_id = qr.get("query_id") or qr.get("id") or qr.get("query") or ""
+        query_id = normalize_query_id(raw_id)
+        status = qr.get("status", "UNKNOWN")
+
+        # Get execution time in ms, preferring canonical seconds key.
+        exec_time_ms = qr.get("execution_time_ms")
+        exec_time_seconds = qr.get("execution_time_seconds")
+        if exec_time_ms is None and exec_time_seconds is not None:
+            exec_time_ms = float(exec_time_seconds) * 1000.0
+
+        rows = qr.get("rows_returned") or qr.get("rows") or qr.get("result_count")
+        iteration = int(qr.get("iteration", 1))
+        stream_id = int(qr.get("stream_id", 0))
+        run_type = qr.get("run_type")
+        if not run_type:
+            run_type = "warmup" if iteration == 0 else "measurement"
+
+        if status == "SUCCESS":
+            if exec_time_ms is not None and run_type == "measurement":
+                query_times_ms.append(exec_time_ms)
+        else:
+            error_entry = {
+                "phase": "query",
+                "query_id": str(query_id),
+            }
+            error_type = (
+                qr.get("error_type") or qr.get("error_message", "").split(":")[0]
+                if qr.get("error_message")
+                else "UnknownError"
+            )
+            error_entry["type"] = error_type or "UnknownError"
+            error_entry["message"] = qr.get("error_message") or qr.get("error") or "Query failed"
+            errors_list.append(error_entry)
+
+        entry: dict[str, Any] = {"id": str(query_id)}
+        if exec_time_ms is not None:
+            entry["ms"] = round(exec_time_ms, 1)
+        if rows is not None:
+            entry["rows"] = rows
+        entry["iter"] = iteration
+        entry["stream"] = stream_id
+        entry["run_type"] = run_type
+        entry["status"] = status
+
+        queries_list.append(order_dict(entry, QUERY_KEY_ORDER))
+
+    return query_times_ms, queries_list, errors_list, iterations_set, streams_set
+
+
+def _build_summary_section(
+    result: BenchmarkResults,
+    query_times_ms: list[float],
+    total_queries: int,
+    successful_queries: int,
+    failed_count: int,
+) -> dict[str, Any]:
+    """Build the summary block of the payload."""
+    timing_stats = _compute_timing_stats(query_times_ms)
+
+    summary: dict[str, Any] = {
+        "queries": {
+            "total": total_queries,
+            "passed": successful_queries,
+            "failed": failed_count,
+        },
+        "timing": timing_stats,
+    }
+
+    if result.total_rows_loaded or result.data_loading_time:
+        data_stats: dict[str, Any] = {}
+        if result.total_rows_loaded:
+            data_stats["rows_loaded"] = result.total_rows_loaded
+        if result.data_loading_time:
+            data_stats["load_time_ms"] = round(result.data_loading_time * 1000, 1)
+        if data_stats:
+            summary["data"] = data_stats
+
+    if result.validation_status:
+        summary["validation"] = result.validation_status.lower()
+
+    tpc_metrics = _build_tpc_metrics(result)
+    if tpc_metrics:
+        summary["tpc_metrics"] = tpc_metrics
+
+    return summary
+
+
+def _build_run_section(
+    result: BenchmarkResults,
+    query_times_ms: list[float],
+    iterations_set: set[int],
+    streams_set: set[int],
+) -> dict[str, Any]:
+    """Build the run block of the payload."""
+    run: dict[str, Any] = {
+        "id": result.execution_id,
+        "timestamp": result.timestamp.isoformat() if result.timestamp else datetime.now().isoformat(),
+        "total_duration_ms": round(result.duration_seconds * 1000),
+        "query_time_ms": round(sum(query_times_ms)),
+    }
+    run["iterations"] = max(iterations_set) if iterations_set else 1
+    run["streams"] = max(streams_set) if streams_set else 1
+    if result.query_subset:
+        run["query_subset"] = result.query_subset
+    return run
+
+
+def _build_benchmark_section(result: BenchmarkResults) -> dict[str, Any]:
+    """Build the benchmark block of the payload."""
+    benchmark_name = _shorten_benchmark_name(result.benchmark_name)
+    return {
+        "id": result.benchmark_id,
+        "name": benchmark_name,
+        "scale_factor": result.scale_factor,
+        "test_type": result.test_execution_type,
+    }
+
+
+def _build_platform_section(result: BenchmarkResults, driver_metadata: dict[str, Any]) -> dict[str, Any]:
+    """Build the platform block of the payload."""
+    platform_name = str(result.platform).replace(" (DataFrame)", "")
+    platform: dict[str, Any] = {"name": platform_name}
+
+    if result.platform_info:
+        version = result.platform_info.get("platform_version") or result.platform_info.get("version")
+        client_version = result.platform_info.get("client_library_version")
+        platform["version"] = version or "unknown"
+        platform["client_version"] = client_version or "unknown"
+        variant = result.platform_info.get("variant")
+        if variant:
+            platform["variant"] = variant
+
+        config = _extract_platform_config(result.platform_info)
+        if config:
+            platform["config"] = config
+
+    for src_key, dest_key in _DRIVER_PLATFORM_KEYS:
+        if driver_metadata.get(src_key):
+            platform[dest_key] = driver_metadata[src_key]
+
+    engine_metadata = _collect_engine_version_metadata(result)
+    if engine_metadata.get("engine_version"):
+        platform["engine_version"] = engine_metadata["engine_version"]
+    if engine_metadata.get("engine_version_source"):
+        platform["engine_version_source"] = engine_metadata["engine_version_source"]
+
+    if "version" not in platform:
+        platform["version"] = "unknown"
+    if "client_version" not in platform:
+        platform["client_version"] = "unknown"
+
+    tuning = _build_tuning_summary(result)
+    if tuning:
+        platform["tuning"] = tuning
+
+    return platform
+
+
+def _add_cost_section(payload: dict[str, Any], result: BenchmarkResults) -> None:
+    """Add cost summary to payload if available."""
     if result.cost_summary:
         cost_block: dict[str, Any] = {}
         if "total_cost" in result.cost_summary:
@@ -420,103 +488,198 @@ def build_result_payload(result: BenchmarkResults) -> dict[str, Any]:
         if cost_block:
             payload["cost"] = cost_block
 
-    # Add execution context for reproducibility (v2.1+)
+
+def _add_execution_section(payload: dict[str, Any], result: BenchmarkResults, driver_metadata: dict[str, Any]) -> None:
+    """Add execution context section to payload."""
     if result.execution_context:
-        exec_block: dict[str, Any] = {}
-        ctx = result.execution_context
-
-        # Always include entry point
-        if ctx.get("entry_point"):
-            exec_block["entry_point"] = ctx["entry_point"]
-
-        # Timestamp
-        if ctx.get("invocation_timestamp"):
-            exec_block["timestamp"] = ctx["invocation_timestamp"]
-
-        # Phases (only if non-default)
-        phases = ctx.get("phases")
-        if phases and phases != ["power"]:
-            exec_block["phases"] = phases
-
-        # Seed (only if set)
-        if ctx.get("seed") is not None:
-            exec_block["seed"] = ctx["seed"]
-
-        # Compression (only if enabled)
-        if ctx.get("compression_enabled"):
-            compression = {"type": ctx.get("compression_type", "none")}
-            if ctx.get("compression_level"):
-                compression["level"] = ctx["compression_level"]
-            exec_block["compression"] = compression
-
-        # Mode (always sql or dataframe)
-        mode_value = None
-        if ctx.get("mode"):
-            mode_value = ctx["mode"]
-        elif isinstance(result.execution_metadata, Mapping):
-            mode_value = result.execution_metadata.get("mode")
-        elif result.platform_info:
-            mode_value = result.platform_info.get("execution_mode")
-        if mode_value:
-            exec_block["mode"] = mode_value
-
-        # Official TPC mode
-        if ctx.get("official"):
-            exec_block["official"] = True
-
-        # Validation mode
-        if ctx.get("validation_mode"):
-            exec_block["validation_mode"] = ctx["validation_mode"]
-
-        # Force flags
-        force_flags = []
-        if ctx.get("force_datagen"):
-            force_flags.append("datagen")
-        if ctx.get("force_upload"):
-            force_flags.append("upload")
-        if force_flags:
-            exec_block["force"] = force_flags
-
-        # Query subset (also in run block, but include here for complete context)
-        if ctx.get("query_subset"):
-            exec_block["query_subset"] = ctx["query_subset"]
-
-        # Plan capture
-        if ctx.get("capture_plans"):
-            exec_block["capture_plans"] = True
-        if ctx.get("strict_plan_capture"):
-            exec_block["strict_plan_capture"] = True
-
-        # Non-interactive
-        if ctx.get("non_interactive"):
-            exec_block["non_interactive"] = True
-
-        # Tuning
-        if ctx.get("tuning_mode"):
-            exec_block["tuning_mode"] = ctx["tuning_mode"]
-
+        exec_block = _build_execution_from_context(result, driver_metadata)
         if exec_block:
             payload["execution"] = exec_block
 
     if "execution" not in payload:
-        exec_block: dict[str, Any] = {}
-        mode_value = None
-        if isinstance(result.execution_metadata, Mapping):
-            mode_value = result.execution_metadata.get("mode")
-        if not mode_value and result.platform_info:
-            mode_value = result.platform_info.get("execution_mode")
-        if mode_value:
-            exec_block["mode"] = mode_value
+        exec_block = _build_execution_fallback(result, driver_metadata)
         if exec_block:
             payload["execution"] = exec_block
 
-    return order_dict(payload, CANONICAL_KEY_ORDER)
+
+# Simple ctx-key → exec-block-key passthrough fields for _build_execution_from_context.
+_EXEC_CTX_PASSTHROUGH = [
+    ("entry_point", "entry_point"),
+    ("invocation_timestamp", "timestamp"),
+]
+_EXEC_CTX_TRUTHY = [
+    ("official", "official", True),
+    ("capture_plans", "capture_plans", True),
+    ("strict_plan_capture", "strict_plan_capture", True),
+    ("non_interactive", "non_interactive", True),
+]
+_EXEC_CTX_VALUE = ["validation_mode", "query_subset", "tuning_mode"]
+
+
+def _build_execution_from_context(result: BenchmarkResults, driver_metadata: dict[str, Any]) -> dict[str, Any]:
+    """Build execution block from execution_context."""
+    exec_block: dict[str, Any] = {}
+    ctx = result.execution_context
+
+    for ctx_key, block_key in _EXEC_CTX_PASSTHROUGH:
+        if ctx.get(ctx_key):
+            exec_block[block_key] = ctx[ctx_key]
+
+    phases = ctx.get("phases")
+    if phases and phases != ["power"]:
+        exec_block["phases"] = phases
+
+    if ctx.get("seed") is not None:
+        exec_block["seed"] = ctx["seed"]
+
+    if ctx.get("compression_enabled"):
+        compression = {"type": ctx.get("compression_type", "none")}
+        if ctx.get("compression_level"):
+            compression["level"] = ctx["compression_level"]
+        exec_block["compression"] = compression
+
+    mode_value = _resolve_execution_mode(result, ctx)
+    if mode_value:
+        exec_block["mode"] = mode_value
+
+    _inject_driver_metadata(exec_block, driver_metadata)
+
+    for ctx_key, block_key, value in _EXEC_CTX_TRUTHY:
+        if ctx.get(ctx_key):
+            exec_block[block_key] = value
+
+    force_flags = [f for f, key in [("datagen", "force_datagen"), ("upload", "force_upload")] if ctx.get(key)]
+    if force_flags:
+        exec_block["force"] = force_flags
+
+    for key in _EXEC_CTX_VALUE:
+        if ctx.get(key):
+            exec_block[key] = ctx[key]
+
+    return exec_block
+
+
+def _build_execution_fallback(result: BenchmarkResults, driver_metadata: dict[str, Any]) -> dict[str, Any]:
+    """Build execution block when no execution_context is available."""
+    exec_block: dict[str, Any] = {}
+    mode_value = None
+    if isinstance(result.execution_metadata, Mapping):
+        mode_value = result.execution_metadata.get("mode")
+    if not mode_value and result.platform_info:
+        mode_value = result.platform_info.get("execution_mode")
+    if mode_value:
+        exec_block["mode"] = mode_value
+    _inject_driver_metadata(exec_block, driver_metadata)
+    return exec_block
+
+
+def _resolve_execution_mode(result: BenchmarkResults, ctx: dict[str, Any]) -> Any:
+    """Resolve the execution mode from context, metadata, or platform_info."""
+    if ctx.get("mode"):
+        return ctx["mode"]
+    if isinstance(result.execution_metadata, Mapping):
+        mode = result.execution_metadata.get("mode")
+        if mode:
+            return mode
+    if result.platform_info:
+        return result.platform_info.get("execution_mode")
+    return None
+
+
+def _collect_driver_metadata(result: BenchmarkResults) -> dict[str, Any]:
+    """Collect driver metadata from result fields and compatibility fallbacks."""
+    metadata: dict[str, Any] = {}
+
+    for key in DRIVER_METADATA_KEYS:
+        value = getattr(result, key, None)
+        if value:
+            metadata[key] = value
+
+    execution_metadata = result.execution_metadata if isinstance(result.execution_metadata, Mapping) else {}
+    for key in DRIVER_METADATA_KEYS:
+        if key in metadata:
+            continue
+        value = execution_metadata.get(key)
+        if value:
+            metadata[key] = value
+
+    platform_info = result.platform_info if isinstance(result.platform_info, Mapping) else {}
+    # Compatibility aliases from platform_info.
+    aliases = {
+        "driver_package": ("driver_package",),
+        "driver_version_requested": ("driver_version_requested",),
+        "driver_version_resolved": ("driver_version_resolved",),
+        "driver_version_actual": ("driver_version_actual", "runtime_version_actual"),
+        "driver_runtime_strategy": ("driver_runtime_strategy",),
+        "driver_runtime_path": ("driver_runtime_path",),
+        "driver_runtime_python_executable": ("driver_runtime_python_executable",),
+    }
+    for canonical, keys in aliases.items():
+        if canonical in metadata:
+            continue
+        for key in keys:
+            value = platform_info.get(key)
+            if value:
+                metadata[canonical] = value
+                break
+
+    return metadata
+
+
+def _collect_engine_version_metadata(result: BenchmarkResults) -> dict[str, Any]:
+    """Collect engine/service version metadata from result fields and fallbacks.
+
+    Engine version is the database service/runtime version, which may differ from
+    the Python driver/client version. For coupled platforms (DuckDB, DataFusion),
+    engine version equals driver version. For decoupled platforms (Snowflake, etc.),
+    engine version is probed from connection or API metadata.
+    """
+    metadata: dict[str, Any] = {}
+
+    # Direct result fields (set by adapter or runner).
+    for key in ENGINE_VERSION_KEYS:
+        value = getattr(result, key, None)
+        if value:
+            metadata[key] = value
+
+    # Fallback: check execution_metadata.
+    if not metadata.get("engine_version"):
+        execution_metadata = result.execution_metadata if isinstance(result.execution_metadata, Mapping) else {}
+        for key in ENGINE_VERSION_KEYS:
+            if key not in metadata:
+                value = execution_metadata.get(key)
+                if value:
+                    metadata[key] = value
+
+    # Fallback: check platform_info.
+    if not metadata.get("engine_version"):
+        platform_info = result.platform_info if isinstance(result.platform_info, Mapping) else {}
+        for key in ENGINE_VERSION_KEYS:
+            if key not in metadata:
+                value = platform_info.get(key)
+                if value:
+                    metadata[key] = value
+
+    return metadata
+
+
+def _inject_driver_metadata(exec_block: dict[str, Any], driver_metadata: dict[str, Any]) -> None:
+    """Inject driver metadata into execution block."""
+    for key in DRIVER_METADATA_KEYS:
+        value = driver_metadata.get(key)
+        if value:
+            exec_block[key] = value
 
 
 def _shorten_benchmark_name(name: str) -> str:
     if name.lower().endswith(" benchmark"):
         return name[: -len(" benchmark")]
     return name
+
+
+# Fields that fall back from ctx → run_cfg (use_is_not_none=True for seed).
+_CONFIG_CTX_OR_RUN = ["seed", "phases", "query_subset"]
+_CONFIG_RUN_ONLY = ["platform_options", "tuning_mode", "tuning_config"]
 
 
 def _build_config_block(result: BenchmarkResults) -> dict[str, Any]:
@@ -526,6 +689,7 @@ def _build_config_block(result: BenchmarkResults) -> dict[str, Any]:
     if isinstance(result.execution_metadata, Mapping):
         run_cfg = result.execution_metadata.get("run_config") or {}
 
+    # Compression has special merging logic
     compression = None
     if ctx.get("compression_type") or run_cfg.get("compression"):
         if ctx.get("compression_type"):
@@ -535,30 +699,20 @@ def _build_config_block(result: BenchmarkResults) -> dict[str, Any]:
     if compression:
         config["compression"] = compression
 
-    if ctx.get("seed") is not None:
-        config["seed"] = ctx.get("seed")
-    elif run_cfg.get("seed") is not None:
-        config["seed"] = run_cfg.get("seed")
+    # Fields that prefer ctx, fall back to run_cfg
+    for key in _CONFIG_CTX_OR_RUN:
+        value = ctx.get(key)
+        if value is None:
+            value = run_cfg.get(key)
+        if value is not None:
+            config[key] = value
 
-    if ctx.get("phases"):
-        config["phases"] = ctx.get("phases")
-    elif run_cfg.get("phases"):
-        config["phases"] = run_cfg.get("phases")
+    # Fields sourced only from run_cfg
+    for key in _CONFIG_RUN_ONLY:
+        if run_cfg.get(key):
+            config[key] = run_cfg[key]
 
-    if ctx.get("query_subset"):
-        config["query_subset"] = ctx.get("query_subset")
-    elif run_cfg.get("query_subset"):
-        config["query_subset"] = run_cfg.get("query_subset")
-
-    if run_cfg.get("platform_options"):
-        config["platform_options"] = run_cfg.get("platform_options")
-
-    if run_cfg.get("tuning_mode"):
-        config["tuning_mode"] = run_cfg.get("tuning_mode")
-    if run_cfg.get("tuning_config"):
-        config["tuning_config"] = run_cfg.get("tuning_config")
-
-    # Execution mode and test type for reproducibility
+    # Execution mode for reproducibility
     exec_mode = None
     if isinstance(result.execution_metadata, Mapping):
         exec_mode = result.execution_metadata.get("mode")
@@ -566,7 +720,6 @@ def _build_config_block(result: BenchmarkResults) -> dict[str, Any]:
         exec_mode = result.platform_info.get("execution_mode")
     if exec_mode:
         config["mode"] = exec_mode
-    # test_type is in benchmark block, not needed here
 
     return config
 
@@ -627,6 +780,76 @@ def _build_phases_block(result: BenchmarkResults) -> dict[str, Any]:
             phases[phase] = {"status": "NOT_RUN"}
 
     return phases
+
+
+def compute_plan_capture_stats(
+    query_results: list[dict[str, Any]],
+    capture_plans: bool,
+    *,
+    existing_errors: list[dict[str, Any]] | None = None,
+) -> tuple[int, int, list[dict[str, Any]]]:
+    """Compute plan capture statistics from a list of query result dicts.
+
+    Produces iteration-stable counts keyed on unique query IDs so the metrics
+    do not inflate with warmup/measurement iteration count.  Both the SQL adapter
+    and the DataFrame mixin call this function so their result fields are always
+    computed with the same logic.
+
+    Args:
+        query_results: Query result dicts containing ``query_id``, ``status``,
+            optional ``run_type``, and optionally ``query_plan``.
+        capture_plans: Whether plan capture was requested for this run.
+        existing_errors: When provided (SQL path), filter these rich error dicts
+            to only include entries whose ``query_id`` maps to a failed capture.
+            When None (DataFrame path), generate minimal error dicts.
+
+    Returns:
+        Tuple of ``(plans_captured, capture_failures, capture_errors)`` where:
+
+        - *plans_captured*: unique query IDs with a plan in **any** execution.
+        - *capture_failures*: unique query IDs that succeeded in the measurement
+          phase but had no plan captured across any execution.  Always 0 when
+          ``capture_plans`` is False.
+        - *capture_errors*: per-query-id failure detail dicts.
+    """
+    ids_with_plan: set[str] = {
+        str(qr.get("query_id", "")) for qr in query_results if isinstance(qr, dict) and qr.get("query_plan") is not None
+    }
+    plans_captured = len(ids_with_plan)
+
+    if not capture_plans:
+        return plans_captured, 0, []
+
+    measurement_success_ids: set[str] = {
+        str(qr.get("query_id", ""))
+        for qr in query_results
+        if isinstance(qr, dict)
+        and str(qr.get("status", "")).upper() == "SUCCESS"
+        and str(qr.get("run_type", "")) == "measurement"
+    }
+    # For power-style runs, prefer measurement-only semantics. For standard
+    # runs where run_type is absent, fall back to all successes.
+    successful_ids: set[str]
+    if measurement_success_ids:
+        successful_ids = measurement_success_ids
+    else:
+        successful_ids = {
+            str(qr.get("query_id", ""))
+            for qr in query_results
+            if isinstance(qr, dict) and str(qr.get("status", "")).upper() == "SUCCESS"
+        }
+
+    failed_ids = successful_ids - ids_with_plan
+
+    if existing_errors is not None:
+        failed_ids_str = {str(i) for i in failed_ids}
+        capture_errors: list[dict[str, Any]] = [
+            e for e in existing_errors if str(e.get("query_id", "")) in failed_ids_str
+        ]
+    else:
+        capture_errors = [{"query_id": qid, "error": "Query plan not captured"} for qid in sorted(failed_ids)]
+
+    return plans_captured, len(failed_ids), capture_errors
 
 
 def build_plans_payload(result: BenchmarkResults) -> dict[str, Any] | None:

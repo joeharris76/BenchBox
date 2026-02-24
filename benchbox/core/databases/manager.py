@@ -7,8 +7,8 @@ programmatic and CLI consumers, keeping interactive UX in the CLI layer.
 
 from __future__ import annotations
 
-from benchbox.core.config import DatabaseConfig, SystemProfile
 from benchbox.core.platform_config import get_platform_config
+from benchbox.core.schemas import DatabaseConfig, SystemProfile
 from benchbox.platforms import get_platform_adapter
 
 

@@ -9,6 +9,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.panel import Panel
@@ -96,58 +97,11 @@ def create_sample(platform, profile, output, smart_defaults):
 
     try:
         if smart_defaults:
-            # Use smart defaults based on detected system profile
             config = get_smart_defaults(platform)
-            console.print("[blue]Using smart defaults based on detected system profile[/blue]")
-
-            # Show detected system profile
-            sys_profile = detect_system_profile()
-            summary = get_profile_summary(sys_profile)
-            console.print(f"  CPU cores: {summary['cpu_cores']}")
-            console.print(f"  Available memory: {summary['available_memory_gb']:.1f} GB")
-            console.print(f"  Memory category: {summary['memory_category']}")
-            if summary["has_gpu"]:
-                console.print(f"  GPU memory: {summary['gpu_memory_gb']:.1f} GB")
+            _display_smart_defaults_info(platform)
         else:
-            # Create profile-based configuration
-            config = DataFrameTuningConfiguration()
+            config = _create_profile_config(platform.lower(), profile)
 
-            if profile == "optimized":
-                # Optimized for performance
-                config.execution.lazy_evaluation = True
-                if platform.lower() == "polars":
-                    config.execution.engine_affinity = "in-memory"
-                elif platform.lower() == "dask":
-                    config.parallelism.worker_count = 4
-                    config.parallelism.threads_per_worker = 2
-                elif platform.lower() == "cudf":
-                    config.gpu.enabled = True
-                    config.gpu.pool_type = "pool"
-
-            elif profile == "streaming":
-                # Streaming for large datasets
-                config.execution.streaming_mode = True
-                config.memory.chunk_size = 100_000
-                if platform.lower() == "polars":
-                    config.execution.engine_affinity = "streaming"
-
-            elif profile == "memory-constrained":
-                # Memory-constrained environment
-                config.execution.streaming_mode = True
-                config.memory.chunk_size = 50_000
-                config.memory.spill_to_disk = True
-                if platform.lower() == "dask":
-                    config.memory.memory_limit = "2GB"
-
-            elif profile == "gpu":
-                # GPU-optimized (cuDF)
-                if platform.lower() != "cudf":
-                    console.print("[yellow]Warning: GPU profile is only applicable to cuDF[/yellow]")
-                config.gpu.enabled = True
-                config.gpu.pool_type = "pool"
-                config.gpu.spill_to_host = True
-
-        # Save configuration
         save_dataframe_tuning(config, output_path)
 
         console.print("\n[green]Sample DataFrame tuning configuration created[/green]")
@@ -170,6 +124,53 @@ def create_sample(platform, profile, output, smart_defaults):
     except Exception as e:
         console.print(f"[red]Failed to create sample configuration: {e}[/red]")
         raise click.Abort() from e
+
+
+def _display_smart_defaults_info(platform: str) -> None:
+    """Display detected system profile info for smart defaults."""
+    console.print("[blue]Using smart defaults based on detected system profile[/blue]")
+    sys_profile = detect_system_profile()
+    summary = get_profile_summary(sys_profile)
+    console.print(f"  CPU cores: {summary['cpu_cores']}")
+    console.print(f"  Available memory: {summary['available_memory_gb']:.1f} GB")
+    console.print(f"  Memory category: {summary['memory_category']}")
+    if summary["has_gpu"]:
+        console.print(f"  GPU memory: {summary['gpu_memory_gb']:.1f} GB")
+
+
+def _create_profile_config(platform: str, profile: str) -> DataFrameTuningConfiguration:
+    """Create a DataFrameTuningConfiguration based on profile and platform."""
+    config = DataFrameTuningConfiguration()
+
+    if profile == "optimized":
+        config.execution.lazy_evaluation = True
+        if platform == "polars":
+            config.execution.engine_affinity = "in-memory"
+        elif platform == "dask":
+            config.parallelism.worker_count = 4
+            config.parallelism.threads_per_worker = 2
+        elif platform == "cudf":
+            config.gpu.enabled = True
+            config.gpu.pool_type = "pool"
+    elif profile == "streaming":
+        config.execution.streaming_mode = True
+        config.memory.chunk_size = 100_000
+        if platform == "polars":
+            config.execution.engine_affinity = "streaming"
+    elif profile == "memory-constrained":
+        config.execution.streaming_mode = True
+        config.memory.chunk_size = 50_000
+        config.memory.spill_to_disk = True
+        if platform == "dask":
+            config.memory.memory_limit = "2GB"
+    elif profile == "gpu":
+        if platform != "cudf":
+            console.print("[yellow]Warning: GPU profile is only applicable to cuDF[/yellow]")
+        config.gpu.enabled = True
+        config.gpu.pool_type = "pool"
+        config.gpu.spill_to_host = True
+
+    return config
 
 
 @df_tuning_group.command("validate")
@@ -273,63 +274,82 @@ def show_defaults(platform):
 
     console.print(table)
 
-    # Get smart defaults
     config = get_smart_defaults(platform)
 
-    # Show recommended settings
     console.print(f"\n[bold]Recommended Settings for {platform.title()}:[/bold]")
+    _display_config_settings_table(config, console)
 
+    console.print(f"\n[dim]To use these settings: benchbox run --platform {platform}-df --tuning auto[/dim]")
+
+
+def _display_config_settings_table(config: DataFrameTuningConfiguration, target_console: Any) -> None:
+    """Display a settings table for a DataFrameTuningConfiguration."""
     settings_table = Table(show_header=True)
     settings_table.add_column("Category", style="cyan")
     settings_table.add_column("Setting", style="white")
     settings_table.add_column("Value", style="yellow")
 
-    # Parallelism
-    if config.parallelism.thread_count is not None:
-        settings_table.add_row("Parallelism", "thread_count", str(config.parallelism.thread_count))
-    if config.parallelism.worker_count is not None:
-        settings_table.add_row("Parallelism", "worker_count", str(config.parallelism.worker_count))
-    if config.parallelism.threads_per_worker is not None:
-        settings_table.add_row("Parallelism", "threads_per_worker", str(config.parallelism.threads_per_worker))
+    _populate_parallelism_rows(config, settings_table)
+    _populate_memory_rows(config, settings_table)
+    _populate_execution_rows(config, settings_table)
+    _populate_data_types_rows(config, settings_table)
 
-    # Memory
-    if config.memory.memory_limit is not None:
-        settings_table.add_row("Memory", "memory_limit", config.memory.memory_limit)
-    if config.memory.chunk_size is not None:
-        settings_table.add_row("Memory", "chunk_size", str(config.memory.chunk_size))
-    if config.memory.spill_to_disk:
-        settings_table.add_row("Memory", "spill_to_disk", "True")
-
-    # Execution
-    if config.execution.streaming_mode:
-        settings_table.add_row("Execution", "streaming_mode", "True")
-    if config.execution.engine_affinity is not None:
-        settings_table.add_row("Execution", "engine_affinity", config.execution.engine_affinity)
-
-    # Data types
-    if config.data_types.dtype_backend != "numpy_nullable":
-        settings_table.add_row("Data Types", "dtype_backend", config.data_types.dtype_backend)
-    if config.data_types.auto_categorize_strings:
-        settings_table.add_row("Data Types", "auto_categorize_strings", "True")
-
-    # I/O
     if config.io.memory_map:
         settings_table.add_row("I/O", "memory_map", "True")
 
-    # GPU
-    if config.gpu.enabled:
-        settings_table.add_row("GPU", "enabled", "True")
-        settings_table.add_row("GPU", "device_id", str(config.gpu.device_id))
-        settings_table.add_row("GPU", "pool_type", config.gpu.pool_type)
-        if config.gpu.spill_to_host:
-            settings_table.add_row("GPU", "spill_to_host", "True")
+    _populate_gpu_rows(config, settings_table)
 
     if settings_table.row_count == 0:
-        console.print("  [dim]Using default settings (no custom configuration needed)[/dim]")
+        target_console.print("  [dim]Using default settings (no custom configuration needed)[/dim]")
     else:
-        console.print(settings_table)
+        target_console.print(settings_table)
 
-    console.print(f"\n[dim]To use these settings: benchbox run --platform {platform}-df --tuning auto[/dim]")
+
+def _populate_parallelism_rows(config: DataFrameTuningConfiguration, table: Table) -> None:
+    """Add parallelism settings rows to the table."""
+    if config.parallelism.thread_count is not None:
+        table.add_row("Parallelism", "thread_count", str(config.parallelism.thread_count))
+    if config.parallelism.worker_count is not None:
+        table.add_row("Parallelism", "worker_count", str(config.parallelism.worker_count))
+    if config.parallelism.threads_per_worker is not None:
+        table.add_row("Parallelism", "threads_per_worker", str(config.parallelism.threads_per_worker))
+
+
+def _populate_memory_rows(config: DataFrameTuningConfiguration, table: Table) -> None:
+    """Add memory settings rows to the table."""
+    if config.memory.memory_limit is not None:
+        table.add_row("Memory", "memory_limit", config.memory.memory_limit)
+    if config.memory.chunk_size is not None:
+        table.add_row("Memory", "chunk_size", str(config.memory.chunk_size))
+    if config.memory.spill_to_disk:
+        table.add_row("Memory", "spill_to_disk", "True")
+
+
+def _populate_execution_rows(config: DataFrameTuningConfiguration, table: Table) -> None:
+    """Add execution settings rows to the table."""
+    if config.execution.streaming_mode:
+        table.add_row("Execution", "streaming_mode", "True")
+    if config.execution.engine_affinity is not None:
+        table.add_row("Execution", "engine_affinity", config.execution.engine_affinity)
+
+
+def _populate_data_types_rows(config: DataFrameTuningConfiguration, table: Table) -> None:
+    """Add data types settings rows to the table."""
+    if config.data_types.dtype_backend != "numpy_nullable":
+        table.add_row("Data Types", "dtype_backend", config.data_types.dtype_backend)
+    if config.data_types.auto_categorize_strings:
+        table.add_row("Data Types", "auto_categorize_strings", "True")
+
+
+def _populate_gpu_rows(config: DataFrameTuningConfiguration, table: Table) -> None:
+    """Add GPU settings rows to the table."""
+    if not config.gpu.enabled:
+        return
+    table.add_row("GPU", "enabled", "True")
+    table.add_row("GPU", "device_id", str(config.gpu.device_id))
+    table.add_row("GPU", "pool_type", config.gpu.pool_type)
+    if config.gpu.spill_to_host:
+        table.add_row("GPU", "spill_to_host", "True")
 
 
 @df_tuning_group.command("list-platforms")

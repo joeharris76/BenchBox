@@ -245,6 +245,18 @@ def _manifest_v1_to_dict(manifest: ManifestV1) -> dict:
     return result
 
 
+_FILE_OPTIONAL_FIELDS = ["converted_from", "converted_at", "compression", "row_groups", "conversion_options"]
+_MANIFEST_OPTIONAL_FIELDS = [
+    "benchmark",
+    "scale_factor",
+    "format_preference",
+    "compression",
+    "parallel",
+    "created_at",
+    "generator_version",
+]
+
+
 def _manifest_v2_to_dict(manifest: ManifestV2) -> dict:
     """Convert ManifestV2 to dict.
 
@@ -265,46 +277,28 @@ def _manifest_v2_to_dict(manifest: ManifestV2) -> dict:
                     "size_bytes": f.size_bytes,
                     "row_count": f.row_count,
                 }
-                # Only include conversion metadata if present
-                if f.converted_from is not None:
-                    file_dict["converted_from"] = f.converted_from
-                if f.converted_at is not None:
-                    file_dict["converted_at"] = f.converted_at
-                if f.compression is not None:
-                    file_dict["compression"] = f.compression
-                if f.row_groups is not None:
-                    file_dict["row_groups"] = f.row_groups
-                if f.conversion_options:
-                    file_dict["conversion_options"] = f.conversion_options
-
+                for attr in _FILE_OPTIONAL_FIELDS:
+                    value = getattr(f, attr, None)
+                    if value is not None and value:
+                        file_dict[attr] = value
                 file_dicts.append(file_dict)
 
             formats_dict[format_name] = file_dicts
         tables[table_name] = {"formats": formats_dict}
 
-    result = {
+    result: dict = {
         "version": 2,
         "tables": tables,
     }
 
-    # Add optional fields only if they have values
-    if manifest.benchmark is not None:
-        result["benchmark"] = manifest.benchmark
-    if manifest.scale_factor is not None:
-        result["scale_factor"] = manifest.scale_factor
-    if manifest.format_preference:
-        result["format_preference"] = manifest.format_preference
-    if manifest.compression is not None:
-        result["compression"] = manifest.compression
-    if manifest.parallel is not None:
-        result["parallel"] = manifest.parallel
-    if manifest.created_at is not None:
-        result["created_at"] = manifest.created_at
-    if manifest.generator_version is not None:
-        result["generator_version"] = manifest.generator_version
+    for attr in _MANIFEST_OPTIONAL_FIELDS:
+        value = getattr(manifest, attr, None)
+        if value is not None and value:
+            result[attr] = value
+
     if manifest.plan_metadata is not None:
         metadata_dict = manifest.plan_metadata.to_dict()
-        if metadata_dict:  # Only include if not empty
+        if metadata_dict:
             result["plan_metadata"] = metadata_dict
 
     return result

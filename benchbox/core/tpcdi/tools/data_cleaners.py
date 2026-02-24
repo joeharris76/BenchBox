@@ -563,10 +563,6 @@ def quick_quality_check(data: pd.DataFrame, table_name: str = "generic") -> dict
     return basic_data_quality_check(data, table_name)
 
 
-# Backward-compatible class alias.
-DataCleaner = BasicDataCleaner
-
-
 class DataCleaningRule:
     """Data cleaning rule for validation and transformation."""
 

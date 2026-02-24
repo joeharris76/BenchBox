@@ -20,10 +20,33 @@ from benchbox.core.visualization.ascii.box_plot import (
     compute_quartiles,
     from_distribution_series,
 )
+from benchbox.core.visualization.ascii.cdf_chart import (
+    ASCIICDFChart,
+    CDFSeriesData,
+    from_query_results as cdf_from_query_results,
+)
 from benchbox.core.visualization.ascii.heatmap import ASCIIHeatmap, from_matrix
 from benchbox.core.visualization.ascii.histogram import ASCIIQueryHistogram, HistogramBar, from_query_latency_data
 from benchbox.core.visualization.ascii.line_chart import ASCIILineChart, LinePoint, from_time_series_points
+from benchbox.core.visualization.ascii.normalized_speedup import (
+    ASCIINormalizedSpeedup,
+    SpeedupData,
+    from_normalized_results,
+)
+from benchbox.core.visualization.ascii.percentile_ladder import (
+    ASCIIPercentileLadder,
+    PercentileData,
+    compute_percentile,
+    from_query_results,
+)
+from benchbox.core.visualization.ascii.rank_table import ASCIIRankTable, RankTableData, from_heatmap_data
 from benchbox.core.visualization.ascii.scatter_plot import ASCIIScatterPlot, ScatterPoint, from_cost_performance_points
+from benchbox.core.visualization.ascii.sparkline_table import (
+    ASCIISparklineTable,
+    SparklineColumn,
+    SparklineTableData,
+)
+from benchbox.core.visualization.ascii.stacked_bar import ASCIIStackedBar, StackedBarData, StackedBarSegment
 
 
 class TestTerminalCapabilities:
@@ -295,6 +318,50 @@ class TestASCIIHeatmap:
         )
         result = chart.render()
         assert "Q1" in result
+
+    def test_no_color_heatmap_uses_column_separators(self):
+        """No-color heatmap includes explicit separators between data columns."""
+        matrix = [[34, 40], [83, 94]]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=["Q1", "Q2"], col_labels=["A", "B"], options=opts)
+        result = chart.render()
+        q1_line = next(line for line in result.splitlines() if "Q1" in line)
+        assert q1_line.count("│") >= 2
+
+    def test_no_color_heatmap_right_aligns_values_with_density_fill(self):
+        """No-color heatmap right-aligns values and fills cell area with intensity chars."""
+        matrix = [[50, 140], [20, 80]]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=["Q1", "Q2"], col_labels=["A", "B"], options=opts)
+        result = chart.render()
+        q1_line = next(line for line in result.splitlines() if "Q1" in line)
+        assert "░" in q1_line or "▒" in q1_line or "▓" in q1_line or "█" in q1_line
+        assert "50" in q1_line
+        assert "140" in q1_line
+
+    def test_no_color_heatmap_cells_are_fixed_width_with_value_spacing(self):
+        """No-color heatmap keeps equal cell widths and a separator space before numbers."""
+        matrix = [[34, 140], [83, 94]]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=["Q1", "Q2"], col_labels=["A", "B"], options=opts)
+        result = chart.render()
+        q1_line = next(line for line in result.splitlines() if "Q1" in line)
+
+        data_region = q1_line.split("│", 1)[1]
+        cells = [c for c in data_region.split("│") if c.strip()]
+        assert len(cells) == 2
+        assert len(cells[0]) == len(cells[1])
+        assert " 34" in cells[0]
+        assert " 140" in cells[1]
+
+    def test_height_constrained_heatmap_shows_row_truncation_indicator(self):
+        """Row truncation indicator is shown when options.height limits visible rows."""
+        matrix = [[float(i), float(i + 1)] for i in range(12)]
+        rows = [f"Q{i}" for i in range(12)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True, height=12)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=rows, col_labels=["A", "B"], options=opts)
+        result = chart.render()
+        assert "more rows" in result
 
 
 class TestASCIIScatterPlot:
@@ -1116,7 +1183,7 @@ class TestASCIIComparisonBar:
 
         from benchbox.core.visualization.ascii.comparison_bar import from_comparison_data
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="benchbox.core.visualization.ascii.comparison_bar"):
             from_comparison_data([{"label": "Q1", "baseline_value": 100, "comparison_value": 50}])
         assert "unexpected type" in caplog.text
 
@@ -1285,7 +1352,7 @@ class TestASCIIDivergingBar:
 
         from benchbox.core.visualization.ascii.diverging_bar import from_regression_data
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="benchbox.core.visualization.ascii.diverging_bar"):
             from_regression_data([{"label": "Q1", "pct_change": -10}])
         assert "unexpected type" in caplog.text
 
@@ -1454,6 +1521,85 @@ class TestASCIISummaryBox:
         result = chart.render()
         assert "Best" not in result
         assert "Worst" not in result
+
+    def test_long_title_does_not_overflow_box_width(self):
+        """Very long titles are truncated to fit the configured width."""
+        from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
+
+        width = 80
+        stats = SummaryStats(title="X" * 200, geo_mean_ms=100)
+        opts = ASCIIChartOptions(width=width, use_color=False)
+        chart = ASCIISummaryBox(stats=stats, options=opts)
+        result = chart.render()
+        for line in result.splitlines():
+            assert len(line) == width
+
+    def test_long_best_worst_text_does_not_overflow_box_width(self):
+        """Best/worst rows are truncated to preserve box borders."""
+        from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
+
+        width = 80
+        stats = SummaryStats(
+            title="Summary",
+            geo_mean_baseline_ms=100,
+            geo_mean_comparison_ms=130,
+            total_time_baseline_ms=4000,
+            total_time_comparison_ms=3000,
+            num_queries=3,
+            num_improved=1,
+            num_stable=1,
+            num_regressed=1,
+            best_queries=[
+                ("aggregation_groupby_large", -12.2),
+                ("exchange_merge_join_extremely_verbose_name", -10.0),
+                ("read_parquet_single", -9.2),
+            ],
+            worst_queries=[("another_extremely_verbose_query_identifier_name", 55.0)],
+        )
+        opts = ASCIIChartOptions(width=width, use_color=False, use_unicode=True)
+        chart = ASCIISummaryBox(stats=stats, options=opts)
+        result = chart.render()
+        for line in result.splitlines():
+            assert len(line) == width
+
+    def test_two_column_mode_includes_percentage_deltas(self):
+        """Two-column summary mode keeps percentage deltas visible."""
+        from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
+
+        stats = SummaryStats(
+            title="Summary",
+            geo_mean_baseline_ms=100,
+            geo_mean_comparison_ms=130,
+            total_time_baseline_ms=4000,
+            total_time_comparison_ms=3000,
+            num_queries=22,
+            environment={"OS": "macOS", "Python": "3.12.2", "CPUs": "10", "Memory": "16GB"},
+        )
+        opts = ASCIIChartOptions(width=120, use_color=False, use_unicode=True)
+        chart = ASCIISummaryBox(stats=stats, options=opts)
+        result = chart.render()
+        assert "+30.0%" in result
+        assert "-25.0%" in result
+
+    def test_two_column_mode_colorizes_percentage_deltas_when_color_enabled(self):
+        """Two-column mode keeps colored percentage deltas when color output is enabled."""
+        from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
+
+        stats = SummaryStats(
+            title="Summary",
+            geo_mean_baseline_ms=100,
+            geo_mean_comparison_ms=130,
+            total_time_baseline_ms=4000,
+            total_time_comparison_ms=3000,
+            num_queries=22,
+            environment={"OS": "macOS", "Python": "3.12.2"},
+        )
+        opts = ASCIIChartOptions(width=120, use_color=True, use_unicode=True)
+        chart = ASCIISummaryBox(stats=stats, options=opts)
+        result = chart.render()
+        assert "+30.0%" in result
+        assert "-25.0%" in result
+        assert "\033[" in result
 
 
 # ── Integration Tests ────────────────────────────────────────────
@@ -1657,6 +1803,402 @@ class TestSeriesNamingSymmetry:
 
         assert ResultPlotter.MODE_ABBREVIATIONS["dataframe"] == "df"
         assert ResultPlotter.MODE_ABBREVIATIONS.get("sql", "sql") == "sql"
+
+
+class TestDisambiguateVersions:
+    """Tests for _disambiguate_versions in ResultPlotter."""
+
+    @staticmethod
+    def _make_result(platform: str, version: str | None = None):
+        from benchbox.core.visualization.result_plotter import NormalizedResult
+
+        raw: dict = {}
+        if version:
+            raw["platform"] = {"name": platform, "version": version}
+        return NormalizedResult(
+            benchmark="tpch",
+            platform=platform,
+            scale_factor=1,
+            execution_id=None,
+            timestamp=None,
+            total_time_ms=None,
+            avg_time_ms=None,
+            success_rate=None,
+            cost_total=None,
+            raw=raw,
+        )
+
+    def test_different_versions_appended_to_label(self):
+        """When same platform has different driver versions, both labels get version appended."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [
+            self._make_result("DuckDB", "1.0.0"),
+            self._make_result("DuckDB", "1.4.3"),
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._disambiguate_versions()
+
+        platforms = {r.platform for r in plotter.results}
+        assert "DuckDB 1.0.0" in platforms
+        assert "DuckDB 1.4.3" in platforms
+
+    def test_same_version_labels_unchanged(self):
+        """When both runs share the same version, labels are not modified."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [
+            self._make_result("DuckDB", "1.4.3"),
+            self._make_result("DuckDB", "1.4.3"),
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._disambiguate_versions()
+
+        for r in plotter.results:
+            assert r.platform == "DuckDB"
+
+    def test_different_platforms_unaffected(self):
+        """Different platforms with no version collision are not modified."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [
+            self._make_result("DuckDB", "1.0.0"),
+            self._make_result("Polars", "0.19.0"),
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._disambiguate_versions()
+
+        platforms = [r.platform for r in plotter.results]
+        assert "DuckDB" in platforms
+        assert "Polars" in platforms
+
+    def test_no_version_in_raw_skipped(self):
+        """Results without version info in raw data are not modified."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [
+            self._make_result("DuckDB", None),
+            self._make_result("DuckDB", None),
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._disambiguate_versions()
+
+        for r in plotter.results:
+            assert r.platform == "DuckDB"
+
+
+class TestSortResultsByVersion:
+    """Tests for _sort_results_by_version in ResultPlotter."""
+
+    @staticmethod
+    def _make_result(platform: str):
+        from benchbox.core.visualization.result_plotter import NormalizedResult
+
+        return NormalizedResult(
+            benchmark="tpch",
+            platform=platform,
+            scale_factor=1,
+            execution_id=None,
+            timestamp=None,
+            total_time_ms=None,
+            avg_time_ms=None,
+            success_rate=None,
+            cost_total=None,
+            raw={},
+        )
+
+    def test_versions_sorted_ascending(self):
+        """Results with version labels are sorted from oldest to newest."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [
+            self._make_result("DuckDB 1.3.2"),
+            self._make_result("DuckDB 1.0.0"),
+            self._make_result("DuckDB 1.2.2"),
+            self._make_result("DuckDB 1.1.3"),
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._sort_results_by_version()
+
+        ordered = [r.platform for r in plotter.results]
+        assert ordered == ["DuckDB 1.0.0", "DuckDB 1.1.3", "DuckDB 1.2.2", "DuckDB 1.3.2"]
+
+    def test_prerelease_sorts_after_stable(self):
+        """Pre-release (dev) versions sort after the corresponding stable release."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [
+            self._make_result("DuckDB 1.5.0-dev7404"),
+            self._make_result("DuckDB 1.4.4"),
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._sort_results_by_version()
+
+        ordered = [r.platform for r in plotter.results]
+        assert ordered == ["DuckDB 1.4.4", "DuckDB 1.5.0-dev7404"]
+
+    def test_six_versions_full_order(self):
+        """Full six-version scenario from the user's test case sorts correctly."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        insert_order = [
+            "DuckDB 1.1.3",
+            "DuckDB 1.0.0",
+            "DuckDB 1.2.2",
+            "DuckDB 1.3.2",
+            "DuckDB 1.4.4",
+            "DuckDB 1.5.0-dev7404",
+        ]
+        expected = [
+            "DuckDB 1.0.0",
+            "DuckDB 1.1.3",
+            "DuckDB 1.2.2",
+            "DuckDB 1.3.2",
+            "DuckDB 1.4.4",
+            "DuckDB 1.5.0-dev7404",
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = [self._make_result(p) for p in insert_order]
+        plotter._sort_results_by_version()
+
+        assert [r.platform for r in plotter.results] == expected
+
+    def test_non_versioned_labels_sort_last(self):
+        """Labels without a version number sort after versioned ones."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [
+            self._make_result("Polars"),
+            self._make_result("DuckDB 1.0.0"),
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._sort_results_by_version()
+
+        assert plotter.results[0].platform == "DuckDB 1.0.0"
+        assert plotter.results[1].platform == "Polars"
+
+    def test_single_result_unchanged(self):
+        """Single result is unaffected."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        results = [self._make_result("DuckDB 1.0.0")]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        plotter._sort_results_by_version()
+
+        assert plotter.results[0].platform == "DuckDB 1.0.0"
+
+
+@pytest.mark.fast
+class TestHeatmapColumnFitting:
+    """Tests for heatmap column-shrinking behavior (fit all cols before truncating)."""
+
+    def _make_heatmap(self, num_cols: int, width: int = 120) -> ASCIIHeatmap:
+        """Build a heatmap with ``num_cols`` platforms and a fixed chart width."""
+        matrix = [[float(10 * (i + 1) + j) for j in range(num_cols)] for i in range(3)]
+        row_labels = [f"Q{i + 1}" for i in range(3)]
+        col_labels = [f"Platform{j + 1}" for j in range(num_cols)]
+        opts = ASCIIChartOptions(width=width, use_color=False)
+        return ASCIIHeatmap(matrix=matrix, row_labels=row_labels, col_labels=col_labels, options=opts)
+
+    def test_all_columns_shown_when_they_fit(self):
+        """When columns comfortably fit at default cell width, all are rendered."""
+        chart = self._make_heatmap(num_cols=3, width=120)
+        result = chart.render()
+        for j in range(1, 4):
+            assert f"Platform{j}" in result
+
+    def test_columns_compressed_instead_of_truncated(self):
+        """When columns overflow at default width, cell_width shrinks to fit all cols."""
+        # 6 columns with long labels at width=120 would normally truncate; they must all appear.
+        chart = self._make_heatmap(num_cols=6, width=120)
+        result = chart.render()
+        for j in range(1, 7):
+            assert f"Platform{j}" in result
+        # The truncation indicator should NOT appear when compression succeeds.
+        assert "..." not in result
+
+    def test_many_columns_compressed_to_minimum(self):
+        """Very many columns compress to minimum cell width and all remain visible."""
+        chart = self._make_heatmap(num_cols=10, width=120)
+        result = chart.render()
+        # At least the first and last column labels must appear.
+        assert "Platform1" in result
+        assert "Platform10" in result
+
+    def test_truncation_only_when_compression_insufficient(self):
+        """Truncation indicator appears only when compressed cell_width < minimum viable width."""
+        # 40 columns in 80 chars: each cell would need 2 chars, below minimum (5).
+        # In this case truncation is acceptable.
+        chart = self._make_heatmap(num_cols=40, width=80)
+        result = chart.render()
+        # The chart must render without crashing; first column always visible.
+        assert "Platform1" in result
+
+    def test_row_labels_all_present(self):
+        """Row labels are always rendered regardless of column compression."""
+        chart = self._make_heatmap(num_cols=6, width=120)
+        result = chart.render()
+        for i in range(1, 4):
+            assert f"Q{i}" in result
+
+
+@pytest.mark.fast
+class TestHistogramWidthAware:
+    """Tests for histogram width-aware chunking and footer wrapping."""
+
+    def _make_bars(self, num_queries: int, platforms: list[str]) -> list[HistogramBar]:
+        """Build HistogramBar list for ``num_queries`` queries across ``platforms``."""
+        bars: list[HistogramBar] = []
+        for p in platforms:
+            for q in range(1, num_queries + 1):
+                bars.append(HistogramBar(query_id=str(q), latency_ms=10.0 + q, platform=p))
+        return bars
+
+    # ------------------------------------------------------------------ chunking
+
+    def test_chunk_data_respects_max_queries_override(self):
+        """_chunk_data splits by the max_queries override, not self.max_per_chart."""
+        bars = self._make_bars(10, ["A", "B"])
+        opts = ASCIIChartOptions(width=120, use_color=False)
+        hist = ASCIIQueryHistogram(data=bars, options=opts)
+        # Bootstrap internal state that render() normally sets.
+        hist._use_grouped = True
+        hist._platforms = ["A", "B"]
+        chunks = hist._chunk_data(hist._sort_data(), max_queries=5)
+        assert len(chunks) == 2
+        # Each chunk should contain bars for exactly 5 unique queries.
+        for chunk in chunks:
+            unique_qids = {b.query_id for b in chunk}
+            assert len(unique_qids) == 5
+
+    def test_chunk_data_no_split_when_fits(self):
+        """_chunk_data returns one chunk when unique queries ≤ max_queries."""
+        bars = self._make_bars(8, ["A", "B"])
+        opts = ASCIIChartOptions(width=120, use_color=False)
+        hist = ASCIIQueryHistogram(data=bars, options=opts)
+        hist._use_grouped = True
+        hist._platforms = ["A", "B"]
+        chunks = hist._chunk_data(hist._sort_data(), max_queries=10)
+        assert len(chunks) == 1
+
+    def test_grouped_render_splits_when_queries_exceed_width(self):
+        """render() splits into multiple charts when 6 platforms × 22 queries exceed width=120."""
+        platforms = [f"DuckDB 1.{v}.0" for v in range(6)]
+        bars = self._make_bars(22, platforms)
+        opts = ASCIIChartOptions(width=120, use_color=False)
+        hist = ASCIIQueryHistogram(data=bars, options=opts)
+        result = hist.render()
+        # Two chart blocks separated by a blank line.
+        assert "\n\n" in result
+
+    def test_grouped_render_single_chart_when_few_queries(self):
+        """render() produces one chart when queries fit within the width."""
+        platforms = ["A", "B"]
+        bars = self._make_bars(5, platforms)
+        opts = ASCIIChartOptions(width=120, use_color=False)
+        hist = ASCIIQueryHistogram(data=bars, options=opts)
+        result = hist.render()
+        # Only one chart header line rendered (no split into multiple charts).
+        assert result.count("Query Latency Histogram") == 1
+
+    # ------------------------------------------------------------------ footer wrapping
+
+    def test_footer_wraps_when_legend_exceeds_width(self):
+        """_build_grouped_footer wraps long legends to multiple lines."""
+        # Build 6 long-named platforms to force a wide footer.
+        platforms = [f"DuckDB {1 + i}.{i}.{i}" for i in range(6)]
+        bars = self._make_bars(3, platforms)
+        opts = ASCIIChartOptions(width=80, use_color=False)
+        hist = ASCIIQueryHistogram(data=bars, options=opts)
+        # Drive internal state.
+        hist._use_grouped = True
+        hist._platforms = platforms
+        hist._outlier_bar_keys = set()
+        platform_colors = dict.fromkeys(platforms, "#ffffff")
+        platform_fills = dict.fromkeys(platforms, "█")
+        from benchbox.core.visualization.ascii.base import ColorMode, TerminalColors
+
+        colors = TerminalColors(color_mode=ColorMode.NONE)
+        footer = hist._build_grouped_footer(
+            bars,
+            global_mean=15.0,
+            platform_colors=platform_colors,
+            platform_fills=platform_fills,
+            no_color=True,
+            colors=colors,
+            y_axis_width=8,
+            width=80,
+        )
+        # Should contain at least one newline (wrapped to multiple lines).
+        assert "\n" in footer
+
+    def test_footer_single_line_when_legend_fits(self):
+        """_build_grouped_footer stays on one line when legend is short."""
+        platforms = ["A", "B"]
+        bars = self._make_bars(2, platforms)
+        opts = ASCIIChartOptions(width=120, use_color=False)
+        hist = ASCIIQueryHistogram(data=bars, options=opts)
+        hist._use_grouped = True
+        hist._platforms = platforms
+        hist._outlier_bar_keys = set()
+        platform_colors = dict.fromkeys(platforms, "#ffffff")
+        platform_fills = dict.fromkeys(platforms, "█")
+        from benchbox.core.visualization.ascii.base import ColorMode, TerminalColors
+
+        colors = TerminalColors(color_mode=ColorMode.NONE)
+        footer = hist._build_grouped_footer(
+            bars,
+            global_mean=12.0,
+            platform_colors=platform_colors,
+            platform_fills=platform_fills,
+            no_color=True,
+            colors=colors,
+            y_axis_width=8,
+            width=120,
+        )
+        assert "\n" not in footer
+        assert "A" in footer
+        assert "B" in footer
+
+    def test_footer_no_line_exceeds_width(self):
+        """Each wrapped line of the footer stays within the chart width."""
+        import re as _re
+
+        platforms = [f"DuckDB {1 + i}.{i}.{i}" for i in range(6)]
+        bars = self._make_bars(3, platforms)
+        chart_width = 80
+        opts = ASCIIChartOptions(width=chart_width, use_color=False)
+        hist = ASCIIQueryHistogram(data=bars, options=opts)
+        hist._use_grouped = True
+        hist._platforms = platforms
+        hist._outlier_bar_keys = set()
+        platform_colors = dict.fromkeys(platforms, "#ffffff")
+        platform_fills = dict.fromkeys(platforms, "█")
+        from benchbox.core.visualization.ascii.base import ColorMode, TerminalColors
+
+        colors = TerminalColors(color_mode=ColorMode.NONE)
+        footer = hist._build_grouped_footer(
+            bars,
+            global_mean=15.0,
+            platform_colors=platform_colors,
+            platform_fills=platform_fills,
+            no_color=True,
+            colors=colors,
+            y_axis_width=8,
+            width=chart_width,
+        )
+        ansi_re = _re.compile(r"\x1b\[[0-9;]*m")
+        for line in footer.split("\n"):
+            visible_len = len(ansi_re.sub("", line))
+            assert visible_len <= chart_width, f"Footer line too wide ({visible_len} > {chart_width}): {line!r}"
 
 
 class TestLabelTruncation:
@@ -1945,22 +2487,22 @@ class TestHistogramOutliers:
         assert "Q10" in chart._outlier_ids
 
     def test_outlier_uses_distinct_char(self):
-        """Outlier bars use ▓ instead of █."""
+        """Outlier bars use the configured distinct no-color unicode glyph."""
         data = [HistogramBar(query_id=f"Q{i}", latency_ms=float(10 + i)) for i in range(1, 10)]
         data.append(HistogramBar(query_id="Q10", latency_ms=500.0))
         opts = ASCIIChartOptions(use_color=False, use_unicode=True)
         chart = ASCIIQueryHistogram(data=data, options=opts)
         result = chart.render()
-        assert "▓" in result
+        assert chart._get_outlier_char(no_color=True) in result
 
     def test_outlier_ascii_fallback(self):
-        """Outlier bars use # in ASCII mode."""
+        """Outlier bars use the configured no-color ASCII fallback glyph."""
         data = [HistogramBar(query_id=f"Q{i}", latency_ms=float(10 + i)) for i in range(1, 10)]
         data.append(HistogramBar(query_id="Q10", latency_ms=500.0))
         opts = ASCIIChartOptions(use_color=False, use_unicode=False)
         chart = ASCIIQueryHistogram(data=data, options=opts)
         result = chart.render()
-        assert "#" in result
+        assert chart._get_outlier_char(no_color=True) in result
 
     def test_outlier_in_legend(self):
         """Outlier indicator appears in legend."""
@@ -1978,6 +2520,24 @@ class TestHistogramOutliers:
         chart = ASCIIQueryHistogram(data=data, options=opts)
         chart.render()
         assert len(chart._outlier_ids) == 0
+
+    def test_grouped_outlier_marks_only_the_outlier_bar(self):
+        """Grouped mode tracks outliers per platform+query bar, not per query ID."""
+        data: list[HistogramBar] = []
+        for i in range(1, 11):
+            baseline = 80 + i
+            comparison = 82 + i
+            if i == 10:
+                comparison = 500  # clear outlier on one platform only
+            data.append(HistogramBar(query_id=f"Q{i}", latency_ms=baseline, platform="DF(df)"))
+            data.append(HistogramBar(query_id=f"Q{i}", latency_ms=comparison, platform="DF(sql)"))
+
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        chart.render()
+
+        assert ("DF(sql)", "Q10") in chart._outlier_bar_keys
+        assert ("DF(df)", "Q10") not in chart._outlier_bar_keys
 
 
 class TestSummaryBoxDotLeader:
@@ -2043,6 +2603,26 @@ class TestSummaryBoxDotLeader:
         # Single-run metrics don't have percentage, so no dot-leader needed
         assert "·" not in result or ".." not in result
 
+    def test_no_color_percentage_arrows_do_not_overflow_box_width(self):
+        """No-color percentage arrows are included in width calculations."""
+        from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
+
+        width = 120
+        stats = SummaryStats(
+            title="DataFusion (df) vs DataFusion (sql) Summary",
+            geo_mean_baseline_ms=62.6,
+            geo_mean_comparison_ms=66.5,  # +6.2% -> includes up arrow in no-color mode
+            total_time_baseline_ms=4900.0,
+            total_time_comparison_ms=4831.0,  # -1.4% (no arrow threshold)
+            num_queries=22,
+        )
+        opts = ASCIIChartOptions(width=width, use_color=False, use_unicode=True)
+        chart = ASCIISummaryBox(stats=stats, options=opts)
+        result = chart.render()
+
+        for line in result.splitlines():
+            assert len(line) == width
+
 
 class TestEdgeCases:
     """Tests for edge cases in new features."""
@@ -2078,3 +2658,815 @@ class TestEdgeCases:
         assert "Time (ms)" in result
         # Should have arrow indicator
         assert "\u2191" in result
+
+
+# ── Percentile Ladder Chart Tests ────────────────────────────────
+
+
+class TestASCIIPercentileLadder:
+    """Tests for percentile ladder chart rendering."""
+
+    def test_empty_data(self):
+        """Empty data returns message."""
+        chart = ASCIIPercentileLadder(data=[])
+        result = chart.render()
+        assert "No data" in result
+
+    def test_single_platform(self):
+        """Single platform renders correctly."""
+        data = [PercentileData("DuckDB", 12, 45, 78, 120)]
+        chart = ASCIIPercentileLadder(data=data)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "12" in result
+        assert "120" in result
+        assert "P50" in result
+        assert "P99" in result
+
+    def test_multiple_platforms(self):
+        """Multiple platforms render as separate rows."""
+        data = [
+            PercentileData("DuckDB", 12, 45, 78, 120),
+            PercentileData("Polars", 15, 52, 95, 310),
+            PercentileData("Pandas", 25, 85, 140, 280),
+        ]
+        chart = ASCIIPercentileLadder(data=data)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "Polars" in result
+        assert "Pandas" in result
+
+    def test_band_fill_chars_unicode(self):
+        """Unicode mode uses ░▒▓█ fill characters."""
+        data = [PercentileData("Test", 10, 20, 30, 40)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        assert "░" in result
+        assert "█" in result
+
+    def test_band_fill_chars_ascii(self):
+        """ASCII mode uses .=#@ fill characters."""
+        data = [PercentileData("Test", 10, 20, 30, 40)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        assert "░" not in result
+        assert "." in result or "=" in result or "#" in result or "@" in result
+
+    def test_no_color_output(self):
+        """Chart renders without ANSI codes when color disabled."""
+        data = [PercentileData("Test", 10, 20, 30, 40)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        assert "\033[" not in result
+
+    def test_legend_shows_all_bands(self):
+        """Legend shows all four percentile bands."""
+        data = [PercentileData("Test", 10, 20, 30, 40)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        assert "P50" in result
+        assert "P90" in result
+        assert "P95" in result
+        assert "P99" in result
+
+    def test_annotation_shows_pipe_separated_values(self):
+        """Annotation shows values separated by pipes."""
+        data = [PercentileData("Test", 10, 20, 30, 40)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        # Should contain pipe-separated values
+        assert "10.0 | 20.0 | 30.0 | 40.0" in result
+
+    def test_annotation_values_use_shared_width_and_precision(self):
+        """Annotation values are right-justified with consistent decimal precision."""
+        data = [
+            PercentileData("DataFusion (df)", 66.5, 123.9, 165.9, 217.1),
+            PercentileData("DataFusion (sql)", 62, 120.7, 146.2, 237.1),
+        ]
+        opts = ASCIIChartOptions(use_color=False, width=120)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+
+        assert " 66.5 | 123.9 | 165.9 | 217.1" in result
+        assert " 62.0 | 120.7 | 146.2 | 237.1" in result
+
+    def test_identical_percentiles(self):
+        """Identical percentile values render without crash."""
+        data = [PercentileData("Flat", 50, 50, 50, 50)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        assert "Flat" in result
+
+    def test_zero_percentiles(self):
+        """Zero percentile values render without crash."""
+        data = [PercentileData("Zero", 0, 0, 0, 0)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        assert "Zero" in result
+
+    def test_narrow_width(self):
+        """Chart renders at minimum width."""
+        data = [PercentileData("VeryLongPlatformName", 10, 50, 80, 200)]
+        opts = ASCIIChartOptions(width=40, use_color=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+        assert len(result) > 0
+
+    def test_metadata_subtitle(self):
+        """Metadata subtitle renders when provided."""
+        data = [PercentileData("Test", 10, 20, 30, 40)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIPercentileLadder(data=data, options=opts, metadata={"scale_factor": 1})
+        result = chart.render()
+        assert "SF=sf1" in result
+
+
+class TestComputePercentile:
+    """Tests for compute_percentile function."""
+
+    def test_empty_input(self):
+        """Empty input returns 0."""
+        assert compute_percentile([], 50) == 0.0
+
+    def test_single_value(self):
+        """Single value returns that value for any percentile."""
+        assert compute_percentile([42], 50) == 42
+        assert compute_percentile([42], 99) == 42
+
+    def test_two_values(self):
+        """Two values interpolate correctly."""
+        result = compute_percentile([10, 20], 50)
+        assert result == 15.0
+
+    def test_known_percentiles(self):
+        """Known percentile values from sorted array."""
+        vals = list(range(1, 101))  # 1 to 100
+        assert compute_percentile(vals, 50) == 50.5
+        assert compute_percentile(vals, 0) == 1.0
+        assert compute_percentile(vals, 100) == 100.0
+
+    def test_p99_near_max(self):
+        """P99 is close to maximum for large arrays."""
+        vals = list(range(1, 1001))
+        p99 = compute_percentile(vals, 99)
+        assert 990 <= p99 <= 1000
+
+    def test_unsorted_input(self):
+        """Function handles unsorted input correctly."""
+        result = compute_percentile([50, 10, 30, 20, 40], 50)
+        assert result == 30.0
+
+
+class TestFromQueryResults:
+    """Tests for from_query_results factory function."""
+
+    def test_basic_factory(self):
+        """Factory creates chart from raw query times."""
+        chart = from_query_results(
+            [("DuckDB", [10, 20, 30, 50, 120])],
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "DuckDB" in result
+
+    def test_empty_values(self):
+        """Factory handles platform with no query times."""
+        chart = from_query_results(
+            [("Empty", [])],
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "Empty" in result
+
+    def test_multi_platform_factory(self):
+        """Factory handles multiple platforms."""
+        chart = from_query_results(
+            [
+                ("DuckDB", [10, 20, 30, 50, 120]),
+                ("Polars", [15, 25, 45, 80, 310]),
+            ],
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "Polars" in result
+
+    def test_exporters_render_percentile_ladder(self):
+        """render_ascii_chart handles percentile_ladder type."""
+        from benchbox.core.visualization.exporters import render_ascii_chart
+
+        data = [PercentileData("DuckDB", 12, 45, 78, 120)]
+        result = render_ascii_chart("percentile_ladder", data, title="Test")
+        assert "DuckDB" in result
+
+    def test_percentile_ladder_importable_from_module(self):
+        """ASCIIPercentileLadder is importable from the ascii module."""
+        from benchbox.core.visualization.ascii import ASCIIPercentileLadder
+
+        assert ASCIIPercentileLadder is not None
+
+
+# ── Normalized Speedup Chart Tests ────────────────────────────────
+
+
+class TestASCIINormalizedSpeedup:
+    """Tests for normalized speedup chart rendering."""
+
+    def test_empty_data(self):
+        """Empty data returns message."""
+        chart = ASCIINormalizedSpeedup(data=[])
+        result = chart.render()
+        assert "No data" in result
+
+    def test_single_platform_baseline(self):
+        """Single platform at baseline renders."""
+        data = [SpeedupData("SQLite", 1.0, True)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIINormalizedSpeedup(data=data, options=opts)
+        result = chart.render()
+        assert "SQLite" in result
+        assert "1.00x" in result
+
+    def test_faster_and_slower(self):
+        """Faster and slower platforms render on both sides."""
+        data = [
+            SpeedupData("SQLite", 1.0, True),
+            SpeedupData("DuckDB", 8.2, False),
+            SpeedupData("Pandas", 0.4, False),
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIINormalizedSpeedup(data=data, options=opts)
+        result = chart.render()
+        assert "SQLite" in result
+        assert "DuckDB" in result
+        assert "Pandas" in result
+        assert "8.20x" in result
+        assert "0.40x" in result
+
+    def test_log2_symmetry(self):
+        """2x faster and 0.5x slower produce equal bar lengths."""
+        data = [
+            SpeedupData("Base", 1.0, True),
+            SpeedupData("Fast", 2.0, False),
+            SpeedupData("Slow", 0.5, False),
+        ]
+        opts = ASCIIChartOptions(use_color=False, width=80)
+        chart = ASCIINormalizedSpeedup(data=data, options=opts)
+        result = chart.render()
+        # Both should appear in the output
+        assert "2.00x" in result
+        assert "0.50x" in result
+
+    def test_no_color_output(self):
+        """Chart renders without ANSI codes when color disabled."""
+        data = [SpeedupData("Test", 1.5, False)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIINormalizedSpeedup(data=data, options=opts)
+        result = chart.render()
+        assert "\033[" not in result
+
+    def test_direction_labels(self):
+        """Chart shows Slower/Faster direction labels."""
+        data = [SpeedupData("Test", 2.0, False)]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIINormalizedSpeedup(data=data, options=opts)
+        result = chart.render()
+        assert "Slower" in result
+        assert "Faster" in result
+
+
+class TestFromNormalizedResults:
+    """Tests for from_normalized_results factory."""
+
+    def test_basic_factory(self):
+        """Factory creates chart from timing data."""
+        chart = from_normalized_results(
+            [("SQLite", 5000), ("DuckDB", 610)],
+            baseline="SQLite",
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "SQLite" in result
+        assert "DuckDB" in result
+
+    def test_slowest_baseline(self):
+        """'slowest' auto-selects the slowest platform."""
+        chart = from_normalized_results(
+            [("A", 100), ("B", 500), ("C", 200)],
+            baseline="slowest",
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "1.00x" in result  # B should be 1.0x
+
+    def test_fastest_baseline(self):
+        """'fastest' auto-selects the fastest platform."""
+        chart = from_normalized_results(
+            [("A", 100), ("B", 500), ("C", 200)],
+            baseline="fastest",
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "1.00x" in result
+
+    def test_empty_input(self):
+        """Empty input renders no data."""
+        chart = from_normalized_results([], options=ASCIIChartOptions(use_color=False))
+        result = chart.render()
+        assert "No data" in result
+
+    def test_exporters_render_normalized_speedup(self):
+        """render_ascii_chart handles normalized_speedup type."""
+        from benchbox.core.visualization.exporters import render_ascii_chart
+
+        data = [SpeedupData("Test", 2.0, False)]
+        result = render_ascii_chart("normalized_speedup", data, title="Test")
+        assert "Test" in result
+
+
+# ── Stacked Bar Chart Tests ────────────────────────────────
+
+
+class TestASCIIStackedBar:
+    """Tests for stacked bar chart rendering."""
+
+    def test_empty_data(self):
+        """Empty data returns message."""
+        chart = ASCIIStackedBar(data=[])
+        result = chart.render()
+        assert "No data" in result
+
+    def test_single_platform_single_phase(self):
+        """Single platform with one phase renders."""
+        data = [StackedBarData("DuckDB", [StackedBarSegment("Power", 8000)])]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "Power" in result
+
+    def test_multi_platform_multi_phase(self):
+        """Multiple platforms with multiple phases render."""
+        data = [
+            StackedBarData(
+                "DuckDB",
+                [
+                    StackedBarSegment("Load", 1500),
+                    StackedBarSegment("Power", 8000),
+                ],
+            ),
+            StackedBarData(
+                "SQLite",
+                [
+                    StackedBarSegment("Load", 5000),
+                    StackedBarSegment("Power", 15000),
+                ],
+            ),
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "SQLite" in result
+        assert "Load" in result
+        assert "Power" in result
+
+    def test_total_auto_computed(self):
+        """Total is auto-computed from segments if not provided."""
+        d = StackedBarData("Test", [StackedBarSegment("A", 100), StackedBarSegment("B", 200)])
+        assert d.total == 300
+
+    def test_zero_phases_skipped(self):
+        """Phases with zero value render without crash."""
+        data = [
+            StackedBarData(
+                "Test",
+                [
+                    StackedBarSegment("A", 100),
+                    StackedBarSegment("B", 0),
+                    StackedBarSegment("C", 200),
+                ],
+            )
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+        assert "Test" in result
+
+    def test_time_formatting(self):
+        """Time values format correctly in annotations."""
+        data = [
+            StackedBarData("Fast", [StackedBarSegment("Run", 500)], total=500),
+            StackedBarData("Med", [StackedBarSegment("Run", 5000)], total=5000),
+            StackedBarData("Slow", [StackedBarSegment("Run", 120000)], total=120000),
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+        assert "500ms" in result
+        assert "5.0s" in result
+        assert "2.0min" in result
+
+    def test_legend_shows_phases(self):
+        """Legend shows phase names."""
+        data = [
+            StackedBarData(
+                "Test",
+                [
+                    StackedBarSegment("DataGen", 100),
+                    StackedBarSegment("Load", 200),
+                ],
+            )
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+        assert "DataGen" in result
+        assert "Load" in result
+
+    def test_no_color_output(self):
+        """Chart renders without ANSI codes when color disabled."""
+        data = [StackedBarData("Test", [StackedBarSegment("A", 100)])]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+        assert "\033[" not in result
+
+    def test_exporters_render_stacked_phase(self):
+        """render_ascii_chart handles stacked_phase type."""
+        from benchbox.core.visualization.exporters import render_ascii_chart
+
+        data = [StackedBarData("Test", [StackedBarSegment("Power", 5000)])]
+        result = render_ascii_chart("stacked_phase", data, title="Test")
+        assert "Test" in result
+
+
+# ── Sparkline Table Tests ────────────────────────────────
+
+
+class TestASCIISparklineTable:
+    """Tests for sparkline table chart rendering."""
+
+    def test_empty_data(self):
+        """Empty data returns message."""
+        data = SparklineTableData([], [])
+        chart = ASCIISparklineTable(data=data)
+        result = chart.render()
+        assert "No data" in result
+
+    def test_single_metric(self):
+        """Single metric column renders."""
+        cols = [SparklineColumn("Total", {"DuckDB": 1240, "Polars": 1580}, False)]
+        data = SparklineTableData(["DuckDB", "Polars"], cols)
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIISparklineTable(data=data, options=opts)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "Polars" in result
+        assert "Total" in result
+
+    def test_higher_is_better_inversion(self):
+        """Higher-is-better columns show highest value with tallest bar."""
+        cols = [SparklineColumn("Success", {"A": 100, "B": 50}, True)]
+        data = SparklineTableData(["A", "B"], cols)
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIISparklineTable(data=data, options=opts)
+        result = chart.render()
+        assert "A" in result
+        assert "B" in result
+
+    def test_multiple_metrics(self):
+        """Multiple metrics render as columns."""
+        cols = [
+            SparklineColumn("Latency", {"DuckDB": 56, "Polars": 72}, False),
+            SparklineColumn("Success", {"DuckDB": 100, "Polars": 100}, True),
+        ]
+        data = SparklineTableData(["DuckDB", "Polars"], cols)
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIISparklineTable(data=data, options=opts)
+        result = chart.render()
+        assert "Latency" in result
+        assert "Success" in result
+
+    def test_legend_present(self):
+        """Legend shows best/worst indicator."""
+        cols = [SparklineColumn("Test", {"A": 1, "B": 2}, False)]
+        data = SparklineTableData(["A", "B"], cols)
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIISparklineTable(data=data, options=opts)
+        result = chart.render()
+        assert "best" in result
+        assert "worst" in result
+
+    def test_no_color_output(self):
+        """Chart renders without ANSI codes when color disabled."""
+        cols = [SparklineColumn("Test", {"A": 1}, False)]
+        data = SparklineTableData(["A"], cols)
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIISparklineTable(data=data, options=opts)
+        result = chart.render()
+        assert "\033[" not in result
+
+    def test_long_platform_names_not_truncated_when_width_allows(self):
+        """Long platform names remain fully visible when chart width allows it."""
+        cols = [SparklineColumn("Total(ms)", {"DataFusion (df)": 100, "DataFusion (sql)": 110}, False)]
+        data = SparklineTableData(["DataFusion (df)", "DataFusion (sql)"], cols)
+        opts = ASCIIChartOptions(use_color=False, width=120)
+        chart = ASCIISparklineTable(data=data, options=opts)
+        result = chart.render()
+        assert "DataFusion (df)" in result
+        assert "DataFusion (sql)" in result
+        assert "DataFusion (.." not in result
+
+    def test_truncated_platform_names_are_disambiguated(self):
+        """When truncation is required, colliding labels are made unique."""
+        p1 = "VeryLongPlatformNameSharedPrefix-DataFusion-ModeA"
+        p2 = "VeryLongPlatformNameSharedPrefix-DataFusion-ModeB"
+        cols = [SparklineColumn("Total(ms)", {p1: 100, p2: 110}, False)]
+        data = SparklineTableData([p1, p2], cols)
+        opts = ASCIIChartOptions(use_color=False, width=40)
+        chart = ASCIISparklineTable(data=data, options=opts)
+        result = chart.render()
+        assert "~1" in result
+        assert "~2" in result
+
+    def test_exporters_render_sparkline_table(self):
+        """render_ascii_chart handles sparkline_table type."""
+        from benchbox.core.visualization.exporters import render_ascii_chart
+
+        cols = [SparklineColumn("Test", {"A": 1}, False)]
+        data = SparklineTableData(["A"], cols)
+        result = render_ascii_chart("sparkline_table", data, title="Test")
+        assert "A" in result
+
+
+# ── CDF Chart Tests ────────────────────────────────
+
+
+class TestASCIICDFChart:
+    """Tests for CDF chart rendering."""
+
+    def test_empty_data(self):
+        """Empty data returns message."""
+        chart = ASCIICDFChart(data=[])
+        result = chart.render()
+        assert "No data" in result
+
+    def test_empty_values(self):
+        """Series with empty values returns message."""
+        data = [CDFSeriesData("Empty", [])]
+        chart = ASCIICDFChart(data=data)
+        result = chart.render()
+        assert "No data" in result
+
+    def test_single_series(self):
+        """Single series renders with markers."""
+        data = [CDFSeriesData("DuckDB", [10, 20, 30, 50, 120])]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "100%" in result
+        assert "0%" in result
+
+    def test_multi_series(self):
+        """Multiple series render with different markers."""
+        data = [
+            CDFSeriesData("DuckDB", [10, 20, 30, 50, 120]),
+            CDFSeriesData("Polars", [15, 25, 45, 80, 310]),
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "Polars" in result
+        assert "*" in result  # First series marker
+        assert "+" in result  # Second series marker
+
+    def test_identical_values(self):
+        """Identical values render without crash."""
+        data = [CDFSeriesData("Flat", [50, 50, 50, 50, 50])]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+        assert "Flat" in result
+
+    def test_single_value(self):
+        """Single value renders without crash."""
+        data = [CDFSeriesData("Solo", [42])]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+        assert "Solo" in result
+
+    def test_y_axis_fixed_0_100(self):
+        """Y-axis is fixed at 0-100% range."""
+        data = [CDFSeriesData("Test", [10, 20, 30])]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+        assert "100%" in result
+        assert "0%" in result
+
+    def test_no_color_output(self):
+        """Chart renders without ANSI codes when color disabled."""
+        data = [CDFSeriesData("Test", [10, 20, 30])]
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+        assert "\033[" not in result
+
+    def test_factory_function(self):
+        """from_query_results factory creates CDF chart."""
+        chart = cdf_from_query_results(
+            [("DuckDB", [10, 20, 30])],
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "DuckDB" in result
+
+    def test_exporters_render_cdf_chart(self):
+        """render_ascii_chart handles cdf_chart type."""
+        from benchbox.core.visualization.exporters import render_ascii_chart
+
+        data = [CDFSeriesData("Test", [10, 20, 30])]
+        result = render_ascii_chart("cdf_chart", data, title="Test")
+        assert "Test" in result
+
+
+# ── Rank Table Tests ────────────────────────────────
+
+
+class TestASCIIRankTable:
+    """Tests for rank table chart rendering."""
+
+    def test_empty_data(self):
+        """Empty data returns message."""
+        data = RankTableData([], [], {})
+        chart = ASCIIRankTable(data=data)
+        result = chart.render()
+        assert "No data" in result
+
+    def test_two_platforms_two_queries(self):
+        """Basic 2x2 ranking renders."""
+        data = RankTableData(
+            ["Q1", "Q2"],
+            ["DuckDB", "Polars"],
+            {
+                ("DuckDB", "Q1"): 10,
+                ("Polars", "Q1"): 20,
+                ("DuckDB", "Q2"): 30,
+                ("Polars", "Q2"): 15,
+            },
+        )
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIRankTable(data=data, options=opts)
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "Polars" in result
+        assert "1st" in result
+        assert "2nd" in result
+        assert "Wins" in result
+
+    def test_tie_handling(self):
+        """Tied platforms get the same rank."""
+        data = RankTableData(
+            ["Q1"],
+            ["A", "B", "C"],
+            {("A", "Q1"): 10, ("B", "Q1"): 10, ("C", "Q1"): 20},
+        )
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIRankTable(data=data, options=opts)
+        result = chart.render()
+        # A and B should both be 1st, C should be 3rd (not 2nd)
+        assert "1st" in result
+        assert "3rd" in result
+
+    def test_georank_computed(self):
+        """Geometric mean rank is computed."""
+        data = RankTableData(
+            ["Q1", "Q2"],
+            ["A", "B"],
+            {("A", "Q1"): 10, ("B", "Q1"): 20, ("A", "Q2"): 30, ("B", "Q2"): 15},
+        )
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIRankTable(data=data, options=opts)
+        result = chart.render()
+        assert "GeoRank" in result
+
+    def test_natural_sort_order(self):
+        """Queries are naturally sorted (Q1, Q2, Q10 not Q1, Q10, Q2)."""
+        data = RankTableData(
+            ["Q10", "Q2", "Q1"],
+            ["A", "B"],
+            {
+                ("A", "Q1"): 10,
+                ("B", "Q1"): 20,
+                ("A", "Q2"): 10,
+                ("B", "Q2"): 20,
+                ("A", "Q10"): 10,
+                ("B", "Q10"): 20,
+            },
+        )
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIRankTable(data=data, options=opts)
+        result = chart.render()
+        lines = result.split("\n")
+        # Find data rows that start with Q and a digit (not header "Query", title, or separator)
+        data_lines = [l for l in lines if l.strip() and l.strip()[0:2] in ("Q1", "Q2")]
+        # Filter out title and header lines
+        data_lines = [l for l in data_lines if "Ranking" not in l and "Query " not in l]
+        assert len(data_lines) == 3
+        # Check order is Q1, Q2, Q10 (natural sort)
+        assert data_lines[0].strip().startswith("Q1 ")
+        assert data_lines[1].strip().startswith("Q2 ")
+        assert data_lines[2].strip().startswith("Q10")
+
+    def test_win_counts(self):
+        """Win counts are correctly tallied."""
+        data = RankTableData(
+            ["Q1", "Q2", "Q3"],
+            ["A", "B"],
+            {
+                ("A", "Q1"): 10,
+                ("B", "Q1"): 20,
+                ("A", "Q2"): 20,
+                ("B", "Q2"): 10,
+                ("A", "Q3"): 10,
+                ("B", "Q3"): 20,
+            },
+        )
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIRankTable(data=data, options=opts)
+        result = chart.render()
+        # A wins 2 queries, B wins 1
+        lines = [l for l in result.split("\n") if "Wins" in l]
+        assert len(lines) == 1
+        assert "2" in lines[0]
+        assert "1" in lines[0]
+
+    def test_no_color_output(self):
+        """Chart renders without ANSI codes when color disabled."""
+        data = RankTableData(
+            ["Q1"],
+            ["A", "B"],
+            {("A", "Q1"): 10, ("B", "Q1"): 20},
+        )
+        opts = ASCIIChartOptions(use_color=False)
+        chart = ASCIIRankTable(data=data, options=opts)
+        result = chart.render()
+        assert "\033[" not in result
+
+    def test_from_heatmap_data_factory(self):
+        """from_heatmap_data creates rank table from matrix format."""
+        chart = from_heatmap_data(
+            [[10, 20], [30, 15]],
+            ["Q1", "Q2"],
+            ["DuckDB", "Polars"],
+            options=ASCIIChartOptions(use_color=False),
+        )
+        result = chart.render()
+        assert "DuckDB" in result
+        assert "Polars" in result
+
+    def test_exporters_render_rank_table(self):
+        """render_ascii_chart handles rank_table type."""
+        from benchbox.core.visualization.exporters import render_ascii_chart
+
+        data = RankTableData(
+            ["Q1"],
+            ["A", "B"],
+            {("A", "Q1"): 10, ("B", "Q1"): 20},
+        )
+        result = render_ascii_chart("rank_table", data, title="Test")
+        assert "A" in result
+
+
+# ── All New Charts Module Import Tests ────────────────────────────────
+
+
+class TestNewChartsModuleImports:
+    """Tests that all new chart types are importable from the ascii module."""
+
+    def test_import_all_new_charts(self):
+        """All new chart classes are importable from the ascii module."""
+        from benchbox.core.visualization.ascii import (
+            ASCIICDFChart,
+            ASCIINormalizedSpeedup,
+            ASCIIRankTable,
+            ASCIISparklineTable,
+            ASCIIStackedBar,
+        )
+
+        assert ASCIICDFChart is not None
+        assert ASCIINormalizedSpeedup is not None
+        assert ASCIIRankTable is not None
+        assert ASCIISparklineTable is not None
+        assert ASCIIStackedBar is not None

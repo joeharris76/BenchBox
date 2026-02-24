@@ -64,7 +64,7 @@ pip install "benchbox[bigquery]"
 pip install "benchbox[cloud]"
 
 # DataFrame platforms
-pip install "benchbox[dataframe]"
+pip install "benchbox[dataframe-all]"
 ```
 
 Check installation status:

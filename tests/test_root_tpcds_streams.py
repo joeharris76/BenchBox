@@ -36,7 +36,7 @@ def test_tpcds_streams():
         # Initialize TPC-DS benchmark
         print("\n1. Initializing TPC-DS benchmark...")
         tpcds = TPCDS(
-            scale_factor=0.1,  # Small scale for testing
+            scale_factor=1.0,
             output_dir=output_dir,
             verbose=True,
         )
@@ -175,8 +175,8 @@ def test_streams_specification_compliance():
 
         # Test deterministic permutation with fixed seed
         print("\n1. Testing deterministic permutation...")
-        tpcds1 = TPCDS(scale_factor=0.1, output_dir=output_dir / "test1", verbose=False)
-        tpcds2 = TPCDS(scale_factor=0.1, output_dir=output_dir / "test2", verbose=False)
+        tpcds1 = TPCDS(scale_factor=1.0, output_dir=output_dir / "test1", verbose=False)
+        tpcds2 = TPCDS(scale_factor=1.0, output_dir=output_dir / "test2", verbose=False)
 
         # Generate streams with same seed
         seed = 54321
@@ -214,7 +214,7 @@ def test_streams_specification_compliance():
         # Test different permutations for different streams
         print("\n2. Testing different permutations per stream...")
         try:
-            tpcds = TPCDS(scale_factor=0.1, output_dir=output_dir / "multi_stream", verbose=False)
+            tpcds = TPCDS(scale_factor=1.0, output_dir=output_dir / "multi_stream", verbose=False)
             tpcds.generate_streams(num_streams=3, rng_seed=seed)
 
             orders = []

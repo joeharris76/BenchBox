@@ -127,6 +127,7 @@ def data_generation_config():
         "memory_limit_mb": 2048,
         "disk_limit_mb": 1024,
         "scale_factors": [0.01, 0.1],  # Removed 0.001 (below TPC-H minimum of 0.01)
+        "tpcds_scale_factors": [1.0, 2.0],
         "parallel_workers": [1, 2, 4],
         "benchmark_runs": 3,
     }
@@ -172,7 +173,7 @@ class TestDataGenerationPerformance:
 
     def test_tpcds_data_generation_scaling(self, data_generation_monitor, data_generation_config, tmp_path):
         """Test how TPC-DS data generation scales with different scale factors."""
-        scale_factors = data_generation_config["scale_factors"]
+        scale_factors = data_generation_config["tpcds_scale_factors"]
         results = {}
 
         for scale_factor in scale_factors:
@@ -592,6 +593,7 @@ class TestDataGenerationBenchmarkComparison:
     def test_benchmark_generation_comparison(self, tmp_path):
         """Compare data generation performance across different benchmarks."""
         scale_factor = 0.01
+        tpcds_scale_factor = 1.0
         benchmark_results = {}
 
         # Test TPC-H
@@ -615,7 +617,7 @@ class TestDataGenerationBenchmarkComparison:
         tpcds_dir = tmp_path / "tpcds_comparison"
         tpcds_dir.mkdir(exist_ok=True)
 
-        tpcds = TPCDS(scale_factor=scale_factor, output_dir=tpcds_dir, verbose=False)
+        tpcds = TPCDS(scale_factor=tpcds_scale_factor, output_dir=tpcds_dir, verbose=False)
 
         with patch.object(tpcds._impl.data_generator, "generate") as mock_tpcds:
             mock_tpcds.side_effect = self._mock_tpcds_data_generation

@@ -75,6 +75,24 @@ benchbox run --platform clickhouse-cloud --benchmark tpch --scale 1.0 \
 | `max_execution_time` | - | - | Query timeout (seconds) |
 | `disable_result_cache` | - | `true` | Disable result cache for benchmarking |
 | `compression` | - | `true` | Enable network compression |
+| `driver_version` | - | (latest) | Pin the clickhouse-connect package version (e.g. `0.10.0`) |
+| `driver_auto_install` | - | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific clickhouse-connect Version
+
+```bash
+benchbox run --platform clickhouse-cloud --benchmark tpch \
+  --platform-option driver_version=0.10.0 \
+  --platform-option driver_auto_install=true \
+  --platform-option host=your-instance.clickhouse.cloud \
+  --platform-option password=your-password
+```
+
+The driver package for ClickHouse Cloud is `clickhouse-connect` (the HTTP-based connector).
+This is distinct from the `[clickhouse]` extra which uses `clickhouse-driver` (the TCP binary protocol).
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Usage Examples
 

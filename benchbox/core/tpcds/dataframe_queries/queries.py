@@ -4442,17 +4442,32 @@ def q47_expression_impl(ctx: DataFrameContext) -> Any:
     return result
 
 
-def q47_pandas_impl(ctx: DataFrameContext) -> Any:
-    """TPC-DS Q47: Store Sales Rolling Average (Pandas Family)."""
+def _rolling_average_pandas_impl(
+    ctx: DataFrameContext,
+    *,
+    query_id: int,
+    sales_table: str,
+    date_sk_col: str,
+    item_sk_col: str,
+    sales_price_col: str,
+    channel_table: str,
+    channel_join_key_left: str,
+    channel_join_key_right: str,
+    channel_cols: list[str],
+) -> Any:
+    """Shared rolling average implementation for Q47/Q57 (Pandas Family).
 
-    params = get_parameters(47)
+    The TPC-DS spec mirrors Q47 (store channel) and Q57 (catalog channel)
+    with the same algorithm but different dimension tables and column names.
+    """
+    params = get_parameters(query_id)
     year = params.get("year", 1999)
 
     # Get tables
-    store_sales = ctx.get_table("store_sales")
+    sales = ctx.get_table(sales_table)
     date_dim = ctx.get_table("date_dim")
     item = ctx.get_table("item")
-    store = ctx.get_table("store")
+    channel = ctx.get_table(channel_table)
 
     # Filter dates
     dates = date_dim[
@@ -4462,45 +4477,45 @@ def q47_pandas_impl(ctx: DataFrameContext) -> Any:
     ]
 
     # Base aggregation
-    base = store_sales.merge(dates, left_on="ss_sold_date_sk", right_on="d_date_sk")
-    base = base.merge(item, left_on="ss_item_sk", right_on="i_item_sk")
-    base = base.merge(store, left_on="ss_store_sk", right_on="s_store_sk")
-    base = base.groupby(
-        ["i_category", "i_brand", "s_store_name", "s_company_name", "d_year", "d_moy"], as_index=False
-    ).agg(sum_sales=("ss_sales_price", "sum"))
+    group_keys = ["i_category", "i_brand", *channel_cols, "d_year", "d_moy"]
+
+    base = sales.merge(dates, left_on=date_sk_col, right_on="d_date_sk")
+    base = base.merge(item, left_on=item_sk_col, right_on="i_item_sk")
+    base = base.merge(channel, left_on=channel_join_key_left, right_on=channel_join_key_right)
+    base = base.groupby(group_keys, as_index=False).agg(sum_sales=(sales_price_col, "sum"))
 
     # Add year_month for ordering
+    partition_keys = ["i_category", "i_brand", *channel_cols]
     base["year_month"] = base["d_year"] * 100 + base["d_moy"]
-    base = base.sort_values(["i_category", "i_brand", "s_store_name", "s_company_name", "year_month"])
+    base = base.sort_values([*partition_keys, "year_month"])
 
     # Add rank
-    base["rn"] = base.groupby(["i_category", "i_brand", "s_store_name", "s_company_name"]).cumcount() + 1
+    base["rn"] = base.groupby(partition_keys).cumcount() + 1
 
     # Add average monthly sales within year
-    base["avg_monthly_sales"] = base.groupby(["i_category", "i_brand", "s_store_name", "s_company_name", "d_year"])[
-        "sum_sales"
-    ].transform("mean")
+    base["avg_monthly_sales"] = base.groupby([*partition_keys, "d_year"])["sum_sales"].transform("mean")
 
     # Self-join for lag and lead
     v1 = base.copy()
-    v1_lag = v1[["i_category", "i_brand", "s_store_name", "s_company_name", "rn", "sum_sales"]].copy()
+    lag_cols = [*partition_keys, "rn", "sum_sales"]
+    v1_lag = v1[lag_cols].copy()
     v1_lag = v1_lag.rename(columns={"sum_sales": "psum", "rn": "rn_lag"})
-    v1_lag["rn_lag"] = v1_lag["rn_lag"] + 1  # For v1.rn = v1_lag.rn + 1
+    v1_lag["rn_lag"] = v1_lag["rn_lag"] + 1
 
-    v1_lead = v1[["i_category", "i_brand", "s_store_name", "s_company_name", "rn", "sum_sales"]].copy()
+    v1_lead = v1[lag_cols].copy()
     v1_lead = v1_lead.rename(columns={"sum_sales": "nsum", "rn": "rn_lead"})
-    v1_lead["rn_lead"] = v1_lead["rn_lead"] - 1  # For v1.rn = v1_lead.rn - 1
+    v1_lead["rn_lead"] = v1_lead["rn_lead"] - 1
 
-    # Join
+    merge_keys = [*partition_keys, "rn"]
     result = v1.merge(
         v1_lag,
-        left_on=["i_category", "i_brand", "s_store_name", "s_company_name", "rn"],
-        right_on=["i_category", "i_brand", "s_store_name", "s_company_name", "rn_lag"],
+        left_on=merge_keys,
+        right_on=[*partition_keys, "rn_lag"],
     )
     result = result.merge(
         v1_lead,
-        left_on=["i_category", "i_brand", "s_store_name", "s_company_name", "rn"],
-        right_on=["i_category", "i_brand", "s_store_name", "s_company_name", "rn_lead"],
+        left_on=merge_keys,
+        right_on=[*partition_keys, "rn_lead"],
     )
 
     # Filter
@@ -4512,23 +4527,27 @@ def q47_pandas_impl(ctx: DataFrameContext) -> Any:
 
     # Select and sort
     result["diff"] = result["sum_sales"] - result["avg_monthly_sales"]
-    result = result[
-        [
-            "i_category",
-            "i_brand",
-            "s_store_name",
-            "s_company_name",
-            "d_year",
-            "d_moy",
-            "avg_monthly_sales",
-            "sum_sales",
-            "psum",
-            "nsum",
-        ]
-    ]
+    output_cols = [*partition_keys, "d_year", "d_moy", "avg_monthly_sales", "sum_sales", "psum", "nsum"]
+    result = result[output_cols]
     result = result.sort_values(["diff", "avg_monthly_sales"]).head(100)
 
     return result
+
+
+def q47_pandas_impl(ctx: DataFrameContext) -> Any:
+    """TPC-DS Q47: Store Sales Rolling Average (Pandas Family)."""
+    return _rolling_average_pandas_impl(
+        ctx,
+        query_id=47,
+        sales_table="store_sales",
+        date_sk_col="ss_sold_date_sk",
+        item_sk_col="ss_item_sk",
+        sales_price_col="ss_sales_price",
+        channel_table="store",
+        channel_join_key_left="ss_store_sk",
+        channel_join_key_right="s_store_sk",
+        channel_cols=["s_store_name", "s_company_name"],
+    )
 
 
 # =============================================================================
@@ -4633,77 +4652,18 @@ def q57_expression_impl(ctx: DataFrameContext) -> Any:
 
 def q57_pandas_impl(ctx: DataFrameContext) -> Any:
     """TPC-DS Q57: Catalog Sales Rolling Average (Pandas Family)."""
-
-    params = get_parameters(57)
-    year = params.get("year", 1999)
-
-    # Get tables
-    catalog_sales = ctx.get_table("catalog_sales")
-    date_dim = ctx.get_table("date_dim")
-    item = ctx.get_table("item")
-    call_center = ctx.get_table("call_center")
-
-    # Filter dates
-    dates = date_dim[
-        (date_dim["d_year"] == year)
-        | ((date_dim["d_year"] == year - 1) & (date_dim["d_moy"] == 12))
-        | ((date_dim["d_year"] == year + 1) & (date_dim["d_moy"] == 1))
-    ]
-
-    # Base aggregation
-    base = catalog_sales.merge(dates, left_on="cs_sold_date_sk", right_on="d_date_sk")
-    base = base.merge(item, left_on="cs_item_sk", right_on="i_item_sk")
-    base = base.merge(call_center, left_on="cs_call_center_sk", right_on="cc_call_center_sk")
-    base = base.groupby(["i_category", "i_brand", "cc_name", "d_year", "d_moy"], as_index=False).agg(
-        sum_sales=("cs_sales_price", "sum")
+    return _rolling_average_pandas_impl(
+        ctx,
+        query_id=57,
+        sales_table="catalog_sales",
+        date_sk_col="cs_sold_date_sk",
+        item_sk_col="cs_item_sk",
+        sales_price_col="cs_sales_price",
+        channel_table="call_center",
+        channel_join_key_left="cs_call_center_sk",
+        channel_join_key_right="cc_call_center_sk",
+        channel_cols=["cc_name"],
     )
-
-    # Add ordering and rank
-    base["year_month"] = base["d_year"] * 100 + base["d_moy"]
-    base = base.sort_values(["i_category", "i_brand", "cc_name", "year_month"])
-    base["rn"] = base.groupby(["i_category", "i_brand", "cc_name"]).cumcount() + 1
-
-    # Add average
-    base["avg_monthly_sales"] = base.groupby(["i_category", "i_brand", "cc_name", "d_year"])["sum_sales"].transform(
-        "mean"
-    )
-
-    # Self-join
-    v1 = base.copy()
-    v1_lag = v1[["i_category", "i_brand", "cc_name", "rn", "sum_sales"]].copy()
-    v1_lag = v1_lag.rename(columns={"sum_sales": "psum", "rn": "rn_lag"})
-    v1_lag["rn_lag"] = v1_lag["rn_lag"] + 1
-
-    v1_lead = v1[["i_category", "i_brand", "cc_name", "rn", "sum_sales"]].copy()
-    v1_lead = v1_lead.rename(columns={"sum_sales": "nsum", "rn": "rn_lead"})
-    v1_lead["rn_lead"] = v1_lead["rn_lead"] - 1
-
-    result = v1.merge(
-        v1_lag,
-        left_on=["i_category", "i_brand", "cc_name", "rn"],
-        right_on=["i_category", "i_brand", "cc_name", "rn_lag"],
-    )
-    result = result.merge(
-        v1_lead,
-        left_on=["i_category", "i_brand", "cc_name", "rn"],
-        right_on=["i_category", "i_brand", "cc_name", "rn_lead"],
-    )
-
-    # Filter
-    result = result[
-        (result["d_year"] == year)
-        & (result["avg_monthly_sales"] > 0)
-        & (abs(result["sum_sales"] - result["avg_monthly_sales"]) / result["avg_monthly_sales"] > 0.1)
-    ]
-
-    # Select and sort
-    result["diff"] = result["sum_sales"] - result["avg_monthly_sales"]
-    result = result[
-        ["i_category", "i_brand", "cc_name", "d_year", "d_moy", "avg_monthly_sales", "sum_sales", "psum", "nsum"]
-    ]
-    result = result.sort_values(["diff", "avg_monthly_sales"]).head(100)
-
-    return result
 
 
 # =============================================================================

@@ -460,7 +460,7 @@ class ResourceMonitor:
         >>> # ... run benchmark ...
         >>> resource_mon.stop()
         >>> snapshot = monitor.snapshot()
-        >>> print(f"Peak memory: {snapshot.gauges['peak_memory_mb']:.1f} MB")
+        >>> emit(f"Peak memory: {snapshot.gauges['peak_memory_mb']:.1f} MB")
     """
 
     def __init__(self, monitor: PerformanceMonitor, sample_interval: float = 2.0):

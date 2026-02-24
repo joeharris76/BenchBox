@@ -199,78 +199,6 @@ class TestSQLiteAdapter:
         mock_benchmark.get_create_tables_sql.assert_called_once_with(dialect="sqlite", tuning_config=mock_config)
 
     @patch("benchbox.platforms.sqlite.sqlite3")
-    def test_load_data_with_dictionary_rows(self, mock_sqlite3):
-        """Test data loading with dictionary-like rows."""
-        mock_connection = Mock()
-        mock_sqlite3.connect.return_value = mock_connection
-
-        mock_benchmark = Mock()
-        mock_benchmark.get_tables.return_value = {
-            "test_table": [{"id": 1, "name": "test1"}, {"id": 2, "name": "test2"}]
-        }
-
-        adapter = SQLiteAdapter()
-        connection = adapter.create_connection()
-
-        table_stats, load_time, _ = adapter.load_data(mock_benchmark, connection, Path("/tmp"))
-
-        assert isinstance(table_stats, dict)
-        assert isinstance(load_time, float)
-        assert load_time >= 0
-        assert table_stats["test_table"] == 2
-
-        # Should execute insert statement
-        expected_sql = "INSERT INTO test_table (id,name) VALUES (?,?)"
-        mock_connection.executemany.assert_called_once()
-        call_args = mock_connection.executemany.call_args
-        assert expected_sql == call_args[0][0]
-        assert call_args[0][1] == [(1, "test1"), (2, "test2")]
-
-        mock_connection.commit.assert_called_once()
-
-    @patch("benchbox.platforms.sqlite.sqlite3")
-    def test_load_data_with_tuple_rows(self, mock_sqlite3):
-        """Test data loading with tuple-like rows."""
-        mock_connection = Mock()
-        mock_sqlite3.connect.return_value = mock_connection
-
-        mock_benchmark = Mock()
-        mock_benchmark.get_tables.return_value = {"test_table": [(1, "test1"), (2, "test2")]}
-
-        adapter = SQLiteAdapter()
-        connection = adapter.create_connection()
-
-        table_stats, load_time, _ = adapter.load_data(mock_benchmark, connection, Path("/tmp"))
-
-        assert isinstance(table_stats, dict)
-        assert table_stats["test_table"] == 2
-
-        # Should execute insert statement for tuples
-        expected_sql = "INSERT INTO test_table VALUES (?,?)"
-        mock_connection.executemany.assert_called_once()
-        call_args = mock_connection.executemany.call_args
-        assert expected_sql == call_args[0][0]
-        assert call_args[0][1] == [(1, "test1"), (2, "test2")]
-
-    @patch("benchbox.platforms.sqlite.sqlite3")
-    def test_load_data_empty_tables(self, mock_sqlite3):
-        """Test data loading with empty tables."""
-        mock_connection = Mock()
-        mock_sqlite3.connect.return_value = mock_connection
-
-        mock_benchmark = Mock()
-        mock_benchmark.get_tables.return_value = {"empty_table": []}
-
-        adapter = SQLiteAdapter()
-        connection = adapter.create_connection()
-
-        table_stats, load_time, _ = adapter.load_data(mock_benchmark, connection, Path("/tmp"))
-
-        assert table_stats["empty_table"] == 0
-        # Should not call executemany for empty tables
-        mock_connection.executemany.assert_not_called()
-
-    @patch("benchbox.platforms.sqlite.sqlite3")
     def test_configure_for_benchmark_olap(self, mock_sqlite3):
         """Test OLAP benchmark configuration."""
         mock_connection = Mock()
@@ -579,20 +507,18 @@ class TestSQLiteAdapter:
         assert adapter.timeout == 60.0
         assert adapter.check_same_thread is True
 
-    def test_from_config_with_legacy_connection_dict(self):
-        """Test from_config() with legacy nested connection dict as fallback."""
+    def test_from_config_rejects_nested_connection_dict(self):
+        """Nested connection dict is no longer accepted."""
+        from benchbox.core.exceptions import ConfigurationError
+
         config = {
             "connection": {
                 "database_path": "/tmp/legacy_path.db",
             },
         }
 
-        adapter = SQLiteAdapter.from_config(config)
-
-        # Legacy connection dict database_path is now used as fallback
-        assert adapter.database_path == "/tmp/legacy_path.db"
-        assert adapter.timeout == 30.0  # Default
-        assert adapter.check_same_thread is False  # Default
+        with pytest.raises(ConfigurationError):
+            SQLiteAdapter.from_config(config)
 
     def test_get_database_path_with_none_override(self):
         """Test get_database_path() when connection_config has None value."""

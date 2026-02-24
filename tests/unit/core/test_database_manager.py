@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from benchbox.core.config import DatabaseConfig, SystemProfile
 from benchbox.core.databases import manager as db_manager
+from benchbox.core.schemas import DatabaseConfig, SystemProfile
 
 pytestmark = pytest.mark.fast
 

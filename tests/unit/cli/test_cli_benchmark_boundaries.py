@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from benchbox.cli.execution_pipeline import BenchmarkLoadingStage
-from benchbox.core.config import BenchmarkConfig
+from benchbox.core.schemas import BenchmarkConfig
 
 pytestmark = pytest.mark.fast
 

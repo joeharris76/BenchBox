@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from benchbox.core.config import BenchmarkConfig, DryRunResult
+from benchbox.core.schemas import BenchmarkConfig, DryRunResult
 from benchbox.examples import dryrun_utils
 
 pytestmark = pytest.mark.fast

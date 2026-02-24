@@ -8,6 +8,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -111,6 +112,11 @@ class RankingResult:
         }
 
 
+def _extract_platform_times(report: "ComparisonReport", platform: str) -> list[float]:
+    """Extract query execution times for a platform from a comparison report."""
+    return [qc.metrics[platform].mean for qc in report.query_comparisons.values() if platform in qc.metrics]
+
+
 class PlatformRanker:
     """Ranks platforms based on benchmark comparison results.
 
@@ -123,7 +129,7 @@ class PlatformRanker:
         >>> ranker = PlatformRanker(strategy=RankingStrategy.COMPOSITE)
         >>> result = ranker.rank(comparison_report)
         >>> for r in result.rankings:
-        ...     print(f"{r.rank}. {r.platform}: {r.score:.2f}")
+        ...     emit(f"{r.rank}. {r.platform}: {r.score:.2f}")
     """
 
     def __init__(
@@ -370,56 +376,10 @@ class PlatformRanker:
             RankingResult ordered by composite score (lower is better)
         """
         weights = self.config.weights
+        raw_scores = self._compute_raw_scores(report)
+        normalized_scores = self._normalize_scores(raw_scores, report.platforms)
 
-        # First, calculate raw scores for each dimension
-        raw_scores: dict[str, dict[str, float]] = {p: {} for p in report.platforms}
-
-        for platform in report.platforms:
-            times = []
-            for qc in report.query_comparisons.values():
-                if platform in qc.metrics:
-                    times.append(qc.metrics[platform].mean)
-
-            # Performance score (geometric mean, lower is better)
-            geo_mean = calculate_geometric_mean(times) if times else float("inf")
-            raw_scores[platform]["performance"] = geo_mean
-
-            # Cost score (inverse of cost efficiency, lower is better)
-            if report.cost_analysis and platform in report.cost_analysis.performance_per_dollar:
-                ce = report.cost_analysis.performance_per_dollar[platform]
-                raw_scores[platform]["cost"] = 1.0 / ce if ce > 0 else float("inf")
-            else:
-                raw_scores[platform]["cost"] = geo_mean  # Proxy with performance
-
-            # Consistency score (CV, lower is better)
-            if times and len(times) > 1:
-                mean_time = sum(times) / len(times)
-                variance = sum((t - mean_time) ** 2 for t in times) / (len(times) - 1)
-                cv = (variance**0.5) / mean_time if mean_time > 0 else 0
-                raw_scores[platform]["consistency"] = cv
-            else:
-                raw_scores[platform]["consistency"] = 0.0
-
-            # Features score (placeholder - could be expanded)
-            # For now, use 0 (neutral) for all platforms
-            raw_scores[platform]["features"] = 0.0
-
-        # Normalize scores to 0-1 range within each dimension
-        normalized_scores: dict[str, dict[str, float]] = {p: {} for p in report.platforms}
-
-        for dimension in ["performance", "cost", "consistency", "features"]:
-            values = [raw_scores[p][dimension] for p in report.platforms]
-            min_val = min(values) if values else 0
-            max_val = max(values) if values else 1
-            range_val = max_val - min_val if max_val > min_val else 1
-
-            for platform in report.platforms:
-                normalized = (raw_scores[platform][dimension] - min_val) / range_val
-                normalized_scores[platform][dimension] = normalized
-
-        # Calculate composite score
         rankings = []
-
         for platform in report.platforms:
             composite_score = (
                 weights.performance * normalized_scores[platform]["performance"]
@@ -428,21 +388,13 @@ class PlatformRanker:
                 + weights.features * normalized_scores[platform]["features"]
             )
 
-            times = []
-            for qc in report.query_comparisons.values():
-                if platform in qc.metrics:
-                    times.append(qc.metrics[platform].mean)
-
+            times = _extract_platform_times(report, platform)
             geo_mean = calculate_geometric_mean(times) if times else 0.0
-            total_time = sum(times) if times else 0.0
             win_rate = report.win_loss_matrix.get(platform, None)
 
             cost_efficiency = None
             if report.cost_analysis and platform in report.cost_analysis.performance_per_dollar:
                 cost_efficiency = report.cost_analysis.performance_per_dollar[platform]
-
-            # Consistency score
-            consistency_score = 1.0 - normalized_scores[platform]["consistency"]
 
             rankings.append(
                 PlatformRanking(
@@ -450,19 +402,16 @@ class PlatformRanker:
                     rank=0,
                     score=composite_score,
                     geometric_mean_time=geo_mean,
-                    total_time=total_time,
+                    total_time=sum(times) if times else 0.0,
                     win_rate=win_rate.win_rate if win_rate else 0.0,
                     cost_efficiency=cost_efficiency,
-                    consistency_score=consistency_score,
+                    consistency_score=1.0 - normalized_scores[platform]["consistency"],
                 )
             )
 
-        # Sort by composite score (lower is better)
         rankings.sort(key=lambda r: r.score)
-
         ties_detected, tie_groups = self._assign_ranks_with_ties(rankings)
 
-        # Normalize scores to 0-100 if configured
         if self.config.normalize_scores:
             max_score = max(r.score for r in rankings) if rankings else 1
             for r in rankings:
@@ -478,6 +427,73 @@ class PlatformRanker:
                 "weights": weights.to_dict(),
             },
         )
+
+    @staticmethod
+    def _compute_raw_scores(report: ComparisonReport) -> dict[str, dict[str, float]]:
+        """Compute raw performance, cost, consistency, and feature scores per platform.
+
+        Platforms with no query times receive float('inf') for performance; platforms
+        with zero cost-efficiency (ce == 0) also receive float('inf') for cost.
+        Callers (e.g. _normalize_scores) must handle non-finite values.
+        """
+        raw_scores: dict[str, dict[str, float]] = {p: {} for p in report.platforms}
+
+        for platform in report.platforms:
+            times = _extract_platform_times(report, platform)
+
+            geo_mean = calculate_geometric_mean(times) if times else float("inf")
+            raw_scores[platform]["performance"] = geo_mean
+
+            if report.cost_analysis and platform in report.cost_analysis.performance_per_dollar:
+                ce = report.cost_analysis.performance_per_dollar[platform]
+                raw_scores[platform]["cost"] = 1.0 / ce if ce > 0 else float("inf")
+            else:
+                raw_scores[platform]["cost"] = geo_mean
+
+            if times and len(times) > 1:
+                mean_time = sum(times) / len(times)
+                variance = sum((t - mean_time) ** 2 for t in times) / (len(times) - 1)
+                cv = (variance**0.5) / mean_time if mean_time > 0 else 0
+                raw_scores[platform]["consistency"] = cv
+            else:
+                raw_scores[platform]["consistency"] = 0.0
+
+            raw_scores[platform]["features"] = 0.0
+
+        return raw_scores
+
+    @staticmethod
+    def _normalize_scores(raw_scores: dict[str, dict[str, float]], platforms: list[str]) -> dict[str, dict[str, float]]:
+        """Normalize raw scores to 0-1 range within each dimension using min-max scaling.
+
+        Non-finite values (inf, -inf, NaN) are replaced with a penalty value above
+        the maximum finite value (offset by the finite range, or 1.0 as fallback),
+        ensuring they always normalize to the worst score.
+        """
+        normalized: dict[str, dict[str, float]] = {p: {} for p in platforms}
+
+        for dimension in ["performance", "cost", "consistency", "features"]:
+            values = [raw_scores[p][dimension] for p in platforms]
+
+            # Replace non-finite values with a penalty above the finite maximum
+            finite_values = [v for v in values if math.isfinite(v)]
+            if finite_values:
+                max_finite = max(finite_values)
+                min_finite = min(finite_values)
+                spread = max_finite - min_finite if max_finite > min_finite else 1.0
+                inf_replacement = max_finite + spread
+            else:
+                inf_replacement = 1.0
+            values = [v if math.isfinite(v) else inf_replacement for v in values]
+
+            min_val = min(values) if values else 0
+            max_val = max(values) if values else 1
+            range_val = max_val - min_val if max_val > min_val else 1
+
+            for platform, val in zip(platforms, values):
+                normalized[platform][dimension] = (val - min_val) / range_val
+
+        return normalized
 
     def _assign_ranks_with_ties(
         self,

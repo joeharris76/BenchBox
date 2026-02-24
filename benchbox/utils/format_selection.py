@@ -101,8 +101,6 @@ class FormatSelector:
 
         # If manifest has format information, use that
         if manifest_data:
-            version = int(manifest_data.get("version") or manifest_data.get("manifest_version", 1))
-
             # Manifest-level formats (v2)
             if "formats" in manifest_data and isinstance(manifest_data["formats"], list):
                 available.extend(manifest_data["formats"])
@@ -110,13 +108,10 @@ class FormatSelector:
             # Table-specific formats
             if "tables" in manifest_data:
                 table_data = manifest_data["tables"].get(table_name, {})
-                if version == 2 and isinstance(table_data, dict):
+                if isinstance(table_data, dict):
                     formats_section = table_data.get("formats")
                     if isinstance(formats_section, dict):
                         available.extend(list(formats_section.keys()))
-                elif version == 1:
-                    # v1 manifests only contain tbl
-                    available.append("tbl")
 
             if available:
                 return list(dict.fromkeys(available))  # dedupe preserving order

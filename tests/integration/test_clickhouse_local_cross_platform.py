@@ -22,7 +22,7 @@ class TestClickHouseLocalCrossPlatform:
 
     def test_primary_keys_always_enabled(self):
         """Test that ClickHouse always enables primary keys even in no-tuning mode."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
 
         # Simulate no-tuning mode (should still enable primary keys)
         enable_primary_keys, enable_foreign_keys = adapter._get_constraint_configuration()
@@ -98,7 +98,7 @@ class TestClickHouseLocalCrossPlatform:
         """Test full integration with ClickBench benchmark."""
         # This is a lighter integration test that doesn't require full data generation
         benchmark = ClickBenchBenchmark(scale_factor=0.01)
-        ClickHouseAdapter(mode="local")
+        ClickHouseAdapter(deployment_mode="local")
 
         # Test that benchmark has the expected CSV configuration method
         assert hasattr(benchmark, "get_csv_loading_config")

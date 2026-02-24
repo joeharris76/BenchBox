@@ -2,16 +2,83 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import click
 from pydantic import ValidationError
-from rich.console import Console
 from rich.panel import Panel
 
 from benchbox.cli.output import ResultExporter
+from benchbox.cli.shared import console
 from benchbox.core.schemas import ExecutionContext
 
-console = Console()
+
+def _extract_result_fields(data: dict[str, Any]) -> tuple[str | None, str | None, Any, dict[str, Any] | None]:
+    """Extract platform, benchmark, scale_factor, and execution_context from result data.
+
+    Handles both v2.x schema format and legacy format.
+
+    Returns:
+        Tuple of (platform, benchmark_name, scale_factor, execution_context).
+    """
+    platform = None
+    benchmark_name = None
+    scale_factor = None
+
+    # Try schema v2.x format first
+    if "benchmark" in data and isinstance(data["benchmark"], dict):
+        benchmark_name = data["benchmark"].get("name") or data["benchmark"].get("id")
+        scale_factor = data["benchmark"].get("scale_factor")
+
+    if "platform" in data and isinstance(data["platform"], dict):
+        platform = data["platform"].get("name")
+
+    # Try legacy format
+    if not platform:
+        platform = data.get("platform")
+    if not benchmark_name:
+        benchmark_name = data.get("benchmark_name") or data.get("benchmark_id")
+    if not scale_factor:
+        scale_factor = data.get("scale_factor")
+
+    # Get execution context
+    execution_context = data.get("execution") or data.get("execution_context")
+
+    return platform, benchmark_name, scale_factor, execution_context
+
+
+def _reconstruct_cli_command(
+    data: dict[str, Any],
+    platform: str,
+    benchmark_name: str,
+    scale_factor: Any,
+    execution_context: dict[str, Any] | None,
+) -> str:
+    """Reconstruct the full CLI command from result data fields.
+
+    Returns:
+        The reconstructed CLI command string.
+    """
+    base_cmd = f"benchbox run --platform {platform} --benchmark {benchmark_name} --scale {scale_factor}"
+
+    if execution_context:
+        ctx = ExecutionContext(**{k: v for k, v in execution_context.items() if k != "invocation_timestamp"})
+        cli_args = ctx.to_cli_args()
+        if cli_args:
+            return f"{base_cmd} {' '.join(cli_args)}"
+        return base_cmd
+
+    # Try to reconstruct from other fields
+    extra_args = []
+
+    # Query subset from run block
+    if "run" in data and data["run"].get("query_subset"):
+        extra_args.extend(["--queries", ",".join(data["run"]["query_subset"])])
+
+    if extra_args:
+        return f"{base_cmd} {' '.join(extra_args)}"
+
+    return base_cmd
 
 
 @click.group("results", invoke_without_command=True)
@@ -52,30 +119,7 @@ def show_cli(result_file: str, full: bool) -> None:
         with result_path.open("r") as f:
             data = json.load(f)
 
-        # Extract key identifiers
-        platform = None
-        benchmark_name = None
-        scale_factor = None
-        execution_context = None
-
-        # Try schema v2.x format first
-        if "benchmark" in data and isinstance(data["benchmark"], dict):
-            benchmark_name = data["benchmark"].get("name") or data["benchmark"].get("id")
-            scale_factor = data["benchmark"].get("scale_factor")
-
-        if "platform" in data and isinstance(data["platform"], dict):
-            platform = data["platform"].get("name")
-
-        # Try legacy format
-        if not platform:
-            platform = data.get("platform")
-        if not benchmark_name:
-            benchmark_name = data.get("benchmark_name") or data.get("benchmark_id")
-        if not scale_factor:
-            scale_factor = data.get("scale_factor")
-
-        # Get execution context
-        execution_context = data.get("execution") or data.get("execution_context")
+        platform, benchmark_name, scale_factor, execution_context = _extract_result_fields(data)
 
         if not all([platform, benchmark_name, scale_factor is not None]):
             console.print(
@@ -83,62 +127,16 @@ def show_cli(result_file: str, full: bool) -> None:
             )
             return
 
-        # Build base command
-        base_cmd = f"benchbox run --platform {platform} --benchmark {benchmark_name} --scale {scale_factor}"
-
-        # If we have execution context, reconstruct full command
-        if execution_context:
-            ctx = ExecutionContext(**{k: v for k, v in execution_context.items() if k != "invocation_timestamp"})
-            cli_args = ctx.to_cli_args()
-            if cli_args:
-                full_cmd = f"{base_cmd} {' '.join(cli_args)}"
-            else:
-                full_cmd = base_cmd
-        else:
-            full_cmd = base_cmd
-            # Try to reconstruct from other fields
-            extra_args = []
-
-            # Query subset from run block
-            if "run" in data and data["run"].get("query_subset"):
-                extra_args.extend(["--queries", ",".join(data["run"]["query_subset"])])
-
-            # Seed
-            if execution_context and execution_context.get("seed"):
-                extra_args.extend(["--seed", str(execution_context["seed"])])
-
-            if extra_args:
-                full_cmd = f"{base_cmd} {' '.join(extra_args)}"
+        full_cmd = _reconstruct_cli_command(data, platform, benchmark_name, scale_factor, execution_context)
 
         # Display the command
         console.print("\n[bold]Reconstructed CLI Command:[/bold]")
         console.print(Panel(full_cmd, style="green"))
 
-        # Show provenance info
-        if execution_context:
-            entry_point = execution_context.get("entry_point", "unknown")
-            timestamp = execution_context.get("timestamp") or execution_context.get("invocation_timestamp")
-            console.print(f"\n[dim]Entry point: {entry_point}[/dim]")
-            if timestamp:
-                console.print(f"[dim]Executed: {timestamp}[/dim]")
+        _display_provenance_info(execution_context)
 
-        # If --full flag, show what options were non-default
         if full and execution_context:
-            console.print("\n[bold]Execution Context Details:[/bold]")
-            for key, value in execution_context.items():
-                if key not in ("invocation_timestamp", "entry_point") and value is not None:
-                    # Skip default values
-                    if key == "phases" and value == ["power"]:
-                        continue
-                    if key == "mode" and value == "sql":
-                        continue
-                    if key == "compression_type" and value == "none":
-                        continue
-                    if key == "compression_enabled" and not value:
-                        continue
-                    if isinstance(value, bool) and not value:
-                        continue
-                    console.print(f"  {key}: {value}")
+            _display_execution_context_details(execution_context)
 
     except json.JSONDecodeError as e:
         console.print(f"[red]❌ Invalid JSON file: {e}[/red]")
@@ -148,6 +146,41 @@ def show_cli(result_file: str, full: bool) -> None:
         console.print(f"[red]❌ Invalid result file format: {e}[/red]")
     except ValidationError as e:
         console.print(f"[red]❌ Invalid execution context in result file: {e}[/red]")
+
+
+def _display_provenance_info(execution_context: dict[str, Any] | None) -> None:
+    """Display execution provenance information (entry point, timestamp)."""
+    if not execution_context:
+        return
+    entry_point = execution_context.get("entry_point", "unknown")
+    timestamp = execution_context.get("timestamp") or execution_context.get("invocation_timestamp")
+    console.print(f"\n[dim]Entry point: {entry_point}[/dim]")
+    if timestamp:
+        console.print(f"[dim]Executed: {timestamp}[/dim]")
+
+
+# Keys and their default values that should be skipped in full context display
+_CONTEXT_DEFAULT_VALUES: dict[str, Any] = {
+    "phases": ["power"],
+    "mode": "sql",
+    "compression_type": "none",
+    "compression_enabled": False,
+}
+
+_CONTEXT_SKIP_KEYS = {"invocation_timestamp", "entry_point"}
+
+
+def _display_execution_context_details(execution_context: dict[str, Any]) -> None:
+    """Display non-default execution context details."""
+    console.print("\n[bold]Execution Context Details:[/bold]")
+    for key, value in execution_context.items():
+        if key in _CONTEXT_SKIP_KEYS or value is None:
+            continue
+        if key in _CONTEXT_DEFAULT_VALUES and value == _CONTEXT_DEFAULT_VALUES[key]:
+            continue
+        if isinstance(value, bool) and not value:
+            continue
+        console.print(f"  {key}: {value}")
 
 
 __all__ = ["results"]

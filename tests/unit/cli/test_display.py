@@ -15,7 +15,7 @@ import pytest
 from rich.console import Console
 
 from benchbox.cli.display import StandardDisplays
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig, QueryResult, SystemProfile
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, QueryResult, SystemProfile
 
 pytestmark = pytest.mark.fast
 

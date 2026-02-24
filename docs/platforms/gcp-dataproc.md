@@ -1,11 +1,11 @@
 <!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
 
-# GCP Dataproc Platform
+# Google Cloud Dataproc Platform
 
 ```{tags} intermediate, guide, dataproc, cloud-platform
 ```
 
-GCP Dataproc is Google Cloud's fully managed Apache Spark and Hadoop service. BenchBox integrates with Dataproc to execute benchmarks on managed clusters, supporting both persistent and ephemeral cluster modes.
+Google Cloud Dataproc is Google Cloud's fully managed Apache Spark and Hadoop service. BenchBox integrates with Dataproc to execute benchmarks on managed clusters, supporting both persistent and ephemeral cluster modes.
 
 ## Features
 

@@ -89,7 +89,7 @@ class BottleneckDetector:
     Example:
         >>> detector = BottleneckDetector()
         >>> analysis = detector.analyze(timeline)
-        >>> print(f"Primary bottleneck: {analysis.primary_bottleneck}")
+        >>> emit(f"Primary bottleneck: {analysis.primary_bottleneck}")
     """
 
     def __init__(

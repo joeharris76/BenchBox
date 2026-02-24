@@ -178,7 +178,7 @@ class ArrowTypeMapper:
         # Unknown type handling
         if strict:
             raise SchemaError(f"Unknown SQL type '{sql_type}' cannot be mapped to Arrow type in strict mode")
-        # Default to string for backward compatibility
+        # Default to string when strict mode is disabled
         return pa.string()
 
     @staticmethod

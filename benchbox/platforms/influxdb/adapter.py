@@ -26,7 +26,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.utils.dependencies import (
     check_platform_dependencies,
     get_dependency_error_message,
@@ -78,11 +78,14 @@ class InfluxDBAdapter(
         ...     host="localhost",
         ...     port=8086,
         ...     token="your-token",
+
         ...     database="benchmarks",
         ...     mode="core",
         ...     ssl=False,
         ... )
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         """Initialize InfluxDB adapter.
@@ -233,9 +236,7 @@ class InfluxDBAdapter(
         Returns:
             Tuple of (row_counts, load_time, load_metadata)
         """
-        import csv
         import time
-        from datetime import datetime
 
         from ._dependencies import INFLUXDB3_AVAILABLE
 
@@ -255,9 +256,57 @@ class InfluxDBAdapter(
             return {}, 0.0, {"skipped": True, "reason": "write not supported"}
 
         # TSBS DevOps table configurations for Line Protocol
-        # Maps table name to (tag_columns, field_columns, timestamp_column)
-        # Note: tags table uses hostname as primary tag, other fields as string fields
-        tsbs_tables = {
+        tsbs_tables = self._tsbs_table_configs()
+
+        row_counts: dict[str, int] = {}
+        total_time = 0.0
+        load_metadata: dict[str, Any] = {"tables_loaded": [], "batch_size": 10000}
+
+        self.logger.info(f"Loading TSBS DevOps data from {data_dir}")
+
+        for table_name, config in tsbs_tables.items():
+            csv_path = data_dir / f"{table_name}.csv"
+            if not csv_path.exists():
+                self.logger.debug(f"No data file found for {table_name}, skipping")
+                continue
+
+            self.logger.info(f"Loading {table_name} from {csv_path}")
+            table_start = time.perf_counter()
+
+            try:
+                records = self._read_tsbs_csv(csv_path, config)
+
+                if records:
+                    count = connection.write_batch(
+                        measurement=table_name,
+                        records=records,
+                        tag_columns=config["tags"],
+                        field_columns=config["fields"],
+                        timestamp_column="time",
+                        precision="ns",
+                        batch_size=10000,
+                    )
+                    row_counts[table_name] = count
+                    load_metadata["tables_loaded"].append(table_name)
+                    self.logger.info(f"Loaded {count:,} rows into {table_name}")
+
+            except Exception as e:
+                self.logger.error(f"Failed to load {table_name}: {e}")
+                row_counts[table_name] = 0
+
+            table_time = time.perf_counter() - table_start
+            total_time += table_time
+            self.logger.debug(f"{table_name} load time: {table_time:.2f}s")
+
+        load_metadata["total_rows"] = sum(row_counts.values())
+        self.logger.info(f"Data loading complete: {load_metadata['total_rows']:,} total rows in {total_time:.2f}s")
+
+        return row_counts, total_time, load_metadata
+
+    @staticmethod
+    def _tsbs_table_configs() -> dict[str, dict[str, Any]]:
+        """Return TSBS DevOps table configurations for Line Protocol."""
+        return {
             "tags": {
                 "tags": ["hostname"],
                 "fields": [
@@ -271,7 +320,7 @@ class InfluxDBAdapter(
                     "service_version",
                     "service_environment",
                 ],
-                "timestamp": None,  # No timestamp for metadata table
+                "timestamp": None,
             },
             "cpu": {
                 "tags": ["hostname"],
@@ -336,106 +385,73 @@ class InfluxDBAdapter(
             },
         }
 
-        row_counts: dict[str, int] = {}
-        total_time = 0.0
-        load_metadata: dict[str, Any] = {"tables_loaded": [], "batch_size": 10000}
+    # Fields that should always remain as floats (not converted to int)
+    _FLOAT_ONLY_FIELDS = frozenset(
+        {
+            "usage_user",
+            "usage_system",
+            "usage_idle",
+            "usage_nice",
+            "usage_iowait",
+            "usage_irq",
+            "usage_softirq",
+            "usage_steal",
+            "usage_guest",
+            "usage_guest_nice",
+            "used_percent",
+            "available_percent",
+        }
+    )
 
-        self.logger.info(f"Loading TSBS DevOps data from {data_dir}")
+    def _read_tsbs_csv(self, csv_path: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
+        """Read a TSBS DevOps CSV file and convert rows to records."""
+        import csv
 
-        for table_name, config in tsbs_tables.items():
-            # Find data file for this table
-            csv_path = data_dir / f"{table_name}.csv"
-            if not csv_path.exists():
-                self.logger.debug(f"No data file found for {table_name}, skipping")
-                continue
+        records: list[dict[str, Any]] = []
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                record: dict[str, Any] = {}
 
-            self.logger.info(f"Loading {table_name} from {csv_path}")
-            table_start = time.perf_counter()
+                if config["timestamp"] in row:
+                    record["time"] = self._parse_timestamp(row[config["timestamp"]])
 
+                for tag in config["tags"]:
+                    if tag in row:
+                        record[tag] = row[tag]
+
+                for field in config["fields"]:
+                    if field in row and row[field]:
+                        parsed = self._parse_field_value(field, row[field])
+                        if parsed is not None:
+                            record[field] = parsed
+
+                records.append(record)
+        return records
+
+    @staticmethod
+    def _parse_timestamp(ts_str: str):
+        """Parse a timestamp string to datetime, trying ISO then Unix format."""
+        from datetime import datetime
+
+        try:
+            return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except ValueError:
             try:
-                # Read CSV and convert to records
-                records: list[dict[str, Any]] = []
-                with open(csv_path, newline="", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        record: dict[str, Any] = {}
+                return datetime.fromtimestamp(float(ts_str))
+            except (ValueError, OSError):
+                return None
 
-                        # Parse timestamp
-                        if config["timestamp"] in row:
-                            ts_str = row[config["timestamp"]]
-                            try:
-                                # Try ISO format first
-                                record["time"] = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                            except ValueError:
-                                # Try Unix timestamp
-                                try:
-                                    record["time"] = datetime.fromtimestamp(float(ts_str))
-                                except (ValueError, OSError):
-                                    record["time"] = None
-
-                        # Extract tags
-                        tags: list[str] = config["tags"]  # type: ignore[assignment]
-                        for tag in tags:
-                            if tag in row:
-                                record[tag] = row[tag]
-
-                        # Extract and convert fields
-                        fields: list[str] = config["fields"]  # type: ignore[assignment]
-                        for field in fields:
-                            if field in row and row[field]:
-                                try:
-                                    # Try float first (handles both int and float)
-                                    value = float(row[field])
-                                    # Convert to int if it's a whole number and expected to be int
-                                    if value.is_integer() and field not in (
-                                        "usage_user",
-                                        "usage_system",
-                                        "usage_idle",
-                                        "usage_nice",
-                                        "usage_iowait",
-                                        "usage_irq",
-                                        "usage_softirq",
-                                        "usage_steal",
-                                        "usage_guest",
-                                        "usage_guest_nice",
-                                        "used_percent",
-                                        "available_percent",
-                                    ):
-                                        record[field] = int(value)
-                                    else:
-                                        record[field] = value
-                                except ValueError:
-                                    self.logger.debug(f"Skipping invalid value for field '{field}': {row[field]}")
-
-                        records.append(record)
-
-                # Write records using batch method
-                if records:
-                    count = connection.write_batch(
-                        measurement=table_name,
-                        records=records,
-                        tag_columns=config["tags"],
-                        field_columns=config["fields"],
-                        timestamp_column="time",
-                        precision="ns",
-                        batch_size=10000,
-                    )
-                    row_counts[table_name] = count
-                    load_metadata["tables_loaded"].append(table_name)
-                    self.logger.info(f"Loaded {count:,} rows into {table_name}")
-
-            except Exception as e:
-                self.logger.error(f"Failed to load {table_name}: {e}")
-                row_counts[table_name] = 0
-
-            table_time = time.perf_counter() - table_start
-            total_time += table_time
-            self.logger.debug(f"{table_name} load time: {table_time:.2f}s")
-
-        load_metadata["total_rows"] = sum(row_counts.values())
-        self.logger.info(f"Data loading complete: {load_metadata['total_rows']:,} total rows in {total_time:.2f}s")
-
-        return row_counts, total_time, load_metadata
+    def _parse_field_value(self, field: str, raw: str):
+        """Parse a field value string to int or float as appropriate."""
+        try:
+            value = float(raw)
+            if value.is_integer() and field not in self._FLOAT_ONLY_FIELDS:
+                return int(value)
+            return value
+        except ValueError:
+            self.logger.debug(f"Skipping invalid value for field '{field}': {raw}")
+            return None
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply platform-specific optimizations for the benchmark type.

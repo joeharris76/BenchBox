@@ -24,7 +24,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from benchbox.core.config_inheritance import (
     resolve_dialect_for_query_translation,
@@ -36,7 +36,11 @@ try:
 except ImportError:
     duckdb = None
 
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
+from .duckdb import _build_duckdb_ctas_sort_sql
+
+if TYPE_CHECKING:
+    from benchbox.core.tuning.interface import TuningColumn
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +59,8 @@ class MotherDuckAdapter(PlatformAdapter):
         benchbox run --platform motherduck --benchmark tpch --scale 0.01 \\
             --platform-option database=my_benchmark_db
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         """Initialize MotherDuck adapter.
@@ -214,6 +220,33 @@ class MotherDuckAdapter(PlatformAdapter):
             logger.error(f"Query execution failed after {execution_time:.2f}s: {e}")
             raise
 
+    def get_platform_info(self, connection: Any = None) -> dict[str, Any]:
+        """Get MotherDuck platform information for results traceability."""
+        info: dict[str, Any] = {
+            "platform_type": "motherduck",
+            "platform_name": self.platform_name,
+            "platform_version": "unknown",
+            "connection_mode": "remote",
+            "configuration": {
+                "database": self.database,
+            },
+            "client_library_version": getattr(duckdb, "__version__", None) if duckdb else None,
+        }
+
+        # Probe engine version from active connection
+        conn = connection or self.connection
+        if conn:
+            try:
+                result = conn.execute("SELECT version()").fetchone()
+                if result:
+                    info["platform_version"] = result[0]
+                    info["engine_version"] = result[0]
+                    info["engine_version_source"] = "sql_query"
+            except Exception:
+                logger.debug("Failed to probe MotherDuck engine version via SELECT version()", exc_info=True)
+
+        return info
+
     def get_platform_metadata(self) -> dict[str, Any]:
         """Get platform metadata including MotherDuck-specific info."""
         metadata = {
@@ -287,6 +320,7 @@ class MotherDuckAdapter(PlatformAdapter):
         """
         start_time = time.perf_counter()
         row_counts: dict[str, int] = {}
+        effective_tuning = self.unified_tuning_configuration if self.tuning_enabled else None
 
         # Get table files from data directory
         for table_file in data_dir.glob("*.parquet"):
@@ -303,8 +337,15 @@ class MotherDuckAdapter(PlatformAdapter):
             result = connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
             row_counts[table_name] = result[0] if result else 0
 
+            if effective_tuning:
+                self.apply_ctas_sort(table_name, effective_tuning, connection)
+
         load_time = time.perf_counter() - start_time
         return row_counts, load_time, None
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """Build MotherDuck CTAS SQL using DuckDB-compatible syntax."""
+        return _build_duckdb_ctas_sort_sql(table_name, sort_columns)
 
     def apply_platform_optimizations(self, platform_config, connection) -> None:
         """Apply platform-specific optimizations.

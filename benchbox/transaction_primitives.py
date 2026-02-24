@@ -11,11 +11,18 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from benchbox.base import BaseBenchmark
+from benchbox.core.benchmark_mixins import OperationCategoryFacadeMixin, QueryCategoryFacadeMixin, QueryFacadeMixin
 from benchbox.core.operations import OperationExecutor
 from benchbox.core.transaction_primitives.benchmark import TransactionPrimitivesBenchmark
 
 
-class TransactionPrimitives(BaseBenchmark, OperationExecutor):
+class TransactionPrimitives(
+    OperationCategoryFacadeMixin,
+    QueryCategoryFacadeMixin,
+    QueryFacadeMixin,
+    BaseBenchmark,
+    OperationExecutor,
+):
     """Transaction Primitives benchmark implementation.
 
     Tests database transaction semantics and overhead using TPC-H schema as foundation.
@@ -88,43 +95,6 @@ class TransactionPrimitives(BaseBenchmark, OperationExecutor):
         """
         return self._impl.generate_data(tables)
 
-    def get_queries(self, dialect: Optional[str] = None) -> dict[str, str]:
-        """Get all transaction operation SQL.
-
-        Args:
-            dialect: Target SQL dialect for query translation. If None, returns original SQL.
-
-        Returns:
-            A dictionary mapping operation IDs to transaction SQL strings
-        """
-        return self._impl.get_queries(dialect=dialect)
-
-    def get_queries_by_category(self, category: str) -> dict[str, str]:
-        """Get transaction operation SQL filtered by category.
-
-        Args:
-            category: Operation category (overhead, isolation, multi_statement, advanced)
-
-        Returns:
-            Dictionary mapping operation IDs to transaction SQL for the category
-        """
-        return self._impl.get_queries_by_category(category)
-
-    def get_query(self, query_id: Union[int, str], **kwargs) -> str:
-        """Get a specific transaction operation SQL.
-
-        Args:
-            query_id: The ID of the operation to retrieve (e.g., 'transaction_commit_small')
-            **kwargs: Additional parameters
-
-        Returns:
-            The transaction SQL string
-
-        Raises:
-            ValueError: If the query_id is invalid
-        """
-        return self._impl.get_query(query_id, **kwargs)
-
     def get_operation(self, operation_id: str) -> Any:
         """Get a specific transaction operation.
 
@@ -143,25 +113,6 @@ class TransactionPrimitives(BaseBenchmark, OperationExecutor):
             Dictionary mapping operation IDs to TransactionOperation objects
         """
         return self._impl.get_all_operations()
-
-    def get_operations_by_category(self, category: str) -> dict[str, Any]:
-        """Get operations filtered by category.
-
-        Args:
-            category: Category name (e.g., 'overhead', 'isolation', 'multi_statement')
-
-        Returns:
-            Dictionary mapping operation IDs to TransactionOperation objects
-        """
-        return self._impl.get_operations_by_category(category)
-
-    def get_operation_categories(self) -> list[str]:
-        """Get list of available operation categories.
-
-        Returns:
-            List of category names
-        """
-        return self._impl.get_operation_categories()
 
     def get_schema(self, dialect: str = "standard") -> dict[str, dict]:
         """Get the Transaction Primitives schema (staging tables).

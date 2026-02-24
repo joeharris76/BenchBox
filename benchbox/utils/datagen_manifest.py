@@ -147,9 +147,6 @@ class DataGenerationManifest:
     Manifest Schema v2 (with multi-format support):
     - formats: list[str] - List of available formats (e.g., ['tbl', 'parquet', 'delta'])
     - tables: dict[table_name, dict[format, list[entries]]] - Nested structure by format
-
-    Manifest Schema v1 (legacy, for backward compatibility):
-    - tables: dict[table_name, list[entries]] - Simple list of entries per table
     """
 
     def __init__(
@@ -318,27 +315,15 @@ class DataGenerationManifest:
 
 
 def summarise_manifest(manifest: dict[str, Any]) -> tuple[int, int]:
-    """Return (table_count, file_count) for a parsed manifest dictionary.
-
-    Handles both v1 (legacy) and v2 (multi-format) manifests.
-    """
+    """Return (table_count, file_count) for a parsed manifest dictionary."""
 
     tables = manifest.get("tables", {}) or {}
     table_count = len(tables)
-
-    # Check manifest version (prefer explicit version, fall back to legacy key)
-    version = int(manifest.get("version") or manifest.get("manifest_version", 1))
-
-    if version == 1:
-        # V1: tables = dict[table, list[entries]]
-        file_count = sum(len(entries or []) for entries in tables.values())
-    else:
-        # V2: tables = dict[table, {"formats": {format: [entries]}}]
-        file_count = 0
-        for table_data in tables.values():
-            formats = table_data.get("formats", {}) if isinstance(table_data, dict) else {}
-            for entries in formats.values():
-                file_count += len(entries or [])
+    file_count = 0
+    for table_data in tables.values():
+        formats = table_data.get("formats", {}) if isinstance(table_data, dict) else {}
+        for entries in formats.values():
+            file_count += len(entries or [])
 
     return table_count, file_count
 
@@ -377,36 +362,28 @@ def get_table_files(manifest: dict[str, Any], table_name: str, format: str | Non
         return []
 
     table_data = tables[table_name]
-    version = int(manifest.get("version") or manifest.get("manifest_version", 1))
-
-    if version == 1:
-        # V1: tables = dict[table, list[entries]]
-        # All entries are assumed to be 'tbl' format
-        return table_data if isinstance(table_data, list) else []
-    else:
-        # V2: tables = dict[table, {"formats": {format: [entries]}}]
-        if not isinstance(table_data, dict):
-            return []
-
-        formats_dict = table_data.get("formats", {}) if isinstance(table_data, dict) else {}
-
-        if format:
-            # Return entries for specific format
-            return formats_dict.get(format, [])
-
-        # Choose default format: manifest format_preference > manifest formats list > first available
-        preferred_order = manifest.get("format_preference") or manifest.get("formats") or []
-        if preferred_order:
-            for fmt in preferred_order:
-                if fmt in formats_dict and formats_dict[fmt]:
-                    return formats_dict[fmt]
-
-        # Fallback to any available format
-        for entries in formats_dict.values():
-            if entries:
-                return entries
-
+    if not isinstance(table_data, dict):
         return []
+
+    formats_dict = table_data.get("formats", {}) if isinstance(table_data, dict) else {}
+
+    if format:
+        # Return entries for specific format
+        return formats_dict.get(format, [])
+
+    # Choose default format: manifest format_preference > manifest formats list > first available
+    preferred_order = manifest.get("format_preference") or manifest.get("formats") or []
+    if preferred_order:
+        for fmt in preferred_order:
+            if fmt in formats_dict and formats_dict[fmt]:
+                return formats_dict[fmt]
+
+    # Fallback to any available format
+    for entries in formats_dict.values():
+        if entries:
+            return entries
+
+    return []
 
 
 def get_available_formats(manifest: dict[str, Any], table_name: str | None = None) -> list[str]:
@@ -420,12 +397,6 @@ def get_available_formats(manifest: dict[str, Any], table_name: str | None = Non
     Returns:
         List of format names
     """
-    version = int(manifest.get("version") or manifest.get("manifest_version", 1))
-
-    if version == 1:
-        # V1 manifests only have 'tbl' format
-        return ["tbl"]
-
     if table_name:
         # Get formats for specific table
         tables = manifest.get("tables", {})

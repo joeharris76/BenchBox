@@ -232,25 +232,14 @@ class TPCHSkewBenchmark(TPCHBenchmark):
             >>>
             >>> # Compare queries 1, 6, and 14
             >>> results = benchmark.compare_with_uniform(adapter, queries=[1, 6, 14])
-            >>> print(results["summary"]["avg_skew_slowdown"])
+            >>> emit(results["summary"]["avg_skew_slowdown"])
         """
-        from statistics import mean, stdev
-
         from benchbox.core.tpch.benchmark import TPCHBenchmark
 
         if adapter is None:
             raise ValueError("adapter cannot be None")
 
-        if queries is None:
-            queries = list(range(1, 23))
-        else:
-            # Validate query IDs
-            invalid = [q for q in queries if not isinstance(q, int) or q < 1 or q > 22]
-            if invalid:
-                raise ValueError(f"Invalid query IDs: {invalid}. Must be integers 1-22.")
-
-        if iterations < 1:
-            raise ValueError(f"iterations must be >= 1, got {iterations}")
+        queries = self._validate_comparison_queries(queries, iterations)
 
         self.log_verbose("Starting uniform vs skewed comparison")
         self.log_verbose(f"  Queries: {queries}")
@@ -258,17 +247,15 @@ class TPCHSkewBenchmark(TPCHBenchmark):
         self.log_verbose(f"  Skew preset: {self.skew_preset}")
         self.log_verbose(f"  Iterations: {iterations}")
 
-        # Convert query IDs to strings for adapter compatibility
         query_subset = [str(q) for q in queries]
 
-        # Create uniform TPC-H benchmark with same parameters
         uniform_benchmark = TPCHBenchmark(
             scale_factor=self.scale_factor,
             verbose=self.verbose,
             parallel=getattr(self, "parallel", 1),
         )
 
-        results = {
+        results: dict[str, Any] = {
             "queries": queries,
             "scale_factor": self.scale_factor,
             "skew_preset": self.skew_preset,
@@ -281,140 +268,139 @@ class TPCHSkewBenchmark(TPCHBenchmark):
         }
 
         # Phase 1: Run queries on uniform data
-        self.log_verbose("Phase 1: Running queries on uniform TPC-H data...")
-        start_uniform = mono_time()
-
-        try:
-            uniform_run_results = adapter.run_benchmark(
-                uniform_benchmark,
-                query_subset=query_subset,
-                test_execution_type="standard",
-            )
-            uniform_duration = elapsed_seconds(start_uniform)
-            self.log_verbose(f"  Uniform benchmark completed in {uniform_duration:.2f}s")
-
-            # Extract per-query timing from results
-            for qr in uniform_run_results.query_results:
-                query_id = qr.get("query_id", "")
-                exec_time = qr.get("execution_time_ms", 0) / 1000.0  # Convert to seconds
-                status = qr.get("status", "UNKNOWN")
-
-                if query_id not in results["uniform_results"]:
-                    results["uniform_results"][query_id] = {
-                        "times": [],
-                        "status": status,
-                    }
-                results["uniform_results"][query_id]["times"].append(exec_time)
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to run uniform benchmark: {e}") from e
+        self._run_benchmark_phase(
+            adapter, uniform_benchmark, query_subset, results["uniform_results"], "uniform", "Phase 1"
+        )
 
         # Phase 2: Run queries on skewed data
-        self.log_verbose("Phase 2: Running queries on skewed TPC-H data...")
-        start_skewed = mono_time()
-
-        try:
-            skewed_run_results = adapter.run_benchmark(
-                self,
-                query_subset=query_subset,
-                test_execution_type="standard",
-            )
-            skewed_duration = elapsed_seconds(start_skewed)
-            self.log_verbose(f"  Skewed benchmark completed in {skewed_duration:.2f}s")
-
-            # Extract per-query timing from results
-            for qr in skewed_run_results.query_results:
-                query_id = qr.get("query_id", "")
-                exec_time = qr.get("execution_time_ms", 0) / 1000.0  # Convert to seconds
-                status = qr.get("status", "UNKNOWN")
-
-                if query_id not in results["skewed_results"]:
-                    results["skewed_results"][query_id] = {
-                        "times": [],
-                        "status": status,
-                    }
-                results["skewed_results"][query_id]["times"].append(exec_time)
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to run skewed benchmark: {e}") from e
+        self._run_benchmark_phase(adapter, self, query_subset, results["skewed_results"], "skewed", "Phase 2")
 
         # Phase 3: Compute comparison statistics
         self.log_verbose("Phase 3: Computing comparison statistics...")
+        results["comparison"], results["summary"] = self._compute_comparison_stats(queries, results)
 
-        all_ratios = []
+        self.log_verbose("Comparison complete")
+        return results
+
+    @staticmethod
+    def _validate_comparison_queries(queries: list[int] | None, iterations: int) -> list[int]:
+        """Validate and return query list for comparison."""
+        if queries is None:
+            queries = list(range(1, 23))
+        else:
+            invalid = [q for q in queries if not isinstance(q, int) or q < 1 or q > 22]
+            if invalid:
+                raise ValueError(f"Invalid query IDs: {invalid}. Must be integers 1-22.")
+        if iterations < 1:
+            raise ValueError(f"iterations must be >= 1, got {iterations}")
+        return queries
+
+    def _run_benchmark_phase(
+        self,
+        adapter: Any,
+        benchmark: Any,
+        query_subset: list[str],
+        target_results: dict[str, Any],
+        label: str,
+        phase_name: str,
+    ) -> None:
+        """Run a single benchmark phase (uniform or skewed) and collect results."""
+        self.log_verbose(f"{phase_name}: Running queries on {label} TPC-H data...")
+        start = mono_time()
+
+        try:
+            run_results = adapter.run_benchmark(
+                benchmark,
+                query_subset=query_subset,
+                test_execution_type="standard",
+            )
+            duration = elapsed_seconds(start)
+            self.log_verbose(f"  {label.capitalize()} benchmark completed in {duration:.2f}s")
+
+            for qr in run_results.query_results:
+                query_id = qr.get("query_id", "")
+                exec_time = qr.get("execution_time_ms", 0) / 1000.0
+                status = qr.get("status", "UNKNOWN")
+
+                if query_id not in target_results:
+                    target_results[query_id] = {"times": [], "status": status}
+                target_results[query_id]["times"].append(exec_time)
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to run {label} benchmark: {e}") from e
+
+    def _compute_comparison_stats(
+        self, queries: list[int], results: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Compute per-query comparison and summary statistics."""
+        from statistics import mean, stdev
+
+        comparison: dict[str, Any] = {}
+        all_ratios: list[float] = []
         uniform_total = 0.0
         skewed_total = 0.0
-        queries_compared = 0
 
         for query_id in [str(q) for q in queries]:
-            uniform_data = results["uniform_results"].get(query_id, {})
-            skewed_data = results["skewed_results"].get(query_id, {})
-
-            uniform_times = uniform_data.get("times", [])
-            skewed_times = skewed_data.get("times", [])
+            uniform_times = results["uniform_results"].get(query_id, {}).get("times", [])
+            skewed_times = results["skewed_results"].get(query_id, {}).get("times", [])
 
             if not uniform_times or not skewed_times:
-                results["comparison"][query_id] = {
-                    "status": "INCOMPLETE",
-                    "reason": "Missing timing data",
-                }
+                comparison[query_id] = {"status": "INCOMPLETE", "reason": "Missing timing data"}
                 continue
 
             uniform_avg = mean(uniform_times)
             skewed_avg = mean(skewed_times)
-
-            # Ratio > 1 means skewed is slower, < 1 means skewed is faster
             ratio = skewed_avg / uniform_avg if uniform_avg > 0 else float("inf")
 
-            comparison_entry = {
+            entry: dict[str, Any] = {
                 "uniform_avg_seconds": uniform_avg,
                 "skewed_avg_seconds": skewed_avg,
-                "ratio": ratio,  # skewed/uniform
+                "ratio": ratio,
                 "status": "SUCCESS",
             }
-
-            # Add standard deviation if multiple iterations
             if len(uniform_times) > 1:
-                comparison_entry["uniform_stdev"] = stdev(uniform_times)
+                entry["uniform_stdev"] = stdev(uniform_times)
             if len(skewed_times) > 1:
-                comparison_entry["skewed_stdev"] = stdev(skewed_times)
+                entry["skewed_stdev"] = stdev(skewed_times)
 
-            results["comparison"][query_id] = comparison_entry
+            comparison[query_id] = entry
             all_ratios.append(ratio)
             uniform_total += uniform_avg
             skewed_total += skewed_avg
-            queries_compared += 1
 
-        # Compute summary statistics
-        if all_ratios:
-            results["summary"] = {
-                "queries_compared": queries_compared,
-                "uniform_total_seconds": uniform_total,
-                "skewed_total_seconds": skewed_total,
-                "avg_ratio": mean(all_ratios),
-                "min_ratio": min(all_ratios),
-                "max_ratio": max(all_ratios),
-                "geometric_mean_ratio": self._geometric_mean(all_ratios),
-            }
-            if len(all_ratios) > 1:
-                results["summary"]["ratio_stdev"] = stdev(all_ratios)
+        summary = self._build_comparison_summary(all_ratios, uniform_total, skewed_total)
+        return comparison, summary
 
-            # Interpretation
-            avg_ratio = results["summary"]["avg_ratio"]
-            if avg_ratio > 1.1:
-                results["summary"]["interpretation"] = f"Skewed data is {(avg_ratio - 1) * 100:.1f}% slower on average"
-            elif avg_ratio < 0.9:
-                results["summary"]["interpretation"] = f"Skewed data is {(1 - avg_ratio) * 100:.1f}% faster on average"
-            else:
-                results["summary"]["interpretation"] = "Performance is similar between uniform and skewed data"
+    def _build_comparison_summary(
+        self, all_ratios: list[float], uniform_total: float, skewed_total: float
+    ) -> dict[str, Any]:
+        """Build summary statistics from comparison ratios."""
+        from statistics import mean, stdev
+
+        if not all_ratios:
+            return {"queries_compared": 0, "error": "No valid comparisons could be made"}
+
+        summary: dict[str, Any] = {
+            "queries_compared": len(all_ratios),
+            "uniform_total_seconds": uniform_total,
+            "skewed_total_seconds": skewed_total,
+            "avg_ratio": mean(all_ratios),
+            "min_ratio": min(all_ratios),
+            "max_ratio": max(all_ratios),
+            "geometric_mean_ratio": self._geometric_mean(all_ratios),
+        }
+        if len(all_ratios) > 1:
+            summary["ratio_stdev"] = stdev(all_ratios)
+
+        avg_ratio = summary["avg_ratio"]
+        if avg_ratio > 1.1:
+            summary["interpretation"] = f"Skewed data is {(avg_ratio - 1) * 100:.1f}% slower on average"
+        elif avg_ratio < 0.9:
+            summary["interpretation"] = f"Skewed data is {(1 - avg_ratio) * 100:.1f}% faster on average"
         else:
-            results["summary"] = {
-                "queries_compared": 0,
-                "error": "No valid comparisons could be made",
-            }
+            summary["interpretation"] = "Performance is similar between uniform and skewed data"
 
-        self.log_verbose("Comparison complete")
-        return results
+        return summary
 
     @staticmethod
     def _geometric_mean(values: list[float]) -> float:

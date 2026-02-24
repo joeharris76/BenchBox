@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from .adapter import (
     BenchmarkResults,
+    DriverIsolationCapability,
     EnhancedBenchmarkResults,
     ExecutionPhases,
     PlatformAdapter,
     PlatformAdapterConnection,
     PlatformAdapterCursor,
     QueryDefinition,
+    check_isolation_capability,
 )
 from .models import (
     ConnectionConfig,
@@ -35,7 +37,9 @@ __all__ = [
     "DatabaseValidationResult",
     "DataGenerationPhase",
     "BenchmarkResults",
+    "DriverIsolationCapability",
     "EnhancedBenchmarkResults",
+    "check_isolation_capability",
     "ExecutionPhases",
     "FileFormatInfo",
     "MaintenanceOperation",

@@ -80,3 +80,42 @@ class TestStorageLocationParity:
         """get_benchmark_runs_dataframe_path() respects base_dir override."""
         path = get_benchmark_runs_dataframe_path("/custom/dir")
         assert path == Path("/custom/dir")
+
+    def test_datacache_get_cache_path_is_child_of_datagen_path(self):
+        """DataCache.get_cache_path() should return a path nested inside get_benchmark_runs_datagen_path()."""
+        from benchbox.core.dataframe.capabilities import DataFormat
+
+        cache = DataCache()
+        for benchmark, sf in [("tpch", 0.01), ("tpch", 1.0), ("tpcds", 10.0)]:
+            cache_path = cache.get_cache_path(benchmark, sf, DataFormat.PARQUET)
+            datagen_path = get_benchmark_runs_datagen_path(benchmark, sf)
+            # cache_path must be strictly inside datagen_path
+            assert str(cache_path).startswith(str(datagen_path) + "/"), (
+                f"Expected {cache_path} to be under {datagen_path}"
+            )
+
+
+class TestGlobalCacheOption:
+    """Verify --global-cache routes DataFrame cache to ~/.benchbox/datagen/."""
+
+    def test_global_cache_path_is_under_home(self):
+        """~/.benchbox/datagen/ is under the user home directory."""
+        expected = Path.home() / ".benchbox" / "datagen"
+        assert str(expected).startswith(str(Path.home()))
+
+    def test_global_cache_path_uses_datagen_subdir(self):
+        """Global cache uses the unified datagen/ subdirectory name."""
+        expected = Path.home() / ".benchbox" / "datagen"
+        assert expected.name == "datagen"
+
+    def test_datacache_with_global_dir_resolves_correctly(self):
+        """DataCache constructed with ~/.benchbox/datagen/ uses that path."""
+        global_dir = Path.home() / ".benchbox" / "datagen"
+        cache = DataCache(cache_dir=global_dir)
+        assert cache.cache_dir == global_dir
+
+    def test_global_cache_differs_from_project_local(self):
+        """Global cache path must differ from the default project-local path."""
+        global_dir = Path.home() / ".benchbox" / "datagen"
+        project_local = get_benchmark_runs_dataframe_path()
+        assert global_dir != project_local

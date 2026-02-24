@@ -97,29 +97,28 @@ def prompt_cloud_output_location(
         console.print("[dim]You can add --output <cloud-path> when running the command manually[/dim]")
         return None
 
-    # Prompt for cloud path with validation
+    return _prompt_and_validate_cloud_path(default_output)
+
+
+def _prompt_and_validate_cloud_path(default_output: Optional[str]) -> Optional[str]:
+    """Prompt for a cloud storage path with format validation and confirmation loop."""
     while True:
         cloud_path = Prompt.ask("\n[bold]Enter cloud storage path[/bold]", default=default_output or "")
 
         if not cloud_path:
             console.print("[red]❌ Cloud path cannot be empty[/red]")
-            retry = Confirm.ask("Try again?", default=True)
-            if not retry:
+            if not Confirm.ask("Try again?", default=True):
                 return None
             continue
 
-        # Validate cloud path format
         if not is_cloud_path(cloud_path):
             console.print(f"[yellow]⚠️  Warning: '{cloud_path}' doesn't look like a cloud path[/yellow]")
             console.print("[dim]Expected formats: s3://, gs://, abfss://, dbfs:/Volumes/...[/dim]")
-            proceed = Confirm.ask("Use this path anyway?", default=False)
-            if not proceed:
+            if not Confirm.ask("Use this path anyway?", default=False):
                 continue
 
-        # Confirm the path
         console.print(f"\n[green]✓[/green] Will use: [cyan]{cloud_path}[/cyan]")
-        confirmed = Confirm.ask("Is this correct?", default=True)
-        if confirmed:
+        if Confirm.ask("Is this correct?", default=True):
             return cloud_path
 
 

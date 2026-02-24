@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import pytest
 
+from benchbox.core.results.models import (
+    QUERY_RUN_TYPE_MEASUREMENT,
+    QUERY_RUN_TYPE_METADATA,
+    QUERY_RUN_TYPE_SUMMARY,
+    QUERY_RUN_TYPE_WARMUP,
+    QUERY_RUN_TYPES,
+)
 from benchbox.core.results.query_normalizer import (
     QueryResultInput,
     format_query_id,
@@ -13,6 +20,13 @@ from benchbox.core.results.query_normalizer import (
 )
 
 pytestmark = pytest.mark.fast
+
+
+def test_canonical_query_run_type_constants_are_defined() -> None:
+    assert QUERY_RUN_TYPE_WARMUP in QUERY_RUN_TYPES
+    assert QUERY_RUN_TYPE_MEASUREMENT in QUERY_RUN_TYPES
+    assert QUERY_RUN_TYPE_METADATA in QUERY_RUN_TYPES
+    assert QUERY_RUN_TYPE_SUMMARY in QUERY_RUN_TYPES
 
 
 class TestNormalizeQueryId:
@@ -131,6 +145,21 @@ class TestNormalizeQueryResult:
         assert result.iteration == 2
         assert result.stream_id == 3
         assert result.run_type == "measurement"
+
+    def test_normalize_preserves_explicit_run_type_over_iteration_inference(self) -> None:
+        """Explicit producer run_type should win over inferred fallback values."""
+        raw = {
+            "query_id": "Q1",
+            "execution_time_seconds": 1.5,
+            "rows_returned": 100,
+            "status": "SUCCESS",
+            "iteration": 1,
+            "run_type": "warmup",
+        }
+        result = normalize_query_result(raw)
+
+        assert result.iteration == 1
+        assert result.run_type == "warmup"
 
     def test_normalize_preserves_zero_iteration(self) -> None:
         """Test that iteration=0 is preserved."""

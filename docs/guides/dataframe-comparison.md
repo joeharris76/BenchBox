@@ -32,7 +32,7 @@ BenchBox provides a comprehensive benchmark suite for comparing:
 
 ## Prerequisites
 
-- BenchBox installed with DataFrame extras: `uv add benchbox --extra dataframe`
+- BenchBox installed with DataFrame extras: `uv add benchbox --extra dataframe-all`
 - Benchmark data generated (TPC-H)
 
 ## Quick Start
@@ -59,7 +59,7 @@ Not installed:
   dask-df         (pandas    , distributed )
   pyspark-df      (expression, distributed )
 
-Install extras with: uv add benchbox --extra dataframe-<name>
+Install extras with: uv add benchbox --extra <name>
 ```
 
 ### Compare Two Platforms
@@ -505,7 +505,7 @@ Warning: Platform modin-df not available, skipping
 Install the required extra:
 
 ```bash
-uv add benchbox --extra dataframe-modin
+uv add benchbox --extra modin
 ```
 
 ### Memory Issues at Large Scale

@@ -19,8 +19,8 @@ Usage:
         result = execute_query(...)
 
     profile = ctx.get_profile()
-    print(f"Execution time: {profile.execution_time_ms}ms")
-    print(f"Query plan: {profile.query_plan}")
+    emit(f"Execution time: {profile.execution_time_ms}ms")
+    emit(f"Query plan: {profile.query_plan}")
 
 Copyright 2026 Joe Harris / BenchBox Project
 
@@ -215,7 +215,7 @@ class MemoryTracker:
 
         tracker.stop()
         peak_mb = tracker.peak_memory_mb
-        print(f"Peak memory: {peak_mb:.2f} MB")
+        emit(f"Peak memory: {peak_mb:.2f} MB")
 
     Attributes:
         sample_interval_ms: Time between memory samples in milliseconds
@@ -411,7 +411,7 @@ def track_memory(sample_interval_ms: int = 50) -> Generator[MemoryTracker, None,
     Example:
         with track_memory() as tracker:
             result = df.collect()
-        print(f"Peak memory delta: {tracker.peak_memory_delta_mb:.2f} MB")
+        emit(f"Peak memory delta: {tracker.peak_memory_delta_mb:.2f} MB")
 
     Args:
         sample_interval_ms: Interval between samples
@@ -452,7 +452,7 @@ class DataFrameProfiler:
 
         # Get statistics
         stats = profiler.get_statistics()
-        print(f"Average execution time: {stats['avg_execution_time_ms']:.2f}ms")
+        emit(f"Average execution time: {stats['avg_execution_time_ms']:.2f}ms")
     """
 
     def __init__(self, platform: str = ""):
@@ -949,32 +949,3 @@ class ProfiledExecutionResult:
     def query_plan(self) -> QueryPlan | None:
         """Query execution plan if captured."""
         return self.profile.query_plan
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary format for backward compatibility.
-
-        Returns a dictionary matching the legacy execute_query return format
-        with additional profiling data.
-        """
-        result_dict = {
-            "query_id": self.profile.query_id,
-            "status": "SUCCESS",
-            "execution_time_seconds": self.execution_time_seconds,
-            "rows_returned": self.rows_returned,
-            "profile": self.profile,
-        }
-
-        # Add optional metrics
-        if self.peak_memory_mb > 0:
-            result_dict["peak_memory_mb"] = self.peak_memory_mb
-
-        if self.profile.planning_time_ms > 0:
-            result_dict["planning_time_ms"] = self.profile.planning_time_ms
-            result_dict["collect_time_ms"] = self.profile.collect_time_ms
-
-        if self.query_plan:
-            result_dict["query_plan"] = str(self.query_plan)
-            if self.query_plan.optimization_hints:
-                result_dict["optimization_hints"] = self.query_plan.optimization_hints
-
-        return result_dict

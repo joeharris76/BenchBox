@@ -20,6 +20,41 @@ TEMPLATE_DIR = Path(__file__).resolve().parents[3] / "_sources" / "tpc-ds" / "qu
 # - Require external dimension tables: Q46, Q64, Q68, Q84 (customer's CURRENT address/demographics)
 BLOCKED_QUERY_IDS = {21, 22, 37, 39, 46, 64, 68, 72, 82, 84}
 
+# Column prefix → source table mapping (multi-char prefixes before single-char to avoid shadowing).
+_PREFIX_TO_TABLE: dict[str, str] = {
+    "ss_": "store_sales",
+    "sr_": "store_returns",
+    "ws_": "web_sales",
+    "wr_": "web_returns",
+    "cs_": "catalog_sales",
+    "cr_": "catalog_returns",
+    "sm_": "ship_mode",
+    "ca_": "customer_address",
+    "hd_": "household_demographics",
+    "cd_": "customer_demographics",
+    "d_": "date_dim",
+    "t_": "time_dim",
+    "i_": "item",
+    "s_": "store",
+    "p_": "promotion",
+    "r_": "reason",
+    "w_": "warehouse",
+}
+
+# Dimension table → static role prefix (for tables whose role doesn't depend on the fact column).
+_DIM_STATIC_ROLE: dict[str, str] = {
+    "item": "item_",
+    "store": "store_",
+    "promotion": "promo_",
+    "reason": "reason_",
+    "web_site": "web_site_",
+    "web_page": "web_page_",
+    "call_center": "call_center_",
+    "catalog_page": "catalog_page_",
+    "ship_mode": "ship_mode_",
+    "warehouse": "warehouse_",
+}
+
 
 @dataclass(frozen=True)
 class TemplateParameter:
@@ -679,8 +714,75 @@ class QueryConverter:
                 else:
                     column.set("table", None)
 
+    # Mapping from column prefix to (dimension_table, default_role_prefix) for simple dimension lookups.
+    # IMPORTANT: Iteration order matters — "w_" must precede "web_" because both match "web_*" columns,
+    # and warehouse columns (w_warehouse_*) should match "w_" first. Do not reorder these entries.
+    _SIMPLE_DIMENSION_PREFIX_MAP: dict[str, tuple[str, str]] = {
+        "p_": ("promotion", "promo_"),
+        "r_": ("reason", "reason_"),
+        "cp_": ("catalog_page", "catalog_page_"),
+        "cc_": ("call_center", "call_center_"),
+        "sm_": ("ship_mode", "ship_mode_"),
+        "w_": ("warehouse", "warehouse_"),
+        "wp_": ("web_page", "web_page_"),
+        "web_": ("web_site", "web_site_"),
+    }
+
+    # Mapping from column prefix to (dimension_table, default_role_prefix) for alias-aware dimension lookups.
+    _ALIASED_DIMENSION_PREFIX_MAP: dict[str, tuple[str, str]] = {
+        "c_": ("customer", "bill_customer_"),
+        "cd_": ("customer_demographics", "bill_cdemo_"),
+        "hd_": ("household_demographics", "bill_hdemo_"),
+        "ca_": ("customer_address", "bill_addr_"),
+        "s_": ("store", "store_"),
+    }
+
+    # Mapping from return column prefix to channel for return reference lookups.
+    _RETURN_PREFIX_CHANNEL_MAP: dict[str, str] = {
+        "sr_": "store",
+        "wr_": "web",
+        "cr_": "catalog",
+    }
+
     def _map_unqualified_column(self, name: str, aliases: dict[str, str], role_map: dict[str, str]) -> str | None:
         lowered = name.lower()
+
+        # Try fact table prefixes first
+        mapped = self._map_fact_column(lowered)
+        if mapped:
+            return mapped
+
+        # Item dimension
+        if lowered.startswith("i_"):
+            alias_for_item = self._alias_for_table(aliases, "item")
+            role_prefix = role_map.get(alias_for_item or "", "item_")
+            return self.mapper.map_dimension("item", lowered, role_prefix)
+
+        # Date dimension (fall through if not found — column may match later prefixes)
+        if lowered.startswith("d_"):
+            mapped = self._map_date_dimension_column(lowered, aliases, role_map)
+            if mapped:
+                return mapped
+
+        # Return reference columns
+        mapped = self._map_return_prefix_column(lowered, role_map, aliases)
+        if mapped:
+            return mapped
+
+        # Store with numeric suffix (s_store_name1 etc.) — checked before s_ prefix
+        if lowered.startswith("s_store_"):
+            return self._map_store_numeric_suffix(lowered, aliases, role_map)
+
+        # Alias-aware dimension columns (customer, demographics, address, store)
+        mapped = self._map_aliased_dimension_column(lowered, aliases, role_map)
+        if mapped:
+            return mapped
+
+        # Simple dimension columns (no alias resolution needed)
+        return self._map_simple_dimension_column(lowered)
+
+    def _map_fact_column(self, lowered: str) -> str | None:
+        """Map a column to a fact table based on its prefix."""
         fact_prefix_map = {
             "ss_": "store_sales",
             "sr_": "store_returns",
@@ -694,91 +796,46 @@ class QueryConverter:
                 mapped = self.mapper.map_fact(table, lowered)
                 if mapped:
                     return mapped
+        return None
 
-        alias_for_item = self._alias_for_table(aliases, "item")
-        if lowered.startswith("i_"):
-            role_prefix = role_map.get(alias_for_item or "", "item_")
-            return self.mapper.map_dimension("item", lowered, role_prefix)
-
+    def _map_date_dimension_column(self, lowered: str, aliases: dict[str, str], role_map: dict[str, str]) -> str | None:
+        """Map a date dimension column with alias-aware role prefix."""
         alias_for_date = self._alias_for_table(aliases, "date_dim")
-        if lowered.startswith("d_"):
-            role_prefix = role_map.get(alias_for_date or "", "sold_date_")
-            mapped = self.mapper.map_dimension("date_dim", lowered, role_prefix)
-            if mapped:
-                return mapped
+        role_prefix = role_map.get(alias_for_date or "", "sold_date_")
+        return self.mapper.map_dimension("date_dim", lowered, role_prefix)
 
-        if lowered.startswith("sr_"):
-            mapped = self._map_return_reference(lowered, role_map, aliases, channel="store")
-            if mapped:
-                return mapped
+    def _map_return_prefix_column(self, lowered: str, role_map: dict[str, str], aliases: dict[str, str]) -> str | None:
+        """Map return-prefixed columns (sr_, wr_, cr_) via return reference lookup."""
+        for prefix, channel in self._RETURN_PREFIX_CHANNEL_MAP.items():
+            if lowered.startswith(prefix):
+                mapped = self._map_return_reference(lowered, role_map, aliases, channel=channel)
+                if mapped:
+                    return mapped
+        return None
 
-        if lowered.startswith("wr_"):
-            mapped = self._map_return_reference(lowered, role_map, aliases, channel="web")
-            if mapped:
-                return mapped
+    def _map_aliased_dimension_column(
+        self, lowered: str, aliases: dict[str, str], role_map: dict[str, str]
+    ) -> str | None:
+        """Map dimension columns that require alias resolution for role prefix."""
+        for prefix, (dim_table, default_role) in self._ALIASED_DIMENSION_PREFIX_MAP.items():
+            if lowered.startswith(prefix):
+                alias = self._alias_for_table(aliases, dim_table)
+                role_prefix = role_map.get(alias or "", default_role)
+                return self.mapper.map_dimension(dim_table, lowered, role_prefix)
+        return None
 
-        if lowered.startswith("cr_"):
-            mapped = self._map_return_reference(lowered, role_map, aliases, channel="catalog")
-            if mapped:
-                return mapped
+    def _map_store_numeric_suffix(self, lowered: str, aliases: dict[str, str], role_map: dict[str, str]) -> str | None:
+        """Map store columns with numeric suffix (e.g., s_store_name1)."""
+        base = re.sub(r"\d+$", "", lowered)
+        alias_for_store = self._alias_for_table(aliases, "store")
+        role_prefix = role_map.get(alias_for_store or "", "store_")
+        return self.mapper.map_dimension("store", base, role_prefix)
 
-        if lowered.startswith("c_"):
-            alias_for_customer = self._alias_for_table(aliases, "customer")
-            role_prefix = role_map.get(alias_for_customer or "", "bill_customer_")
-            return self.mapper.map_dimension("customer", lowered, role_prefix)
-
-        if lowered.startswith("cd_"):
-            alias_for_cdemo = self._alias_for_table(aliases, "customer_demographics")
-            role_prefix = role_map.get(alias_for_cdemo or "", "bill_cdemo_")
-            return self.mapper.map_dimension("customer_demographics", lowered, role_prefix)
-
-        if lowered.startswith("hd_"):
-            alias_for_hdemo = self._alias_for_table(aliases, "household_demographics")
-            role_prefix = role_map.get(alias_for_hdemo or "", "bill_hdemo_")
-            return self.mapper.map_dimension("household_demographics", lowered, role_prefix)
-
-        if lowered.startswith("ca_"):
-            alias_for_addr = self._alias_for_table(aliases, "customer_address")
-            role_prefix = role_map.get(alias_for_addr or "", "bill_addr_")
-            return self.mapper.map_dimension("customer_address", lowered, role_prefix)
-
-        if lowered.startswith("s_"):
-            alias_for_store = self._alias_for_table(aliases, "store")
-            role_prefix = role_map.get(alias_for_store or "", "store_")
-            return self.mapper.map_dimension("store", lowered, role_prefix)
-
-        if lowered.startswith("s_store_"):
-            base = re.sub(r"\d+$", "", lowered)
-            alias_for_store = self._alias_for_table(aliases, "store")
-            role_prefix = role_map.get(alias_for_store or "", "store_")
-            mapped = self.mapper.map_dimension("store", base, role_prefix)
-            if mapped:
-                return mapped
-
-        if lowered.startswith("p_"):
-            return self.mapper.map_dimension("promotion", lowered, "promo_")
-
-        if lowered.startswith("r_"):
-            return self.mapper.map_dimension("reason", lowered, "reason_")
-
-        if lowered.startswith("cp_"):
-            return self.mapper.map_dimension("catalog_page", lowered, "catalog_page_")
-
-        if lowered.startswith("cc_"):
-            return self.mapper.map_dimension("call_center", lowered, "call_center_")
-
-        if lowered.startswith("sm_"):
-            return self.mapper.map_dimension("ship_mode", lowered, "ship_mode_")
-
-        if lowered.startswith("w_"):
-            return self.mapper.map_dimension("warehouse", lowered, "warehouse_")
-
-        if lowered.startswith("wp_"):
-            return self.mapper.map_dimension("web_page", lowered, "web_page_")
-
-        if lowered.startswith("web_"):
-            return self.mapper.map_dimension("web_site", lowered, "web_site_")
-
+    def _map_simple_dimension_column(self, lowered: str) -> str | None:
+        """Map dimension columns that use a fixed role prefix (no alias resolution)."""
+        for prefix, (dim_table, role_prefix) in self._SIMPLE_DIMENSION_PREFIX_MAP.items():
+            if lowered.startswith(prefix):
+                return self.mapper.map_dimension(dim_table, lowered, role_prefix)
         return None
 
     @staticmethod
@@ -839,40 +896,9 @@ class QueryConverter:
     @staticmethod
     def _table_from_prefix(column_name: str) -> str | None:
         lowered = column_name.lower()
-        if lowered.startswith("ss_"):
-            return "store_sales"
-        if lowered.startswith("sr_"):
-            return "store_returns"
-        if lowered.startswith("ws_"):
-            return "web_sales"
-        if lowered.startswith("wr_"):
-            return "web_returns"
-        if lowered.startswith("cs_"):
-            return "catalog_sales"
-        if lowered.startswith("cr_"):
-            return "catalog_returns"
-        if lowered.startswith("d_"):
-            return "date_dim"
-        if lowered.startswith("t_"):
-            return "time_dim"
-        if lowered.startswith("i_"):
-            return "item"
-        if lowered.startswith("s_"):
-            return "store"
-        if lowered.startswith("p_"):
-            return "promotion"
-        if lowered.startswith("r_"):
-            return "reason"
-        if lowered.startswith("sm_"):
-            return "ship_mode"
-        if lowered.startswith("w_"):
-            return "warehouse"
-        if lowered.startswith("ca_"):
-            return "customer_address"
-        if lowered.startswith("hd_"):
-            return "household_demographics"
-        if lowered.startswith("cd_"):
-            return "customer_demographics"
+        for prefix, table in _PREFIX_TO_TABLE.items():
+            if lowered.startswith(prefix):
+                return table
         return None
 
     def _infer_roles(self, select: exp.Select, aliases: dict[str, str]) -> dict[str, str]:
@@ -922,28 +948,10 @@ class QueryConverter:
         fact_col_lower = fact_col.lower()
         fact_table_lower = fact_table.lower()
 
-        if dim_table_lower == "date_dim" or dim_table_lower == "time_dim":
+        if dim_table_lower in ("date_dim", "time_dim"):
             role = _infer_date_role(fact_col_lower)
-        elif dim_table_lower == "item":
-            role = "item_"
-        elif dim_table_lower == "store":
-            role = "store_"
-        elif dim_table_lower == "promotion":
-            role = "promo_"
-        elif dim_table_lower == "reason":
-            role = "reason_"
-        elif dim_table_lower == "web_site":
-            role = "web_site_"
-        elif dim_table_lower == "web_page":
-            role = "web_page_"
-        elif dim_table_lower == "call_center":
-            role = "call_center_"
-        elif dim_table_lower == "catalog_page":
-            role = "catalog_page_"
-        elif dim_table_lower == "ship_mode":
-            role = "ship_mode_"
-        elif dim_table_lower == "warehouse":
-            role = "warehouse_"
+        elif dim_table_lower in _DIM_STATIC_ROLE:
+            role = _DIM_STATIC_ROLE[dim_table_lower]
         elif dim_table_lower == "customer":
             role = _infer_customer_role(fact_col_lower, fact_table_lower)
         elif dim_table_lower == "customer_demographics":
@@ -1419,6 +1427,14 @@ class QueryConverter:
   WHERE
     wss.sold_date_d_month_seq BETWEEN 1176 + 12 AND 1176 + 23
 ) AS x""",
+            )
+            sql_text = sql_text.replace(
+                "SELECT\n  store_s_store_name,\n  store_s_store_id,",
+                "SELECT\n  s_store_name1 AS store_s_store_name,\n  s_store_id1 AS store_s_store_id,",
+            )
+            sql_text = sql_text.replace(
+                "WHERE\n  store_s_store_id = store_s_store_id AND d_week_seq1 = d_week_seq2 - 52",
+                "WHERE\n  s_store_id1 = s_store_id2 AND d_week_seq1 = d_week_seq2 - 52",
             )
 
         # Q65: CTE sc and sb need proper column names

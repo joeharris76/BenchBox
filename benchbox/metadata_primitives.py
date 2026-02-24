@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from benchbox.base import BaseBenchmark
+from benchbox.core.benchmark_mixins import QueryCategoryFacadeMixin, QueryFacadeMixin
 from benchbox.core.metadata_primitives.benchmark import (
     ComplexityBenchmarkResult,
     MetadataBenchmarkResult,
@@ -24,7 +25,7 @@ from benchbox.core.metadata_primitives.complexity import (
 )
 
 
-class MetadataPrimitives(BaseBenchmark):
+class MetadataPrimitives(QueryCategoryFacadeMixin, QueryFacadeMixin, BaseBenchmark):
     """Metadata Primitives benchmark implementation.
 
     Tests metadata introspection operations across database platforms:
@@ -64,52 +65,6 @@ class MetadataPrimitives(BaseBenchmark):
             Empty dictionary (no data files to generate)
         """
         return self._impl.generate_data(tables)
-
-    def get_queries(self, dialect: Optional[str] = None) -> dict[str, str]:
-        """Get all Metadata Primitives benchmark queries.
-
-        Args:
-            dialect: Target SQL dialect. If provided, returns dialect-specific
-                    variants where available and excludes unsupported queries.
-
-        Returns:
-            Dictionary mapping query IDs to SQL text
-        """
-        return self._impl.get_queries(dialect=dialect)
-
-    def get_query(self, query_id: Union[int, str], *, params: Optional[dict[str, Any]] = None) -> str:
-        """Get a specific Metadata Primitives benchmark query.
-
-        Args:
-            query_id: Query identifier (e.g., 'schema_list_tables')
-            params: Not supported for Metadata Primitives
-
-        Returns:
-            SQL text of the query
-
-        Raises:
-            ValueError: If query_id is invalid or params are provided
-        """
-        return self._impl.get_query(query_id, params=params)
-
-    def get_queries_by_category(self, category: str) -> dict[str, str]:
-        """Get queries filtered by category.
-
-        Args:
-            category: Category name (e.g., 'schema', 'column', 'stats', 'query')
-
-        Returns:
-            Dictionary mapping query IDs to SQL text for the category
-        """
-        return self._impl.get_queries_by_category(category)
-
-    def get_query_categories(self) -> list[str]:
-        """Get list of available query categories.
-
-        Returns:
-            List of category names (schema, column, stats, query, wide_table, etc.)
-        """
-        return self._impl.get_query_categories()
 
     def get_schema(self) -> dict[str, dict[str, Any]]:
         """Get the Metadata Primitives benchmark schema (TPC-H).

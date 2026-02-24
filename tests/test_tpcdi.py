@@ -387,6 +387,7 @@ class TestTPCDIBenchmarkCoverage:
 
         connection.close()
 
+    @pytest.mark.slow
     def test_load_data_to_database_coverage(self, tpcdi_benchmark: TPCDIBenchmark) -> None:
         """Test load_data_to_database with real DuckDB data."""
         # Generate actual test data first
@@ -419,6 +420,7 @@ class TestTPCDIBenchmarkCoverage:
         finally:
             connection.close()
 
+    @pytest.mark.slow
     def test_run_benchmark_coverage(self, tpcdi_benchmark: TPCDIBenchmark) -> None:
         """Test run_benchmark with real DuckDB execution."""
         # Generate test data and set up database

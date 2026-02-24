@@ -136,9 +136,8 @@ def load_result_file(filepath: Path | str) -> tuple[BenchmarkResults, dict[str, 
     # Check schema version - v2.0 and v2.1 are supported
     version = data.get("version")
     if version not in ("2.0", "2.1"):
-        legacy_version = data.get("schema_version", version)
         raise UnsupportedSchemaError(
-            f"Unsupported schema version: {legacy_version}. "
+            f"Unsupported schema version: {version}. "
             f"Only schema v2.0 and v2.1 are supported. "
             f"Please re-export the result using the current version of BenchBox."
         )
@@ -196,67 +195,112 @@ def reconstruct_benchmark_results(
         KeyError: If required fields are missing.
         ValueError: If data cannot be parsed correctly.
     """
-    # Extract top-level sections
     run_section = data.get("run", {})
     benchmark_section = data.get("benchmark", {})
     platform_section = data.get("platform", {})
     summary_section = data.get("summary", {})
-    environment_section = data.get("environment", {})
-    tables_section = data.get("tables", {})
-    cost_section = data.get("cost", {})
 
-    # Parse timestamp
-    timestamp_str = run_section.get("timestamp", "")
-    try:
-        timestamp = datetime.fromisoformat(timestamp_str)
-    except (ValueError, TypeError):
-        timestamp = datetime.now()
+    timestamp = _parse_timestamp(run_section.get("timestamp", ""))
+    query_results = _reconstruct_query_results(data.get("queries", []), data.get("errors", []))
 
-    # Extract query results from compact format
-    queries_list = data.get("queries", [])
-    query_results = _reconstruct_query_results(queries_list, data.get("errors", []))
+    timing = _extract_timing_metrics(summary_section)
+    tpc = _extract_tpc_metrics(summary_section)
+    platform_info = _extract_platform_info(platform_section)
+    tuning = _extract_tuning_info(platform_section, tuning_data)
+    system_profile = _extract_system_profile(data.get("environment", {}))
+    cost_summary = _extract_cost_summary(data.get("cost", {}))
+    plans_captured, plan_failures = _extract_plans_info(plans_data)
 
-    # Extract timing metrics from summary
-    timing_section = summary_section.get("timing", {})
     queries_counts = summary_section.get("queries", {})
+    tables_section = data.get("tables", {})
+    table_statistics = {
+        name: {"rows": stats.get("rows"), "load_time_ms": stats.get("load_ms")}
+        for name, stats in tables_section.items()
+    }
 
-    total_execution_time = timing_section.get("total_ms", 0.0) / 1000.0
-    average_query_time = timing_section.get("avg_ms", 0.0) / 1000.0
+    return BenchmarkResults(
+        benchmark_name=benchmark_section.get("name", "Unknown"),
+        platform=platform_section.get("name", "Unknown"),
+        scale_factor=benchmark_section.get("scale_factor", 1.0),
+        execution_id=run_section.get("id", ""),
+        timestamp=timestamp,
+        duration_seconds=run_section.get("total_duration_ms", 0) / 1000.0,
+        total_queries=queries_counts.get("total", 0),
+        successful_queries=queries_counts.get("passed", 0),
+        failed_queries=queries_counts.get("failed", 0),
+        query_results=query_results,
+        total_execution_time=timing["total_execution_time"],
+        average_query_time=timing["average_query_time"],
+        data_loading_time=timing["data_loading_time"],
+        total_rows_loaded=timing["total_rows_loaded"],
+        table_statistics=table_statistics,
+        power_at_size=tpc["power_at_size"],
+        throughput_at_size=tpc["throughput_at_size"],
+        qph_at_size=tpc["qph_at_size"],
+        geometric_mean_execution_time=tpc["geometric_mean_execution_time"],
+        test_execution_type=benchmark_section.get("mode", "standard"),
+        validation_status=summary_section.get("validation", "PASSED"),
+        system_profile=system_profile,
+        query_subset=run_section.get("query_subset"),
+        platform_info=platform_info,
+        tunings_applied=tuning["tunings_applied"],
+        tuning_source_file=tuning["tuning_source_file"],
+        tuning_config_hash=tuning["tuning_config_hash"],
+        tuning_validation_status=tuning["tuning_validation_status"],
+        query_plans_captured=plans_captured,
+        plan_capture_failures=plan_failures,
+        cost_summary=cost_summary,
+        _benchmark_id_override=benchmark_section.get("id"),
+    )
 
-    # Extract data loading stats
+
+def _parse_timestamp(timestamp_str: str) -> datetime:
+    """Parse an ISO-format timestamp string, falling back to now()."""
+    try:
+        return datetime.fromisoformat(timestamp_str)
+    except (ValueError, TypeError):
+        return datetime.now()
+
+
+def _extract_timing_metrics(summary_section: dict[str, Any]) -> dict[str, Any]:
+    """Extract timing and data loading metrics from the summary section."""
+    timing = summary_section.get("timing", {})
     data_section = summary_section.get("data", {})
-    data_loading_time = data_section.get("load_time_ms", 0.0) / 1000.0
-    total_rows_loaded = data_section.get("rows_loaded", 0)
+    return {
+        "total_execution_time": timing.get("total_ms", 0.0) / 1000.0,
+        "average_query_time": timing.get("avg_ms", 0.0) / 1000.0,
+        "data_loading_time": data_section.get("load_time_ms", 0.0) / 1000.0,
+        "total_rows_loaded": data_section.get("rows_loaded", 0),
+    }
 
-    # Extract TPC metrics
-    tpc_section = summary_section.get("tpc_metrics", {})
-    power_at_size = tpc_section.get("power_at_size")
-    throughput_at_size = tpc_section.get("throughput_at_size")
-    # Load composite metric (either qphh_at_size or qphds_at_size depending on benchmark)
-    qph_at_size = tpc_section.get("qphh_at_size") or tpc_section.get("qphds_at_size")
 
-    # Geometric mean is in timing section (computed from query times)
-    geometric_mean_ms = timing_section.get("geometric_mean_ms")
-    geometric_mean_execution_time = geometric_mean_ms / 1000.0 if geometric_mean_ms else None
+def _extract_tpc_metrics(summary_section: dict[str, Any]) -> dict[str, Any]:
+    """Extract TPC benchmark metrics from the summary section."""
+    tpc = summary_section.get("tpc_metrics", {})
+    timing = summary_section.get("timing", {})
+    geometric_mean_ms = timing.get("geometric_mean_ms")
+    return {
+        "power_at_size": tpc.get("power_at_size"),
+        "throughput_at_size": tpc.get("throughput_at_size"),
+        "qph_at_size": tpc.get("qphh_at_size") or tpc.get("qphds_at_size"),
+        "geometric_mean_execution_time": geometric_mean_ms / 1000.0 if geometric_mean_ms else None,
+    }
 
-    # Extract table statistics
-    table_statistics = {}
-    for table_name, stats in tables_section.items():
-        table_statistics[table_name] = {
-            "rows": stats.get("rows"),
-            "load_time_ms": stats.get("load_ms"),
-        }
 
-    # Reconstruct platform info
-    platform_info = {
+def _extract_platform_info(platform_section: dict[str, Any]) -> dict[str, Any]:
+    """Extract and reconstruct platform info dictionary."""
+    info: dict[str, Any] = {
         "name": platform_section.get("name"),
         "version": platform_section.get("version"),
         "variant": platform_section.get("variant"),
     }
     if platform_section.get("config"):
-        platform_info.update(platform_section["config"])
+        info.update(platform_section["config"])
+    return info
 
-    # Extract tuning info
+
+def _extract_tuning_info(platform_section: dict[str, Any], tuning_data: dict[str, Any] | None) -> dict[str, Any]:
+    """Extract tuning configuration from platform section and companion data."""
     tunings_applied = None
     tuning_source_file = None
     tuning_config_hash = None
@@ -273,88 +317,55 @@ def reconstruct_benchmark_results(
         tuning_config_hash = tuning_data.get("hash")
         tuning_validation_status = tuning_data.get("validation_status")
 
-    # Reconstruct system profile from environment
-    system_profile = {}
-    if environment_section:
-        if environment_section.get("os"):
-            os_parts = environment_section["os"].split(" ", 1)
-            system_profile["os_type"] = os_parts[0]
-            system_profile["os_release"] = os_parts[1] if len(os_parts) > 1 else ""
-        if environment_section.get("arch"):
-            system_profile["architecture"] = environment_section["arch"]
-        if environment_section.get("cpu_count"):
-            system_profile["cpu_count"] = environment_section["cpu_count"]
-        if environment_section.get("memory_gb"):
-            system_profile["memory_gb"] = environment_section["memory_gb"]
-        if environment_section.get("python"):
-            system_profile["python_version"] = environment_section["python"]
-        if environment_section.get("machine_id"):
-            system_profile["machine_id"] = environment_section["machine_id"]
+    return {
+        "tunings_applied": tunings_applied,
+        "tuning_source_file": tuning_source_file,
+        "tuning_config_hash": tuning_config_hash,
+        "tuning_validation_status": tuning_validation_status,
+    }
 
-    # Extract cost summary
-    cost_summary = None
-    if cost_section:
-        cost_summary = {
-            "total_cost": cost_section.get("total_usd"),
-            "cost_model": cost_section.get("model", "estimated"),
-        }
 
-    # Query plans from companion file
-    query_plans_captured = 0
-    plan_capture_failures = 0
-    if plans_data:
-        query_plans_captured = plans_data.get("plans_captured", 0)
-        plan_capture_failures = plans_data.get("capture_failures", 0)
+def _extract_system_profile(environment_section: dict[str, Any]) -> dict[str, Any]:
+    """Reconstruct system profile from environment section."""
+    profile: dict[str, Any] = {}
+    if not environment_section:
+        return profile
 
-    # Create BenchmarkResults object
-    result = BenchmarkResults(
-        # Core identification
-        benchmark_name=benchmark_section.get("name", "Unknown"),
-        platform=platform_section.get("name", "Unknown"),
-        scale_factor=benchmark_section.get("scale_factor", 1.0),
-        execution_id=run_section.get("id", ""),
-        timestamp=timestamp,
-        duration_seconds=run_section.get("total_duration_ms", 0) / 1000.0,
-        # Query counts
-        total_queries=queries_counts.get("total", 0),
-        successful_queries=queries_counts.get("passed", 0),
-        failed_queries=queries_counts.get("failed", 0),
-        query_results=query_results,
-        # Timing metrics
-        total_execution_time=total_execution_time,
-        average_query_time=average_query_time,
-        data_loading_time=data_loading_time,
-        # Data metrics
-        total_rows_loaded=total_rows_loaded,
-        table_statistics=table_statistics,
-        # TPC metrics
-        power_at_size=power_at_size,
-        throughput_at_size=throughput_at_size,
-        qph_at_size=qph_at_size,
-        geometric_mean_execution_time=geometric_mean_execution_time,
-        # Metadata
-        test_execution_type=benchmark_section.get("mode", "standard"),
-        validation_status=summary_section.get("validation", "PASSED"),
-        system_profile=system_profile,
-        # Configuration
-        query_subset=run_section.get("query_subset"),
-        # Platform info
-        platform_info=platform_info,
-        # Tuning
-        tunings_applied=tunings_applied,
-        tuning_source_file=tuning_source_file,
-        tuning_config_hash=tuning_config_hash,
-        tuning_validation_status=tuning_validation_status,
-        # Plans
-        query_plans_captured=query_plans_captured,
-        plan_capture_failures=plan_capture_failures,
-        # Cost
-        cost_summary=cost_summary,
-        # Benchmark metadata
-        _benchmark_id_override=benchmark_section.get("id"),
-    )
+    _env_field_map = {
+        "arch": "architecture",
+        "cpu_count": "cpu_count",
+        "memory_gb": "memory_gb",
+        "python": "python_version",
+        "machine_id": "machine_id",
+    }
 
-    return result
+    if environment_section.get("os"):
+        os_parts = environment_section["os"].split(" ", 1)
+        profile["os_type"] = os_parts[0]
+        profile["os_release"] = os_parts[1] if len(os_parts) > 1 else ""
+
+    for env_key, profile_key in _env_field_map.items():
+        if environment_section.get(env_key):
+            profile[profile_key] = environment_section[env_key]
+
+    return profile
+
+
+def _extract_cost_summary(cost_section: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract cost summary from cost section."""
+    if not cost_section:
+        return None
+    return {
+        "total_cost": cost_section.get("total_usd"),
+        "cost_model": cost_section.get("model", "estimated"),
+    }
+
+
+def _extract_plans_info(plans_data: dict[str, Any] | None) -> tuple[int, int]:
+    """Extract query plan capture counts from companion data."""
+    if not plans_data:
+        return 0, 0
+    return plans_data.get("plans_captured", 0), plans_data.get("capture_failures", 0)
 
 
 def _reconstruct_query_results(

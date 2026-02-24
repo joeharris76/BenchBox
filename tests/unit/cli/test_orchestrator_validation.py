@@ -7,8 +7,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from benchbox.cli.orchestrator import BenchmarkOrchestrator
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig, SystemProfile
 from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, SystemProfile
 
 pytestmark = pytest.mark.fast
 

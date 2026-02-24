@@ -276,7 +276,7 @@ The following platforms do not have built-in AI functions and will skip AI queri
 - DataFusion
 - Trino/Presto
 - Redshift
-- Azure Synapse
+- Azure Synapse Analytics
 - Microsoft Fabric
 
 When running on these platforms, queries are skipped with informative messages.

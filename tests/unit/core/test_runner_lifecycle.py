@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from benchbox.base import BaseBenchmark
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig, SystemProfile
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.runner import LifecyclePhases, ValidationOptions, run_benchmark_lifecycle
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, SystemProfile
 from benchbox.core.validation import ValidationResult
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings
 
@@ -243,6 +243,97 @@ def test_standard_mode_delegates_to_adapter_run_benchmark():
 
     mock_adapter.run_benchmark.assert_called_once()
     assert res is expected
+
+
+@pytest.mark.unit
+def test_standard_mode_enriches_driver_runtime_metadata():
+    cfg = BenchmarkConfig(name="tpch", display_name="TPC-H", test_execution_type="standard")
+    db = DatabaseConfig(
+        type="duckdb",
+        name="test",
+        driver_package="duckdb",
+        driver_version="1.2.2",
+        driver_version_resolved="1.2.2",
+        driver_version_actual="1.2.2",
+        driver_runtime_strategy="isolated-site-packages",
+        driver_runtime_path="/tmp/duckdb-site-packages",
+        driver_runtime_python_executable="/tmp/duckdb-python",
+        driver_auto_install=False,
+    )
+    bench = MagicMock()
+    bench.output_dir = None
+    bench.tables = None
+    bench.generate_data = MagicMock()
+
+    expected = BenchmarkResults(
+        benchmark_name="TPC-H",
+        platform="duckdb",
+        scale_factor=cfg.scale_factor,
+        execution_id="driver-meta-001",
+        timestamp=datetime.now(),
+        duration_seconds=1.0,
+        query_definitions={},
+        total_queries=1,
+        successful_queries=1,
+        failed_queries=0,
+        total_execution_time=1.0,
+        average_query_time=1.0,
+        execution_phases=None,
+        test_execution_type="standard",
+        execution_metadata={"mode": "sql"},
+        platform_info={
+            "platform_version": "1.2.2",
+            "client_library_version": "1.2.2",
+            "execution_mode": "sql",
+            "configuration": {},
+        },
+    )
+
+    mock_adapter = MagicMock()
+    mock_adapter.run_benchmark.return_value = expected
+    mock_adapter.driver_package = "duckdb"
+    mock_adapter.driver_version_requested = "1.2.2"
+    mock_adapter.driver_version_resolved = "1.2.2"
+    mock_adapter.driver_version_actual = "1.2.2"
+    mock_adapter.driver_runtime_strategy = "isolated-site-packages"
+    mock_adapter.driver_runtime_path = "/tmp/duckdb-site-packages"
+    mock_adapter.driver_runtime_python_executable = "/tmp/duckdb-python"
+    mock_adapter.driver_auto_install_used = False
+
+    res = run_benchmark_lifecycle(
+        benchmark_config=cfg,
+        database_config=db,
+        system_profile=_mk_system_profile(),
+        platform_config={"database_path": "test.duckdb"},
+        benchmark_instance=bench,
+        platform_adapter=mock_adapter,
+    )
+
+    assert res.driver_package == "duckdb"
+    assert res.driver_version_requested == "1.2.2"
+    assert res.driver_version_resolved == "1.2.2"
+    assert res.driver_version_actual == "1.2.2"
+    assert res.driver_runtime_strategy == "isolated-site-packages"
+    assert res.driver_runtime_path == "/tmp/duckdb-site-packages"
+    assert res.driver_runtime_python_executable == "/tmp/duckdb-python"
+
+    assert isinstance(res.execution_metadata, dict)
+    assert res.execution_metadata["driver_package"] == "duckdb"
+    assert res.execution_metadata["driver_version_requested"] == "1.2.2"
+    assert res.execution_metadata["driver_version_resolved"] == "1.2.2"
+    assert res.execution_metadata["driver_version_actual"] == "1.2.2"
+    assert res.execution_metadata["driver_runtime_strategy"] == "isolated-site-packages"
+    assert res.execution_metadata["driver_runtime_path"] == "/tmp/duckdb-site-packages"
+    assert res.execution_metadata["driver_runtime_python_executable"] == "/tmp/duckdb-python"
+
+    assert isinstance(res.platform_info, dict)
+    assert res.platform_info["driver_package"] == "duckdb"
+    assert res.platform_info["driver_version_requested"] == "1.2.2"
+    assert res.platform_info["driver_version_resolved"] == "1.2.2"
+    assert res.platform_info["driver_version_actual"] == "1.2.2"
+    assert res.platform_info["driver_runtime_strategy"] == "isolated-site-packages"
+    assert res.platform_info["driver_runtime_path"] == "/tmp/duckdb-site-packages"
+    assert res.platform_info["driver_runtime_python_executable"] == "/tmp/duckdb-python"
 
 
 @pytest.mark.unit
@@ -491,13 +582,17 @@ def test_manifest_reuse_accepts_data_source_alias(tmp_path):
         "benchmark": "tpch",
         "scale_factor": 1.0,
         "tables": {
-            "customer": [
-                {
-                    "path": "customer.tbl",
-                    "size_bytes": customer_path.stat().st_size,
-                    "row_count": 1,
+            "customer": {
+                "formats": {
+                    "tbl": [
+                        {
+                            "path": "customer.tbl",
+                            "size_bytes": customer_path.stat().st_size,
+                            "row_count": 1,
+                        }
+                    ]
                 }
-            ]
+            }
         },
     }
     (data_dir / "_datagen_manifest.json").write_text(json.dumps(manifest))
@@ -556,13 +651,17 @@ def test_no_regenerate_respects_alias_manifest(tmp_path):
         "benchmark": "tpch",
         "scale_factor": 1.0,
         "tables": {
-            "orders": [
-                {
-                    "path": "orders.tbl",
-                    "size_bytes": orders_path.stat().st_size,
-                    "row_count": 1,
+            "orders": {
+                "formats": {
+                    "tbl": [
+                        {
+                            "path": "orders.tbl",
+                            "size_bytes": orders_path.stat().st_size,
+                            "row_count": 1,
+                        }
+                    ]
                 }
-            ]
+            }
         },
     }
     (data_dir / "_datagen_manifest.json").write_text(json.dumps(manifest))

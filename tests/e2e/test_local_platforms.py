@@ -171,7 +171,7 @@ class TestSQLiteE2E:
 
     @pytest.mark.e2e
     @pytest.mark.e2e_local
-    @pytest.mark.e2e_quick
+    @pytest.mark.slow
     @pytest.mark.sqlite
     @pytest.mark.tpch
     def test_tpch_full_execution(self, tmp_path: Path) -> None:
@@ -180,7 +180,8 @@ class TestSQLiteE2E:
             "platform": "sqlite",
             "benchmark": "tpch",
             "scale": "0.01",
-            # SQLite manages its database location internally via database_name
+            "force": "all",
+            "platform_options": {"database_name": tmp_path.name},
         }
 
         result = run_benchmark(config, timeout=E2E_BENCHMARK_TIMEOUT)
@@ -189,7 +190,7 @@ class TestSQLiteE2E:
 
     @pytest.mark.e2e
     @pytest.mark.e2e_local
-    @pytest.mark.e2e_quick
+    @pytest.mark.slow
     @pytest.mark.sqlite
     @pytest.mark.tpch
     def test_tpch_phases_generate_load(self, tmp_path: Path) -> None:
@@ -199,7 +200,8 @@ class TestSQLiteE2E:
             "benchmark": "tpch",
             "scale": "0.01",
             "phases": "generate,load",
-            # SQLite manages its database location internally via database_name
+            "force": "all",
+            "platform_options": {"database_name": tmp_path.name},
         }
 
         result = run_benchmark(config, timeout=300)

@@ -5,7 +5,13 @@ from typing import Any
 
 import pytest
 
-from benchbox.core.tuning.interface import BenchmarkTunings, TableTuning, TuningColumn, TuningType
+from benchbox.core.tuning.interface import (
+    BenchmarkTunings,
+    TableTuning,
+    TuningColumn,
+    TuningType,
+    UnifiedTuningConfiguration,
+)
 from benchbox.core.tuning.metadata import (
     MetadataValidationResult,
     TuningMetadata,
@@ -230,12 +236,11 @@ def test_save_tunings_short_circuits_when_metadata_table_fails(monkeypatch):
     assert manager.save_tunings(BenchmarkTunings("tpch")) is False
 
 
-def test_save_unified_tunings_supports_legacy_passthrough_and_invalid_type(monkeypatch):
+def test_save_unified_tunings_rejects_invalid_type(monkeypatch):
     manager = TuningMetadataManager(_Adapter("duckdb"))
-    legacy = BenchmarkTunings("tpch")
-
-    monkeypatch.setattr(manager, "save_tunings", lambda bt: bt is legacy)
-    assert manager.save_unified_tunings(legacy) is True
+    unified = UnifiedTuningConfiguration()
+    monkeypatch.setattr(manager, "save_tunings", lambda _bt: True)
+    assert manager.save_unified_tunings(unified) is True
     assert manager.save_unified_tunings(object()) is False
 
 

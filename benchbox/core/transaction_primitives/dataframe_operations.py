@@ -299,7 +299,7 @@ class DataFrameTransactionOperationsManager:
             table_path="/data/orders",
             dataframe=new_orders_df
         )
-        print(f"Version: {result.version_before} -> {result.version_after}")
+        emit(f"Version: {result.version_before} -> {result.version_after}")
 
         # Rollback to previous version
         result = manager.execute_rollback_to_version(

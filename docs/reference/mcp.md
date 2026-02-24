@@ -20,11 +20,14 @@ uv sync --extra mcp
 ### Starting the Server
 
 ```bash
-# Via Python module (recommended)
+# Via Python module
 uv run python -m benchbox.mcp
 
 # Via entry point (if installed globally)
 benchbox-mcp
+
+# With explicit MCP path overrides
+benchbox-mcp --results-dir /tmp/benchbox-results --charts-dir /tmp/benchbox-charts
 ```
 
 The server communicates via stdio using JSON-RPC, compatible with Claude Code and other MCP clients.
@@ -56,17 +59,36 @@ The inspector provides a web UI to browse tools, test calls, and view responses.
 
 ### Server Options
 
-The MCP server accepts environment variables for configuration:
+`benchbox-mcp` supports explicit flags and environment-variable fallback.
+
+**CLI flags**
+
+| Flag | Description |
+|------|-------------|
+| `--results-dir` | Results root used by MCP result reads/writes |
+| `--charts-dir` | Charts root used by MCP visualization paths |
+| `--log-level` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+
+**Environment variables**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCHBOX_MCP_LOG_LEVEL` | `WARNING` | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
-| `BENCHBOX_RESULTS_DIR` | `./benchmark_runs` | Directory for benchmark results |
+| `BENCHBOX_RESULTS_DIR` | `benchmark_runs/results` | Results root when `--results-dir` is not provided |
+| `BENCHBOX_CHARTS_DIR` | `benchmark_runs/charts` | Charts root when `--charts-dir` is not provided |
+| `BENCHBOX_OUTPUT_DIR` | `benchmark_runs` | Base root used to derive results/charts when specific vars are unset |
+| `BENCHBOX_LOG_LEVEL` | `INFO` | Logging level when `--log-level` is not provided |
 
-Example with custom logging:
+**Precedence**
+
+1. Explicit MCP flag (`--results-dir`, `--charts-dir`, `--log-level`)
+2. Specific env var (`BENCHBOX_RESULTS_DIR`, `BENCHBOX_CHARTS_DIR`, `BENCHBOX_LOG_LEVEL`)
+3. Derived from `BENCHBOX_OUTPUT_DIR` for paths
+4. Built-in defaults (`benchmark_runs/results`, `benchmark_runs/charts`, `INFO`)
+
+Example:
 
 ```bash
-BENCHBOX_MCP_LOG_LEVEL=DEBUG uv run python -m benchbox.mcp
+BENCHBOX_RESULTS_DIR=/tmp/results BENCHBOX_LOG_LEVEL=DEBUG benchbox-mcp
 ```
 
 ## Tools

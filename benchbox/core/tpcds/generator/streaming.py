@@ -7,6 +7,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from benchbox.utils.printing import emit
+
 
 class StreamingGenerationMixin:
     """Mixin encapsulating streaming-oriented generation utilities."""
@@ -87,7 +89,7 @@ class StreamingGenerationMixin:
                     with contextlib.suppress(OSError):
                         dat_file.unlink()
                 if self.verbose:
-                    print(f"✓ Generated and compressed {table_name} -> {compressed_path.name}")
+                    emit(f"✓ Generated and compressed {table_name} -> {compressed_path.name}")
                 # Thread-safe manifest update
                 with self._manifest_lock:
                     self._manifest_entries.setdefault(table_name, []).append(
@@ -102,7 +104,7 @@ class StreamingGenerationMixin:
                     with contextlib.suppress(OSError):
                         dat_file.unlink()
                 if self.verbose:
-                    print(f"○ Skipped {table_name} (no data at scale factor {self.scale_factor})")
+                    emit(f"○ Skipped {table_name} (no data at scale factor {self.scale_factor})")
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to generate TPC-DS table {table_name} with exit code {e.returncode}")
         except Exception as e:
@@ -127,7 +129,7 @@ class StreamingGenerationMixin:
 
             if self.verbose:
                 tables_str = f"{parent_table} + {', '.join(child_tables)}"
-                print(f"Generating {tables_str} with streaming compression...")
+                emit(f"Generating {tables_str} with streaming compression...")
 
             # For parent tables with children, dsdgen outputs multiple tables mixed in stdout
             # We need to generate to files first, then compress them to maintain data integrity
@@ -176,7 +178,7 @@ class StreamingGenerationMixin:
                             dat_file.unlink()
                         files_processed += 1
                         if self.verbose:
-                            print(f"✓ Generated and compressed {table_name} -> {compressed_path.name}")
+                            emit(f"✓ Generated and compressed {table_name} -> {compressed_path.name}")
                         # Thread-safe manifest update
                         with self._manifest_lock:
                             self._manifest_entries.setdefault(table_name, []).append(
@@ -190,12 +192,12 @@ class StreamingGenerationMixin:
                         raise RuntimeError(f"Failed to compress {dat_file.name}: {e}")
                 elif self.verbose and dat_file.exists():
                     dat_file.unlink()
-                    print(f"○ Skipped {table_name} (no data at scale factor {self.scale_factor})")
+                    emit(f"○ Skipped {table_name} (no data at scale factor {self.scale_factor})")
 
             # If no files were processed, this is normal for small scale factors
             if files_processed == 0 and self.verbose:
                 tables_str = f"{parent_table} + {', '.join(child_tables)}"
-                print(f"○ Skipped {tables_str} (no data at scale factor {self.scale_factor})")
+                emit(f"○ Skipped {tables_str} (no data at scale factor {self.scale_factor})")
 
         except subprocess.CalledProcessError as e:
             error_msg = f"Failed to generate TPC-DS table {parent_table} with exit code {e.returncode}"
@@ -215,23 +217,22 @@ class StreamingGenerationMixin:
         """
         cmd = [
             str(self.dsdgen_exe),
-            "-verbose" if self.verbose else "-quiet",  # control verbosity
-            "-force",  # force overwrites
+            "-verbose" if self.verbose else "-quiet",
+            "-force",
             "-terminate",
-            "n",  # disable trailing field delimiters
+            "n",
             "-scale",
-            str(self.scale_factor),  # scale factor
+            str(self.scale_factor),
             "-table",
-            table_name,  # generate only this table
+            table_name,
             "-child",
-            str(chunk_id),  # chunk number (1-based)
+            str(chunk_id),
             "-parallel",
-            str(self.parallel),  # total number of chunks
+            str(self.parallel),
             "-FILTER",
-            "Y",  # output to stdout (requires patched dsdgen with FILTER fix)
+            "Y",
         ]
 
-        # Get compressed filename for chunk
         expected_filename = f"{table_name}_{chunk_id}_{self.parallel}.dat"
         compressed_filename = self.get_compressed_filename(expected_filename)
         output_file = output_dir / compressed_filename
@@ -240,95 +241,32 @@ class StreamingGenerationMixin:
             env = os.environ.copy()
 
             if self.verbose:
-                print(f"Generating {table_name} chunk {chunk_id}/{self.parallel} with streaming compression...")
+                emit(f"Generating {table_name} chunk {chunk_id}/{self.parallel} with streaming compression...")
 
-            # Use Popen for streaming (avoids memory buffering)
             process = subprocess.Popen(
                 cmd,
                 cwd=output_dir,
                 env=env,
-                stdout=subprocess.PIPE,  # Stream output without buffering entire result
-                stderr=subprocess.DEVNULL if not self.verbose else None,  # DEVNULL prevents deadlock
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL if not self.verbose else None,
             )
 
-            # Stream stdout directly to compressed file and count rows
-            row_count = 0
-            bytes_written = 0
-            chunk_size = 65536  # 64KB chunks for efficient I/O
-            last_chunk = b""  # Track last chunk to handle missing trailing newline
+            row_count, bytes_written = self._stream_process_output(process, output_file)
 
-            # Check if there's any data by reading the first chunk
-            first_chunk = process.stdout.read(chunk_size)
-            if first_chunk:
-                # Data exists - create compressed file and write
-                with self.open_output_file(output_file, mode="wb") as f:
-                    # Write first chunk
-                    f.write(first_chunk)
-                    bytes_written += len(first_chunk)
-                    row_count += first_chunk.count(b"\n")
-                    last_chunk = first_chunk
-
-                    # Stream remaining chunks
-                    for chunk in iter(lambda: process.stdout.read(chunk_size), b""):
-                        f.write(chunk)
-                        bytes_written += len(chunk)
-                        row_count += chunk.count(b"\n")
-                        last_chunk = chunk
-
-                # Handle edge case: if last chunk doesn't end with newline, we have one more row
-                if last_chunk and not last_chunk.endswith(b"\n"):
-                    row_count += 1
-
-            # Wait for process to complete
             process.wait()
 
-            # Check if dsdgen created an empty file even with -FILTER Y
-            expected_filename = f"{table_name}_{chunk_id}_{self.parallel}.dat"
             potential_dat_file = output_dir / expected_filename
-
-            # Handle results based on whether data was generated
-            if bytes_written > 0:
-                # Remove any .dat file that might have been created by dsdgen
-                if potential_dat_file.exists():
-                    potential_dat_file.unlink()
-
-                if process.returncode != 0:
-                    # Process failed but we got some data - clean up partial file to prevent corruption
-                    with contextlib.suppress(OSError):
-                        output_file.unlink()
-                    stderr_output = ""
-                    if process.stderr:
-                        stderr_output = process.stderr.read().decode("utf-8", errors="replace")
-                    raise subprocess.CalledProcessError(process.returncode, cmd, stderr=stderr_output)
-
-                if self.verbose:
-                    print(f"✓ Generated {table_name} chunk {chunk_id}/{self.parallel} -> {compressed_filename}")
-
-                # Record manifest entry (thread-safe)
-                size_bytes = output_file.stat().st_size if output_file.exists() else 0
-                with self._manifest_lock:
-                    self._manifest_entries.setdefault(table_name, []).append(
-                        {
-                            "path": output_file.name,
-                            "size_bytes": size_bytes,
-                            "row_count": row_count,
-                        }
-                    )
-            else:
-                # No data generated for this chunk - this is normal for parallel generation
-                # Remove any empty .dat file that dsdgen might have created
-                if potential_dat_file.exists():
-                    potential_dat_file.unlink()
-
-                # Check if process failed
-                if process.returncode != 0:
-                    stderr_output = ""
-                    if process.stderr:
-                        stderr_output = process.stderr.read().decode("utf-8", errors="replace")
-                    raise subprocess.CalledProcessError(process.returncode, cmd, stderr=stderr_output)
-
-                if self.verbose:
-                    print(f"○ Skipped {table_name} chunk {chunk_id}/{self.parallel} (no data in this chunk)")
+            self._handle_chunk_result(
+                process,
+                cmd,
+                table_name,
+                chunk_id,
+                compressed_filename,
+                output_file,
+                potential_dat_file,
+                row_count,
+                bytes_written,
+            )
 
         except subprocess.CalledProcessError as e:
             error_msg = f"Failed to generate TPC-DS table {table_name} chunk {chunk_id} with exit code {e.returncode}"
@@ -337,6 +275,82 @@ class StreamingGenerationMixin:
             raise RuntimeError(error_msg)
         except Exception as e:
             raise RuntimeError(f"Failed to generate TPC-DS table {table_name} chunk {chunk_id}: {e}")
+
+    def _stream_process_output(self, process, output_file: Path) -> tuple[int, int]:
+        """Stream dsdgen stdout into a compressed output file.
+
+        Returns:
+            Tuple of (row_count, bytes_written).
+        """
+        row_count = 0
+        bytes_written = 0
+        chunk_size = 65536
+        last_chunk = b""
+
+        first_chunk = process.stdout.read(chunk_size)
+        if first_chunk:
+            with self.open_output_file(output_file, mode="wb") as f:
+                f.write(first_chunk)
+                bytes_written += len(first_chunk)
+                row_count += first_chunk.count(b"\n")
+                last_chunk = first_chunk
+
+                for chunk in iter(lambda: process.stdout.read(chunk_size), b""):
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+                    row_count += chunk.count(b"\n")
+                    last_chunk = chunk
+
+            if last_chunk and not last_chunk.endswith(b"\n"):
+                row_count += 1
+
+        return row_count, bytes_written
+
+    def _handle_chunk_result(
+        self,
+        process,
+        cmd: list[str],
+        table_name: str,
+        chunk_id: int,
+        compressed_filename: str,
+        output_file: Path,
+        potential_dat_file: Path,
+        row_count: int,
+        bytes_written: int,
+    ) -> None:
+        """Process the outcome of a streaming chunk generation."""
+        if bytes_written > 0:
+            if potential_dat_file.exists():
+                potential_dat_file.unlink()
+
+            if process.returncode != 0:
+                with contextlib.suppress(OSError):
+                    output_file.unlink()
+                stderr_output = ""
+                if process.stderr:
+                    stderr_output = process.stderr.read().decode("utf-8", errors="replace")
+                raise subprocess.CalledProcessError(process.returncode, cmd, stderr=stderr_output)
+
+            if self.verbose:
+                emit(f"✓ Generated {table_name} chunk {chunk_id}/{self.parallel} -> {compressed_filename}")
+
+            size_bytes = output_file.stat().st_size if output_file.exists() else 0
+            with self._manifest_lock:
+                self._manifest_entries.setdefault(table_name, []).append(
+                    {"path": output_file.name, "size_bytes": size_bytes, "row_count": row_count}
+                )
+        else:
+            if potential_dat_file.exists():
+                potential_dat_file.unlink()
+
+            if process.returncode != 0:
+                stderr_output = ""
+                if process.stderr:
+                    stderr_output = process.stderr.read().decode("utf-8", errors="replace")
+                raise subprocess.CalledProcessError(process.returncode, cmd, stderr=stderr_output)
+
+            if self.verbose:
+                emit(f"○ Skipped {table_name} chunk {chunk_id}/{self.parallel} (no data in this chunk)")
 
     def _generate_parent_table_chunk_with_children(
         self,
@@ -362,7 +376,7 @@ class StreamingGenerationMixin:
 
             if self.verbose:
                 tables_str = f"{parent_table} + {', '.join(child_tables)}"
-                print(f"Generating {tables_str} chunk {chunk_id}/{self.parallel} with file-then-compress...")
+                emit(f"Generating {tables_str} chunk {chunk_id}/{self.parallel} with file-then-compress...")
 
             # Generate parent table chunk (which automatically creates child tables)
             cmd = [
@@ -421,7 +435,7 @@ class StreamingGenerationMixin:
                             )
 
                         if self.verbose:
-                            print(
+                            emit(
                                 f"✓ Generated and compressed {table_name} chunk {chunk_id}/{self.parallel} -> {compressed_file.name}"
                             )
                     else:
@@ -444,17 +458,17 @@ class StreamingGenerationMixin:
                             )
 
                         if self.verbose:
-                            print(f"✓ Generated {table_name} chunk {chunk_id}/{self.parallel} -> {expected_filename}")
+                            emit(f"✓ Generated {table_name} chunk {chunk_id}/{self.parallel} -> {expected_filename}")
                 elif dat_file.exists():
                     # Remove empty file if it exists
                     dat_file.unlink()
                     if self.verbose:
-                        print(f"○ Skipped {table_name} chunk {chunk_id}/{self.parallel} (no data in this chunk)")
+                        emit(f"○ Skipped {table_name} chunk {chunk_id}/{self.parallel} (no data in this chunk)")
 
             # If no files were processed, this chunk had no data (normal for parallel generation)
             if files_processed == 0 and self.verbose:
                 tables_str = f"{parent_table} + {', '.join(child_tables)}"
-                print(f"○ Skipped {tables_str} chunk {chunk_id}/{self.parallel} (no data in this chunk)")
+                emit(f"○ Skipped {tables_str} chunk {chunk_id}/{self.parallel} (no data in this chunk)")
 
         except subprocess.CalledProcessError as e:
             error_msg = f"Failed to generate TPC-DS table {parent_table} chunk {chunk_id} with exit code {e.returncode}"

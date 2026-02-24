@@ -52,6 +52,8 @@ benchbox run --platform polars-df --benchmark tpch --scale 0.1
 | `execution_mode` | lazy | Execution mode (lazy, eager) |
 | `streaming` | false | Enable streaming execution for large datasets |
 | `n_threads` | auto | Number of threads for parallel execution |
+| `driver_version` | (latest) | Pin the polars package version (e.g. `1.36.1`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
 
 ### Platform Options (DataFrame Mode: `polars-df`)
 
@@ -60,6 +62,19 @@ benchbox run --platform polars-df --benchmark tpch --scale 0.1
 | `streaming` | false | Enable streaming mode for large datasets |
 | `rechunk` | true | Rechunk data for better memory layout |
 | `n_rows` | - | Limit rows to read (for testing) |
+| `driver_version` | (latest) | Pin the polars package version (e.g. `1.36.1`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific Polars Version
+
+```bash
+benchbox run --platform polars-df --benchmark tpch \
+  --platform-option driver_version=1.36.1 \
+  --platform-option driver_auto_install=true
+```
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Usage Examples
 

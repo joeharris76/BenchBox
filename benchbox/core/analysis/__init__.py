@@ -17,13 +17,13 @@ Example:
     >>> report = comparison.compare()
     >>>
     >>> # Get the winner
-    >>> print(f"Winner: {report.winner}")
+    >>> emit(f"Winner: {report.winner}")
     >>>
     >>> # Get detailed insights
     >>> from benchbox.core.analysis import InsightGenerator
     >>> generator = InsightGenerator()
     >>> insights = generator.generate(report)
-    >>> print(insights.to_markdown())
+    >>> emit(insights.to_markdown())
 
 Copyright 2026 Joe Harris / BenchBox Project
 

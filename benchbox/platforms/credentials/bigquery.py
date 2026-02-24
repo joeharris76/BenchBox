@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from rich.console import Console
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Confirm
 
 from benchbox.platforms.credentials.helpers import prompt_with_default
 from benchbox.security.credentials import CredentialManager, CredentialStatus
@@ -207,69 +207,19 @@ def _prompt_default_output_location(
     credentials: dict,
     storage_bucket: Optional[str],
 ) -> None:
-    """Prompt for default cloud output location for BigQuery.
+    """Prompt for default cloud output location for BigQuery."""
+    from benchbox.platforms.credentials.shared import prompt_default_output_location
 
-    Args:
-        cred_manager: Credential manager instance
-        console: Rich console for output
-        credentials: Current credentials dictionary
-        storage_bucket: Optional configured storage bucket (for suggestions)
-    """
-    from benchbox.utils.cloud_storage import is_cloud_path
-
-    console.print("\n[bold]Default Output Location (Optional):[/bold]")
-    console.print("Configure a default cloud path for benchmark data storage.")
-    console.print("This prevents needing to specify --output for every run.\n")
-
-    wants_default = Confirm.ask("Configure default output location?", default=True)
-
-    if not wants_default:
-        console.print("[dim]You can add --output <cloud-path> when running benchmarks[/dim]\n")
-        return
-
-    # Show examples - suggest storage bucket if configured
-    console.print("\n[bold cyan]Example paths for BigQuery:[/bold cyan]")
-    if storage_bucket:
-        console.print(f"  • [dim]gs://{storage_bucket}/benchbox-data[/dim] (using your staging bucket)")
-        console.print(f"  • [dim]gs://{storage_bucket}/data[/dim]")
-    else:
-        console.print("  • [dim]gs://my-bucket/benchbox-data[/dim]")
-        console.print("  • [dim]gs://my-bucket/data[/dim]")
-
-    console.print("\n[bold]Google Cloud Storage:[/bold]")
-    console.print("  gs://<bucket>/<path>")
-    console.print("\n[dim]Note: Ensure the bucket exists and the service account has[/dim]")
-    console.print("[dim]storage.objects.create permission[/dim]\n")
-
-    # Suggest default based on storage bucket
-    suggested_default = f"gs://{storage_bucket}/benchbox-data" if storage_bucket else ""
-
-    # Prompt for path with validation
-    while True:
-        cloud_path = Prompt.ask("[bold]Enter default cloud storage path[/bold]", default=suggested_default)
-
-        if not cloud_path:
-            console.print("[yellow]Skipping default output location[/yellow]\n")
-            return
-
-        # Validate cloud path format
-        if not is_cloud_path(cloud_path):
-            console.print(f"[yellow]⚠️  Warning: '{cloud_path}' doesn't look like a cloud path[/yellow]")
-            console.print("[dim]Expected format: gs://<bucket>/<path>[/dim]")
-            proceed = Confirm.ask("Use this path anyway?", default=False)
-            if not proceed:
-                continue
-
-        # Confirm the path
-        console.print(f"\n[green]✓[/green] Will use: [cyan]{cloud_path}[/cyan]")
-        confirmed = Confirm.ask("Is this correct?", default=True)
-        if confirmed:
-            # Set credentials with default_output_location
-            credentials["default_output_location"] = cloud_path
-            cred_manager.set_platform_credentials("bigquery", credentials, CredentialStatus.VALID)
-            cred_manager.save_credentials()
-            console.print("[green]✅ Default output location saved![/green]\n")
-            return
+    prompt_default_output_location(
+        cred_manager=cred_manager,
+        console=console,
+        credentials=credentials,
+        platform_name="BigQuery",
+        path_scheme="gs://",
+        storage_label="Google Cloud Storage",
+        permission_note="the service account has storage.objects.create permission",
+        bucket=storage_bucket,
+    )
 
 
 def validate_bigquery_credentials(cred_manager: CredentialManager) -> tuple[bool, Optional[str]]:

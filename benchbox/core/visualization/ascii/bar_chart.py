@@ -108,14 +108,17 @@ class ASCIIBarChart(ASCIIChartBase):
         groups = sorted({d.group for d in sorted_data if d.group})
         use_groups = len(groups) > 1
 
-        # Color palette
+        # Color palette and fill patterns
         palette = list(DEFAULT_PALETTE)
         group_colors: dict[str, str] = {}
+        group_fills: dict[str, str] = {}
         if use_groups:
             for i, group in enumerate(groups):
                 group_colors[group] = palette[i % len(palette)]
+                group_fills[group] = self.options.get_series_fill(i)
 
         # Render bars
+        no_color = not self.options.use_color
         for datum in sorted_data:
             label = self._truncate_label(datum.label, max_label_len)
             label_padded = label.ljust(max_label_len)
@@ -131,13 +134,25 @@ class ASCIIBarChart(ASCIIChartBase):
             if is_truncated:
                 ratio = 1.0  # Fill the full bar width
 
+            # Determine fill character for this bar
+            # In no-color mode, use distinct fills to differentiate groups or best/worst;
+            # with color on (or single-series), all bars use the same full-block character.
+            if no_color and use_groups and datum.group:
+                fill_char = group_fills.get(datum.group, self.options.get_series_fill(0))
+            elif no_color and datum.is_best:
+                fill_char = self.options.get_series_fill(0)
+            elif no_color and datum.is_worst:
+                fill_char = self.options.get_series_fill(1)
+            else:
+                fill_char = blocks[-1]
+
             bar_chars = int(ratio * bar_width * 8)  # 8 sub-character increments
             full_blocks = bar_chars // 8
             partial = bar_chars % 8
 
-            bar = blocks[-1] * full_blocks  # Full blocks
+            bar = fill_char * full_blocks  # Full blocks
             if partial > 0 and full_blocks < bar_width:
-                bar += blocks[partial]  # Partial block
+                bar += blocks[partial] if not no_color else fill_char  # Partial block
             bar = bar.ljust(bar_width)
 
             # Mark truncated bars with a break indicator

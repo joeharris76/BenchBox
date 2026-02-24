@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from benchbox.utils.clock import elapsed_seconds, mono_time
+from benchbox.utils.runtime_env import DriverResolution, DriverRuntimeStrategy, load_driver_module
 
 try:
     import duckdb
@@ -24,10 +25,26 @@ except ImportError:
 from benchbox.core.errors import PlanCaptureError
 from benchbox.utils.cloud_storage import get_cloud_path_info, is_cloud_path
 from benchbox.utils.file_format import is_tpc_format
+from benchbox.utils.printing import emit
 
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
+
+if TYPE_CHECKING:
+    from benchbox.core.tuning.interface import TuningColumn
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_duckdb_version(raw_version: Any) -> str | None:
+    """Normalize DuckDB version strings (e.g., 'v1.2.2' -> '1.2.2')."""
+    if raw_version is None:
+        return None
+    version = str(raw_version).strip()
+    if not version:
+        return None
+    if version.startswith("v") and len(version) > 1 and version[1].isdigit():
+        version = version[1:]
+    return version
 
 
 class DuckDBConnectionWrapper:
@@ -80,8 +97,19 @@ class DuckDBCursorWrapper:
         return self._rows[:size] if size else self._rows
 
 
+def _build_duckdb_ctas_sort_sql(table_name: str, sort_columns) -> str:
+    """Build DuckDB-compatible CTAS sort SQL shared by DuckDB and MotherDuck adapters.
+
+    ``sort_columns`` must be pre-sorted by the caller (ascending by ``column.order``).
+    """
+    order_by_clause = ", ".join(column.name for column in sort_columns)
+    return f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM {table_name} ORDER BY {order_by_clause};"
+
+
 class DuckDBAdapter(PlatformAdapter):
     """DuckDB platform adapter with optimized bulk loading and execution."""
+
+    driver_isolation_capability = DriverIsolationCapability.SUPPORTED
 
     @property
     def platform_name(self) -> str:
@@ -140,6 +168,19 @@ class DuckDBAdapter(PlatformAdapter):
         for key in ["tuning_config", "verbose_enabled", "very_verbose"]:
             if key in config:
                 adapter_config[key] = config[key]
+        for key in [
+            "driver_package",
+            "driver_version",
+            "driver_version_requested",
+            "driver_version_resolved",
+            "driver_version_actual",
+            "driver_runtime_strategy",
+            "driver_runtime_path",
+            "driver_runtime_python_executable",
+            "driver_auto_install",
+        ]:
+            if key in config:
+                adapter_config[key] = config[key]
 
         return cls(**adapter_config)
 
@@ -159,28 +200,121 @@ class DuckDBAdapter(PlatformAdapter):
             },
         }
 
-        # Get DuckDB version and client library version
-        try:
-            import duckdb
-
-            platform_info["client_library_version"] = duckdb.__version__
-            platform_info["platform_version"] = duckdb.__version__
-        except (ImportError, AttributeError):
+        # Get DuckDB version and client library version from active runtime module.
+        module_version = None
+        if self._duckdb_module is not None:
+            module_version = _normalize_duckdb_version(getattr(self._duckdb_module, "__version__", None))
+            platform_info["client_library_version"] = module_version
+            platform_info["platform_version"] = module_version
+        else:
             platform_info["client_library_version"] = None
             platform_info["platform_version"] = None
+
+        live_version = self._detect_connection_version(connection)
+        if live_version:
+            platform_info["platform_version"] = live_version
+            platform_info["driver_version_actual"] = live_version
+            self.driver_version_actual = live_version
+        elif self.driver_version_actual:
+            platform_info["driver_version_actual"] = self.driver_version_actual
+        elif module_version:
+            platform_info["driver_version_actual"] = module_version
+
+        if self.driver_runtime_strategy:
+            platform_info["driver_runtime_strategy"] = self.driver_runtime_strategy
+        if self.driver_version_requested:
+            platform_info["driver_version_requested"] = self.driver_version_requested
+        if self.driver_version_resolved:
+            platform_info["driver_version_resolved"] = self.driver_version_resolved
+        if self.driver_version_actual:
+            platform_info["driver_version_actual"] = self.driver_version_actual
 
         return platform_info
 
     def __init__(self, **config):
         super().__init__(**config)
-        if duckdb is None:
-            raise ImportError("DuckDB not installed. Install with: pip install duckdb")
+        self._duckdb_module = self._initialize_duckdb_runtime(config)
         # DuckDB configuration
         self.database_path = config.get("database_path", ":memory:")
         self.memory_limit = config.get("memory_limit", "4GB")
         self.max_temp_directory_size = config.get("max_temp_directory_size")
         self.thread_limit = config.get("thread_limit")
         self.enable_progress_bar = config.get("progress_bar", False)
+
+    def _initialize_duckdb_runtime(self, config: dict[str, Any]):
+        """Resolve DuckDB module from the selected runtime contract."""
+        global duckdb
+
+        requested = config.get("driver_version_requested") or config.get("driver_version")
+        has_runtime_contract = any(
+            config.get(key) is not None
+            for key in (
+                "driver_runtime_strategy",
+                "driver_runtime_path",
+                "driver_version_requested",
+                "driver_version_resolved",
+                "driver_version",
+            )
+        )
+
+        # Backward-compatible fast path: use already-imported module when no
+        # runtime contract was requested.
+        if not has_runtime_contract:
+            if duckdb is not None:
+                return duckdb
+            raise ImportError("DuckDB not installed. Install with: pip install duckdb")
+
+        resolution = DriverResolution(
+            package=(config.get("driver_package") or "duckdb"),
+            requested=requested,
+            resolved=config.get("driver_version_resolved") or requested,
+            actual=config.get("driver_version_actual"),
+            auto_install_used=bool(config.get("driver_auto_install", False)),
+            runtime_strategy=config.get("driver_runtime_strategy") or DriverRuntimeStrategy.CURRENT_PROCESS.value,
+            runtime_path=config.get("driver_runtime_path"),
+            runtime_python_executable=config.get("driver_runtime_python_executable"),
+        )
+
+        try:
+            module = load_driver_module(
+                import_name="duckdb",
+                resolution=resolution,
+                strict_version_check=bool(requested),
+            )
+        except Exception as exc:
+            raise ImportError(
+                "DuckDB runtime initialization failed. "
+                "Install duckdb or provide a valid isolated runtime for the requested version."
+            ) from exc
+
+        # Keep legacy module-level alias aligned for compatibility with older paths.
+        duckdb = module
+
+        module_version = getattr(module, "__version__", None)
+        if module_version:
+            self.driver_version_actual = str(module_version)
+
+        return module
+
+    def _detect_connection_version(self, connection: Any) -> str | None:
+        """Detect runtime version from a live DuckDB connection."""
+        if connection is None:
+            return None
+        try:
+            row = connection.execute("SELECT version()").fetchone()
+        except Exception:
+            return None
+        if not row:
+            return None
+        if isinstance(row, (tuple, list)):
+            if not row:
+                return None
+            candidate = row[0]
+        elif isinstance(row, (str, bytes)):
+            candidate = row
+        else:
+            return None
+        return _normalize_duckdb_version(candidate)
 
     def get_database_path(self, **connection_config) -> str:
         """Get the database file path for DuckDB.
@@ -211,8 +345,18 @@ class DuckDBAdapter(PlatformAdapter):
         self.log_very_verbose(f"DuckDB database path: {db_path}")
 
         # Create connection
-        conn = duckdb.connect(db_path)
+        conn = self._duckdb_module.connect(db_path)
         self.log_very_verbose("DuckDB connection established")
+
+        # Validate requested runtime against live execution context.
+        live_version = self._detect_connection_version(conn)
+        if live_version:
+            self.driver_version_actual = live_version
+
+        if self.driver_version_requested and live_version and self.driver_version_requested != live_version:
+            raise RuntimeError(
+                f"DuckDB runtime version mismatch: requested {self.driver_version_requested}, but live connection reports {live_version}."
+            )
 
         # Apply DuckDB settings
         config_applied = []
@@ -337,7 +481,7 @@ class DuckDBAdapter(PlatformAdapter):
         if is_cloud_path(str(data_dir)):
             path_info = get_cloud_path_info(str(data_dir))
             self.log_verbose(f"Loading data from cloud storage: {path_info['provider']} bucket '{path_info['bucket']}'")
-            print(f"  Loading data from {path_info['provider']} cloud storage")
+            emit(f"  Loading data from {path_info['provider']} cloud storage")
 
         # Create DuckDB-specific handler factory
         def duckdb_handler_factory(file_path, adapter, benchmark_instance):
@@ -366,17 +510,23 @@ class DuckDBAdapter(PlatformAdapter):
                 return DuckDBParquetHandler(adapter)
             return None  # Fall back to generic handler
 
-        # Use DataLoader with DuckDB-specific handler
+        # Use DataLoader with DuckDB-specific handler.
+        # Pass tuning_config so sorted tables are reordered via CTAS after loading.
         loader = DataLoader(
             adapter=self,
             benchmark=benchmark,
             connection=connection,
             data_dir=data_dir,
             handler_factory=duckdb_handler_factory,
+            tuning_config=self.unified_tuning_configuration if self.tuning_enabled else None,
         )
         table_stats, loading_time = loader.load()
         # DataLoader doesn't provide per-table timings yet
         return table_stats, loading_time, None
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """Build DuckDB CTAS SQL used by PlatformAdapter.apply_ctas_sort."""
+        return _build_duckdb_ctas_sort_sql(table_name, sort_columns)
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply DuckDB-specific optimizations based on benchmark type."""
@@ -538,7 +688,7 @@ class DuckDBAdapter(PlatformAdapter):
         """Get DuckDB-specific metadata and system information."""
         metadata = {
             "platform": self.platform_name,
-            "duckdb_version": duckdb.__version__,
+            "duckdb_version": getattr(self._duckdb_module, "__version__", "unknown"),
             "result_cache_enabled": False,  # DuckDB has no persistent query result cache
         }
 
@@ -568,10 +718,10 @@ class DuckDBAdapter(PlatformAdapter):
             for (table_name,) in tables:
                 connection.execute(f"ANALYZE {table_name}")
 
-            print(f"✅ Analyzed {len(tables)} tables for query optimization")
+            emit(f"✅ Analyzed {len(tables)} tables for query optimization")
 
         except Exception as e:
-            print(f"⚠️️  Could not analyze tables: {e}")
+            emit(f"⚠️️  Could not analyze tables: {e}")
 
     def get_target_dialect(self) -> str:
         """Get the target SQL dialect for this platform."""
@@ -841,12 +991,12 @@ class DuckDBAdapter(PlatformAdapter):
         warnings = []
 
         # Check if DuckDB is available
-        if duckdb is None:
+        if self._duckdb_module is None:
             errors.append("DuckDB library not available - install with 'pip install duckdb'")
         else:
             # Check DuckDB version compatibility
             try:
-                version = duckdb.__version__
+                version = self._duckdb_module.__version__
                 # Warn if using very old versions
                 if version.startswith(("0.8", "0.9")):
                     warnings.append(f"DuckDB version {version} is older - consider upgrading for better performance")
@@ -877,14 +1027,14 @@ class DuckDBAdapter(PlatformAdapter):
             "platform": self.platform_name,
             "benchmark_type": benchmark_type,
             "dry_run_mode": self.dry_run_mode,
-            "duckdb_available": duckdb is not None,
+            "duckdb_available": self._duckdb_module is not None,
             "database_path": getattr(self, "database_path", None),
             "memory_limit": getattr(self, "memory_limit", None),
             "thread_limit": getattr(self, "thread_limit", None),
         }
 
-        if duckdb:
-            platform_info["duckdb_version"] = getattr(duckdb, "__version__", "unknown")
+        if self._duckdb_module:
+            platform_info["duckdb_version"] = getattr(self._duckdb_module, "__version__", "unknown")
 
         # Import ValidationResult here to avoid circular imports
         try:

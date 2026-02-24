@@ -75,6 +75,18 @@ class OperationResult:
     cleanup_warning: Optional[str] = None
 
 
+def _check_validation_query(val_query: Any, actual_rows: int) -> bool:
+    """Check whether a validation query passes based on expected row criteria."""
+    expected_rows = val_query.expected_rows
+    if expected_rows is not None:
+        return actual_rows == expected_rows
+    if val_query.expected_rows_min is not None or val_query.expected_rows_max is not None:
+        min_val = val_query.expected_rows_min if val_query.expected_rows_min is not None else 0
+        max_val = val_query.expected_rows_max if val_query.expected_rows_max is not None else float("inf")
+        return min_val <= actual_rows <= max_val
+    return True
+
+
 class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
     """Write Primitives benchmark implementation.
 
@@ -1065,78 +1077,17 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
             write_result = connection.execute(write_sql)
             write_duration_ms = (time.perf_counter() - write_start) * 1000
 
-            # Get rows affected (platform-specific)
-            rows_affected = getattr(write_result, "rowcount", None)
-            if rows_affected is None:
-                self.log_verbose(f"Warning: Platform doesn't support rowcount for {operation_id}")
-                rows_affected = -1  # Sentinel value indicating "unknown"
-            elif rows_affected == -1:
-                # Some platforms return -1 for "not applicable" (e.g., some DDL operations)
-                self.log_verbose(f"Note: rowcount not applicable for {operation_id}")
+            rows_affected = self._extract_rows_affected(write_result, operation_id)
 
             # Execute validation queries
-            self.log_verbose(f"Validating operation: {operation_id}")
-            validation_start = time.perf_counter()
-            validation_results = []
-            validation_passed = True
-
-            for val_query in operation.validation_queries:
-                val_sql = self._replace_placeholders(val_query.sql)
-                val_result = connection.execute(val_sql).fetchall()
-                actual_rows = len(val_result)
-                expected_rows = val_query.expected_rows
-
-                # Validation logic: exact match > range check > no validation
-                if expected_rows is not None:
-                    # Exact row count expected
-                    passed = actual_rows == expected_rows
-                    validation_passed = validation_passed and passed
-                elif val_query.expected_rows_min is not None or val_query.expected_rows_max is not None:
-                    # Range validation
-                    min_val = val_query.expected_rows_min if val_query.expected_rows_min is not None else 0
-                    max_val = val_query.expected_rows_max if val_query.expected_rows_max is not None else float("inf")
-                    passed = min_val <= actual_rows <= max_val
-                    validation_passed = validation_passed and passed
-                else:
-                    # No validation criteria - just verify query runs
-                    passed = True
-
-                validation_results.append(
-                    {
-                        "query_id": val_query.id,
-                        "sql": val_query.sql,
-                        "expected_rows": expected_rows,
-                        "actual_rows": actual_rows,
-                        "passed": passed,
-                        "sample": val_result[:5] if val_result else [],  # Only store first 5 rows for debugging
-                    }
-                )
-
-            validation_duration_ms = (time.perf_counter() - validation_start) * 1000
+            validation_passed, validation_results, validation_duration_ms = self._run_operation_validation(
+                operation, connection, operation_id
+            )
 
             # Execute cleanup if specified
-            self.log_verbose(f"Cleaning up operation: {operation_id}")
-            cleanup_start = time.perf_counter()
-            cleanup_success = True
-            cleanup_warning = None
-
-            if operation.cleanup_sql:
-                # Execute explicit cleanup SQL
-                try:
-                    connection.execute(operation.cleanup_sql)
-                    self.log_verbose(f"Executed cleanup SQL for {operation_id}")
-                except Exception as e:
-                    cleanup_error = str(e)
-                    self.log_verbose(f"Cleanup SQL failed for {operation_id}: {cleanup_error}")
-                    cleanup_success = False
-                    cleanup_warning = (
-                        f"Write operation '{operation_id}' cleanup failed. "
-                        f"Database may be in modified state. Run reset() to restore staging tables. "
-                        f"Error: {cleanup_error}"
-                    )
-                    self.log_verbose(f"WARNING: {cleanup_warning}")
-
-            cleanup_duration_ms = (time.perf_counter() - cleanup_start) * 1000
+            cleanup_success, cleanup_warning, cleanup_duration_ms = self._run_operation_cleanup(
+                operation, connection, operation_id
+            )
 
             return OperationResult(
                 operation_id=operation_id,
@@ -1170,6 +1121,73 @@ class WritePrimitivesBenchmark(BaseBenchmark, OperationExecutor):
                 error=error_msg,
                 cleanup_warning="Write operation failed during execution. Run reset() to ensure clean state.",
             )
+
+    def _extract_rows_affected(self, write_result: Any, operation_id: str) -> int:
+        """Extract rows_affected from the write result object."""
+        rows_affected = getattr(write_result, "rowcount", None)
+        if rows_affected is None:
+            self.log_verbose(f"Warning: Platform doesn't support rowcount for {operation_id}")
+            return -1  # Sentinel value indicating "unknown"
+        if rows_affected == -1:
+            self.log_verbose(f"Note: rowcount not applicable for {operation_id}")
+        return rows_affected
+
+    def _run_operation_validation(
+        self, operation: Any, connection: DatabaseConnection, operation_id: str
+    ) -> tuple[bool, list[dict], float]:
+        """Run validation queries for a write operation."""
+        self.log_verbose(f"Validating operation: {operation_id}")
+        validation_start = time.perf_counter()
+        validation_results = []
+        validation_passed = True
+
+        for val_query in operation.validation_queries:
+            val_sql = self._replace_placeholders(val_query.sql)
+            val_result = connection.execute(val_sql).fetchall()
+            actual_rows = len(val_result)
+            passed = _check_validation_query(val_query, actual_rows)
+            validation_passed = validation_passed and passed
+
+            validation_results.append(
+                {
+                    "query_id": val_query.id,
+                    "sql": val_query.sql,
+                    "expected_rows": val_query.expected_rows,
+                    "actual_rows": actual_rows,
+                    "passed": passed,
+                    "sample": val_result[:5] if val_result else [],
+                }
+            )
+
+        validation_duration_ms = (time.perf_counter() - validation_start) * 1000
+        return validation_passed, validation_results, validation_duration_ms
+
+    def _run_operation_cleanup(
+        self, operation: Any, connection: DatabaseConnection, operation_id: str
+    ) -> tuple[bool, str | None, float]:
+        """Run cleanup SQL for a write operation if specified."""
+        self.log_verbose(f"Cleaning up operation: {operation_id}")
+        cleanup_start = time.perf_counter()
+        cleanup_success = True
+        cleanup_warning = None
+
+        if operation.cleanup_sql:
+            try:
+                connection.execute(operation.cleanup_sql)
+                self.log_verbose(f"Executed cleanup SQL for {operation_id}")
+            except Exception as e:
+                cleanup_error = str(e)
+                self.log_verbose(f"Cleanup SQL failed for {operation_id}: {cleanup_error}")
+                cleanup_success = False
+                cleanup_warning = (
+                    f"Write operation '{operation_id}' cleanup failed. "
+                    f"Database may be in modified state. Run reset() to restore staging tables. "
+                    f"Error: {cleanup_error}"
+                )
+                self.log_verbose(f"WARNING: {cleanup_warning}")
+
+        cleanup_duration_ms = (time.perf_counter() - cleanup_start) * 1000
+        return cleanup_success, cleanup_warning, cleanup_duration_ms
 
     def run_benchmark(
         self,

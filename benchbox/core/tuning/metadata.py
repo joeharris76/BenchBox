@@ -12,12 +12,9 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
-if TYPE_CHECKING:
-    from .interface import UnifiedTuningConfiguration
-
-from .interface import BenchmarkTunings, TableTuning, TuningColumn, TuningType
+from .interface import BenchmarkTunings, TableTuning, TuningColumn, TuningType, UnifiedTuningConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -247,59 +244,52 @@ class TuningMetadataManager:
             self.logger.error(f"Failed to save tunings: {e}")
             return False
 
-    # --- Unified configuration helpers (compat layer) ---
-    def save_unified_tunings(self, unified_config: "UnifiedTuningConfiguration") -> bool:
-        """Save a UnifiedTuningConfiguration to the metadata table.
+    def _as_benchmark_tunings(
+        self, unified_config: UnifiedTuningConfiguration, benchmark_name: str = "unified"
+    ) -> BenchmarkTunings:
+        """Convert unified tuning config to benchmark tuning representation."""
+        return BenchmarkTunings(
+            benchmark_name=benchmark_name,
+            enable_primary_keys=unified_config.primary_keys.enabled,
+            enable_foreign_keys=unified_config.foreign_keys.enabled,
+            table_tunings=unified_config.table_tunings.copy(),
+        )
 
-        This provides a compatibility layer by converting the unified config to
-        the legacy BenchmarkTunings structure used for storage.
-        """
+    def _as_unified_tunings(self, benchmark_tunings: BenchmarkTunings) -> UnifiedTuningConfiguration:
+        """Convert benchmark tuning representation to unified tuning config."""
+        unified = UnifiedTuningConfiguration()
+        unified.primary_keys.enabled = benchmark_tunings.enable_primary_keys
+        unified.foreign_keys.enabled = benchmark_tunings.enable_foreign_keys
+        unified.table_tunings.update(benchmark_tunings.table_tunings)
+        return unified
+
+    def save_unified_tunings(self, unified_config: UnifiedTuningConfiguration) -> bool:
+        """Save a UnifiedTuningConfiguration to the metadata table."""
         try:
-            # Import locally to avoid circular import
-            from .interface import UnifiedTuningConfiguration
-
             if not isinstance(unified_config, UnifiedTuningConfiguration):
-                # Best-effort: if already legacy, delegate directly
-                if isinstance(unified_config, BenchmarkTunings):
-                    return self.save_tunings(unified_config)
-                raise TypeError("Expected UnifiedTuningConfiguration or BenchmarkTunings")
-
-            # Use a stable placeholder benchmark name for hashing/storage
-            legacy = unified_config.to_legacy_config(benchmark_name="unified")
-            return self.save_tunings(legacy)
+                raise TypeError("Expected UnifiedTuningConfiguration")
+            return self.save_tunings(self._as_benchmark_tunings(unified_config))
         except Exception as e:
             self.logger.error(f"Failed to save unified tunings: {e}")
             return False
 
-    def load_unified_tunings(self) -> Optional["UnifiedTuningConfiguration"]:
+    def load_unified_tunings(self) -> Optional[UnifiedTuningConfiguration]:
         """Load tuning metadata and return as UnifiedTuningConfiguration."""
         try:
-            legacy = self.load_tunings()
-            if not legacy:
+            benchmark_tunings = self.load_tunings()
+            if not benchmark_tunings:
                 return None
-            # Rehydrate into unified config
-            from .interface import UnifiedTuningConfiguration
-
-            unified = UnifiedTuningConfiguration()
-            unified.merge_with_legacy_config(legacy)
-            return unified
+            return self._as_unified_tunings(benchmark_tunings)
         except Exception as e:
             self.logger.error(f"Failed to load unified tunings: {e}")
             return None
 
-    def validate_unified_tunings(self, unified_config: "UnifiedTuningConfiguration") -> MetadataValidationResult:
+    def validate_unified_tunings(self, unified_config: UnifiedTuningConfiguration) -> MetadataValidationResult:
         """Validate database metadata against a UnifiedTuningConfiguration."""
         try:
-            # Convert to legacy for comparison logic
-            from .interface import UnifiedTuningConfiguration
-
-            if isinstance(unified_config, UnifiedTuningConfiguration):
-                legacy = unified_config.to_legacy_config(benchmark_name="unified")
-            elif isinstance(unified_config, BenchmarkTunings):
-                legacy = unified_config
-            else:
-                raise TypeError("Expected UnifiedTuningConfiguration or BenchmarkTunings")
-            return self.validate_tunings(legacy)
+            if not isinstance(unified_config, UnifiedTuningConfiguration):
+                raise TypeError("Expected UnifiedTuningConfiguration")
+            return self.validate_tunings(self._as_benchmark_tunings(unified_config))
         except Exception as e:
             result = MetadataValidationResult(is_valid=False)
             result.add_error(f"Validation failed with error: {e}")

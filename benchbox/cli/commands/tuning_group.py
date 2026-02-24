@@ -352,19 +352,27 @@ def show_defaults(platform: str) -> None:
     config = get_smart_defaults(platform)
 
     console.print(f"\n[bold]Recommended Settings for {platform.title()}:[/bold]")
+    _display_config_settings_table(config)
 
+    console.print(f"\n[dim]To use these settings: benchbox run --platform {platform} --tuning auto[/dim]")
+
+
+def _display_config_settings_table(config: DataFrameTuningConfiguration) -> None:
+    """Display a settings table for a DataFrameTuningConfiguration."""
     settings_table = Table(show_header=True)
     settings_table.add_column("Category", style="cyan")
     settings_table.add_column("Setting", style="white")
     settings_table.add_column("Value", style="yellow")
 
     # Parallelism
-    if config.parallelism.thread_count is not None:
-        settings_table.add_row("Parallelism", "thread_count", str(config.parallelism.thread_count))
-    if config.parallelism.worker_count is not None:
-        settings_table.add_row("Parallelism", "worker_count", str(config.parallelism.worker_count))
-    if config.parallelism.threads_per_worker is not None:
-        settings_table.add_row("Parallelism", "threads_per_worker", str(config.parallelism.threads_per_worker))
+    for attr, label in [
+        ("thread_count", "thread_count"),
+        ("worker_count", "worker_count"),
+        ("threads_per_worker", "threads_per_worker"),
+    ]:
+        val = getattr(config.parallelism, attr)
+        if val is not None:
+            settings_table.add_row("Parallelism", label, str(val))
 
     # Memory
     if config.memory.memory_limit is not None:
@@ -402,8 +410,6 @@ def show_defaults(platform: str) -> None:
         console.print("  [dim]Using default settings (no custom configuration needed)[/dim]")
     else:
         console.print(settings_table)
-
-    console.print(f"\n[dim]To use these settings: benchbox run --platform {platform} --tuning auto[/dim]")
 
 
 @tuning_group.command("list")

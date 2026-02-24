@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from benchbox.core.config import BenchmarkConfig, SystemProfile
+from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
 
 def get_benchmark_instance(config: BenchmarkConfig, system_profile: SystemProfile | None) -> Any:

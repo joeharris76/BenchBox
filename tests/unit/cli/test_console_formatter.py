@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from benchbox.core.config import QueryResult
+from benchbox.core.schemas import QueryResult
 from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast

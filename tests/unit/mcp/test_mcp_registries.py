@@ -6,6 +6,7 @@ callable functions with the FastMCP server that produce correct output.
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -37,13 +38,13 @@ class TestRegisterAllResources:
 
         mcp = _make_mcp()
         # Should not raise
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
     def test_list_benchmarks_resource(self):
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
         # Access the registered function directly via the resource manager
         # FastMCP stores resources; we can invoke the underlying function
@@ -66,7 +67,7 @@ class TestRegisterAllResources:
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
         templates = mcp._resource_manager._templates
         template_key = "benchbox://benchmarks/{name}"
@@ -84,7 +85,7 @@ class TestRegisterAllResources:
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
         templates = mcp._resource_manager._templates
         fn = templates["benchbox://benchmarks/{name}"].fn
@@ -97,7 +98,7 @@ class TestRegisterAllResources:
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
         resources = mcp._resource_manager._resources
         assert "benchbox://platforms" in resources
@@ -112,7 +113,7 @@ class TestRegisterAllResources:
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
         templates = mcp._resource_manager._templates
         fn = templates["benchbox://platforms/{name}"].fn
@@ -125,7 +126,7 @@ class TestRegisterAllResources:
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
         templates = mcp._resource_manager._templates
         fn = templates["benchbox://platforms/{name}"].fn
@@ -133,15 +134,11 @@ class TestRegisterAllResources:
         data = json.loads(result)
         assert "error" in data
 
-    def test_recent_results_no_dir(self, tmp_path, monkeypatch):
-        from benchbox.mcp.resources import registry
-
-        monkeypatch.setattr(registry, "DEFAULT_RESULTS_DIR", tmp_path / "nonexistent")
-
+    def test_recent_results_no_dir(self, tmp_path):
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=tmp_path / "nonexistent")
 
         resources = mcp._resource_manager._resources
         fn = resources["benchbox://results/recent"].fn
@@ -150,11 +147,7 @@ class TestRegisterAllResources:
         assert data["count"] == 0
         assert data["runs"] == []
 
-    def test_recent_results_with_files(self, tmp_path, monkeypatch):
-        from benchbox.mcp.resources import registry
-
-        monkeypatch.setattr(registry, "DEFAULT_RESULTS_DIR", tmp_path)
-
+    def test_recent_results_with_files(self, tmp_path):
         # Create a mock result file
         result_data = {
             "platform": {"name": "duckdb"},
@@ -167,7 +160,7 @@ class TestRegisterAllResources:
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=tmp_path)
 
         resources = mcp._resource_manager._resources
         fn = resources["benchbox://results/recent"].fn
@@ -181,7 +174,7 @@ class TestRegisterAllResources:
         from benchbox.mcp.resources.registry import register_all_resources
 
         mcp = _make_mcp()
-        register_all_resources(mcp)
+        register_all_resources(mcp, results_dir=Path("benchmark_runs/results"))
 
         resources = mcp._resource_manager._resources
         assert "benchbox://system/profile" in resources

@@ -10,15 +10,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.table import Table
 
+from benchbox.cli.shared import console
 from benchbox.core.results.database import (
     RankingConfig,
     ResultDatabase,
 )
-
-console = Console()
 
 
 @click.group("report")

@@ -25,7 +25,7 @@ Dialect Translation
    BenchBox can translate queries to many SQL dialects via SQLGlot (PostgreSQL, MySQL, SQL Server, Oracle, etc.),
    but **dialect translation does not mean platform adapters exist** for connecting to those databases.
 
-   **Currently supported platforms**: DuckDB, SQLite, PostgreSQL, TimescaleDB, ClickHouse, Databricks, BigQuery, Redshift, Snowflake, Trino, Presto, Athena, Firebolt, Azure Synapse, Microsoft Fabric, and many more (see :doc:`/platforms/index`)
+   **Currently supported platforms**: DuckDB, SQLite, PostgreSQL, TimescaleDB, ClickHouse, Databricks SQL, BigQuery, Redshift, Snowflake, Trino, Presto, Amazon Athena, Firebolt, Azure Synapse Analytics, Microsoft Fabric, and many more (see :doc:`/platforms/index`)
 
    **Planned platforms**: MySQL, SQL Server, and others (see :doc:`/development/roadmap`)
 

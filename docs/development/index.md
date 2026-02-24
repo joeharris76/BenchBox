@@ -28,6 +28,7 @@ Documentation for contributors and developers working on BenchBox.
 - [Code Structure](../design/structure.md) - Codebase organization
 - [DB API 2.0](db-api-2.md) - Python DB API 2.0 specification and platform integration
 - [Runtime Modules](runtime-modules.md) - Runtime module organization and responsibilities
+- [Run Lifecycle Map](run-lifecycle-map.md) - Current `benchbox run` execution/export branches
 - [Data Sharing](data-sharing.md) - Data sharing between benchmark phases
 - [Dependency Compatibility](dependency-compatibility.md) - Managing optional dependencies
 
@@ -61,6 +62,7 @@ tpc-compilation-guide
 testing
 read-primitives-catalog
 runtime-modules
+run-lifecycle-map
 data-sharing
 dependency-compatibility
 db-api-2

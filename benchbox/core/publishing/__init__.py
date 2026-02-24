@@ -12,7 +12,7 @@ Example usage:
     >>> config = PublishingConfig.for_local("/path/to/published")
     >>> publisher = Publisher(config)
     >>> result = publisher.publish_result(benchmark_result)
-    >>> print(result.permalink.full_url)
+    >>> emit(result.permalink.full_url)
 """
 
 from .artifacts import (

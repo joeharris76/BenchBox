@@ -97,6 +97,7 @@ class ASCIIHeatmap(ASCIIChartBase):
 
         colors = self.options.get_colors()
         intensity_chars = self.options.get_intensity_chars()
+        box = self.options.get_box_chars()
         width = self.options.get_effective_width()
 
         # Find min/max for normalization
@@ -120,93 +121,176 @@ class ASCIIHeatmap(ASCIIChartBase):
             lines.append(self._render_horizontal_line(width))
             lines.append("")
 
-        # Calculate column widths — dynamic row label width, capped at 20
-        max_row_label = min(20, max(len(label) for label in self.row_labels))
+        # Layout calculation
+        max_row_label, cell_width, col_sep = self._compute_layout(box, all_values)
 
-        # Cell width: accommodate column labels and formatted values with padding
-        max_col_label = max(len(label) for label in self.col_labels) + 2
-        if self._show_values:
-            max_value_len = max(len(self._format_value(v)) for v in all_values) + 4  # generous padding
-            cell_width = max(max_col_label, max_value_len)
-        else:
-            cell_width = max_col_label
-
-        # 1-char gap between columns
-        col_gap = 1
-
-        # Check if we need to truncate columns
+        # Column fitting: shrink cell_width to fit all columns before truncating
         available_width = width - max_row_label - 2
-        max_cols = available_width // (cell_width + col_gap)
-        max_cols = max(1, max_cols)
+        num_cols = len(self.col_labels)
+        max_cols = max(1, available_width // (cell_width + len(col_sep)))
+        if num_cols > max_cols:
+            # Try to reduce cell_width so all columns fit
+            min_cell_width = max(5, max(len(self._format_value(v)) for v in all_values) + 2)
+            compressed = (available_width // num_cols) - len(col_sep)
+            if compressed >= min_cell_width:
+                cell_width = compressed
+                max_cols = num_cols
+        max_rows = len(self.row_labels)
+        if self.options.height is not None:
+            max_rows = max(1, self.options.height - 10)
 
         display_cols = self.col_labels[:max_cols]
-        display_matrix = [row[:max_cols] for row in self.matrix]
-        truncated = len(self.col_labels) > max_cols
+        display_row_labels = self.row_labels[:max_rows]
+        display_matrix = [row[:max_cols] for row in self.matrix[:max_rows]]
+        col_truncated = len(self.col_labels) > max_cols
+        row_truncated = len(self.row_labels) > len(display_row_labels)
 
-        # Header row with column labels
-        header = " " * (max_row_label + 2)
-        for j, label in enumerate(display_cols):
-            header += self._truncate_label(label, cell_width).center(cell_width)
-            if j < len(display_cols) - 1:
-                header += " " * col_gap
-        lines.append(header)
-
-        # Separator
-        total_data_width = cell_width * len(display_cols) + col_gap * (len(display_cols) - 1)
-        sep = " " * (max_row_label + 1) + "┬" + "─" * total_data_width
-        lines.append(sep)
+        # Header and separator
+        lines.extend(self._render_header(display_cols, max_row_label, cell_width, col_sep, box))
 
         # Data rows
         use_bg = colors.color_mode != ColorMode.NONE
         bg_scale = self.BG_SCALE_DIVERGING
 
-        for row_label, row_data in zip(self.row_labels, display_matrix):
-            label = self._truncate_label(row_label, max_row_label).rjust(max_row_label)
-            row_str = f"{label} │"
-
-            for j, value in enumerate(row_data):
-                if value is None:
-                    cell = " - ".center(cell_width)
-                else:
-                    normalized = (value - min_val) / value_range if value_range > 0 else 0.5
-                    color_idx = min(len(bg_scale) - 1, int(normalized * (len(bg_scale) - 1)))
-
-                    value_str = self._format_value(value)
-
-                    if use_bg:
-                        # Full-width colored background cell with centered value
-                        padded = value_str.center(cell_width)
-                        cell = colors.colorize(
-                            padded,
-                            fg_color=self.FG_ON_BG[color_idx],
-                            bg_color=bg_scale[color_idx],
-                        )
-                    else:
-                        # No-color fallback: intensity prefix + value
-                        intensity_idx = min(
-                            len(intensity_chars) - 1,
-                            int(normalized * (len(intensity_chars) - 1)),
-                        )
-                        cell = f"{intensity_chars[intensity_idx]}{value_str}".center(cell_width)
-
-                row_str += cell
-                if j < len(row_data) - 1:
-                    row_str += " " * col_gap
-
-            if truncated:
-                row_str += " ..."
-
+        for row_label, row_data in zip(display_row_labels, display_matrix):
+            row_str = self._render_data_row(
+                row_label,
+                row_data,
+                max_row_label,
+                cell_width,
+                col_sep,
+                box,
+                min_val,
+                value_range,
+                use_bg,
+                bg_scale,
+                colors,
+                intensity_chars,
+                col_truncated,
+            )
             lines.append(row_str)
 
-        # Row count indicator if truncated
-        if len(self.row_labels) > len(display_matrix):
-            lines.append(f"... ({len(self.row_labels) - len(display_matrix)} more rows)")
+        if row_truncated:
+            lines.append(f"... ({len(self.row_labels) - len(display_row_labels)} more rows)")
 
-        # Axis labels
+        # Footer
         lines.append(self._render_axis_label("Platform", width, axis="x"))
-
-        # Scale legend
         lines.append("")
+        lines.append(self._render_scale_legend(use_bg, bg_scale, colors, intensity_chars))
+        lines.append(f"Range: {self._format_value(min_val)} - {self._format_value(max_val)} {self.value_label}")
+
+        return "\n".join(lines)
+
+    def _compute_layout(self, box: dict[str, str], all_values: list[float]) -> tuple[int, int, str]:
+        """Compute row label width, cell width, and column separator."""
+        max_row_label = min(20, max(len(label) for label in self.row_labels))
+        max_col_label = max(len(label) for label in self.col_labels) + 2
+        if self._show_values:
+            max_value_len = max(len(self._format_value(v)) for v in all_values) + 4
+            cell_width = max(max_col_label, max_value_len)
+        else:
+            cell_width = max_col_label
+        return max_row_label, cell_width, box["v"]
+
+    def _render_header(
+        self,
+        display_cols: list[str],
+        max_row_label: int,
+        cell_width: int,
+        col_sep: str,
+        box: dict[str, str],
+    ) -> list[str]:
+        """Render the column header row and separator line."""
+        header = " " * (max_row_label + 2)
+        for j, label in enumerate(display_cols):
+            header += self._truncate_label(label, cell_width).center(cell_width)
+            if j < len(display_cols) - 1:
+                header += col_sep
+
+        sep_core = (box["h"] * cell_width + box["cross"]) * (len(display_cols) - 1) + box["h"] * cell_width
+        sep = " " * (max_row_label + 1) + box["tm"] + sep_core
+        return [header, sep]
+
+    def _render_data_row(
+        self,
+        row_label: str,
+        row_data: list[float | None],
+        max_row_label: int,
+        cell_width: int,
+        col_sep: str,
+        box: dict[str, str],
+        min_val: float,
+        value_range: float,
+        use_bg: bool,
+        bg_scale: list[str],
+        colors: object,
+        intensity_chars: list[str],
+        col_truncated: bool,
+    ) -> str:
+        """Render a single data row with colored/intensity cells."""
+        label = self._truncate_label(row_label, max_row_label).rjust(max_row_label)
+        row_str = f"{label} {box['v']}"
+
+        for j, value in enumerate(row_data):
+            cell = self._render_cell(
+                value,
+                cell_width,
+                min_val,
+                value_range,
+                use_bg,
+                bg_scale,
+                colors,
+                intensity_chars,
+            )
+            row_str += cell
+            if j < len(row_data) - 1:
+                row_str += col_sep
+
+        if col_truncated:
+            row_str += " ..."
+        return row_str
+
+    def _render_cell(
+        self,
+        value: float | None,
+        cell_width: int,
+        min_val: float,
+        value_range: float,
+        use_bg: bool,
+        bg_scale: list[str],
+        colors: object,
+        intensity_chars: list[str],
+    ) -> str:
+        """Render a single heatmap cell (colored background or intensity chars)."""
+        if value is None:
+            return (" " * max(0, cell_width - 1)) + "-"
+
+        normalized = (value - min_val) / value_range if value_range > 0 else 0.5
+        color_idx = min(len(bg_scale) - 1, int(normalized * (len(bg_scale) - 1)))
+        value_str = self._format_value(value)
+
+        if use_bg:
+            padded = value_str.center(cell_width)
+            return colors.colorize(
+                padded,
+                fg_color=self.FG_ON_BG[color_idx],
+                bg_color=bg_scale[color_idx],
+            )
+
+        intensity_idx = min(len(intensity_chars) - 1, int(normalized * (len(intensity_chars) - 1)))
+        fill_width = max(0, cell_width - len(value_str) - 1)
+        if fill_width > 0:
+            return (intensity_chars[intensity_idx] * fill_width) + " " + value_str
+        return value_str.rjust(cell_width)
+
+    def _render_scale_legend(
+        self,
+        use_bg: bool,
+        bg_scale: list[str],
+        colors: object,
+        intensity_chars: list[str],
+    ) -> str:
+        """Render the color/intensity scale legend line."""
         if use_bg:
             scale_line = "Scale: "
             scale_labels = ["fast", "", "", "", "slow"]
@@ -214,18 +298,13 @@ class ASCIIHeatmap(ASCIIChartBase):
                 block = f" {lbl} " if lbl else "   "
                 scale_line += colors.colorize(block, fg_color=self.FG_ON_BG[i], bg_color=bg_scale[i])
             scale_line += f"  ({self.value_label})"
-            lines.append(scale_line)
-        else:
-            scale_line = "Scale: "
-            for char in intensity_chars[1:]:
-                scale_line += char + " "
-            scale_line += f"(fast → slow, {self.value_label})"
-            lines.append(scale_line)
+            return scale_line
 
-        # Min/max values
-        lines.append(f"Range: {self._format_value(min_val)} - {self._format_value(max_val)} {self.value_label}")
-
-        return "\n".join(lines)
+        scale_line = "Scale: "
+        for char in intensity_chars[1:]:
+            scale_line += char + " "
+        scale_line += f"(fast → slow, {self.value_label})"
+        return scale_line
 
 
 def from_matrix(

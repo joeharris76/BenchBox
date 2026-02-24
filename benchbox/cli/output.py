@@ -70,34 +70,8 @@ class ConsoleResultFormatter:
         if getattr(results, "execution_phases", None):
             console.print("\n[bold yellow]Phase Execution Summary:[/bold yellow]")
 
-        # Enhanced elements - Resource utilization
-        if hasattr(results, "resource_utilization") and results.resource_utilization:
-            console.print("\n[bold yellow]Resource Utilization:[/bold yellow]")
-            for metric, value in results.resource_utilization.items():
-                if isinstance(value, (int, float)):
-                    if "memory" in metric.lower():
-                        console.print(
-                            f"  [bold]{metric.replace('_', ' ').title()}:[/bold] {format_bytes(value * 1024 * 1024)}"
-                        )
-                    elif "cpu" in metric.lower() and value <= 100:
-                        console.print(f"  [bold]{metric.replace('_', ' ').title()}:[/bold] {value:.1f}%")
-                    else:
-                        console.print(f"  [bold]{metric.replace('_', ' ').title()}:[/bold] {value}")
-
-        # Enhanced elements - Performance characteristics
-        if hasattr(results, "performance_characteristics") and results.performance_characteristics:
-            console.print("\n[bold yellow]Performance Characteristics:[/bold yellow]")
-            perf_chars = results.performance_characteristics
-            if "query_complexity_distribution" in perf_chars:
-                console.print(
-                    f"  [bold]Query Complexity Distribution:[/bold] {perf_chars['query_complexity_distribution']}"
-                )
-            if "data_access_patterns" in perf_chars:
-                console.print(f"  [bold]Data Access Patterns:[/bold] {perf_chars['data_access_patterns']}")
-            if "parallel_execution_efficiency" in perf_chars:
-                console.print(
-                    f"  [bold]Parallel Execution Efficiency:[/bold] {perf_chars['parallel_execution_efficiency']:.2f}"
-                )
+        ConsoleResultFormatter._display_resource_utilization(results)
+        ConsoleResultFormatter._display_performance_characteristics(results)
 
         # Data and timing information
         if hasattr(results, "data_size_mb"):
@@ -107,34 +81,84 @@ class ConsoleResultFormatter:
         if hasattr(results, "data_loading_time"):
             console.print(f"[bold blue]Data Loading:[/bold blue] {format_duration(results.data_loading_time)}")
 
-        # Overall benchmark status (includes data loading and query execution)
-        query_success = results.successful_queries == results.total_queries
-        validation_success = getattr(results, "validation_status", "PASSED") in [
-            "PASSED",
-            "PARTIAL",
-        ]
-
-        # Determine status and color
-        if not validation_success or not query_success:
-            status = "FAILED"
-            status_color = "red"
-        elif getattr(results, "validation_status", "PASSED") == "PARTIAL":
-            status = "PARTIAL"
-            status_color = "yellow"
-        else:
-            status = "PASSED"
-            status_color = "green"
-
+        status, status_color = ConsoleResultFormatter._determine_benchmark_status(results)
         console.print(f"[bold blue]Benchmark Status:[/bold blue] [{status_color}]{status}[/{status_color}]")
         console.print(
             f"[bold blue]Queries:[/bold blue] {results.successful_queries}/{results.total_queries} successful"
         )
 
-        # Show validation status details if validation failed or is partial
-        validation_status = getattr(results, "validation_status", "PASSED")
         validation_details = getattr(results, "validation_details", {}) or {}
-
         ConsoleResultFormatter._print_validation_stages(validation_details)
+        ConsoleResultFormatter._display_validation_status(results, validation_details)
+
+        if results.successful_queries > 0:
+            console.print(
+                f"[bold blue]Query Execution Time:[/bold blue] {format_duration(results.total_execution_time)}"
+            )
+            console.print(f"[bold blue]Average Query Time:[/bold blue] {format_duration(results.average_query_time)}")
+
+        # Tuning configuration display
+        if hasattr(results, "tuning_enabled") and results.tuning_enabled:
+            console.print("[bold blue]Tuning Configuration:[/bold blue] [green]Enabled[/green]")
+            if hasattr(results, "constraints_applied"):
+                console.print(f"  [dim]Constraints Applied:[/dim] {results.constraints_applied}")
+        else:
+            console.print("[bold blue]Tuning Configuration:[/bold blue] [dim]Default (constraints enabled)[/dim]")
+
+        if verbose:
+            ConsoleResultFormatter._display_platform_query_details(results)
+
+    @staticmethod
+    def _display_resource_utilization(results: BenchmarkResults) -> None:
+        """Display resource utilization metrics."""
+        if not hasattr(results, "resource_utilization") or not results.resource_utilization:
+            return
+        console.print("\n[bold yellow]Resource Utilization:[/bold yellow]")
+        for metric, value in results.resource_utilization.items():
+            if isinstance(value, (int, float)):
+                if "memory" in metric.lower():
+                    console.print(
+                        f"  [bold]{metric.replace('_', ' ').title()}:[/bold] {format_bytes(value * 1024 * 1024)}"
+                    )
+                elif "cpu" in metric.lower() and value <= 100:
+                    console.print(f"  [bold]{metric.replace('_', ' ').title()}:[/bold] {value:.1f}%")
+                else:
+                    console.print(f"  [bold]{metric.replace('_', ' ').title()}:[/bold] {value}")
+
+    @staticmethod
+    def _display_performance_characteristics(results: BenchmarkResults) -> None:
+        """Display performance characteristics."""
+        if not hasattr(results, "performance_characteristics") or not results.performance_characteristics:
+            return
+        console.print("\n[bold yellow]Performance Characteristics:[/bold yellow]")
+        perf_chars = results.performance_characteristics
+        if "query_complexity_distribution" in perf_chars:
+            console.print(
+                f"  [bold]Query Complexity Distribution:[/bold] {perf_chars['query_complexity_distribution']}"
+            )
+        if "data_access_patterns" in perf_chars:
+            console.print(f"  [bold]Data Access Patterns:[/bold] {perf_chars['data_access_patterns']}")
+        if "parallel_execution_efficiency" in perf_chars:
+            console.print(
+                f"  [bold]Parallel Execution Efficiency:[/bold] {perf_chars['parallel_execution_efficiency']:.2f}"
+            )
+
+    @staticmethod
+    def _determine_benchmark_status(results: BenchmarkResults) -> tuple[str, str]:
+        """Determine overall benchmark status and color."""
+        query_success = results.successful_queries == results.total_queries
+        validation_success = getattr(results, "validation_status", "PASSED") in ["PASSED", "PARTIAL"]
+
+        if not validation_success or not query_success:
+            return "FAILED", "red"
+        if getattr(results, "validation_status", "PASSED") == "PARTIAL":
+            return "PARTIAL", "yellow"
+        return "PASSED", "green"
+
+    @staticmethod
+    def _display_validation_status(results: BenchmarkResults, validation_details: dict[str, Any]) -> None:
+        """Display validation status details for failed or partial validations."""
+        validation_status = getattr(results, "validation_status", "PASSED")
 
         if validation_status == "FAILED":
             console.print("\n[bold red]❌ Data Validation Failed:[/bold red]")
@@ -157,23 +181,6 @@ class ConsoleResultFormatter:
                             f"   [yellow]• {table_info['table']}:[/yellow] {table_info['actual']} rows (expected min: {table_info['expected_minimum']})"
                         )
             console.print("   [dim]Benchmark completed with partial data validation[/dim]")
-
-        if results.successful_queries > 0:
-            console.print(
-                f"[bold blue]Query Execution Time:[/bold blue] {format_duration(results.total_execution_time)}"
-            )
-            console.print(f"[bold blue]Average Query Time:[/bold blue] {format_duration(results.average_query_time)}")
-
-        # Tuning configuration display
-        if hasattr(results, "tuning_enabled") and results.tuning_enabled:
-            console.print("[bold blue]Tuning Configuration:[/bold blue] [green]Enabled[/green]")
-            if hasattr(results, "constraints_applied"):
-                console.print(f"  [dim]Constraints Applied:[/dim] {results.constraints_applied}")
-        else:
-            console.print("[bold blue]Tuning Configuration:[/bold blue] [dim]Default (constraints enabled)[/dim]")
-
-        if verbose:
-            ConsoleResultFormatter._display_platform_query_details(results)
 
     @staticmethod
     def _print_validation_stages(details: Optional[dict[str, Any]]) -> None:
@@ -210,11 +217,28 @@ class ConsoleResultFormatter:
     @staticmethod
     def _display_platform_result(results: BenchmarkResults, verbose: bool) -> None:
         """Display platform BenchmarkResults format."""
+        ConsoleResultFormatter._display_platform_header(results)
+
+        status, status_color = ConsoleResultFormatter._determine_benchmark_status(results)
+        console.print(f"[bold blue]Benchmark Status:[/bold blue] [{status_color}]{status}[/{status_color}]")
+        console.print(
+            f"[bold blue]Queries:[/bold blue] {results.successful_queries}/{results.total_queries} successful"
+        )
+
+        validation_details = getattr(results, "validation_details", {}) or {}
+        ConsoleResultFormatter._display_validation_status(results, validation_details)
+        ConsoleResultFormatter._display_timing_and_tuning(results)
+
+        if verbose:
+            ConsoleResultFormatter._display_platform_query_details(results)
+
+    @staticmethod
+    def _display_platform_header(results: BenchmarkResults) -> None:
+        """Display platform identification and data/timing header info."""
         console.print(f"[bold blue]Scale Factor:[/bold blue] {results.scale_factor}")
         console.print(f"[bold blue]Platform:[/bold blue] {results.platform}")
         console.print(f"[bold blue]Database:[/bold blue] {getattr(results, 'database_name', 'in-memory')}")
 
-        # Data and timing information
         if hasattr(results, "data_size_mb"):
             console.print(f"[bold blue]Data Size:[/bold blue] {format_bytes(results.data_size_mb * 1024 * 1024)}")
         if hasattr(results, "schema_creation_time"):
@@ -222,71 +246,21 @@ class ConsoleResultFormatter:
         if hasattr(results, "data_loading_time"):
             console.print(f"[bold blue]Data Loading:[/bold blue] {format_duration(results.data_loading_time)}")
 
-        # Overall benchmark status (includes data loading and query execution)
-        query_success = results.successful_queries == results.total_queries
-        validation_success = getattr(results, "validation_status", "PASSED") in [
-            "PASSED",
-            "PARTIAL",
-        ]
-
-        # Determine status and color
-        if not validation_success or not query_success:
-            status = "FAILED"
-            status_color = "red"
-        elif getattr(results, "validation_status", "PASSED") == "PARTIAL":
-            status = "PARTIAL"
-            status_color = "yellow"
-        else:
-            status = "PASSED"
-            status_color = "green"
-
-        console.print(f"[bold blue]Benchmark Status:[/bold blue] [{status_color}]{status}[/{status_color}]")
-        console.print(
-            f"[bold blue]Queries:[/bold blue] {results.successful_queries}/{results.total_queries} successful"
-        )
-
-        # Show validation status details if validation failed or is partial
-        validation_status = getattr(results, "validation_status", "PASSED")
-        validation_details = getattr(results, "validation_details", {})
-
-        if validation_status == "FAILED":
-            console.print("\n[bold red]❌ Data Validation Failed:[/bold red]")
-            if validation_details:
-                if "empty_tables" in validation_details and validation_details["empty_tables"]:
-                    console.print(f"   [red]• Empty tables:[/red] {', '.join(validation_details['empty_tables'])}")
-                if "missing_tables" in validation_details and validation_details["missing_tables"]:
-                    console.print(f"   [red]• Missing tables:[/red] {', '.join(validation_details['missing_tables'])}")
-                if "inaccessible_tables" in validation_details and validation_details["inaccessible_tables"]:
-                    console.print(
-                        f"   [red]• Inaccessible tables:[/red] {', '.join(validation_details['inaccessible_tables'])}"
-                    )
-            console.print("   [yellow]💡 Suggestion:[/yellow] Check data generation and loading process")
-        elif validation_status == "PARTIAL":
-            console.print("\n[bold yellow]⚠️ Data Validation Partial:[/bold yellow]")
-            if validation_details:
-                if "insufficient_data_tables" in validation_details:
-                    for table_info in validation_details["insufficient_data_tables"]:
-                        console.print(
-                            f"   [yellow]• {table_info['table']}:[/yellow] {table_info['actual']} rows (expected min: {table_info['expected_minimum']})"
-                        )
-            console.print("   [dim]Benchmark completed with partial data validation[/dim]")
-
+    @staticmethod
+    def _display_timing_and_tuning(results: BenchmarkResults) -> None:
+        """Display query timing and tuning configuration info."""
         if results.successful_queries > 0:
             console.print(
                 f"[bold blue]Query Execution Time:[/bold blue] {format_duration(results.total_execution_time)}"
             )
             console.print(f"[bold blue]Average Query Time:[/bold blue] {format_duration(results.average_query_time)}")
 
-        # Tuning configuration display
         if hasattr(results, "tuning_enabled") and results.tuning_enabled:
             console.print("[bold blue]Tuning Configuration:[/bold blue] [green]Enabled[/green]")
             if hasattr(results, "constraints_applied"):
                 console.print(f"  [dim]Constraints Applied:[/dim] {results.constraints_applied}")
         else:
             console.print("[bold blue]Tuning Configuration:[/bold blue] [dim]Default (constraints enabled)[/dim]")
-
-        if verbose:
-            ConsoleResultFormatter._display_platform_query_details(results)
 
     @staticmethod
     def _display_platform_query_details(results: BenchmarkResults) -> None:

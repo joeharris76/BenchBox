@@ -258,7 +258,3 @@ class TPCHOfficialBenchmark:
                     f.write(f"  - {error}\n")
 
         return output_path
-
-
-# Aliases for backward compatibility
-QphHResult = TPCHOfficialBenchmarkResult

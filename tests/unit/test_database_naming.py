@@ -282,7 +282,7 @@ class TestDatabaseNameParsing:
         assert parsed["original_name"] == "tpch_sf1_tuned_pk.duckdb"
 
         # SQLite file
-        parsed = parse_database_name("tpcds_sf01_notuning.db")
+        parsed = parse_database_name("tpcds_sf01_notuning.sqlite")
         assert parsed["benchmark"] == "tpcds"
 
     def test_invalid_name_parsing(self):

@@ -10,7 +10,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,13 +20,15 @@ if TYPE_CHECKING:
         ForeignKeyConfiguration,
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
+        TuningColumn,
         UnifiedTuningConfiguration,
     )
 
 from ..core.exceptions import ConfigurationError
 from ..utils.dependencies import check_platform_dependencies, get_dependency_error_message
 from ..utils.file_format import is_tpc_format
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
+from .base.data_loading import DataSourceResolver
 
 try:
     import snowflake.connector
@@ -41,6 +42,8 @@ except ImportError:
 
 class SnowflakeAdapter(PlatformAdapter):
     """Snowflake platform adapter with cloud data warehouse optimizations."""
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -137,6 +140,20 @@ class SnowflakeAdapter(PlatformAdapter):
     @property
     def platform_name(self) -> str:
         return "Snowflake"
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """Build opt-in sorted-ingestion SQL for Snowflake."""
+        mode, method = self.resolve_sorted_ingestion_strategy()
+        if mode == "off":
+            return None
+
+        if method != "ctas":
+            raise ValueError(
+                f"Sorted ingestion method '{method}' is not supported for Snowflake; use method='ctas' or 'auto'."
+            )
+
+        order_by = ", ".join(column.name for column in sort_columns)
+        return f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM {table_name} ORDER BY {order_by}"
 
     @staticmethod
     def add_cli_arguments(parser) -> None:
@@ -272,6 +289,8 @@ class SnowflakeAdapter(PlatformAdapter):
                 # Get Snowflake version
                 result = cursor.execute("SELECT current_version()").fetchone()
                 platform_info["platform_version"] = result[0] if result else None
+                platform_info["engine_version"] = platform_info["platform_version"]
+                platform_info["engine_version_source"] = "sql_query"
 
                 # Get current region and cloud provider
                 try:
@@ -640,6 +659,7 @@ class SnowflakeAdapter(PlatformAdapter):
 
         start_time = mono_time()
         table_stats = {}
+        total_time = 0.0
 
         cursor = connection.cursor()
 
@@ -648,76 +668,12 @@ class SnowflakeAdapter(PlatformAdapter):
             self.log_very_verbose(f"Setting query tag: {self.query_tag}_data_loading")
             cursor.execute(f"ALTER SESSION SET QUERY_TAG = '{self.query_tag}_data_loading'")
 
-            # Create file format for CSV loading if needed
-            self.log_verbose("Creating file formats for data loading")
-            cursor.execute(f"""
-                CREATE OR REPLACE FILE FORMAT {self.schema}.BENCHBOX_CSV_FORMAT
-                TYPE = 'CSV'
-                FIELD_DELIMITER = ','
-                RECORD_DELIMITER = '\\n'
-                SKIP_HEADER = 0
-                ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
-                REPLACE_INVALID_CHARACTERS = TRUE
-                EMPTY_FIELD_AS_NULL = TRUE
-                COMPRESSION = '{self.compression}'
-            """)
-
-            # Create file format for TPC-H .tbl files (pipe delimited)
-            cursor.execute(f"""
-                CREATE OR REPLACE FILE FORMAT {self.schema}.BENCHBOX_TBL_FORMAT
-                TYPE = 'CSV'
-                FIELD_DELIMITER = '|'
-                RECORD_DELIMITER = '\\n'
-                SKIP_HEADER = 0
-                ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
-                REPLACE_INVALID_CHARACTERS = TRUE
-                EMPTY_FIELD_AS_NULL = TRUE
-                COMPRESSION = '{self.compression}'
-            """)
-
-            # Get data files from benchmark or manifest fallback
-            if hasattr(benchmark, "tables") and benchmark.tables:
-                data_files = benchmark.tables
-            else:
-                data_files = None
-                try:
-                    manifest_path = Path(data_dir) / "_datagen_manifest.json"
-                    if manifest_path.exists():
-                        with open(manifest_path) as f:
-                            manifest = json.load(f)
-                        tables = manifest.get("tables") or {}
-                        mapping = {}
-                        for table, entries in tables.items():
-                            if entries:
-                                # Collect ALL chunk files, not just the first one
-                                chunk_paths = []
-                                for entry in entries:
-                                    rel = entry.get("path")
-                                    if rel:
-                                        chunk_paths.append(Path(data_dir) / rel)
-                                if chunk_paths:
-                                    mapping[table] = chunk_paths
-                        if mapping:
-                            data_files = mapping
-                            self.log_very_verbose("Using data files from _datagen_manifest.json")
-                except Exception as e:
-                    self.log_very_verbose(f"Manifest fallback failed: {e}")
-                if not data_files:
-                    # No data files available - benchmark should have generated data first
-                    raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+            self._create_load_file_formats(cursor)
+            data_files = self._resolve_data_files(benchmark, data_dir)
 
             # Load data for each table (handle multi-chunk files)
             for table_name, file_paths in data_files.items():
-                # Normalize to list (data resolver should always return lists now)
-                if not isinstance(file_paths, list):
-                    file_paths = [file_paths]
-
-                # Filter out non-existent or empty files
-                valid_files = []
-                for file_path in file_paths:
-                    file_path = Path(file_path)
-                    if file_path.exists() and file_path.stat().st_size > 0:
-                        valid_files.append(file_path)
+                valid_files = self._normalize_existing_files(file_paths)
 
                 if not valid_files:
                     self.logger.warning(f"Skipping {table_name} - no valid data files")
@@ -730,67 +686,12 @@ class SnowflakeAdapter(PlatformAdapter):
                 try:
                     load_start = mono_time()
                     table_name_upper = table_name.upper()
-
-                    # Create stage for file upload
-                    stage_name = f"@%{table_name_upper}"
-                    self.log_very_verbose(f"Using stage: {stage_name}")
-
-                    # Upload all files to Snowflake internal stage using PUT
-                    for file_idx, file_path in enumerate(valid_files):
-                        put_command = f"PUT file://{file_path.absolute()} {stage_name}"
-                        chunk_msg = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
-                        self.log_very_verbose(f"Uploading file{chunk_msg} with PUT: {file_path.name}")
-                        cursor.execute(put_command)
-
-                    # Determine file format based on first file
-                    # Uses centralized utility that handles compression and sharding
-                    first_file = valid_files[0]
-                    if is_tpc_format(first_file):
-                        file_format = f"{self.schema}.BENCHBOX_TBL_FORMAT"
-                        self.log_very_verbose(f"Using TBL file format for {table_name}")
-                    else:
-                        file_format = f"{self.schema}.BENCHBOX_CSV_FORMAT"
-                        self.log_very_verbose(f"Using CSV file format for {table_name}")
-
-                    # Load data using COPY INTO (loads all files from stage)
-                    copy_command = f"""
-                        COPY INTO {table_name_upper}
-                        FROM {stage_name}
-                        FILE_FORMAT = (FORMAT_NAME = '{file_format}')
-                        ON_ERROR = 'CONTINUE'
-                        PURGE = TRUE
-                    """
-
-                    self.log_very_verbose(f"Executing COPY INTO for {table_name_upper}")
-                    cursor.execute(copy_command)
-                    copy_results = cursor.fetchall()
-
-                    # Parse copy results to get row count
-                    # Snowflake COPY INTO result columns:
-                    # 0: file, 1: status, 2: rows_parsed, 3: rows_loaded, 4: error_limit, 5: first_error, 6: first_error_line, ...
-                    rows_loaded = 0
-                    for row in copy_results:
-                        if len(row) > 3:  # Ensure rows_loaded column exists
-                            status = str(row[1]) if len(row) > 1 else "UNKNOWN"
-                            try:
-                                loaded = int(row[3])  # row[3] = rows_loaded (integer)
-                                rows_loaded += loaded
-
-                                # Log warning if file had issues, including error details
-                                if status != "LOADED":
-                                    file_name = str(row[0]) if len(row) > 0 else "unknown"
-                                    error_msg = str(row[5]) if len(row) > 5 and row[5] else "No error message provided"
-                                    self.logger.warning(
-                                        f"File {file_name} status: {status}, loaded {loaded} rows. Error: {error_msg}"
-                                    )
-                            except (ValueError, TypeError) as e:
-                                self.logger.warning(f"Could not parse rows_loaded from COPY result: {e}")
-                                continue
-
-                    # Get actual row count from table
-                    cursor.execute(f"SELECT COUNT(*) FROM {table_name_upper}")
-                    actual_count = cursor.fetchone()[0]
+                    actual_count = self._load_table_from_stage(cursor, table_name, table_name_upper, valid_files)
                     table_stats[table_name_upper] = actual_count
+
+                    effective_tuning = self.get_effective_tuning_configuration()
+                    if effective_tuning is not None:
+                        self.apply_ctas_sort(table_name_upper, effective_tuning, connection)
 
                     load_time = elapsed_seconds(load_start)
                     self.log_verbose(
@@ -816,6 +717,110 @@ class SnowflakeAdapter(PlatformAdapter):
 
         # Snowflake doesn't provide detailed per-table timings yet
         return table_stats, total_time, None
+
+    def _create_load_file_formats(self, cursor: Any) -> None:
+        """Create Snowflake file formats used by COPY INTO operations."""
+        self.log_verbose("Creating file formats for data loading")
+        cursor.execute(f"""
+            CREATE OR REPLACE FILE FORMAT {self.schema}.BENCHBOX_CSV_FORMAT
+            TYPE = 'CSV'
+            FIELD_DELIMITER = ','
+            RECORD_DELIMITER = '\\n'
+            SKIP_HEADER = 0
+            ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
+            REPLACE_INVALID_CHARACTERS = TRUE
+            EMPTY_FIELD_AS_NULL = TRUE
+            COMPRESSION = '{self.compression}'
+        """)
+        cursor.execute(f"""
+            CREATE OR REPLACE FILE FORMAT {self.schema}.BENCHBOX_TBL_FORMAT
+            TYPE = 'CSV'
+            FIELD_DELIMITER = '|'
+            RECORD_DELIMITER = '\\n'
+            SKIP_HEADER = 0
+            ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
+            REPLACE_INVALID_CHARACTERS = TRUE
+            EMPTY_FIELD_AS_NULL = TRUE
+            COMPRESSION = '{self.compression}'
+        """)
+
+    def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
+        """Resolve benchmark data files from benchmark tables or manifest."""
+        resolver = DataSourceResolver()
+        data_source = resolver.resolve(benchmark, data_dir)
+        if not data_source or not data_source.tables:
+            raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+        return data_source.tables
+
+    @staticmethod
+    def _normalize_existing_files(file_paths: Any) -> list[Path]:
+        """Normalize file inputs to existing, non-empty local paths."""
+        normalized_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        valid_files: list[Path] = []
+        for file_path in normalized_paths:
+            path = Path(file_path)
+            if path.exists() and path.stat().st_size > 0:
+                valid_files.append(path)
+        return valid_files
+
+    def _get_file_format_for_table(self, table_name: str, first_file: Path) -> str:
+        """Select Snowflake file format object based on source file type."""
+        if is_tpc_format(first_file):
+            self.log_very_verbose(f"Using TBL file format for {table_name}")
+            return f"{self.schema}.BENCHBOX_TBL_FORMAT"
+        self.log_very_verbose(f"Using CSV file format for {table_name}")
+        return f"{self.schema}.BENCHBOX_CSV_FORMAT"
+
+    def _parse_copy_results(self, copy_results: list[Any]) -> None:
+        """Log per-file COPY INTO warnings while tolerating parse failures."""
+        for row in copy_results:
+            if len(row) <= 3:
+                continue
+
+            status = str(row[1]) if len(row) > 1 else "UNKNOWN"
+            try:
+                loaded = int(row[3])
+            except (ValueError, TypeError) as e:
+                self.logger.warning(f"Could not parse rows_loaded from COPY result: {e}")
+                continue
+
+            if status == "LOADED":
+                continue
+
+            file_name = str(row[0]) if len(row) > 0 else "unknown"
+            error_msg = str(row[5]) if len(row) > 5 and row[5] else "No error message provided"
+            self.logger.warning(f"File {file_name} status: {status}, loaded {loaded} rows. Error: {error_msg}")
+
+    def _load_table_from_stage(
+        self,
+        cursor: Any,
+        table_name: str,
+        table_name_upper: str,
+        valid_files: list[Path],
+    ) -> int:
+        """Upload table files to stage, COPY INTO target table, and return actual row count."""
+        stage_name = f"@%{table_name_upper}"
+        self.log_very_verbose(f"Using stage: {stage_name}")
+
+        for file_idx, file_path in enumerate(valid_files):
+            chunk_msg = f" (chunk {file_idx + 1}/{len(valid_files)})" if len(valid_files) > 1 else ""
+            self.log_very_verbose(f"Uploading file{chunk_msg} with PUT: {file_path.name}")
+            cursor.execute(f"PUT file://{file_path.absolute()} {stage_name}")
+
+        file_format = self._get_file_format_for_table(table_name, valid_files[0])
+        copy_command = f"""
+            COPY INTO {table_name_upper}
+            FROM {stage_name}
+            FILE_FORMAT = (FORMAT_NAME = '{file_format}')
+            ON_ERROR = 'CONTINUE'
+            PURGE = TRUE
+        """
+        self.log_very_verbose(f"Executing COPY INTO for {table_name_upper}")
+        cursor.execute(copy_command)
+        self._parse_copy_results(cursor.fetchall())
+
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name_upper}")
+        return cursor.fetchone()[0]
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply Snowflake-specific optimizations based on benchmark type."""
@@ -923,74 +928,20 @@ class SnowflakeAdapter(PlatformAdapter):
         Raises:
             ConfigurationError: If cache control validation fails and strict_validation=True
         """
-        cursor = connection.cursor()
-        result = {
-            "validated": False,
-            "cache_disabled": False,
-            "settings": {},
-            "warnings": [],
-            "errors": [],
-        }
+        from benchbox.platforms.cloud_shared import validate_session_cache_control
 
-        try:
-            # Query current session parameter value
-            cursor.execute("SELECT SYSTEM$GET_SESSION_PARAMETER('USE_CACHED_RESULT') as value")
-            row = cursor.fetchone()
-
-            if row:
-                actual_value = str(row[0]).upper()
-                result["settings"]["USE_CACHED_RESULT"] = actual_value
-
-                # Determine expected value based on configuration
-                expected_value = "FALSE" if self.disable_result_cache else "TRUE"
-
-                if actual_value == expected_value:
-                    result["validated"] = True
-                    result["cache_disabled"] = actual_value == "FALSE"
-                    self.logger.debug(
-                        f"Cache control validated: USE_CACHED_RESULT={actual_value} (expected {expected_value})"
-                    )
-                else:
-                    error_msg = (
-                        f"Cache control validation failed: "
-                        f"expected USE_CACHED_RESULT={expected_value}, "
-                        f"got {actual_value}"
-                    )
-                    result["errors"].append(error_msg)
-                    self.logger.error(error_msg)
-
-                    # Raise error if strict validation mode enabled
-                    if self.strict_validation:
-                        raise ConfigurationError(
-                            "Snowflake session cache control validation failed - "
-                            "benchmark results may be incorrect due to cached query results",
-                            details=result,
-                        )
-            else:
-                warning_msg = "Could not retrieve USE_CACHED_RESULT parameter from session"
-                result["warnings"].append(warning_msg)
-                self.logger.warning(warning_msg)
-
-        except Exception as e:
-            # If this is our ConfigurationError, re-raise it
-            if isinstance(e, ConfigurationError):
-                raise
-
-            # Otherwise log validation error
-            error_msg = f"Validation query failed: {e}"
-            result["errors"].append(error_msg)
-            self.logger.error(f"Cache control validation error: {e}")
-
-            # Raise if strict mode and query failed
-            if self.strict_validation:
-                raise ConfigurationError(
-                    "Failed to validate Snowflake cache control settings",
-                    details={"original_error": str(e), "validation_result": result},
-                )
-        finally:
-            cursor.close()
-
-        return result
+        return validate_session_cache_control(
+            connection=connection,
+            query="SELECT SYSTEM$GET_SESSION_PARAMETER('USE_CACHED_RESULT') as value",
+            setting_key="USE_CACHED_RESULT",
+            disabled_value="FALSE",
+            enabled_value="TRUE",
+            normalize="upper",
+            platform_name="Snowflake",
+            disable_result_cache=self.disable_result_cache,
+            strict_validation=self.strict_validation,
+            adapter_logger=self.logger,
+        )
 
     def execute_query(
         self,
@@ -1683,7 +1634,7 @@ def _build_snowflake_config(
     Returns:
         DatabaseConfig with credentials loaded and platform-specific fields at top-level
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

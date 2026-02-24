@@ -52,7 +52,7 @@ BenchBox supports platforms across six categories:
 6. Which cloud provider?
    └── AWS → Redshift, Athena, or EMR Serverless
    └── GCP → BigQuery or Dataproc Serverless
-   └── Azure → Synapse, Fabric Warehouse, or Fabric Spark
+   └── Azure → Azure Synapse Analytics, Microsoft Fabric Warehouse, or Microsoft Fabric Spark
    └── Multi-cloud → Snowflake or Databricks
 ```
 
@@ -162,15 +162,25 @@ uv add clickhouse-driver chdb
 
 Managed cloud platforms with enterprise features, auto-scaling, and petabyte-scale capacity.
 
+```{note}
+TimescaleDB also supports a managed cloud deployment mode via TigerData (`timescaledb:cloud`). It is shown separately below because it is a managed PostgreSQL time-series service rather than an MPP warehouse.
+```
+
 ### Architecture Comparison
 
 | Feature           | BigQuery     | Snowflake          | Databricks           | Redshift               | Synapse         | Fabric DW      | Athena               | Firebolt             |
 | ----------------- | ------------ | ------------------ | -------------------- | ---------------------- | --------------- | -------------- | -------------------- | -------------------- |
-| **CLI Name**      | `bigquery`   | `snowflake`        | `databricks`         | `redshift`             | `synapse`       | `fabric_dw`    | `athena`             | `firebolt`           |
+| **CLI Name**      | `bigquery`   | `snowflake`        | `databricks`         | `redshift`             | `synapse`       | `fabric-dw`    | `athena`             | `firebolt`           |
 | **Cloud**         | GCP          | Multi-cloud        | Multi-cloud          | AWS                    | Azure           | Azure          | AWS                  | Multi-cloud          |
 | **Architecture**  | Columnar MPP | Columnar MPP       | Columnar MPP (Spark) | Columnar MPP           | Columnar MPP    | Columnar MPP   | Columnar MPP (Trino) | Columnar MPP (Trino) |
 | **Storage**       | Capacitor    | Micro-partitions   | Delta Lake           | Columnar Blocks        | Distributed     | OneLake/Delta  | S3/Parquet           | Proprietary          |
 | **Compute Model** | Serverless   | Virtual Warehouses | Clusters/Serverless  | Provisioned/Serverless | Dedicated Pools | Capacity Units | Serverless           | Engines              |
+
+### Managed PostgreSQL / Time-Series Service
+
+| Platform | CLI Name | Protocol | Authentication | SSL | Storage | Managed |
+| -------- | -------- | -------- | -------------- | --- | ------- | ------- |
+| **TimescaleDB / TigerData** | `timescaledb:cloud` | PostgreSQL | Password | Required | TigerData managed PostgreSQL storage | Yes |
 
 ### Cost Analysis
 
@@ -186,6 +196,7 @@ Managed cloud platforms with enterprise features, auto-scaling, and petabyte-sca
 | **Fabric DW**  | Capacity Units     | Included            | Included      | 60-day trial      |
 | **Athena**     | $5/TB scanned      | S3 pricing          | S3 pricing    | None              |
 | **Firebolt**   | Per-engine pricing | Included            | Included      | Free local mode   |
+| **TigerData**  | Service tiers      | Included            | Included      | Free trial tiers  |
 
 **Cost estimate context**: Monthly costs assume SF=10 workload (~10GB), 100 queries/day, standard configurations. Actual costs vary significantly based on query complexity, concurrency, and data volume.
 
@@ -199,6 +210,11 @@ Managed cloud platforms with enterprise features, auto-scaling, and petabyte-sca
 | **SOC 2**                 | Yes       | Yes       | Yes        | Yes       | Yes      | Yes       | Yes     | Yes       |
 | **HIPAA**                 | Yes       | Yes       | Yes        | Yes       | Yes      | Yes       | Yes     | Contact   |
 | **FedRAMP**               | Yes       | Yes       | Yes        | Yes       | Yes      | Pending   | Yes     | No        |
+
+TigerData (`timescaledb:cloud`) security profile:
+- Encryption at rest: Default
+- Encryption in transit: TLS (SSL required by adapter)
+- Authentication: Username/password (`TIGERDATA_*` primary, `TIMESCALE_*` fallback)
 
 ### Installation
 
@@ -215,13 +231,13 @@ uv add databricks-sql-connector
 # Redshift
 uv add redshift-connector boto3
 
-# Azure Synapse
+# Azure Synapse Analytics
 uv add pyodbc azure-storage-blob azure-identity
 
 # Fabric Warehouse
 uv add pyodbc azure-identity azure-storage-file-datalake
 
-# AWS Athena
+# Amazon Athena
 uv add pyathena boto3
 
 # Firebolt

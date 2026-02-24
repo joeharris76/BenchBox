@@ -889,11 +889,22 @@ class TestPromptDataFormat:
 
     @patch("benchbox.cli.benchmarks.Prompt.ask")
     @patch("benchbox.cli.benchmarks.Confirm.ask")
+    def test_select_vortex(self, mock_confirm, mock_prompt):
+        """Test selecting Vortex."""
+        mock_confirm.return_value = True
+        # Vortex=3, zstd=1 (vortex options: zstd=1, lz4=2, none=3)
+        mock_prompt.side_effect = ["3", "1"]
+        fmt, compression = prompt_data_format("duckdb")
+        assert fmt == "vortex"
+        assert compression == "zstd"
+
+    @patch("benchbox.cli.benchmarks.Prompt.ask")
+    @patch("benchbox.cli.benchmarks.Confirm.ask")
     def test_select_delta(self, mock_confirm, mock_prompt):
         """Test selecting Delta Lake."""
         mock_confirm.return_value = True
-        # Delta=3, snappy=1 (delta options: snappy=1, zstd=2, none=3)
-        mock_prompt.side_effect = ["3", "1"]
+        # Delta=4, snappy=1 (delta options: snappy=1, zstd=2, none=3)
+        mock_prompt.side_effect = ["4", "1"]
         fmt, compression = prompt_data_format("databricks")
         assert fmt == "delta"
         assert compression == "snappy"
@@ -903,8 +914,8 @@ class TestPromptDataFormat:
     def test_select_iceberg(self, mock_confirm, mock_prompt):
         """Test selecting Iceberg."""
         mock_confirm.return_value = True
-        # Iceberg=4, zstd=1 (iceberg options: zstd=1, snappy=2, gzip=3, none=4)
-        mock_prompt.side_effect = ["4", "1"]
+        # Iceberg=5, zstd=1 (iceberg options: zstd=1, snappy=2, gzip=3, none=4)
+        mock_prompt.side_effect = ["5", "1"]
         fmt, compression = prompt_data_format("snowflake")
         assert fmt == "iceberg"
         assert compression == "zstd"

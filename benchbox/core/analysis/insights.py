@@ -116,8 +116,8 @@ class InsightGenerator:
         >>>
         >>> generator = InsightGenerator()
         >>> insights = generator.generate(comparison_report)
-        >>> print(insights.executive_summary)
-        >>> print(insights.to_markdown())
+        >>> emit(insights.executive_summary)
+        >>> emit(insights.to_markdown())
     """
 
     def __init__(self, config: Optional[InsightConfig] = None) -> None:

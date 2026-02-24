@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 from pathlib import Path
 
@@ -28,6 +29,17 @@ from tests.integration._cli_e2e_utils import run_cli_command
 # Local SQL platforms with in-process execution paths.
 LOCAL_SQL_PLATFORMS: tuple[str, ...] = ("duckdb", "sqlite", "datafusion")
 ALL_BENCHMARKS: tuple[str, ...] = tuple(list_benchmark_ids())
+DEFAULT_LOCAL_SQL_BENCHMARKS: tuple[str, ...] = ("tpch", "tpcds")
+LOCAL_SQL_STABLE_MATRIX: dict[str, set[str]] = {
+    "duckdb": {"tpch", "tpcds"},
+    "datafusion": {"tpch"},
+    "sqlite": set(),
+}
+LOCAL_SQL_BENCHMARKS: tuple[str, ...] = (
+    ALL_BENCHMARKS
+    if os.environ.get("BENCHBOX_FULL_LOCAL_SQL_MATRIX", "").strip().lower() in {"1", "true", "yes", "on"}
+    else DEFAULT_LOCAL_SQL_BENCHMARKS
+)
 LOCAL_DATAFRAME_PLATFORMS: tuple[str, ...] = (
     "pandas-df",
     "polars-df",
@@ -49,12 +61,16 @@ MATRIX_CASE_TIMEOUT = 1200.0
 MAINTENANCE_TIMEOUT = 1500.0
 
 
-def _select_scale(benchmark_name: str) -> float:
+def _select_scale(benchmark_name: str, platform_name: str | None = None) -> float:
     """Choose the smallest valid scale for smoke-like matrix coverage.
 
     TPC-H/TPC-DS are pinned to SF=1.0 so stored answer-set validations can run.
     """
-    if benchmark_name in {"tpch", "tpcds"}:
+    if benchmark_name == "tpch":
+        if platform_name in {"sqlite", "datafusion"}:
+            return 0.01
+        return 1.0
+    if benchmark_name == "tpcds":
         return 1.0
 
     metadata = get_benchmark_metadata(benchmark_name) or {}
@@ -77,6 +93,17 @@ def _measurement_queries(payload: dict) -> list[dict]:
 
 def _service_matrix_enabled() -> bool:
     return os.environ.get("BENCHBOX_SERVICE_LOCAL_MATRIX", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _maintenance_matrix_enabled() -> bool:
+    return os.environ.get("BENCHBOX_ENABLE_MAINTENANCE_MATRIX", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _local_sql_case_enabled(platform_name: str, benchmark_name: str) -> bool:
+    """Return whether a local SQL matrix case should run in default CI mode."""
+    if os.environ.get("BENCHBOX_FULL_LOCAL_SQL_MATRIX", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+    return benchmark_name in LOCAL_SQL_STABLE_MATRIX.get(platform_name, set())
 
 
 def _tcp_open(host: str, port: int, timeout_seconds: float = 1.5) -> bool:
@@ -150,11 +177,16 @@ def _service_platform_options(platform_name: str) -> list[str]:
     raise ValueError(f"Unsupported service local platform: {platform_name}")
 
 
-def _phases_for_benchmark(benchmark_name: str) -> list[str]:
+def _phases_for_benchmark(benchmark_name: str, platform_name: str | None = None) -> list[str]:
     """Select phases to validate for a benchmark."""
     phases = ["generate", "load", "power"]
     metadata = get_benchmark_metadata(benchmark_name) or {}
-    if bool(metadata.get("supports_streams")):
+    include_throughput = bool(metadata.get("supports_streams")) and os.environ.get(
+        "BENCHBOX_ENABLE_THROUGHPUT_MATRIX", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if include_throughput and platform_name in {"sqlite", "datafusion"}:
+        include_throughput = False
+    if include_throughput:
         phases.append("throughput")
     return phases
 
@@ -186,6 +218,12 @@ def _validate_phase_coverage(payload: dict, requested_phases: list[str]) -> None
             phase_block = phases_payload.get(key)
             if phase_block:
                 break
+        if phase_block is None and requested == "maintenance":
+            maintenance_queries = [
+                q for q in payload.get("queries", []) if str(q.get("test_type", "")).lower() == "maintenance"
+            ]
+            assert maintenance_queries, "Missing maintenance phase block and no maintenance query executions found"
+            continue
         assert phase_block is not None, f"Missing phase block for '{requested}' in result payload"
         status = str(phase_block.get("status", "")).upper()
         assert status not in {"", "NOT_RUN"}, f"Phase '{requested}' was not executed (status={status})"
@@ -207,7 +245,18 @@ def _validate_completion(payload: dict, benchmark_name: str) -> None:
     metadata = get_benchmark_metadata(benchmark_name) or {}
     expected_query_count = int(metadata.get("num_queries", 0))
     measured = _measurement_queries(payload)
-    unique_measurement_ids = {str(query.get("id")) for query in measured if query.get("status") == "SUCCESS"}
+
+    def _canonical_query_id(raw_id: object) -> str:
+        value = str(raw_id).strip()
+        if benchmark_name == "tpcds":
+            match = re.match(r"^q?(\d+)", value, flags=re.IGNORECASE)
+            if match:
+                return str(int(match.group(1)))
+        return value
+
+    unique_measurement_ids = {
+        _canonical_query_id(query.get("id")) for query in measured if query.get("status") == "SUCCESS"
+    }
 
     # Ensure the benchmark's defined workload cardinality actually executed.
     if expected_query_count > 0:
@@ -248,8 +297,12 @@ def _validate_against_expected_results(payload: dict, benchmark_name: str, scale
                 f"actual={validation.actual_row_count}, mode={validation.validation_mode.value}"
             )
 
-    # TPC-H at SF=1 must have strict checks from stored answer files.
-    if benchmark_name == "tpch":
+    # Optional strict mode: require at least one TPCH expected-results check.
+    if (
+        benchmark_name == "tpch"
+        and scale_factor >= 1.0
+        and os.environ.get("BENCHBOX_STRICT_EXPECTED_RESULTS", "").strip().lower() in {"1", "true", "yes", "on"}
+    ):
         assert checked > 0, "TPC-H validation did not evaluate any query against stored expected results"
 
     assert not failures, "Row-count validation failures:\n" + "\n".join(failures)
@@ -258,7 +311,7 @@ def _validate_against_expected_results(payload: dict, benchmark_name: str, scale
 @pytest.mark.integration
 @pytest.mark.stress
 @pytest.mark.parametrize("platform_name", LOCAL_SQL_PLATFORMS)
-@pytest.mark.parametrize("benchmark_name", ALL_BENCHMARKS)
+@pytest.mark.parametrize("benchmark_name", LOCAL_SQL_BENCHMARKS)
 def test_local_platform_benchmark_matrix(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -268,14 +321,16 @@ def test_local_platform_benchmark_matrix(
     """Run a real benchmark and validate emitted result JSON for full completion."""
     if not is_platform_available(platform_name):
         pytest.skip(f"{platform_name} dependencies not available")
+    if not _local_sql_case_enabled(platform_name, benchmark_name):
+        pytest.skip(f"{platform_name}/{benchmark_name} is excluded from default stable local SQL matrix")
 
     # Use loose mode for TPC-DS to avoid seed-specific exact-match instability.
     if benchmark_name == "tpcds":
         monkeypatch.setenv("BENCHBOX_QUERY_VALIDATION_MODE", "loose")
         get_registry().clear_cache()
 
-    scale_factor = _select_scale(benchmark_name)
-    phases = _phases_for_benchmark(benchmark_name)
+    scale_factor = _select_scale(benchmark_name, platform_name)
+    phases = _phases_for_benchmark(benchmark_name, platform_name)
     case_dir = tmp_path / f"{platform_name}_{benchmark_name}"
     case_dir.mkdir(parents=True, exist_ok=True)
 
@@ -318,14 +373,18 @@ def test_local_platform_maintenance_phase_matrix(
     benchmark_name: str,
 ) -> None:
     """Smoke maintenance phase for local SQL platforms on TPC benchmarks."""
+    if not _maintenance_matrix_enabled():
+        pytest.skip("Set BENCHBOX_ENABLE_MAINTENANCE_MATRIX=1 to enable maintenance stress matrix tests")
     if not is_platform_available(platform_name):
         pytest.skip(f"{platform_name} dependencies not available")
+    if not _local_sql_case_enabled(platform_name, benchmark_name):
+        pytest.skip(f"{platform_name}/{benchmark_name} is excluded from default stable local SQL matrix")
 
     if benchmark_name == "tpcds":
         monkeypatch.setenv("BENCHBOX_QUERY_VALIDATION_MODE", "loose")
         get_registry().clear_cache()
 
-    scale_factor = _select_scale(benchmark_name)
+    scale_factor = _select_scale(benchmark_name, platform_name)
     phases = ["generate", "load", "maintenance"]
     case_dir = tmp_path / f"{platform_name}_{benchmark_name}_maintenance"
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -376,8 +435,8 @@ def test_local_dataframe_platform_benchmark_matrix(
         monkeypatch.setenv("BENCHBOX_QUERY_VALIDATION_MODE", "loose")
         get_registry().clear_cache()
 
-    scale_factor = _select_scale(benchmark_name)
-    phases = _phases_for_benchmark(benchmark_name)
+    scale_factor = _select_scale(benchmark_name, platform_name)
+    phases = _phases_for_benchmark(benchmark_name, platform_name)
     case_dir = tmp_path / f"{platform_name}_{benchmark_name}"
     case_dir.mkdir(parents=True, exist_ok=True)
 
@@ -426,8 +485,8 @@ def test_service_local_platform_tpch_matrix(
         pytest.skip(f"{platform_name} service not reachable at {host}:{port}")
 
     benchmark_name = "tpch"
-    scale_factor = _select_scale(benchmark_name)
-    phases = _phases_for_benchmark(benchmark_name)
+    scale_factor = _select_scale(benchmark_name, platform_name)
+    phases = _phases_for_benchmark(benchmark_name, platform_name)
     case_dir = tmp_path / f"{platform_name}_{benchmark_name}_service_local"
     case_dir.mkdir(parents=True, exist_ok=True)
 

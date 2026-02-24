@@ -209,6 +209,103 @@ def render_ascii_chart(
                 )
         chart = ASCIIDivergingBar(data=converted, title=title, options=opts, **kwargs)
 
+    elif chart_type == "percentile_ladder":
+        from benchbox.core.visualization.ascii.percentile_ladder import ASCIIPercentileLadder, PercentileData
+
+        converted = []
+        for item in data:
+            if isinstance(item, PercentileData):
+                converted.append(item)
+            else:
+                converted.append(
+                    PercentileData(
+                        name=getattr(item, "name", str(item)),
+                        p50=getattr(item, "p50", 0),
+                        p90=getattr(item, "p90", 0),
+                        p95=getattr(item, "p95", 0),
+                        p99=getattr(item, "p99", 0),
+                    )
+                )
+        chart = ASCIIPercentileLadder(data=converted, title=title, options=opts, **kwargs)
+
+    elif chart_type == "normalized_speedup":
+        from benchbox.core.visualization.ascii.normalized_speedup import ASCIINormalizedSpeedup, SpeedupData
+
+        converted = []
+        for item in data:
+            if isinstance(item, SpeedupData):
+                converted.append(item)
+            else:
+                converted.append(
+                    SpeedupData(
+                        name=getattr(item, "name", str(item)),
+                        ratio=getattr(item, "ratio", 1.0),
+                        is_baseline=getattr(item, "is_baseline", False),
+                    )
+                )
+        chart = ASCIINormalizedSpeedup(data=converted, title=title, options=opts, **kwargs)
+
+    elif chart_type == "stacked_phase":
+        from benchbox.core.visualization.ascii.stacked_bar import (
+            ASCIIStackedBar,
+            StackedBarData,
+            StackedBarSegment,
+        )
+
+        converted = []
+        for item in data:
+            if isinstance(item, StackedBarData):
+                converted.append(item)
+            else:
+                segments = [
+                    StackedBarSegment(
+                        phase_name=getattr(s, "phase_name", str(s)),
+                        value=getattr(s, "value", 0),
+                        color=getattr(s, "color", None),
+                    )
+                    for s in getattr(item, "segments", [])
+                ]
+                converted.append(
+                    StackedBarData(
+                        label=getattr(item, "label", str(item)),
+                        segments=segments,
+                        total=getattr(item, "total", None),
+                    )
+                )
+        chart = ASCIIStackedBar(data=converted, title=title, options=opts, **kwargs)
+
+    elif chart_type == "sparkline_table":
+        from benchbox.core.visualization.ascii.sparkline_table import ASCIISparklineTable, SparklineTableData
+
+        if isinstance(data, SparklineTableData):
+            chart = ASCIISparklineTable(data=data, title=title, options=opts, **kwargs)
+        else:
+            raise VisualizationError("sparkline_table data must be a SparklineTableData instance")
+
+    elif chart_type == "cdf_chart":
+        from benchbox.core.visualization.ascii.cdf_chart import ASCIICDFChart, CDFSeriesData
+
+        converted = []
+        for item in data:
+            if isinstance(item, CDFSeriesData):
+                converted.append(item)
+            else:
+                converted.append(
+                    CDFSeriesData(
+                        name=getattr(item, "name", str(item)),
+                        values=list(getattr(item, "values", [])),
+                    )
+                )
+        chart = ASCIICDFChart(data=converted, title=title, options=opts, **kwargs)
+
+    elif chart_type == "rank_table":
+        from benchbox.core.visualization.ascii.rank_table import ASCIIRankTable, RankTableData
+
+        if isinstance(data, RankTableData):
+            chart = ASCIIRankTable(data=data, title=title, options=opts, **kwargs)
+        else:
+            raise VisualizationError("rank_table data must be a RankTableData instance")
+
     elif chart_type == "summary_box":
         from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
 

@@ -92,6 +92,7 @@ class TestPandasFamilyPlatformListing:
             "dask-df",
             "datafusion-df",
             "pyspark-df",
+            "lakesail-df",
         }
         assert set(platforms.keys()) == expected
 

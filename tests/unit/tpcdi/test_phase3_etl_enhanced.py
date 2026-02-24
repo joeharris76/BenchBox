@@ -758,7 +758,7 @@ class TestDataQualityMonitor:
             rule_type="COMPLETENESS",
             table_name="DimCustomer",
             column_name="Name",
-            rule_sql="SELECT COUNT(*) FROM DimCustomer WHERE Name IS NULL OR Name = ''",
+            custom_sql="SELECT COUNT(*) FROM DimCustomer WHERE Name IS NULL OR Name = ''",
             expected_result=0,
             severity="HIGH",
         )

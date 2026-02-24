@@ -397,8 +397,10 @@ def test_print_validation_report_verbose_mode(caplog):
             "benchmark": "tpcds",
             "scale_factor": 10.0,
             "tables": {
-                "catalog_sales": [{"path": "catalog_sales.dat.1.zst"}, {"path": "catalog_sales.dat.2.zst"}],
-                "store_sales": [{"path": "store_sales.dat.1.zst"}],
+                "catalog_sales": {
+                    "formats": {"zst": [{"path": "catalog_sales.dat.1.zst"}, {"path": "catalog_sales.dat.2.zst"}]}
+                },
+                "store_sales": {"formats": {"zst": [{"path": "store_sales.dat.1.zst"}]}},
             },
             "compression": {"enabled": True, "type": "zstd", "level": 3},
         },

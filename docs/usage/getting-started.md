@@ -92,7 +92,7 @@ BenchBox also supports benchmarking DataFrame libraries using their native APIs.
 uv run benchbox run --platform polars-df --benchmark tpch --scale 0.01
 
 # Pandas DataFrame (requires extra)
-uv add benchbox --extra dataframe-pandas
+uv add benchbox --extra pandas
 uv run benchbox run --platform pandas-df --benchmark tpch --scale 0.01
 ```
 

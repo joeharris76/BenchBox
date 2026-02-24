@@ -565,52 +565,50 @@ def extract_entities(text: str, entity_types: list[str] | None = None) -> dict[s
     if not text_str:
         return result
 
-    # Try spaCy first
     try:
-        nlp = _get_spacy_model()
-        doc = nlp(text_str)
-
-        for ent in doc.ents:
-            # Map spaCy entity types to our types
-            if ent.label_ in ("PRODUCT", "ORG") and "feature" in entity_types:
-                result["feature"].append(ent.text)
-            elif ent.label_ == "MATERIAL" and "material" in entity_types:
-                result["material"].append(ent.text)
-
-        # Use adjectives for colors and sizes
-        for token in doc:
-            if token.pos_ == "ADJ":
-                text_lower = token.text.lower()
-                if any(c in text_lower for c in ["red", "blue", "green", "black", "white", "yellow"]):
-                    if "color" in entity_types:
-                        result["color"].append(token.text)
-                elif any(s in text_lower for s in ["small", "medium", "large", "tiny", "huge"]):
-                    if "size" in entity_types:
-                        result["size"].append(token.text)
-
+        _extract_entities_spacy(text_str, entity_types, result)
     except Exception as e:
-        # Fallback to simple regex-based extraction
         logger.debug(f"spaCy extraction failed, using regex fallback: {e}")
-        import re
-
-        # Color extraction
-        if "color" in entity_types:
-            colors = re.findall(r"\b(red|blue|green|black|white|yellow|brown|gray|grey)\b", text_str, re.IGNORECASE)
-            result["color"] = list(set(colors))
-
-        # Size extraction
-        if "size" in entity_types:
-            sizes = re.findall(r"\b(small|medium|large|tiny|huge|xl|xxl)\b", text_str, re.IGNORECASE)
-            result["size"] = list(set(sizes))
-
-        # Material extraction
-        if "material" in entity_types:
-            materials = re.findall(
-                r"\b(steel|iron|copper|brass|aluminum|plastic|wood|leather|cotton)\b", text_str, re.IGNORECASE
-            )
-            result["material"] = list(set(materials))
+        _extract_entities_regex(text_str, entity_types, result)
 
     return result
+
+
+def _extract_entities_spacy(text_str: str, entity_types: list[str], result: dict[str, list[str]]) -> None:
+    """Extract entities using spaCy NLP model."""
+    nlp = _get_spacy_model()
+    doc = nlp(text_str)
+
+    for ent in doc.ents:
+        if ent.label_ in ("PRODUCT", "ORG") and "feature" in entity_types:
+            result["feature"].append(ent.text)
+        elif ent.label_ == "MATERIAL" and "material" in entity_types:
+            result["material"].append(ent.text)
+
+    for token in doc:
+        if token.pos_ == "ADJ":
+            text_lower = token.text.lower()
+            if any(c in text_lower for c in ["red", "blue", "green", "black", "white", "yellow"]):
+                if "color" in entity_types:
+                    result["color"].append(token.text)
+            elif any(s in text_lower for s in ["small", "medium", "large", "tiny", "huge"]):
+                if "size" in entity_types:
+                    result["size"].append(token.text)
+
+
+def _extract_entities_regex(text_str: str, entity_types: list[str], result: dict[str, list[str]]) -> None:
+    """Extract entities using regex patterns as a fallback."""
+    import re
+
+    _regex_patterns: dict[str, str] = {
+        "color": r"\b(red|blue|green|black|white|yellow|brown|gray|grey)\b",
+        "size": r"\b(small|medium|large|tiny|huge|xl|xxl)\b",
+        "material": r"\b(steel|iron|copper|brass|aluminum|plastic|wood|leather|cotton)\b",
+    }
+
+    for etype, pattern in _regex_patterns.items():
+        if etype in entity_types:
+            result[etype] = list(set(re.findall(pattern, text_str, re.IGNORECASE)))
 
 
 # =============================================================================
@@ -717,7 +715,7 @@ class DataFrameAIOperationsManager:
 
         # Get helpful error for missing dependencies
         if not manager.supports_operation(AIOperationType.EMBEDDING_BATCH):
-            print(manager.get_unsupported_message(AIOperationType.EMBEDDING_BATCH))
+            emit(manager.get_unsupported_message(AIOperationType.EMBEDDING_BATCH))
     """
 
     def __init__(self, platform_name: str) -> None:

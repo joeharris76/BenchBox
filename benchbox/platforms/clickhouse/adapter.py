@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.utils.dependencies import check_platform_dependencies, get_dependency_error_message
 
 from .diagnostics import ClickHouseDiagnosticsMixin
@@ -37,6 +37,8 @@ class ClickHouseAdapter(
         manual query rewriting or ClickHouse engine improvements.
     """
 
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
+
     # Known incompatible queries that may fail despite transformations
     KNOWN_INCOMPATIBLE_QUERIES = {
         "tpcds": [14, 30, 66, 81],
@@ -47,28 +49,10 @@ class ClickHouseAdapter(
 
         self._dialect = "clickhouse"
 
-        # Determine deployment mode with priority:
-        # 1. deployment_mode (from factory via colon syntax: clickhouse:local)
-        # 2. mode (legacy config key)
-        # Default to 'local' (easiest onboarding - no credentials required)
+        # Determine deployment mode (from factory via colon syntax: clickhouse:local).
+        # Default to local mode for easiest onboarding (no credentials required).
         deployment_mode = config.get("deployment_mode")
-        legacy_mode = config.get("mode")
-
-        if deployment_mode:
-            self.deployment_mode = deployment_mode.lower()
-        elif legacy_mode:
-            self.deployment_mode = legacy_mode.lower()
-            # Log deprecation warning for legacy mode config key
-            logger.warning(
-                "Config key 'mode' is deprecated. Use deployment mode syntax "
-                "(clickhouse:local, clickhouse:server) or 'deployment_mode' config key."
-            )
-        else:
-            self.deployment_mode = "local"  # Default to local (chDB)
-
-        # Support 'embedded' as alias for 'local' for backward compatibility
-        if self.deployment_mode == "embedded":
-            self.deployment_mode = "local"
+        self.deployment_mode = deployment_mode.lower() if deployment_mode else "local"
 
         # Validate deployment mode
         # Note: "cloud" mode is now a separate first-class platform: clickhouse-cloud
@@ -125,9 +109,6 @@ class ClickHouseAdapter(
                     "\nFor more information, visit: https://clickhouse.com/docs/en/integrations/python"
                 )
             self._setup_cloud_mode(config)
-
-        # Store deployment_mode as mode for backward compatibility with existing code
-        self.mode = self.deployment_mode
 
 
 __all__ = ["ClickHouseAdapter"]

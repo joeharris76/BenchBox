@@ -77,6 +77,22 @@ benchbox run --platform bigquery --benchmark tpch --scale 1.0 \
 | `credentials_path` | (env) | Service account JSON path |
 | `staging_bucket` | (none) | GCS bucket for staging |
 | `maximum_bytes_billed` | (none) | Query cost limit |
+| `driver_version` | (latest) | Pin the google-cloud-bigquery package version (e.g. `3.0.0`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific BigQuery Connector Version
+
+```bash
+benchbox run --platform bigquery --benchmark tpch \
+  --platform-option driver_version=3.0.0 \
+  --platform-option driver_auto_install=true \
+  --platform-option project_id=your-gcp-project
+```
+
+The driver package for BigQuery is `google-cloud-bigquery`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Authentication Methods
 

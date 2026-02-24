@@ -462,7 +462,7 @@ class TestDryRunDataLoadModes:
         from datetime import datetime
 
         from benchbox.cli.dryrun import DryRunExecutor
-        from benchbox.core.config import SystemProfile
+        from benchbox.core.schemas import SystemProfile
 
         executor = DryRunExecutor()
         config = BenchmarkConfig(name="test", display_name="Test", scale_factor=0.01)

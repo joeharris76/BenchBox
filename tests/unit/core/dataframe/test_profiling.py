@@ -554,25 +554,6 @@ class TestProfiledExecutionResult:
         assert result.rows_returned == 100
         assert result.peak_memory_mb == 512.0
 
-    def test_to_dict(self):
-        """Test converting to dictionary."""
-        profile = QueryExecutionProfile(
-            query_id="Q1",
-            execution_time_ms=1000.0,
-            rows_processed=100,
-            peak_memory_mb=512.0,
-        )
-
-        result = ProfiledExecutionResult(result=[], profile=profile)
-        result_dict = result.to_dict()
-
-        assert result_dict["query_id"] == "Q1"
-        assert result_dict["status"] == "SUCCESS"
-        assert result_dict["execution_time_seconds"] == 1.0
-        assert result_dict["rows_returned"] == 100
-        assert result_dict["peak_memory_mb"] == 512.0
-        assert result_dict["profile"] is profile
-
 
 class TestComparisonResult:
     """Tests for ComparisonResult dataclass."""

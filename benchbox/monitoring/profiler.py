@@ -206,7 +206,7 @@ class EnhancedResourceProfiler:
         >>> # ... run benchmark ...
         >>> profiler.stop()
         >>> timeline = profiler.get_timeline()
-        >>> print(f"Peak CPU: {timeline.get_peak_cpu():.1f}%")
+        >>> emit(f"Peak CPU: {timeline.get_peak_cpu():.1f}%")
     """
 
     def __init__(

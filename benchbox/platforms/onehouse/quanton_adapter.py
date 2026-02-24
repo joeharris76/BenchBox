@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkConfigMixin,
     CloudSparkStaging,
@@ -95,6 +95,8 @@ class QuantonAdapter(
     - XTable integration for format comparison
     - Intelligent cluster management
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     # CloudSparkConfigMixin: Uses Quanton-optimized config
     cloud_platform: ClassVar[CloudPlatform] = CloudPlatform.QUANTON

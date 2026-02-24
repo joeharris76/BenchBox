@@ -20,7 +20,7 @@ Example:
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
     >>> # Get sort clause for CTAS pattern
     >>> if clauses.sort_by:
-    ...     print(f"CREATE TABLE sorted_table AS SELECT * FROM src {clauses.sort_by}")
+    ...     emit(f"CREATE TABLE sorted_table AS SELECT * FROM src {clauses.sort_by}")
     CREATE TABLE sorted_table AS SELECT * FROM src ORDER BY l_shipdate, l_orderkey
 
 Copyright 2026 Joe Harris / BenchBox Project
@@ -273,7 +273,7 @@ class DuckDBDDLGenerator(BaseDDLGenerator):
         table_name: str,
         source_query: str,
         tuning: TuningClauses | None = None,
-        if_not_exists: bool = False,
+        or_replace: bool = False,
         schema: str | None = None,
     ) -> str:
         """Generate DuckDB CREATE TABLE AS statement with optional sorting.
@@ -284,7 +284,7 @@ class DuckDBDDLGenerator(BaseDDLGenerator):
             table_name: Target table name.
             source_query: SELECT query providing the data (without ORDER BY).
             tuning: Tuning clauses containing sort_by.
-            if_not_exists: Add IF NOT EXISTS clause.
+            or_replace: Use CREATE OR REPLACE TABLE.
             schema: Schema name for qualified table name.
 
         Returns:
@@ -292,9 +292,8 @@ class DuckDBDDLGenerator(BaseDDLGenerator):
         """
         parts = ["CREATE"]
 
-        # Note: DuckDB uses CREATE OR REPLACE TABLE, not CREATE TABLE IF NOT EXISTS
-        # for CTAS. We'll use CREATE OR REPLACE for the 'if_not_exists' case.
-        if if_not_exists:
+        # Note: DuckDB uses CREATE OR REPLACE TABLE for replacement semantics.
+        if or_replace:
             parts.append("OR REPLACE")
 
         parts.append("TABLE")

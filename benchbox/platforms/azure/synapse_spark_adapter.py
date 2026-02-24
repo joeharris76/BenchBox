@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkStaging,
     SparkConfigOptimizer,
@@ -129,6 +129,8 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
     - Storage charged separately (ADLS Gen2)
     - Pool idle timeout billing
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     def __init__(
         self,
@@ -264,7 +266,7 @@ class SynapseSparkAdapter(SparkTuningMixin, PlatformAdapter):
         """
         return {
             "platform": "synapse-spark",
-            "display_name": "Azure Synapse Spark",
+            "display_name": "Azure Synapse Analytics Spark",
             "vendor": "Microsoft",
             "type": "managed_spark",
             "workspace_name": self.workspace_name,

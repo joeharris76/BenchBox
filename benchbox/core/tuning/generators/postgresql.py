@@ -9,7 +9,7 @@ Example:
     >>> from benchbox.core.tuning.generators.postgresql import PostgreSQLDDLGenerator
     >>> generator = PostgreSQLDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
-    >>> print(generator.generate_create_table_ddl("orders", columns, clauses))
+    >>> emit(generator.generate_create_table_ddl("orders", columns, clauses))
     CREATE TABLE orders (
         o_orderkey BIGINT NOT NULL,
         o_orderdate DATE NOT NULL

@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkConfigMixin,
     CloudSparkStaging,
@@ -109,6 +109,8 @@ class DataprocAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdapter):
     - Per-second billing with 1-minute minimum
     - Preemptible VMs: ~80% cheaper than standard
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     # CloudSparkConfigMixin: Uses Dataproc-optimized config
     cloud_platform = CloudPlatform.DATAPROC
@@ -238,7 +240,7 @@ class DataprocAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdapter):
         """
         return {
             "platform": "dataproc",
-            "display_name": "GCP Dataproc",
+            "display_name": "Google Cloud Dataproc",
             "vendor": "Google Cloud",
             "type": "managed_spark",
             "project_id": self.project_id,

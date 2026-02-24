@@ -14,6 +14,8 @@ Available generators:
 - PostgreSQLDDLGenerator: PostgreSQL with PARTITION BY/CLUSTER
 - TimescaleDBDDLGenerator: TimescaleDB with hypertables and compression
 - ClickHouseDDLGenerator: ClickHouse with MergeTree PARTITION BY/ORDER BY
+- DorisDDLGenerator: Apache Doris with DUPLICATE KEY/DISTRIBUTED BY HASH
+- QuestDBDDLGenerator: QuestDB with timestamp(), PARTITION BY, SYMBOL types
 
 Copyright 2026 Joe Harris / BenchBox Project
 
@@ -41,15 +43,27 @@ from benchbox.core.tuning.generators.clickhouse import (
     ClickHouseDDLGenerator,
     MergeTreeEngine,
 )
+from benchbox.core.tuning.generators.doris import (
+    DorisDDLGenerator,
+)
 from benchbox.core.tuning.generators.duckdb import (
     DuckDBDDLGenerator,
 )
 from benchbox.core.tuning.generators.firebolt import (
     FireboltDDLGenerator,
 )
+from benchbox.core.tuning.generators.pg_duckdb import (
+    PgDuckDBDDLGenerator,
+)
+from benchbox.core.tuning.generators.pg_mooncake import (
+    PgMooncakeDDLGenerator,
+)
 from benchbox.core.tuning.generators.postgresql import (
     PartitionStrategy,
     PostgreSQLDDLGenerator,
+)
+from benchbox.core.tuning.generators.questdb import (
+    QuestDBDDLGenerator,
 )
 from benchbox.core.tuning.generators.redshift import (
     ColumnEncoding,
@@ -94,6 +108,8 @@ __all__ = [
     # ClickHouse
     "ClickHouseDDLGenerator",
     "MergeTreeEngine",
+    # Doris
+    "DorisDDLGenerator",
     # DuckDB
     "DuckDBDDLGenerator",
     # Firebolt
@@ -114,9 +130,12 @@ __all__ = [
     "ConnectorType",
     "FileFormat",
     "TrinoDDLGenerator",
-    # PostgreSQL/TimescaleDB
+    # PostgreSQL/TimescaleDB/pg_duckdb/QuestDB
     "PartitionStrategy",
     "PostgreSQLDDLGenerator",
+    "PgDuckDBDDLGenerator",
+    "PgMooncakeDDLGenerator",
+    "QuestDBDDLGenerator",
     "TimescaleDBDDLGenerator",
     # Spark Family (Delta, Iceberg, Parquet, Hive)
     "DeltaDDLGenerator",

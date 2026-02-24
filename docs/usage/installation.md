@@ -44,8 +44,8 @@ For managed Spark platforms, use provider-specific extras to install only the de
 | Extra | Platforms | Dependencies |
 | --- | --- | --- |
 | `[cloud-spark-aws]` | AWS Glue, EMR Serverless, Athena Spark | boto3 |
-| `[cloud-spark-gcp]` | GCP Dataproc, Dataproc Serverless | google-cloud-dataproc, google-cloud-storage |
-| `[cloud-spark-azure]` | Azure Synapse Spark, Fabric Spark | azure-identity, azure-storage-file-datalake, requests |
+| `[cloud-spark-gcp]` | Google Cloud Dataproc, Dataproc Serverless | google-cloud-dataproc, google-cloud-storage |
+| `[cloud-spark-azure]` | Azure Synapse Analytics Spark, Fabric Spark | azure-identity, azure-storage-file-datalake, requests |
 | `[cloud-spark-snowflake]` | Snowflake Snowpark | snowflake-snowpark-python, pyspark |
 | `[cloud-spark-databricks]` | Databricks Connect | databricks-connect, databricks-sdk |
 | `[cloud-spark]` | All cloud Spark platforms | All of the above |

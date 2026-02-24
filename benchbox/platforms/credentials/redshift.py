@@ -12,7 +12,7 @@ import time
 from typing import Optional, Union
 
 from rich.console import Console
-from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.prompt import Confirm, IntPrompt
 
 from benchbox.platforms.credentials.helpers import prompt_secure_field, prompt_with_default
 from benchbox.security.credentials import CredentialManager, CredentialStatus
@@ -250,69 +250,19 @@ def _prompt_default_output_location(
     credentials: dict,
     s3_bucket: Optional[str],
 ) -> None:
-    """Prompt for default cloud output location for Redshift.
+    """Prompt for default cloud output location for Redshift."""
+    from benchbox.platforms.credentials.shared import prompt_default_output_location
 
-    Args:
-        cred_manager: Credential manager instance
-        console: Rich console for output
-        credentials: Current credentials dictionary
-        s3_bucket: Optional configured S3 bucket (for suggestions)
-    """
-    from benchbox.utils.cloud_storage import is_cloud_path
-
-    console.print("\n[bold]Default Output Location (Optional):[/bold]")
-    console.print("Configure a default cloud path for benchmark data storage.")
-    console.print("This prevents needing to specify --output for every run.\n")
-
-    wants_default = Confirm.ask("Configure default output location?", default=True)
-
-    if not wants_default:
-        console.print("[dim]You can add --output <cloud-path> when running benchmarks[/dim]\n")
-        return
-
-    # Show examples - suggest S3 bucket if configured
-    console.print("\n[bold cyan]Example paths for Redshift:[/bold cyan]")
-    if s3_bucket:
-        console.print(f"  • [dim]s3://{s3_bucket}/benchbox-data[/dim] (using your staging bucket)")
-        console.print(f"  • [dim]s3://{s3_bucket}/data[/dim]")
-    else:
-        console.print("  • [dim]s3://my-bucket/benchbox-data[/dim]")
-        console.print("  • [dim]s3://my-bucket/data[/dim]")
-
-    console.print("\n[bold]S3 Staging Location:[/bold]")
-    console.print("  s3://<bucket>/<path>")
-    console.print("\n[dim]Note: Ensure the bucket exists and the cluster IAM role has[/dim]")
-    console.print("[dim]s3:PutObject permission[/dim]\n")
-
-    # Suggest default based on S3 bucket
-    suggested_default = f"s3://{s3_bucket}/benchbox-data" if s3_bucket else ""
-
-    # Prompt for path with validation
-    while True:
-        cloud_path = Prompt.ask("[bold]Enter default cloud storage path[/bold]", default=suggested_default)
-
-        if not cloud_path:
-            console.print("[yellow]Skipping default output location[/yellow]\n")
-            return
-
-        # Validate cloud path format
-        if not is_cloud_path(cloud_path):
-            console.print(f"[yellow]⚠️  Warning: '{cloud_path}' doesn't look like a cloud path[/yellow]")
-            console.print("[dim]Expected format: s3://<bucket>/<path>[/dim]")
-            proceed = Confirm.ask("Use this path anyway?", default=False)
-            if not proceed:
-                continue
-
-        # Confirm the path
-        console.print(f"\n[green]✓[/green] Will use: [cyan]{cloud_path}[/cyan]")
-        confirmed = Confirm.ask("Is this correct?", default=True)
-        if confirmed:
-            # Set credentials with default_output_location
-            credentials["default_output_location"] = cloud_path
-            cred_manager.set_platform_credentials("redshift", credentials, CredentialStatus.VALID)
-            cred_manager.save_credentials()
-            console.print("[green]✅ Default output location saved![/green]\n")
-            return
+    prompt_default_output_location(
+        cred_manager=cred_manager,
+        console=console,
+        credentials=credentials,
+        platform_name="Redshift",
+        path_scheme="s3://",
+        storage_label="S3 Staging Location",
+        permission_note="the cluster IAM role has s3:PutObject permission",
+        bucket=s3_bucket,
+    )
 
 
 def validate_redshift_credentials(

@@ -44,14 +44,6 @@ class TestValidationResult:
         assert not result.warnings
         assert result.details == {}
 
-    def test_validation_result_passed_property(self):
-        """Test legacy 'passed' property."""
-        valid_result = ValidationResult(is_valid=True)
-        invalid_result = ValidationResult(is_valid=False)
-
-        assert valid_result.passed is True
-        assert invalid_result.passed is False
-
 
 class TestValidationSummary:
     """Test cases for ValidationSummary dataclass."""
@@ -414,15 +406,3 @@ class TestValidationIntegration:
 
             db_result = db_engine.validate_loaded_data(mock_connection, "tpcds", 1.0)
             assert isinstance(db_result, ValidationResult)
-
-    def test_validation_result_backward_compatibility(self):
-        """Test that ValidationResult maintains backward compatibility."""
-        result = ValidationResult(is_valid=True)
-
-        # Test legacy 'passed' property
-        assert result.passed is True
-        assert hasattr(result, "passed")
-
-        # Test with invalid result
-        result = ValidationResult(is_valid=False)
-        assert result.passed is False

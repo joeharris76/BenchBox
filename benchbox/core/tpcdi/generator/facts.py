@@ -7,6 +7,8 @@ import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from benchbox.utils.printing import emit
+
 
 class FactGenerationMixin:
     """Generate fact table datasets for the TPC-DI benchmark."""
@@ -147,7 +149,7 @@ class FactGenerationMixin:
                         chunk_data = future.result()
                         completed_chunks.append((chunk_start, chunk_data))
                     except Exception as e:
-                        print(f"Error generating chunk {chunk_start}-{chunk_end}: {e}")
+                        emit(f"Error generating chunk {chunk_start}-{chunk_end}: {e}")
                         raise
 
                 # Sort chunks by start position and write in order

@@ -17,6 +17,7 @@ import csv
 import io
 import json
 import logging
+import os
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +45,7 @@ from benchbox.core.results.schema import (
     build_result_payload,
     build_tuning_payload,
 )
+from benchbox.core.runtime_paths import resolve_results_dir
 from benchbox.utils.cloud_storage import create_path_handler, is_cloud_path
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,7 @@ class ResultExporter:
             console: Rich console for output. Creates new one if not provided.
         """
         if output_dir is None:
-            self.output_dir = Path("benchmark_runs/results")
+            self.output_dir = resolve_results_dir(env=os.environ)
             self.output_dir.mkdir(parents=True, exist_ok=True)
             self.is_cloud_output = False
         else:
@@ -176,6 +178,9 @@ class ResultExporter:
                 logger.error(message)
                 # Mirror to root logger so test harness caplog captures failures reliably.
                 logging.error(message)
+                # Some tests elevate global logging to CRITICAL; emit at CRITICAL too
+                # so failure diagnostics are still observable via caplog.
+                logging.critical(message)
                 self.console.print(f"[red]Failed to export {format_name}: {exc}[/red]")
 
         return exported_files
@@ -183,8 +188,7 @@ class ResultExporter:
     def _generate_filename_base(self, result: ResultLike, timestamp: str) -> str:
         """Generate base filename for exports.
 
-        Legacy helper retained for compatibility; delegates to centralized
-        filename builder.
+        Delegates to centralized filename builder.
         """
         from benchbox.core.results.filenames import build_result_filename_base
 
@@ -530,40 +534,25 @@ class ResultExporter:
                 with open(json_file, encoding="utf-8") as handle:
                     data = json.load(handle)
 
-                # Detect schema version
-                version = data.get("version") or data.get("schema_version", "unknown")
+                version = data.get("version")
+                if version not in ("2.0", "2.1"):
+                    continue
 
-                if version in ("2.0", "2.1"):
-                    # Schema v2.x format
-                    results.append(
-                        {
-                            "file": json_file,
-                            "version": version,
-                            "benchmark": data.get("benchmark", {}).get("name", "Unknown"),
-                            "platform": data.get("platform", {}).get("name", "Unknown"),
-                            "scale_factor": data.get("benchmark", {}).get("scale_factor", 1.0),
-                            "execution_id": data.get("run", {}).get("id", ""),
-                            "timestamp": data.get("run", {}).get("timestamp", ""),
-                            "duration": data.get("run", {}).get("total_duration_ms", 0) / 1000,
-                            "queries": data.get("summary", {}).get("queries", {}).get("total", 0),
-                            "status": data.get("summary", {}).get("validation", "unknown"),
-                        }
-                    )
-                else:
-                    # Legacy v1.x format - still supported for reading
-                    results.append(
-                        {
-                            "file": json_file,
-                            "version": version,
-                            "benchmark": data.get("benchmark", {}).get("name", "Unknown"),
-                            "platform": data.get("execution", {}).get("platform", "Unknown"),
-                            "execution_id": data.get("execution", {}).get("id", ""),
-                            "timestamp": data.get("execution", {}).get("timestamp", ""),
-                            "duration": data.get("execution", {}).get("duration_ms", 0) / 1000,
-                            "queries": data.get("results", {}).get("queries", {}).get("total", 0),
-                            "status": data.get("validation", {}).get("status", "UNKNOWN"),
-                        }
-                    )
+                # Schema v2.x format
+                results.append(
+                    {
+                        "file": json_file,
+                        "version": version,
+                        "benchmark": data.get("benchmark", {}).get("name", "Unknown"),
+                        "platform": data.get("platform", {}).get("name", "Unknown"),
+                        "scale_factor": data.get("benchmark", {}).get("scale_factor", 1.0),
+                        "execution_id": data.get("run", {}).get("id", ""),
+                        "timestamp": data.get("run", {}).get("timestamp", ""),
+                        "duration": data.get("run", {}).get("total_duration_ms", 0) / 1000,
+                        "queries": data.get("summary", {}).get("queries", {}).get("total", 0),
+                        "status": data.get("summary", {}).get("validation", "unknown"),
+                    }
+                )
 
             except Exception as exc:
                 logger.debug("Could not read %s: %s", json_file, exc)
@@ -620,7 +609,7 @@ class ResultExporter:
             with open(filepath, encoding="utf-8") as handle:
                 data = json.load(handle)
 
-            version = data.get("version") or data.get("schema_version", "unknown")
+            version = data.get("version", "unknown")
             return {"data": data, "version": version, "filepath": filepath}
 
         except Exception as exc:

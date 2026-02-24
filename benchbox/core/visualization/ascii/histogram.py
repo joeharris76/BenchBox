@@ -95,7 +95,17 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         self._platforms = platforms
 
         sorted_data = self._sort_data()
-        chunks = self._chunk_data(sorted_data)
+
+        # For grouped charts, cap queries per chunk so bars stay within chart width.
+        # Minimum group width is 1 char per platform + 1 gap; compute how many queries fit.
+        if self._use_grouped and platforms:
+            _bar_area = self.options.get_effective_width() - 8 - 2
+            _max_q = max(1, _bar_area // (len(platforms) + 1))
+            effective_max = min(self.max_per_chart, _max_q)
+        else:
+            effective_max = self.max_per_chart
+
+        chunks = self._chunk_data(sorted_data, effective_max)
 
         # Calculate global statistics for consistent scaling
         all_latencies = [d.latency_ms for d in sorted_data]
@@ -104,6 +114,7 @@ class ASCIIQueryHistogram(ASCIIChartBase):
 
         # Detect outliers via IQR
         self._outlier_ids: set[str] = set()
+        self._outlier_bar_keys: set[tuple[str | None, str]] = set()
         if len(all_latencies) >= 4:
             s = sorted(all_latencies)
             n = len(s)
@@ -114,6 +125,7 @@ class ASCIIQueryHistogram(ASCIIChartBase):
             for d in sorted_data:
                 if d.latency_ms > upper_fence:
                     self._outlier_ids.add(d.query_id)
+                    self._outlier_bar_keys.add((d.platform, d.query_id))
 
         rendered_charts: list[str] = []
         for chunk_idx, chunk in enumerate(chunks):
@@ -169,31 +181,60 @@ class ASCIIQueryHistogram(ASCIIChartBase):
 
         return label[:width]
 
-    def _chunk_data(self, sorted_data: list[HistogramBar]) -> list[list[HistogramBar]]:
+    def _chunk_data(self, sorted_data: list[HistogramBar], max_queries: int | None = None) -> list[list[HistogramBar]]:
         """Split data into chunks for multi-chart rendering.
 
         For multi-platform data, chunks are split by unique query count (not bar count),
         so all platforms for a query stay in the same chunk.
+
+        Args:
+            sorted_data: Sorted histogram bars.
+            max_queries: Override for max queries per chunk (default: self.max_per_chart).
         """
+        limit = max_queries if max_queries is not None else self.max_per_chart
         if not self._use_grouped:
-            if len(sorted_data) <= self.max_per_chart:
+            if len(sorted_data) <= limit:
                 return [sorted_data]
             chunks: list[list[HistogramBar]] = []
-            for i in range(0, len(sorted_data), self.max_per_chart):
-                chunks.append(sorted_data[i : i + self.max_per_chart])
+            for i in range(0, len(sorted_data), limit):
+                chunks.append(sorted_data[i : i + limit])
             return chunks
 
         # Multi-platform: chunk by unique query IDs
         unique_queries = list(dict.fromkeys(d.query_id for d in sorted_data))
-        if len(unique_queries) <= self.max_per_chart:
+        if len(unique_queries) <= limit:
             return [sorted_data]
 
         chunks = []
-        for i in range(0, len(unique_queries), self.max_per_chart):
-            chunk_qids = set(unique_queries[i : i + self.max_per_chart])
+        for i in range(0, len(unique_queries), limit):
+            chunk_qids = set(unique_queries[i : i + limit])
             chunk_bars = [d for d in sorted_data if d.query_id in chunk_qids]
             chunks.append(chunk_bars)
         return chunks
+
+    def _is_outlier(self, datum: HistogramBar) -> bool:
+        """Check whether a specific bar is an outlier."""
+        return (datum.platform, datum.query_id) in self._outlier_bar_keys
+
+    def _get_outlier_char(self, no_color: bool, used_fills: set[str] | None = None) -> str:
+        """Select an outlier glyph that stays distinct from normal series fills."""
+        if not no_color:
+            return "▓" if self.options.use_unicode else "#"
+
+        used = used_fills or set()
+        if self.options.use_unicode:
+            # Prefer shaded/symbol glyphs not used in the default fill palette.
+            candidates = ("▩", "▨", "▥", "▤", "◈", "◆")
+            for ch in candidates:
+                if ch not in used:
+                    return ch
+            return "◆"
+
+        candidates = ("!", "%", "@", "~")
+        for ch in candidates:
+            if ch not in used:
+                return ch
+        return "!"
 
     def _render_chunk(
         self,
@@ -236,68 +277,25 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         bar_width = max(1, bar_spacing - 1)
 
         chart_height = 12
-
-        if global_max > 0:
-            normalized = [(d.latency_ms / global_max) * chart_height for d in chunk]
-            # Ensure minimum visible bar (at least 1/8th of a row) for any query that actually ran
-            normalized = [max(0.125, n) if n > 0 else 0 for n in normalized]
-        else:
-            normalized = [0] * len(chunk)
-
+        normalized = self._normalize_bars(chunk, global_max, chart_height)
         mean_row = round((global_mean / global_max) * chart_height) if global_max > 0 else 0
 
         palette = list(DEFAULT_PALETTE)
-        chart_rows: list[str] = []
+        no_color = not self.options.use_color
 
-        for row in range(chart_height, 0, -1):
-            row_chars: list[str] = []
-
-            if row == chart_height or row == chart_height // 2 or row == 1:
-                y_value = (row / chart_height) * global_max
-                y_label = self._format_value(y_value).rjust(y_axis_width - 1) + " "
-            else:
-                y_label = " " * y_axis_width
-
-            row_chars.append(y_label)
-
-            for i, datum in enumerate(chunk):
-                bar_height = normalized[i]
-                is_outlier = datum.query_id in self._outlier_ids
-
-                if datum.is_best:
-                    bar_color = "#1b9e77"
-                elif datum.is_worst:
-                    bar_color = "#d95f02"
-                else:
-                    bar_color = palette[0]
-
-                # Use ▓ for outlier bars, █ for normal bars
-                outlier_char = "▓" if self.options.use_unicode else "#"
-                fill_char = outlier_char if is_outlier else blocks[-1]
-
-                if row <= math.ceil(bar_height):
-                    if row <= int(bar_height):
-                        block = fill_char * bar_width
-                    else:
-                        partial = int((bar_height - int(bar_height)) * 8)
-                        if is_outlier:
-                            block = fill_char * bar_width
-                        elif partial > 0 and partial < len(blocks):
-                            block = blocks[partial] * bar_width
-                        else:
-                            block = fill_char * bar_width
-                    colored_block = colors.colorize(block, fg_color=bar_color)
-                else:
-                    if self.show_mean_line and row == mean_row:
-                        colored_block = colors.colorize("·" * bar_width, fg_color="#6b7075")
-                    else:
-                        colored_block = " " * bar_width
-
-                row_chars.append(colored_block)
-                row_chars.append(" ")
-
-            chart_rows.append("".join(row_chars).rstrip())
-
+        chart_rows = self._build_simple_chart_rows(
+            chunk,
+            normalized,
+            chart_height,
+            y_axis_width,
+            bar_width,
+            mean_row,
+            palette,
+            no_color,
+            colors,
+            blocks,
+            global_max,
+        )
         lines.extend(chart_rows)
 
         lines.append(" " * y_axis_width + self._render_horizontal_line(bar_area_width))
@@ -309,10 +307,122 @@ class ASCIIQueryHistogram(ASCIIChartBase):
             label_row.append(" ")
         lines.append("".join(label_row).rstrip())
 
-        # Axis label
         lines.append(self._render_axis_label("Query ID", width, axis="x"))
 
-        # Consolidate mean and legend into a single line
+        footer = self._build_simple_footer(chunk, global_mean, no_color, colors, y_axis_width)
+        if footer:
+            lines.append("")
+            lines.append(footer)
+
+        return "\n".join(lines)
+
+    def _normalize_bars(self, chunk: list[HistogramBar], global_max: float, chart_height: int) -> list[float]:
+        """Normalize bar heights to chart row units."""
+        if global_max > 0:
+            normalized = [(d.latency_ms / global_max) * chart_height for d in chunk]
+            return [max(0.125, n) if n > 0 else 0 for n in normalized]
+        return [0] * len(chunk)
+
+    def _build_simple_chart_rows(
+        self,
+        chunk: list[HistogramBar],
+        normalized: list[float],
+        chart_height: int,
+        y_axis_width: int,
+        bar_width: int,
+        mean_row: int,
+        palette: list[str],
+        no_color: bool,
+        colors: object,
+        blocks: list[str],
+        global_max: float = 0,
+    ) -> list[str]:
+        """Build the vertical bar chart rows for single-platform mode."""
+        chart_rows: list[str] = []
+        for row in range(chart_height, 0, -1):
+            row_chars: list[str] = [self._format_y_label(row, chart_height, y_axis_width, global_max)]
+
+            for i, datum in enumerate(chunk):
+                colored_block = self._render_simple_bar_cell(
+                    row,
+                    normalized[i],
+                    datum,
+                    bar_width,
+                    mean_row,
+                    palette,
+                    no_color,
+                    colors,
+                    blocks,
+                )
+                row_chars.append(colored_block)
+                row_chars.append(" ")
+
+            chart_rows.append("".join(row_chars).rstrip())
+        return chart_rows
+
+    def _format_y_label(self, row: int, chart_height: int, y_axis_width: int, global_max: float) -> str:
+        """Format the Y-axis label for a given chart row."""
+        if row == chart_height or row == chart_height // 2 or row == 1:
+            y_value = (row / chart_height) * global_max
+            return self._format_value(y_value).rjust(y_axis_width - 1) + " "
+        return " " * y_axis_width
+
+    def _render_simple_bar_cell(
+        self,
+        row: int,
+        bar_height: float,
+        datum: HistogramBar,
+        bar_width: int,
+        mean_row: int,
+        palette: list[str],
+        no_color: bool,
+        colors: object,
+        blocks: list[str],
+    ) -> str:
+        """Render a single bar cell in a simple histogram row."""
+        is_outlier = self._is_outlier(datum)
+        bar_color = self._simple_bar_color(datum, palette)
+        outlier_char = self._get_outlier_char(no_color=no_color)
+        fill_char = outlier_char if is_outlier else blocks[-1]
+
+        if row <= math.ceil(bar_height):
+            block = self._compute_bar_block(row, bar_height, fill_char, is_outlier, bar_width, blocks)
+            return colors.colorize(block, fg_color=bar_color)
+
+        if self.show_mean_line and row == mean_row:
+            return colors.colorize("·" * bar_width, fg_color="#6b7075")
+        return " " * bar_width
+
+    def _simple_bar_color(self, datum: HistogramBar, palette: list[str]) -> str:
+        """Determine bar color for single-platform mode."""
+        if datum.is_best:
+            return "#1b9e77"
+        if datum.is_worst:
+            return "#d95f02"
+        return palette[0]
+
+    def _compute_bar_block(
+        self, row: int, bar_height: float, fill_char: str, is_outlier: bool, bar_width: int, blocks: list[str]
+    ) -> str:
+        """Compute the block string for a bar cell at a given row."""
+        if row <= int(bar_height):
+            return fill_char * bar_width
+        if is_outlier:
+            return fill_char * bar_width
+        partial = int((bar_height - int(bar_height)) * 8)
+        if partial > 0 and partial < len(blocks):
+            return blocks[partial] * bar_width
+        return fill_char * bar_width
+
+    def _build_simple_footer(
+        self,
+        chunk: list[HistogramBar],
+        global_mean: float,
+        no_color: bool,
+        colors: object,
+        y_axis_width: int,
+    ) -> str:
+        """Build the footer line with mean and legend markers."""
         footer_parts: list[str] = []
         if self.show_mean_line and global_mean > 0:
             mean_text = f"····· Mean: {self._format_value(global_mean)} ms"
@@ -320,22 +430,21 @@ class ASCIIQueryHistogram(ASCIIChartBase):
 
         has_best = any(d.is_best for d in chunk)
         has_worst = any(d.is_worst for d in chunk)
-        has_outlier = any(d.query_id in self._outlier_ids for d in chunk)
+        has_outlier = any(self._is_outlier(d) for d in chunk)
 
-        if has_best or has_worst or has_outlier:
-            if has_best:
-                footer_parts.append(f"{colors.colorize('■', fg_color='#1b9e77')} Best")
-            if has_worst:
-                footer_parts.append(f"{colors.colorize('■', fg_color='#d95f02')} Worst")
-            if has_outlier:
-                outlier_char = "▓" if self.options.use_unicode else "#"
-                footer_parts.append(f"{colors.colorize(outlier_char, fg_color='#666666')} Outlier")
+        if has_best:
+            best_marker = self.options.get_series_marker(0)
+            footer_parts.append(f"{colors.colorize(best_marker, fg_color='#1b9e77')} Best")
+        if has_worst:
+            worst_marker = self.options.get_series_marker(1)
+            footer_parts.append(f"{colors.colorize(worst_marker, fg_color='#d95f02')} Worst")
+        if has_outlier:
+            outlier_char = self._get_outlier_char(no_color=no_color)
+            footer_parts.append(f"{colors.colorize(outlier_char, fg_color='#666666')} Outlier")
 
         if footer_parts:
-            lines.append("")
-            lines.append(" " * y_axis_width + "  ".join(footer_parts))
-
-        return "\n".join(lines)
+            return " " * y_axis_width + "  ".join(footer_parts)
+        return ""
 
     def _render_grouped_chunk(
         self,
@@ -350,9 +459,8 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         width = self.options.get_effective_width()
         palette = list(DEFAULT_PALETTE)
 
-        platform_colors: dict[str, str] = {}
-        for i, platform in enumerate(self._platforms):
-            platform_colors[platform] = palette[i % len(palette)]
+        platform_colors, platform_fills = self._build_platform_maps(palette)
+        no_color = not self.options.use_color
 
         lines: list[str] = []
 
@@ -382,60 +490,21 @@ class ASCIIQueryHistogram(ASCIIChartBase):
 
         mean_row = round((global_mean / global_max) * chart_height) if global_max > 0 else 0
 
-        chart_rows: list[str] = []
-
-        for row in range(chart_height, 0, -1):
-            row_chars: list[str] = []
-
-            if row == chart_height or row == chart_height // 2 or row == 1:
-                y_value = (row / chart_height) * global_max
-                y_label = self._format_value(y_value).rjust(y_axis_width - 1) + " "
-            else:
-                y_label = " " * y_axis_width
-
-            row_chars.append(y_label)
-
-            for qid in unique_queries:
-                for platform in self._platforms:
-                    datum = lookup.get((platform, qid))
-                    if not datum:
-                        row_chars.append(" " * sub_bar_width)
-                        continue
-
-                    raw_height = (datum.latency_ms / global_max) * chart_height if global_max > 0 else 0
-                    # Ensure minimum visible bar (at least 1/8th of a row) for any query that actually ran
-                    bar_height = max(0.125, raw_height) if raw_height > 0 else 0
-                    is_outlier = datum.query_id in self._outlier_ids
-
-                    # In multi-platform mode, always use platform color (identity is primary)
-                    bar_color = platform_colors.get(datum.platform or "", palette[0])
-
-                    outlier_char = "▓" if self.options.use_unicode else "#"
-                    fill_char = outlier_char if is_outlier else blocks[-1]
-
-                    if row <= math.ceil(bar_height):
-                        if row <= int(bar_height):
-                            block = fill_char * sub_bar_width
-                        else:
-                            if is_outlier:
-                                block = fill_char * sub_bar_width
-                            else:
-                                partial = int((bar_height - int(bar_height)) * 8)
-                                if partial > 0 and partial < len(blocks):
-                                    block = blocks[partial] * sub_bar_width
-                                else:
-                                    block = fill_char * sub_bar_width
-                        row_chars.append(colors.colorize(block, fg_color=bar_color))
-                    else:
-                        if self.show_mean_line and row == mean_row:
-                            row_chars.append(colors.colorize("·" * sub_bar_width, fg_color="#6b7075"))
-                        else:
-                            row_chars.append(" " * sub_bar_width)
-
-                row_chars.append(" ")  # Gap between query groups
-
-            chart_rows.append("".join(row_chars).rstrip())
-
+        chart_rows = self._build_grouped_chart_rows(
+            unique_queries,
+            lookup,
+            chart_height,
+            y_axis_width,
+            sub_bar_width,
+            global_max,
+            mean_row,
+            platform_colors,
+            platform_fills,
+            no_color,
+            colors,
+            blocks,
+            palette,
+        )
         lines.extend(chart_rows)
 
         lines.append(" " * y_axis_width + self._render_horizontal_line(bar_area_width))
@@ -448,28 +517,169 @@ class ASCIIQueryHistogram(ASCIIChartBase):
             label_row.append(" ")
         lines.append("".join(label_row).rstrip())
 
-        # Axis label
         lines.append(self._render_axis_label("Query ID", width, axis="x"))
 
-        # Consolidate mean and legend into a single line
+        footer = self._build_grouped_footer(
+            chunk,
+            global_mean,
+            platform_colors,
+            platform_fills,
+            no_color,
+            colors,
+            y_axis_width,
+            width,
+        )
+        if footer:
+            lines.append("")
+            lines.append(footer)
+
+        return "\n".join(lines)
+
+    def _build_platform_maps(self, palette: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+        """Build platform-to-color and platform-to-fill mappings."""
+        platform_colors: dict[str, str] = {}
+        platform_fills: dict[str, str] = {}
+        for i, platform in enumerate(self._platforms):
+            platform_colors[platform] = palette[i % len(palette)]
+            platform_fills[platform] = self.options.get_series_fill(i)
+        return platform_colors, platform_fills
+
+    def _build_grouped_chart_rows(
+        self,
+        unique_queries: list[str],
+        lookup: dict[tuple[str, str], HistogramBar],
+        chart_height: int,
+        y_axis_width: int,
+        sub_bar_width: int,
+        global_max: float,
+        mean_row: int,
+        platform_colors: dict[str, str],
+        platform_fills: dict[str, str],
+        no_color: bool,
+        colors: object,
+        blocks: list[str],
+        palette: list[str],
+    ) -> list[str]:
+        """Build the vertical bar chart rows for grouped (multi-platform) mode."""
+        chart_rows: list[str] = []
+        for row in range(chart_height, 0, -1):
+            row_chars: list[str] = [self._format_y_label(row, chart_height, y_axis_width, global_max)]
+
+            for qid in unique_queries:
+                for platform in self._platforms:
+                    datum = lookup.get((platform, qid))
+                    if not datum:
+                        row_chars.append(" " * sub_bar_width)
+                        continue
+
+                    cell = self._render_grouped_bar_cell(
+                        row,
+                        datum,
+                        sub_bar_width,
+                        global_max,
+                        chart_height,
+                        mean_row,
+                        platform_colors,
+                        platform_fills,
+                        no_color,
+                        colors,
+                        blocks,
+                        palette,
+                    )
+                    row_chars.append(cell)
+
+                row_chars.append(" ")  # Gap between query groups
+
+            chart_rows.append("".join(row_chars).rstrip())
+        return chart_rows
+
+    def _render_grouped_bar_cell(
+        self,
+        row: int,
+        datum: HistogramBar,
+        sub_bar_width: int,
+        global_max: float,
+        chart_height: int,
+        mean_row: int,
+        platform_colors: dict[str, str],
+        platform_fills: dict[str, str],
+        no_color: bool,
+        colors: object,
+        blocks: list[str],
+        palette: list[str],
+    ) -> str:
+        """Render a single bar cell in a grouped histogram row."""
+        raw_height = (datum.latency_ms / global_max) * chart_height if global_max > 0 else 0
+        bar_height = max(0.125, raw_height) if raw_height > 0 else 0
+        is_outlier = self._is_outlier(datum)
+
+        bar_color = platform_colors.get(datum.platform or "", palette[0])
+        outlier_char = self._get_outlier_char(no_color=no_color, used_fills=set(platform_fills.values()))
+        platform_fill = platform_fills.get(datum.platform or "", blocks[-1])
+        fill_char = outlier_char if is_outlier else (platform_fill if no_color else blocks[-1])
+
+        if row <= math.ceil(bar_height):
+            block = self._compute_bar_block(row, bar_height, fill_char, is_outlier, sub_bar_width, blocks)
+            return colors.colorize(block, fg_color=bar_color)
+
+        if self.show_mean_line and row == mean_row:
+            return colors.colorize("·" * sub_bar_width, fg_color="#6b7075")
+        return " " * sub_bar_width
+
+    def _build_grouped_footer(
+        self,
+        chunk: list[HistogramBar],
+        global_mean: float,
+        platform_colors: dict[str, str],
+        platform_fills: dict[str, str],
+        no_color: bool,
+        colors: object,
+        y_axis_width: int,
+        width: int,
+    ) -> str:
+        """Build the footer line(s) with mean and platform legend for grouped mode.
+
+        Long legends are wrapped to multiple lines so they stay within chart width.
+        """
         footer_parts: list[str] = []
         if self.show_mean_line and global_mean > 0:
             mean_text = f"····· Mean: {self._format_value(global_mean)} ms"
             footer_parts.append(colors.colorize(mean_text, fg_color="#6b7075"))
 
-        for platform in self._platforms:
+        for i, platform in enumerate(self._platforms):
             color = platform_colors[platform]
-            footer_parts.append(f"{colors.colorize('■', fg_color=color)} {platform}")
+            series_glyph = platform_fills[platform] if no_color else self.options.get_series_marker(i)
+            footer_parts.append(f"{colors.colorize(series_glyph, fg_color=color)} {platform}")
 
-        has_outlier = any(d.query_id in self._outlier_ids for d in chunk)
+        has_outlier = any(self._is_outlier(d) for d in chunk)
         if has_outlier:
-            outlier_char = "▓" if self.options.use_unicode else "#"
+            outlier_char = self._get_outlier_char(no_color=no_color, used_fills=set(platform_fills.values()))
             footer_parts.append(f"{colors.colorize(outlier_char, fg_color='#666666')} Outlier")
 
-        if footer_parts:
-            lines.append("")
-            lines.append(" " * y_axis_width + "  ".join(footer_parts))
+        if not footer_parts:
+            return ""
 
+        # Wrap footer parts into lines that stay within chart width
+        ansi_re = re.compile(r"\x1b\[[0-9;]*m")
+        indent = " " * y_axis_width
+        lines: list[str] = []
+        current = indent
+        current_visible = y_axis_width
+        for part in footer_parts:
+            part_visible = len(ansi_re.sub("", part))
+            if current_visible > y_axis_width:
+                if current_visible + 2 + part_visible > width:
+                    lines.append(current)
+                    current = indent + part
+                    current_visible = y_axis_width + part_visible
+                else:
+                    current += "  " + part
+                    current_visible += 2 + part_visible
+            else:
+                current += part
+                current_visible += part_visible
+        if current.strip():
+            lines.append(current)
         return "\n".join(lines)
 
 

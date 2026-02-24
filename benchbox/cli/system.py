@@ -6,7 +6,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 from benchbox.cli.display import create_display_manager
-from benchbox.core.config import SystemProfile
+from benchbox.core.schemas import SystemProfile
 from benchbox.core.system import SystemProfiler as CoreSystemProfiler
 from benchbox.utils.printing import quiet_console
 

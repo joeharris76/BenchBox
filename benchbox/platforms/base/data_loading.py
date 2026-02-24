@@ -22,7 +22,10 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from benchbox.utils.clock import elapsed_seconds, mono_time
-from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN, detect_compression
+from benchbox.utils.file_format import (
+    get_column_names_with_trailing,
+    has_trailing_delimiter,
+)
 from benchbox.utils.printing import quiet_console
 
 logger = logging.getLogger(__name__)
@@ -91,7 +94,7 @@ def escape_sql_string_literal(value: str) -> str:
 class DataSource:
     """Represents a data source with table-to-file mappings."""
 
-    source_type: str  # 'benchmark_tables', 'manifest', 'legacy_get_tables'
+    source_type: str  # 'benchmark_tables', 'benchmark_impl_tables', 'manifest'
     tables: dict[str, Any]  # table_name -> file_path or data
 
 
@@ -209,70 +212,80 @@ class ManifestFileSource:
             manifest_path = Path(data_dir) / "_datagen_manifest.json"
 
             # Try to use manifest v2 API first
-            try:
-                from benchbox.core.manifest import ManifestV2, get_files_for_format, get_preferred_format, load_manifest
-
-                manifest = load_manifest(manifest_path)
-
-                if isinstance(manifest, ManifestV2):
-                    # v2: Use format preferences
-                    mapping = {}
-                    platform_name = getattr(self, "_platform_name", None) or self._infer_platform_name(benchmark)
-
-                    for table_name in manifest.tables.keys():
-                        # Get preferred format for this platform
-                        preferred_format = get_preferred_format(manifest, table_name, platform_name)
-
-                        if preferred_format:
-                            # Get files for the preferred format
-                            files = get_files_for_format(manifest, table_name, preferred_format)
-                            if files:
-                                # Convert to absolute paths
-                                table_files = [Path(data_dir) / f for f in files]
-                                mapping[table_name] = table_files
-                        else:
-                            # Fallback: try first available format
-                            table_formats = manifest.tables[table_name]
-                            for format_name, format_files in table_formats.formats.items():
-                                if format_files:
-                                    table_files = [Path(data_dir) / f.path for f in format_files]
-                                    mapping[table_name] = table_files
-                                    break
-
-                    if mapping:
-                        quiet_console.print(
-                            f"Using data files from _datagen_manifest.json (v2, format: {preferred_format or 'auto'})"
-                        )
-                        return DataSource(source_type="manifest_v2", tables=mapping)
-
-            except ImportError:
-                # manifest module not available, fall through to v1 handling
-                pass
+            v2_source = self._try_manifest_v2(manifest_path, benchmark, data_dir)
+            if v2_source is not None:
+                return v2_source
 
             # v1 fallback: Use original logic
-            with open(manifest_path) as f:
-                manifest_dict = json.load(f)
-
-            tables = manifest_dict.get("tables") or {}
-            mapping = {}
-            for table, entries in tables.items():
-                if entries:
-                    # Collect ALL files for each table (support multi-chunk data)
-                    table_files = []
-                    for entry in entries:
-                        rel = entry.get("path")
-                        if rel:
-                            table_files.append(Path(data_dir) / rel)
-                    if table_files:
-                        mapping[table] = table_files
-
-            if mapping:
-                quiet_console.print("Using data files from _datagen_manifest.json (v1)")
-                return DataSource(source_type="manifest", tables=mapping)
+            return self._try_manifest_v1(manifest_path, data_dir)
 
         except Exception as e:
             # Log the exception for debugging but continue to try next provider
             logger.debug(f"Failed to load manifest file: {e}")
+
+        return None
+
+    def _try_manifest_v2(self, manifest_path: Path, benchmark: Any, data_dir: Path) -> DataSource | None:
+        """Attempt to load data source using manifest v2 format."""
+        try:
+            from benchbox.core.manifest import ManifestV2, get_files_for_format, get_preferred_format, load_manifest
+
+            manifest = load_manifest(manifest_path)
+
+            if not isinstance(manifest, ManifestV2):
+                return None
+
+            mapping = {}
+            platform_name = getattr(self, "_platform_name", None) or self._infer_platform_name(benchmark)
+            preferred_format = None
+
+            for table_name in manifest.tables.keys():
+                preferred_format = get_preferred_format(manifest, table_name, platform_name)
+
+                if preferred_format:
+                    files = get_files_for_format(manifest, table_name, preferred_format)
+                    if files:
+                        mapping[table_name] = [Path(data_dir) / f for f in files]
+                else:
+                    # Fallback: try first available format
+                    table_formats = manifest.tables[table_name]
+                    for _format_name, format_files in table_formats.formats.items():
+                        if format_files:
+                            mapping[table_name] = [Path(data_dir) / f.path for f in format_files]
+                            break
+
+            if mapping:
+                quiet_console.print(
+                    f"Using data files from _datagen_manifest.json (v2, format: {preferred_format or 'auto'})"
+                )
+                return DataSource(source_type="manifest_v2", tables=mapping)
+
+        except ImportError:
+            pass
+
+        return None
+
+    @staticmethod
+    def _try_manifest_v1(manifest_path: Path, data_dir: Path) -> DataSource | None:
+        """Attempt to load data source using manifest v1 format."""
+        with open(manifest_path) as f:
+            manifest_dict = json.load(f)
+
+        tables = manifest_dict.get("tables") or {}
+        mapping = {}
+        for table, entries in tables.items():
+            if entries:
+                table_files = []
+                for entry in entries:
+                    rel = entry.get("path")
+                    if rel:
+                        table_files.append(Path(data_dir) / rel)
+                if table_files:
+                    mapping[table] = table_files
+
+        if mapping:
+            quiet_console.print("Using data files from _datagen_manifest.json (v1)")
+            return DataSource(source_type="manifest", tables=mapping)
 
         return None
 
@@ -287,22 +300,6 @@ class ManifestFileSource:
         return "duckdb"
 
 
-class LegacyGetTablesSource:
-    """Data source provider from benchmark.get_tables() method (in-memory)."""
-
-    def can_provide(self, benchmark: Any, data_dir: Path) -> bool:
-        """Check if benchmark has get_tables method."""
-        return hasattr(benchmark, "get_tables")
-
-    def get_data_source(self, benchmark: Any, data_dir: Path) -> DataSource | None:
-        """Get in-memory data from benchmark.get_tables()."""
-        if self.can_provide(benchmark, data_dir):
-            tables = benchmark.get_tables()
-            if tables:
-                return DataSource(source_type="legacy_get_tables", tables=tables)
-        return None
-
-
 class DataSourceResolver:
     """Resolves data source using chain of responsibility pattern."""
 
@@ -312,7 +309,6 @@ class DataSourceResolver:
             BenchmarkTablesSource(),
             BenchmarkImplTablesSource(),
             ManifestFileSource(),
-            LegacyGetTablesSource(),
         ]
 
     def resolve(self, benchmark: Any, data_dir: Path) -> DataSource | None:
@@ -533,6 +529,35 @@ class FileFormatHandler(ABC):
             Number of rows loaded
         """
 
+    def load_table_bulk(
+        self,
+        table_name: str,
+        file_paths: list[Path],
+        connection: Any,
+        benchmark: Any,
+        logger: Any,
+    ) -> int:
+        """Load table data from multiple shard files.
+
+        Default implementation calls load_table() sequentially.
+        Override to use platform-native multi-file ingestion (e.g., DuckDB
+        read_csv([list]) or ClickHouse file() glob) for better performance.
+
+        Args:
+            table_name: Name of table to load
+            file_paths: List of shard file paths (all shards for this table)
+            connection: Database connection
+            benchmark: Benchmark instance
+            logger: Logger instance
+
+        Returns:
+            Total number of rows loaded across all files
+        """
+        total = 0
+        for file_path in file_paths:
+            total += self.load_table(table_name, file_path, connection, benchmark, logger)
+        return total
+
 
 class DelimitedFileHandler(FileFormatHandler):
     """Handler for delimited text files (CSV, TBL, DAT)."""
@@ -655,24 +680,23 @@ class DuckDBNativeHandler(FileFormatHandler):
 
         # Build appropriate read_csv configuration
         if self.delimiter_char == "|":
-            # TPC-H .tbl and TPC-DS .dat files have trailing pipe delimiters,
-            # which causes read_csv to create an extra empty column.
-            # Get actual column names from table schema and use them explicitly,
-            # plus an ignore column for the trailing delimiter.
+            # TPC-H .tbl and TPC-DS .dat files may or may not have trailing pipe
+            # delimiters. Detect per-file and only add a dummy column when needed.
             result = connection.execute(
                 f"SELECT name FROM pragma_table_info('{validated_table}') ORDER BY cid"
             ).fetchall()
             col_names = [row[0] for row in result] if result else []
 
             if col_names:
-                # Use explicit column names from schema plus an ignore column for trailing pipe
-                # Then EXCLUDE the ignore column in SELECT to get only the real columns.
-                # null_padding=true handles files that may or may not have trailing delimiters.
-                all_names = col_names + [TRAILING_DUMMY_COLUMN]
+                # Detect whether this file has a trailing delimiter by sampling the first shard.
+                trailing = has_trailing_delimiter(file_path, "|", col_names)
+                all_names = get_column_names_with_trailing(col_names, trailing)
                 names_param = ", ".join([f"'{col}'" for col in all_names])
+                # Project explicit schema columns to avoid fragile SELECT * EXCLUDE.
+                select_cols = ", ".join([f'"{col}"' for col in col_names])
                 insert_sql = f"""
                     INSERT INTO {validated_table}
-                    SELECT * EXCLUDE ({TRAILING_DUMMY_COLUMN}) FROM read_csv('{escaped_path}',
+                    SELECT {select_cols} FROM read_csv('{escaped_path}',
                         delim='|',
                         header=false,
                         nullstr='',
@@ -708,10 +732,82 @@ class DuckDBNativeHandler(FileFormatHandler):
             self.adapter.capture_sql(insert_sql, "load_data", validated_table)
             return 1000  # Placeholder for dry-run
         else:
+            before = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
             connection.execute(insert_sql)
-            # Get actual row count
-            row_count = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
-            return row_count
+            after = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
+            return after - before
+
+    def load_table_bulk(
+        self,
+        table_name: str,
+        file_paths: list[Path],
+        connection: Any,
+        benchmark: Any,
+        logger: Any,
+    ) -> int:
+        """Load all CSV/TBL shards in a single INSERT ... SELECT * FROM read_csv([array]).
+
+        Uses DuckDB's native multi-file read_csv() to process all shards in one
+        query plan, avoiding N separate INSERT statements. Schema and trailing-
+        delimiter detection are performed once against the first shard only.
+        """
+        if len(file_paths) == 1:
+            return self.load_table(table_name, file_paths[0], connection, benchmark, logger)
+
+        validated_table = validate_sql_identifier(table_name, "table name")
+        escaped_paths = [escape_sql_string_literal(str(p)) for p in file_paths]
+        paths_array = "[" + ", ".join(f"'{p}'" for p in escaped_paths) + "]"
+
+        if self.delimiter_char == "|":
+            result = connection.execute(
+                f"SELECT name FROM pragma_table_info('{validated_table}') ORDER BY cid"
+            ).fetchall()
+            col_names = [row[0] for row in result] if result else []
+
+            if col_names:
+                trailing = has_trailing_delimiter(file_paths[0], "|", col_names)
+                all_names = get_column_names_with_trailing(col_names, trailing)
+                names_param = ", ".join([f"'{col}'" for col in all_names])
+                select_cols = ", ".join([f'"{col}"' for col in col_names])
+                insert_sql = f"""
+                    INSERT INTO {validated_table}
+                    SELECT {select_cols} FROM read_csv({paths_array},
+                        delim='|',
+                        header=false,
+                        nullstr='',
+                        ignore_errors=true,
+                        null_padding=true,
+                        names=[{names_param}]
+                    )
+                """
+            else:
+                insert_sql = f"""
+                    INSERT INTO {validated_table}
+                    SELECT * FROM read_csv({paths_array},
+                        delim='|',
+                        header=false,
+                        nullstr='',
+                        ignore_errors=true,
+                        auto_detect=true
+                    )
+                """
+        else:
+            csv_config = self._get_csv_config(validated_table)
+            insert_sql = f"""
+                INSERT INTO {validated_table}
+                SELECT * FROM read_csv({paths_array},
+                    {csv_config}
+                )
+            """
+
+        if hasattr(self.adapter, "dry_run_mode") and self.adapter.dry_run_mode:
+            self.adapter.capture_sql(insert_sql, "load_data_bulk", validated_table)
+            return 1000 * len(file_paths)
+        else:
+            before = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
+            connection.execute(insert_sql)
+            after = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
+            return after - before
 
 
 class ParquetFileHandler(FileFormatHandler):
@@ -825,10 +921,36 @@ class DuckDBParquetHandler(FileFormatHandler):
             self.adapter.capture_sql(insert_sql, "load_data", validated_table)
             return 1000  # Placeholder for dry-run
         else:
+            before = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
             connection.execute(insert_sql)
-            # Get actual row count
-            row_count = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
-            return row_count
+            after = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
+            return after - before
+
+    def load_table_bulk(
+        self,
+        table_name: str,
+        file_paths: list[Path],
+        connection: Any,
+        benchmark: Any,
+        logger: Any,
+    ) -> int:
+        """Load all Parquet shards in a single INSERT ... SELECT * FROM read_parquet([array])."""
+        if len(file_paths) == 1:
+            return self.load_table(table_name, file_paths[0], connection, benchmark, logger)
+
+        validated_table = validate_sql_identifier(table_name, "table name")
+        escaped_paths = [escape_sql_string_literal(str(p)) for p in file_paths]
+        paths_array = "[" + ", ".join(f"'{p}'" for p in escaped_paths) + "]"
+        insert_sql = f"INSERT INTO {validated_table} SELECT * FROM read_parquet({paths_array})"
+
+        if hasattr(self.adapter, "dry_run_mode") and self.adapter.dry_run_mode:
+            self.adapter.capture_sql(insert_sql, "load_data_bulk", validated_table)
+            return 1000 * len(file_paths)
+        else:
+            before = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
+            connection.execute(insert_sql)
+            after = connection.execute(f"SELECT COUNT(*) FROM {validated_table}").fetchone()[0]
+            return after - before
 
 
 class DeltaFileHandler(FileFormatHandler):
@@ -1451,41 +1573,14 @@ class ClickHouseNativeHandler(FileFormatHandler):
         # Validate table name to prevent SQL injection
         validated_table = validate_sql_identifier(table_name, "table name")
 
-        # Handle zstd decompression for local mode
-        actual_file_path = file_path
-        temp_file_path = None
-
-        if hasattr(self.adapter, "mode") and self.adapter.mode == "local" and detect_compression(file_path) == "zstd":
-            # Decompress zstd files for local mode
-            self.adapter.log_verbose(f"Decompressing {file_path.name} for local mode...")
-            try:
-                # Create temporary uncompressed file
-                temp_fd, temp_file_path = tempfile.mkstemp(suffix=".csv")
-                os.close(temp_fd)
-
-                # Decompress using system command
-                with open(temp_file_path, "w") as temp_file:
-                    subprocess.run(
-                        ["zstd", "-d", str(file_path), "-c"],
-                        stdout=temp_file,
-                        check=True,
-                        text=True,
-                    )
-
-                actual_file_path = Path(temp_file_path)
-                self.adapter.log_very_verbose(f"Decompressed to temporary file: {temp_file_path}")
-
-            except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                logger.error(f"zstd decompression failed: {e}")
-                raise RuntimeError(f"Failed to decompress {file_path}: {e}") from e
-
         try:
             # Get CSV configuration
             csv_config = self._get_csv_loading_config(validated_table)
             delimiter = csv_config["delimiter"]
 
-            # Escape the file path for use in SQL string literal
-            escaped_path = escape_sql_string_literal(str(actual_file_path))
+            # ClickHouse (both server and chDB) natively handles zstd-compressed
+            # files via auto-detection of .zst file extensions in file().
+            escaped_path = escape_sql_string_literal(str(file_path))
 
             # Build ClickHouse file() query
             if delimiter == ",":
@@ -1494,8 +1589,6 @@ class ClickHouseNativeHandler(FileFormatHandler):
                     SELECT * FROM file('{escaped_path}', 'CSV')
                 """
             else:
-                # For non-comma delimiters, use SETTINGS clause
-                # Escape delimiter for SQL (single char, but escape for safety)
                 escaped_delimiter = escape_sql_string_literal(delimiter)
                 load_query = f"""
                     INSERT INTO {validated_table}
@@ -1503,23 +1596,77 @@ class ClickHouseNativeHandler(FileFormatHandler):
                     SETTINGS format_csv_delimiter='{escaped_delimiter}'
                 """
 
-            # Execute the load query
+            # Execute the load query with before/after COUNT for accurate per-shard delta
+            before_result = connection.execute(f"SELECT COUNT(*) FROM {validated_table}")
+            before = before_result[0][0] if before_result and before_result[0] else 0
             connection.execute(load_query)
+            after_result = connection.execute(f"SELECT COUNT(*) FROM {validated_table}")
+            after = after_result[0][0] if after_result and after_result[0] else 0
 
-            # Get row count after insertion
-            count_result = connection.execute(f"SELECT COUNT(*) FROM {validated_table}")
-            total_rows = count_result[0][0] if count_result and count_result[0] else 0
-
-            return total_rows
+            return after - before
 
         except Exception as e:
             logger.error(f"ClickHouse file loading failed: {e}")
             raise
-        finally:
-            # Clean up temporary file
-            if temp_file_path and Path(temp_file_path).exists():
-                with contextlib.suppress(Exception):
-                    os.unlink(temp_file_path)
+
+    def load_table_bulk(
+        self,
+        table_name: str,
+        file_paths: list[Path],
+        connection: Any,
+        benchmark: Any,
+        logger: Any,
+    ) -> int:
+        """Load all CSV shards in a single INSERT ... SELECT * FROM file(glob).
+
+        ClickHouse (both server and chDB) natively supports zstd via auto-detection
+        of .zst file extensions in file(), so compressed shards are handled identically
+        to uncompressed ones — no manual decompression needed.
+
+        Falls back to the default per-shard loop only when shards span multiple directories.
+        """
+        if len(file_paths) == 1:
+            return self.load_table(table_name, file_paths[0], connection, benchmark, logger)
+
+        # All shards must share the same parent directory for glob to work
+        parents = {p.parent for p in file_paths}
+        if len(parents) != 1:
+            return super().load_table_bulk(table_name, file_paths, connection, benchmark, logger)
+
+        # Derive common prefix → glob pattern
+        names = [p.name for p in file_paths]
+        common_prefix = os.path.commonprefix(names)
+        if not common_prefix:
+            return super().load_table_bulk(table_name, file_paths, connection, benchmark, logger)
+
+        parent = file_paths[0].parent
+        glob_pattern = str(parent / (common_prefix + "*"))
+
+        validated_table = validate_sql_identifier(table_name, "table name")
+        escaped_glob = escape_sql_string_literal(glob_pattern)
+        csv_config = self._get_csv_loading_config(validated_table)
+        delimiter = csv_config["delimiter"]
+
+        if delimiter == ",":
+            insert_sql = f"INSERT INTO {validated_table} SELECT * FROM file('{escaped_glob}', 'CSV')"
+        else:
+            escaped_delimiter = escape_sql_string_literal(delimiter)
+            insert_sql = (
+                f"INSERT INTO {validated_table} SELECT * FROM file('{escaped_glob}', 'CSV')"
+                f" SETTINGS format_csv_delimiter='{escaped_delimiter}'"
+            )
+
+        if hasattr(self.adapter, "dry_run_mode") and self.adapter.dry_run_mode:
+            if hasattr(self.adapter, "capture_sql"):
+                self.adapter.capture_sql(insert_sql, "load_data_bulk", validated_table)
+            return 1000 * len(file_paths)
+
+        before_result = connection.execute(f"SELECT COUNT(*) FROM {validated_table}")
+        before = before_result[0][0] if before_result and before_result[0] else 0
+        connection.execute(insert_sql)
+        after_result = connection.execute(f"SELECT COUNT(*) FROM {validated_table}")
+        after = after_result[0][0] if after_result and after_result[0] else 0
+        return after - before
 
 
 class InMemoryDataHandler:
@@ -1670,6 +1817,7 @@ class DataLoader:
         connection: Any,
         data_dir: Path,
         handler_factory: Any | None = None,
+        tuning_config: Any | None = None,
     ):
         """Initialize data loader.
 
@@ -1680,6 +1828,12 @@ class DataLoader:
             data_dir: Data directory path
             handler_factory: Optional factory function for creating custom file format handlers.
                            Should accept (file_path, adapter, benchmark) and return FileFormatHandler or None.
+            tuning_config: Optional unified tuning configuration. When provided,
+                           DataLoader calls PlatformAdapter.apply_ctas_sort() after each
+                           table load. Adapters opt in by overriding
+                           _build_ctas_sort_sql(); returning None keeps CTAS sorting disabled.
+                           Default INSERT INTO loading behavior is unchanged for tables without
+                           sort configuration.
         """
         self.adapter = adapter
         self.benchmark = benchmark
@@ -1687,6 +1841,7 @@ class DataLoader:
         self.data_dir = data_dir
         self.resolver = DataSourceResolver()
         self.handler_factory = handler_factory
+        self.tuning_config = tuning_config
 
     def load(self) -> tuple[dict[str, int], float]:
         """Load all benchmark data.
@@ -1706,11 +1861,7 @@ class DataLoader:
             self.adapter.log_very_verbose("No data source found")
             return table_stats, elapsed_seconds(start_time)
 
-        # Load based on source type
-        if data_source.source_type == "legacy_get_tables":
-            table_stats = self._load_in_memory_data(data_source.tables)
-        else:
-            table_stats = self._load_file_based_data(data_source.tables)
+        table_stats = self._load_file_based_data(data_source.tables)
 
         self.connection.commit()
 
@@ -1771,28 +1922,47 @@ class DataLoader:
             # Handle both single file and sharded (list of files) cases
             # When data is generated with parallel>1, tables may be sharded into multiple files
             if isinstance(file_path_or_paths, list):
-                # Multiple shards - load each one
-                total_rows = 0
-                shard_count = 0
-                for shard_path in file_path_or_paths:
-                    shard_path = Path(shard_path)
-                    rows = self._load_single_file(table_name, shard_path)
-                    if rows > 0:
-                        total_rows += rows
-                        shard_count += 1
+                # Multiple shards — delegate to handler's bulk-load method.
+                # DuckDB handlers override load_table_bulk() with native multi-file
+                # read_csv/read_parquet; the default falls back to sequential calls.
+                shard_paths = [Path(p) for p in file_path_or_paths if Path(p).exists()]
+                shard_count = len(shard_paths)
 
-                table_stats[table_name] = total_rows
-                if total_rows > 0:
-                    table_time = elapsed_seconds(table_start)
-                    if self.adapter.verbose_enabled:
+                if not shard_paths:
+                    table_stats[table_name] = 0
+                else:
+                    handler = None
+                    if self.handler_factory:
+                        handler = self.handler_factory(shard_paths[0], self.adapter, self.benchmark)
+                    if not handler:
+                        handler = FileFormatRegistry.get_handler(shard_paths[0])
+
+                    if not handler:
                         quiet_console.print(
-                            f"  ✅ Loaded {total_rows:,} rows into {table_name} "
-                            f"in {table_time:.2f}s from {shard_count} shard(s)"
+                            f"⚠️  Skipping {table_name} - unsupported file format: {shard_paths[0].suffix}"
                         )
+                        total_rows = 0
                     else:
-                        quiet_console.print(
-                            f"  ✅ Loaded {total_rows:,} rows into {table_name} from {shard_count} shard(s)"
-                        )
+                        try:
+                            total_rows = handler.load_table_bulk(
+                                table_name, shard_paths, self.connection, self.benchmark, self.adapter.logger
+                            )
+                        except Exception as e:
+                            quiet_console.print(f"  ❌ Failed to bulk-load {table_name}: {e}")
+                            total_rows = 0
+
+                    table_stats[table_name] = total_rows
+                    if total_rows > 0:
+                        table_time = elapsed_seconds(table_start)
+                        if self.adapter.verbose_enabled:
+                            quiet_console.print(
+                                f"  ✅ Loaded {total_rows:,} rows into {table_name} "
+                                f"in {table_time:.2f}s from {shard_count} shard(s)"
+                            )
+                        else:
+                            quiet_console.print(
+                                f"  ✅ Loaded {total_rows:,} rows into {table_name} from {shard_count} shard(s)"
+                            )
             else:
                 # Single file
                 file_path = Path(file_path_or_paths)
@@ -1807,6 +1977,11 @@ class DataLoader:
                         )
                     else:
                         quiet_console.print(f"  ✅ Loaded {row_count:,} rows into {table_name} from {file_path.name}")
+
+            # Apply CTAS-based sorting after loading when tuning config is present.
+            # PlatformAdapter guarantees apply_ctas_sort; unsupported platforms no-op.
+            if self.tuning_config:
+                self.adapter.apply_ctas_sort(table_name, self.tuning_config, self.connection)
 
         return table_stats
 

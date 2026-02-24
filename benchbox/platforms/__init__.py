@@ -12,9 +12,10 @@ import importlib
 from typing import Optional, Type
 
 from benchbox.core.platform_registry import PlatformRegistry
-from benchbox.utils.runtime_env import ensure_driver_version
+from benchbox.utils.runtime_env import DriverResolution, DriverRuntimeStrategy, ensure_driver_version
 
-from .base import BenchmarkResults, ConnectionConfig, PlatformAdapter
+from .base import BenchmarkResults, ConnectionConfig, DriverIsolationCapability, PlatformAdapter
+from .base.adapter import check_isolation_capability
 
 # ============================================================================
 # Lazy Import System for Cloud Platform Adapters
@@ -42,6 +43,8 @@ from .base import BenchmarkResults, ConnectionConfig, PlatformAdapter
 #   - PrestoAdapter (presto-python-client)
 #   - AzureSynapseAdapter (pyodbc, azure-identity)
 #   - FabricWarehouseAdapter (pyodbc, azure-identity)
+#   - FabricLakehouseAdapter (pyodbc, azure-identity)
+#   - FabricSparkAdapter (azure identity + storage SDK)
 #
 # Adapters loaded eagerly (light dependencies or core):
 #   - DuckDBAdapter (duckdb - core dependency, always available)
@@ -71,11 +74,17 @@ _LAZY_ADAPTERS = {
     "SparkAdapter": ".spark",
     "PySparkSQLAdapter": ".pyspark",
     "FireboltAdapter": ".firebolt",
+    "DatabendAdapter": ".databend",
     "InfluxDBAdapter": ".influxdb",
     "PrestoAdapter": ".presto",
     "AzureSynapseAdapter": ".azure_synapse",
     "FabricWarehouseAdapter": ".fabric_warehouse",
+    "FabricLakehouseAdapter": ".fabric_lakehouse",
+    "FabricSparkAdapter": ".fabric_spark",
+    "StarRocksAdapter": ".starrocks",
     "QuantonAdapter": ".onehouse",
+    "LakeSailAdapter": ".lakesail",
+    "DorisAdapter": ".doris",
     # DataFrame adapters (have their own lazy loading but need module-level deferral)
     "PolarsDataFrameAdapter": ".dataframe",
     "PandasDataFrameAdapter": ".dataframe",
@@ -84,6 +93,7 @@ _LAZY_ADAPTERS = {
     "DaskDataFrameAdapter": ".dataframe",
     "DataFusionDataFrameAdapter": ".dataframe",
     "PySparkDataFrameAdapter": ".dataframe",
+    "LakeSailDataFrameAdapter": ".dataframe",
     "DataFramePlatformChecker": ".dataframe",
 }
 
@@ -225,6 +235,21 @@ try:
 except ImportError:
     TimescaleDBAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
+try:
+    from .pg_duckdb import PgDuckDBAdapter
+except ImportError:
+    PgDuckDBAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+
+try:
+    from .pg_mooncake import PgMooncakeAdapter
+except ImportError:
+    PgMooncakeAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+
+try:
+    from .questdb import QuestDBAdapter
+except ImportError:
+    QuestDBAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+
 __all__ = [
     "PlatformAdapter",
     "ConnectionConfig",
@@ -244,12 +269,21 @@ __all__ = [
     "SparkAdapter",
     "PySparkSQLAdapter",
     "FireboltAdapter",
+    "DatabendAdapter",
     "InfluxDBAdapter",
     "PrestoAdapter",
     "PostgreSQLAdapter",
+    "PgDuckDBAdapter",
+    "PgMooncakeAdapter",
+    "QuestDBAdapter",
     "AzureSynapseAdapter",
     "FabricWarehouseAdapter",
+    "FabricLakehouseAdapter",
+    "FabricSparkAdapter",
+    "StarRocksAdapter",
     "QuantonAdapter",
+    "LakeSailAdapter",
+    "DorisAdapter",
     # DataFrame adapters
     "PolarsDataFrameAdapter",
     "PandasDataFrameAdapter",
@@ -258,6 +292,7 @@ __all__ = [
     "DaskDataFrameAdapter",
     "DataFusionDataFrameAdapter",
     "PySparkDataFrameAdapter",
+    "LakeSailDataFrameAdapter",
     "POLARS_AVAILABLE",
     "PANDAS_AVAILABLE",
     "MODIN_AVAILABLE",
@@ -329,26 +364,60 @@ def get_platform_adapter(platform_name: str, **config) -> PlatformAdapter:
         install_cmd = platform_info.installation_command if platform_info else "unknown"
         raise ImportError(f"Platform '{platform_name}' is not available. Install required dependencies: {install_cmd}")
 
+    # Check for pre-resolved driver state from upstream (database.py) before popping keys.
+    # driver_runtime_strategy is NOT popped, so its presence signals upstream already resolved.
+    already_resolved = config.get("driver_runtime_strategy") is not None
+
     driver_package = config.pop("driver_package", None)
     driver_version = config.pop("driver_version", None)
+    driver_version_requested = config.pop("driver_version_requested", None)
     driver_version_resolved = config.pop("driver_version_resolved", None)
+    driver_version_actual = config.pop("driver_version_actual", None)
     driver_auto_install = bool(config.pop("driver_auto_install", False))
 
     # Get platform info for driver metadata (already resolved to canonical name)
     platform_info = PlatformRegistry.get_platform_info(canonical_name)
     install_hint = platform_info.installation_command if platform_info else "unknown"
     package_hint = driver_package or (platform_info.driver_package if platform_info else None)
-    requested_version = driver_version or driver_version_resolved
+    explicit_requested_version = driver_version_requested or driver_version
+    requested_version = explicit_requested_version
 
-    resolution = ensure_driver_version(
-        package_name=package_hint,
-        requested_version=requested_version,
-        auto_install=driver_auto_install,
-        install_hint=install_hint,
-    )
+    if already_resolved:
+        # Upstream (database.py) already resolved the driver — reconstruct without re-resolving.
+        resolution = DriverResolution(
+            package=driver_package or package_hint or "",
+            requested=explicit_requested_version,
+            resolved=driver_version_resolved,
+            actual=driver_version_actual,
+            auto_install_used=driver_auto_install,
+            runtime_strategy=config.get("driver_runtime_strategy"),
+            runtime_path=config.get("driver_runtime_path"),
+            runtime_python_executable=config.get("driver_runtime_python_executable"),
+        )
+    else:
+        # No upstream resolution (e.g., direct API usage) — resolve now.
+        resolution = ensure_driver_version(
+            package_name=package_hint,
+            requested_version=requested_version,
+            auto_install=driver_auto_install,
+            install_hint=install_hint,
+        )
+
+    check_isolation_capability(adapter_class, canonical_name, resolution.runtime_strategy)
 
     resolved_version = resolution.resolved or driver_version_resolved
-    requested = resolution.requested or driver_version
+    requested = explicit_requested_version or resolution.requested
+
+    # Propagate driver runtime contract into adapter constructor config so
+    # adapters that need runtime binding during initialization can apply it.
+    config.setdefault("driver_package", resolution.package or package_hint)
+    config.setdefault("driver_version_requested", requested)
+    config.setdefault("driver_version_resolved", resolved_version)
+    config.setdefault("driver_version_actual", resolution.actual)
+    config.setdefault("driver_runtime_strategy", resolution.runtime_strategy)
+    config.setdefault("driver_runtime_path", resolution.runtime_path)
+    config.setdefault("driver_runtime_python_executable", resolution.runtime_python_executable)
+    config.setdefault("driver_auto_install", resolution.auto_install_used or driver_auto_install)
 
     # Use from_config() if adapter supports config-aware initialization (e.g., Databricks, Snowflake)
     # This enables proper schema naming based on benchmark/scale/tuning configuration
@@ -362,6 +431,10 @@ def get_platform_adapter(platform_name: str, **config) -> PlatformAdapter:
     adapter_instance.driver_package = resolution.package or package_hint
     adapter_instance.driver_version_requested = requested
     adapter_instance.driver_version_resolved = resolved_version
+    adapter_instance.driver_version_actual = resolution.actual or driver_version_actual
+    adapter_instance.driver_runtime_strategy = resolution.runtime_strategy
+    adapter_instance.driver_runtime_path = resolution.runtime_path
+    adapter_instance.driver_runtime_python_executable = resolution.runtime_python_executable
     adapter_instance.driver_auto_install_used = resolution.auto_install_used or driver_auto_install
 
     return adapter_instance
@@ -442,6 +515,7 @@ def get_dataframe_adapter(platform_name: str, **config):
         "dask-df": "DaskDataFrameAdapter",
         "datafusion-df": "DataFusionDataFrameAdapter",
         "pyspark-df": "PySparkDataFrameAdapter",
+        "lakesail-df": "LakeSailDataFrameAdapter",
     }
 
     platform_lower = platform_name.lower()
@@ -478,6 +552,7 @@ def list_available_dataframe_platforms() -> dict[str, bool]:
         "dask-df": "DASK_AVAILABLE",
         "datafusion-df": "DATAFUSION_DF_AVAILABLE",
         "pyspark-df": "PYSPARK_AVAILABLE",
+        "lakesail-df": "PYSPARK_AVAILABLE",
     }
     # Trigger lazy load via __getattr__ for each constant
     return {platform: _load_lazy_constant(const_name) for platform, const_name in availability_constants.items()}
@@ -494,16 +569,15 @@ def get_dataframe_requirements(platform_name: str) -> str:
     """
     requirements = {
         "polars-df": "pip install polars (core dependency - should be installed)",
-        "pandas-df": (
-            "pip install pandas  # standalone\n  uv add benchbox --extra dataframe-pandas  # inside a project"
-        ),
-        "modin-df": "pip install modin[ray] (or modin[dask])",
+        "pandas-df": "pip install pandas  # standalone\n  uv add benchbox --extra pandas  # inside a project",
+        "modin-df": "pip install modin[ray]  # standalone\n  uv add benchbox --extra modin  # inside a project",
         "cudf-df": "pip install cudf-cu12 (requires NVIDIA GPU with CUDA)",
-        "dask-df": "pip install dask[distributed]",
-        "datafusion-df": "pip install datafusion",
-        "pyspark-df": (
-            "pip install pyspark  # standalone\n  uv add benchbox --extra dataframe-pyspark  # inside a project"
+        "dask-df": "pip install dask[distributed]  # standalone\n  uv add benchbox --extra dask  # inside a project",
+        "datafusion-df": (
+            "pip install datafusion  # standalone\n  uv add benchbox --extra datafusion  # inside a project"
         ),
+        "pyspark-df": "pip install pyspark  # standalone\n  uv add benchbox --extra pyspark  # inside a project",
+        "lakesail-df": "pip install pyspark  # standalone (LakeSail Sail uses PySpark Spark Connect client)",
     }
 
     return requirements.get(platform_name.lower(), "Unknown DataFrame platform")
@@ -526,6 +600,7 @@ def is_dataframe_platform(platform_name: str) -> bool:
         "dask-df",
         "datafusion-df",
         "pyspark-df",
+        "lakesail-df",
     }
 
 
@@ -812,6 +887,104 @@ try:
         ),
     )
 
+    # pg_duckdb (eagerly loaded - shares psycopg2 with PostgreSQL)
+    if PgDuckDBAdapter is not None:
+        from benchbox.platforms.pg_duckdb import _build_pg_duckdb_config
+
+        PlatformHookRegistry.register_config_builder("pg-duckdb", _build_pg_duckdb_config)
+
+    PlatformHookRegistry.register_option_specs(
+        "pg-duckdb",
+        PlatformOptionSpec(
+            name="host",
+            help="PostgreSQL server hostname (with pg_duckdb installed)",
+            default="localhost",
+        ),
+        PlatformOptionSpec(
+            name="port",
+            help="PostgreSQL server port",
+            default="5432",
+        ),
+        PlatformOptionSpec(
+            name="database",
+            help="PostgreSQL database name (auto-generated if not specified)",
+        ),
+        PlatformOptionSpec(
+            name="username",
+            help="PostgreSQL username",
+            default="postgres",
+        ),
+        PlatformOptionSpec(
+            name="password",
+            help="PostgreSQL password",
+        ),
+        PlatformOptionSpec(
+            name="schema",
+            help="PostgreSQL schema name",
+            default="public",
+        ),
+        PlatformOptionSpec(
+            name="force_execution",
+            help="Force DuckDB execution engine for all queries",
+            parser=parse_bool,
+            default="true",
+        ),
+        PlatformOptionSpec(
+            name="postgres_scan_threads",
+            help="Threads for parallel PostgreSQL table scanning (0 = auto)",
+            parser=int,
+            default="0",
+        ),
+    )
+
+    # pg_mooncake (eagerly loaded - shares psycopg2 with PostgreSQL)
+    if PgMooncakeAdapter is not None:
+        from benchbox.platforms.pg_mooncake import _build_pg_mooncake_config
+
+        PlatformHookRegistry.register_config_builder("pg-mooncake", _build_pg_mooncake_config)
+
+    PlatformHookRegistry.register_option_specs(
+        "pg-mooncake",
+        PlatformOptionSpec(
+            name="host",
+            help="PostgreSQL server hostname (with pg_mooncake installed)",
+            default="localhost",
+        ),
+        PlatformOptionSpec(
+            name="port",
+            help="PostgreSQL server port",
+            default="5432",
+        ),
+        PlatformOptionSpec(
+            name="database",
+            help="PostgreSQL database name (auto-generated if not specified)",
+        ),
+        PlatformOptionSpec(
+            name="username",
+            help="PostgreSQL username",
+            default="postgres",
+        ),
+        PlatformOptionSpec(
+            name="password",
+            help="PostgreSQL password",
+        ),
+        PlatformOptionSpec(
+            name="schema",
+            help="PostgreSQL schema name",
+            default="public",
+        ),
+        PlatformOptionSpec(
+            name="storage_mode",
+            help="Storage backend: local (disk) or s3 (object storage)",
+            choices=("local", "s3"),
+            default="local",
+        ),
+        PlatformOptionSpec(
+            name="mooncake_bucket",
+            help="S3/GCS bucket URL for columnstore data (required when storage_mode=s3)",
+        ),
+    )
+
     # ========================================================================
     # Lazy Cloud Platform Hooks (Azure Synapse, Fabric)
     # ========================================================================
@@ -967,6 +1140,111 @@ try:
             name="database",
             help="Database name",
             default="default",
+        ),
+    )
+
+    # StarRocks (lazy - uses pymysql)
+    PlatformHookRegistry.register_option_specs(
+        "starrocks",
+        PlatformOptionSpec(
+            name="host",
+            help="StarRocks FE hostname",
+            default="localhost",
+        ),
+        PlatformOptionSpec(
+            name="port",
+            help="StarRocks FE MySQL protocol port",
+            default="9030",
+        ),
+        PlatformOptionSpec(
+            name="username",
+            help="StarRocks username",
+            default="root",
+        ),
+        PlatformOptionSpec(
+            name="password",
+            help="StarRocks password",
+        ),
+        PlatformOptionSpec(
+            name="database",
+            help="StarRocks database name (auto-generated if not specified)",
+        ),
+        PlatformOptionSpec(
+            name="http_port",
+            help="StarRocks BE HTTP port for Stream Load",
+            default="8040",
+        ),
+    )
+
+    # Databend (lazy - uses databend-driver)
+    PlatformHookRegistry.register_config_builder(
+        "databend", _make_lazy_config_builder(".databend", "_build_databend_config")
+    )
+    PlatformHookRegistry.register_option_specs(
+        "databend",
+        PlatformOptionSpec(
+            name="host",
+            help="Databend host (or set DATABEND_HOST env var)",
+        ),
+        PlatformOptionSpec(
+            name="port",
+            help="Databend port (default: 443 for cloud, 8000 for self-hosted)",
+        ),
+        PlatformOptionSpec(
+            name="username",
+            help="Databend username (default: benchbox)",
+            default="benchbox",
+        ),
+        PlatformOptionSpec(
+            name="password",
+            help="Databend password (or set DATABEND_PASSWORD env var)",
+        ),
+        PlatformOptionSpec(
+            name="database",
+            help="Database name (default: benchbox)",
+            default="benchbox",
+        ),
+        PlatformOptionSpec(
+            name="dsn",
+            help="Full Databend DSN (overrides individual connection params)",
+        ),
+        PlatformOptionSpec(
+            name="warehouse",
+            help="Databend Cloud warehouse name",
+        ),
+    )
+
+    # Doris (lazy - uses pymysql)
+    PlatformHookRegistry.register_config_builder("doris", _make_lazy_config_builder(".doris", "_build_doris_config"))
+    PlatformHookRegistry.register_option_specs(
+        "doris",
+        PlatformOptionSpec(
+            name="host",
+            help="Doris FE node hostname",
+            default="localhost",
+        ),
+        PlatformOptionSpec(
+            name="port",
+            help="Doris MySQL protocol port",
+            default="9030",
+        ),
+        PlatformOptionSpec(
+            name="http_port",
+            help="Doris Stream Load HTTP port",
+            default="8030",
+        ),
+        PlatformOptionSpec(
+            name="database",
+            help="Doris database name (auto-generated if not specified)",
+        ),
+        PlatformOptionSpec(
+            name="username",
+            help="Doris username",
+            default="root",
+        ),
+        PlatformOptionSpec(
+            name="password",
+            help="Doris password",
         ),
     )
 

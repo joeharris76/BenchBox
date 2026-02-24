@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from benchbox.utils import format_duration
+from benchbox.utils.printing import emit
 
 
 def display_results(result_data: dict[str, Any], verbosity: int = 0) -> None:
@@ -24,32 +25,32 @@ def display_results(result_data: dict[str, Any], verbosity: int = 0) -> None:
         verbosity: Verbosity level (0=minimal, 1=detailed, 2=verbose)
     """
     benchmark_name = result_data.get("benchmark", "unknown").upper()
-    print(f"Benchmark: {benchmark_name}")
-    print(f"Scale Factor: {result_data.get('scale_factor', 'unknown')}")
-    print(f"Platform: {result_data.get('platform', 'unknown')}")
+    emit(f"Benchmark: {benchmark_name}")
+    emit(f"Scale Factor: {result_data.get('scale_factor', 'unknown')}")
+    emit(f"Platform: {result_data.get('platform', 'unknown')}")
 
     success = result_data.get("success", False)
-    print(f"\nBenchmark Status: {'PASSED' if success else 'FAILED'}")
+    emit(f"\nBenchmark Status: {'PASSED' if success else 'FAILED'}")
 
     if verbosity > 0 and "total_duration" in result_data:
-        print(f"Total Duration: {format_duration(result_data['total_duration'])}")
+        emit(f"Total Duration: {format_duration(result_data['total_duration'])}")
         if "schema_creation_time" in result_data:
-            print(f"Schema Creation: {format_duration(result_data['schema_creation_time'])}")
+            emit(f"Schema Creation: {format_duration(result_data['schema_creation_time'])}")
         if "data_loading_time" in result_data:
-            print(f"Data Loading: {format_duration(result_data['data_loading_time'])}")
+            emit(f"Data Loading: {format_duration(result_data['data_loading_time'])}")
 
     if "successful_queries" in result_data:
-        print(f"Queries: {result_data['successful_queries']}/{result_data['total_queries']} successful")
+        emit(f"Queries: {result_data['successful_queries']}/{result_data['total_queries']} successful")
 
     if success and "total_execution_time" in result_data:
-        print(f"Query Execution Time: {format_duration(result_data['total_execution_time'])}")
+        emit(f"Query Execution Time: {format_duration(result_data['total_execution_time'])}")
         if "average_query_time" in result_data:
-            print(f"Average Query Time: {format_duration(result_data['average_query_time'])}")
+            emit(f"Average Query Time: {format_duration(result_data['average_query_time'])}")
 
     if success:
-        print(f"\n✅ {benchmark_name} benchmark completed!")
+        emit(f"\n✅ {benchmark_name} benchmark completed!")
     else:
-        print(f"\n❌ {benchmark_name} benchmark failed.")
+        emit(f"\n❌ {benchmark_name} benchmark failed.")
 
 
 def display_platform_list(platforms: dict[str, bool], get_requirements_func=None) -> None:
@@ -59,13 +60,13 @@ def display_platform_list(platforms: dict[str, bool], get_requirements_func=None
         platforms: Dictionary mapping platform names to availability status
         get_requirements_func: Optional function to get platform requirements
     """
-    print("Available platforms:")
+    emit("Available platforms:")
     for platform, available in platforms.items():
         status = "✅ Available" if available else "❌ Not available"
         if not available and get_requirements_func:
             requirements = get_requirements_func(platform)
             status += f" ({requirements})"
-        print(f"  {platform}: {status}")
+        emit(f"  {platform}: {status}")
 
 
 def display_benchmark_list(benchmark_classes: dict[str, Any]) -> None:
@@ -74,7 +75,7 @@ def display_benchmark_list(benchmark_classes: dict[str, Any]) -> None:
     Args:
         benchmark_classes: Dictionary mapping benchmark names to classes
     """
-    print("Available benchmarks:")
+    emit("Available benchmarks:")
     for benchmark_name in sorted(benchmark_classes.keys()):
         benchmark_class = benchmark_classes[benchmark_name]
         description = (
@@ -82,7 +83,7 @@ def display_benchmark_list(benchmark_classes: dict[str, Any]) -> None:
             if benchmark_class.__doc__
             else "No description available"
         )
-        print(f"  {benchmark_name}: {description}")
+        emit(f"  {benchmark_name}: {description}")
 
 
 def display_configuration_summary(config: dict[str, Any], verbosity: int = 0) -> None:
@@ -95,16 +96,16 @@ def display_configuration_summary(config: dict[str, Any], verbosity: int = 0) ->
     if verbosity == 0:
         return
 
-    print(f"Benchmark: {config['benchmark'].upper()} @ SF{config['scale_factor']} on {config['platform'].title()}")
-    print(f"Phases: {config.get('phases', 'unknown')}")
+    emit(f"Benchmark: {config['benchmark'].upper()} @ SF{config['scale_factor']} on {config['platform'].title()}")
+    emit(f"Phases: {config.get('phases', 'unknown')}")
 
     if verbosity > 0:
         tuning_mode = config.get("tuning_mode", "unknown")
-        print(f"Tuning mode: {tuning_mode}")
+        emit(f"Tuning mode: {tuning_mode}")
 
         if config.get("tuning_config"):
             tuning_type = config["tuning_config"].get("_metadata", {}).get("configuration_type", "unknown")
-            print(f"Tuning type: {tuning_type}")
+            emit(f"Tuning type: {tuning_type}")
 
 
 def display_verbose_config_feedback(config: dict[str, Any], platform: str) -> None:
@@ -116,21 +117,21 @@ def display_verbose_config_feedback(config: dict[str, Any], platform: str) -> No
     """
     if platform in ["duckdb", "sqlite"]:
         db_path = config.get("database_path", "unknown")
-        print(f"Database file: {db_path}")
+        emit(f"Database file: {db_path}")
     elif platform == "databricks":
         schema_name = config.get("schema", "unknown")
         catalog_name = config.get("catalog", "unknown")
-        print(f"Database schema: {catalog_name}.{schema_name}")
+        emit(f"Database schema: {catalog_name}.{schema_name}")
     elif platform == "bigquery":
         dataset_id = config.get("dataset_id", "unknown")
         project_id = config.get("project_id", "unknown")
-        print(f"BigQuery dataset: {project_id}.{dataset_id}")
+        emit(f"BigQuery dataset: {project_id}.{dataset_id}")
     elif platform in ["redshift", "snowflake"]:
         database_name = config.get("database", "unknown")
-        print(f"Database name: {database_name}")
+        emit(f"Database name: {database_name}")
     elif platform == "clickhouse":
         data_path = config.get("data_path", "unknown")
-        print(f"Data path: {data_path}")
+        emit(f"Data path: {data_path}")
 
 
 def print_phase_header(phase: str) -> None:
@@ -139,7 +140,7 @@ def print_phase_header(phase: str) -> None:
     Args:
         phase: Phase name to display
     """
-    print(f"\n--- Running Phase: {phase.title()} ---")
+    emit(f"\n--- Running Phase: {phase.title()} ---")
 
 
 def print_completion_message(phase: str, output_location: str | None = None) -> None:
@@ -150,9 +151,9 @@ def print_completion_message(phase: str, output_location: str | None = None) -> 
         output_location: Optional output location to display
     """
     if output_location:
-        print(f"✅ {phase.title()} phase complete in {output_location}")
+        emit(f"✅ {phase.title()} phase complete in {output_location}")
     else:
-        print(f"✅ {phase.title()} phase complete.")
+        emit(f"✅ {phase.title()} phase complete.")
 
 
 def print_dry_run_summary(result, output_dir, saved_files=None) -> None:
@@ -164,8 +165,8 @@ def print_dry_run_summary(result, output_dir, saved_files=None) -> None:
     resources = result.estimated_resources or {}
     query_count = preview.get("query_count") or len(result.queries) or 0
 
-    print("✅ Dry run completed successfully!")
-    print(f"Artifacts directory: {output_dir}")
+    emit("✅ Dry run completed successfully!")
+    emit(f"Artifacts directory: {output_dir}")
 
     def _format_metric(value, suffix):
         try:
@@ -174,35 +175,35 @@ def print_dry_run_summary(result, output_dir, saved_files=None) -> None:
             return f"{value} {suffix}" if value is not None else None
 
     if saved_files:
-        print("Artifacts:")
+        emit("Artifacts:")
         for label, path in sorted(saved_files.items()):
-            print(f"  • {label}: {path}")
+            emit(f"  • {label}: {path}")
     else:
-        print("Artifacts: JSON, YAML, and per-query SQL files emitted.")
+        emit("Artifacts: JSON, YAML, and per-query SQL files emitted.")
 
-    print("\nBenchmark Overview:")
+    emit("\nBenchmark Overview:")
     display_name = benchmark_info.get("display_name") or benchmark_info.get("name", "unknown").upper()
-    print(f"  • Benchmark: {display_name}")
+    emit(f"  • Benchmark: {display_name}")
     if "scale_factor" in benchmark_info:
-        print(f"  • Scale factor: {benchmark_info['scale_factor']}")
+        emit(f"  • Scale factor: {benchmark_info['scale_factor']}")
     execution_context = (
         preview.get("execution_context") or benchmark_info.get("test_execution_type") or "standard execution"
     )
-    print(f"  • Execution mode: {execution_context}")
-    print(f"  • Queries prepared: {query_count}")
+    emit(f"  • Execution mode: {execution_context}")
+    emit(f"  • Queries prepared: {query_count}")
     if preview.get("estimated_time"):
-        print(f"  • Estimated run time: {preview['estimated_time']}")
+        emit(f"  • Estimated run time: {preview['estimated_time']}")
     if preview.get("data_size_mb"):
-        print(f"  • Estimated data size: {preview['data_size_mb']} MB")
+        emit(f"  • Estimated data size: {preview['data_size_mb']} MB")
 
     if platform_info:
-        print("\nPlatform Summary:")
+        emit("\nPlatform Summary:")
         platform_name = platform_info.get("platform_name") or platform_info.get("platform_type")
         if platform_name:
-            print(f"  • Platform: {platform_name}")
+            emit(f"  • Platform: {platform_name}")
         connection_mode = platform_info.get("connection_mode") or platform_info.get("connection_type")
         if connection_mode:
-            print(f"  • Connection: {connection_mode}")
+            emit(f"  • Connection: {connection_mode}")
         configuration = platform_info.get("configuration") or {}
         if configuration:
             interesting_keys = [
@@ -214,23 +215,23 @@ def print_dry_run_summary(result, output_dir, saved_files=None) -> None:
             ]
             for key in interesting_keys:
                 if key in configuration and configuration[key] is not None:
-                    print(f"  • {key.replace('_', ' ').title()}: {configuration[key]}")
+                    emit(f"  • {key.replace('_', ' ').title()}: {configuration[key]}")
 
     if resources:
-        print("\nResource Estimates:")
+        emit("\nResource Estimates:")
         data_size = _format_metric(resources.get("estimated_data_size_mb"), "MB")
         if data_size:
-            print(f"  • Estimated data size: {data_size}")
+            emit(f"  • Estimated data size: {data_size}")
         memory_usage = _format_metric(resources.get("estimated_memory_usage_mb"), "MB")
         if memory_usage:
-            print(f"  • Estimated memory usage: {memory_usage}")
+            emit(f"  • Estimated memory usage: {memory_usage}")
         runtime = _format_metric(resources.get("estimated_runtime_minutes"), "minutes")
         if runtime:
-            print(f"  • Estimated runtime: {runtime}")
+            emit(f"  • Estimated runtime: {runtime}")
         if resources.get("cpu_cores_available") is not None:
-            print(f"  • Cores available: {resources['cpu_cores_available']}")
+            emit(f"  • Cores available: {resources['cpu_cores_available']}")
 
     if result.warnings:
-        print("\nWarnings:")
+        emit("\nWarnings:")
         for warning in result.warnings:
-            print(f"  • {warning}")
+            emit(f"  • {warning}")

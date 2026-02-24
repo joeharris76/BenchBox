@@ -21,12 +21,12 @@ Usage:
     # Check if platform can handle scale factor
     caps = get_platform_capabilities("pandas")
     if scale_factor > caps.max_recommended_sf:
-        print(f"Warning: SF {scale_factor} exceeds recommended limit {caps.max_recommended_sf}")
+        emit(f"Warning: SF {scale_factor} exceeds recommended limit {caps.max_recommended_sf}")
 
     # Check memory before execution
     result = check_sufficient_memory("tpch", scale_factor=10, platform="polars")
     if not result.is_safe:
-        print(result.message)
+        emit(result.message)
 
 Copyright 2026 Joe Harris / BenchBox Project
 

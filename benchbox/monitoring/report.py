@@ -246,7 +246,7 @@ class ResourceReporter:
     Example:
         >>> reporter = ResourceReporter()
         >>> report = reporter.generate_report(timeline)
-        >>> print(report.generate_text_report())
+        >>> emit(report.generate_text_report())
     """
 
     def __init__(

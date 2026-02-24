@@ -72,6 +72,22 @@ benchbox run --platform redshift --benchmark tpch --scale 1.0 \
 | `iam_role` | (env) | IAM role ARN for COPY |
 | `region` | (auto) | AWS region |
 | `ssl` | true | Enable SSL connection |
+| `driver_version` | (latest) | Pin the redshift_connector package version (e.g. `2.1.3`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific Redshift Connector Version
+
+```bash
+benchbox run --platform redshift --benchmark tpch \
+  --platform-option driver_version=2.1.3 \
+  --platform-option driver_auto_install=true \
+  --platform-option host=my-cluster.abc123.us-east-1.redshift.amazonaws.com
+```
+
+The driver package for Redshift is `redshift-connector`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Authentication Methods
 

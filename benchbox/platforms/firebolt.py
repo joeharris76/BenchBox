@@ -24,6 +24,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.core.benchmark_mixins import CursorValidationQueryExecutionMixin
+from benchbox.core.sql_utils import normalize_table_name_in_sql
 from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.file_format import get_delimiter_for_file
 
@@ -42,7 +44,7 @@ from ..utils.dependencies import (
     check_platform_dependencies,
     get_dependency_error_message,
 )
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 from .base.data_loading import FileFormatRegistry
 
 try:
@@ -58,7 +60,65 @@ except ImportError:
     FireboltCore = None
 
 
-class FireboltAdapter(PlatformAdapter):
+def _resolve_firebolt_deployment_mode(
+    config: dict, url: str | None, client_id: str | None, client_secret: str | None
+) -> str:
+    """Resolve deployment mode from explicit config or inferred from credentials.
+
+    Priority: 1) deployment_mode, 2) infer from credentials, 3) default 'core'.
+    """
+    deployment_mode = config.get("deployment_mode")
+
+    if deployment_mode:
+        if deployment_mode not in {"core", "cloud"}:
+            raise ValueError(f"Invalid Firebolt deployment mode '{deployment_mode}'. Valid modes: core, cloud")
+        return deployment_mode
+
+    if url and not (client_id or client_secret):
+        return "core"
+    if client_id and client_secret:
+        # Guard against ambiguous config (both url and cloud credentials)
+        if url:
+            raise ValueError(
+                "Firebolt configuration is ambiguous: both Core URL and Cloud credentials provided. "
+                "Specify --platform firebolt:core or firebolt:cloud explicitly, "
+                "or use --platform-option deployment_mode=core|cloud."
+            )
+        return "cloud"
+
+    return "core"
+
+
+def _validate_firebolt_mode_config(adapter: FireboltAdapter) -> None:
+    """Validate required configuration fields for the resolved deployment mode."""
+    if adapter.deployment_mode == "core":
+        if not adapter.url:
+            # Default to localhost for core mode
+            adapter.url = "http://localhost:3473"
+    else:
+        missing = [
+            name
+            for name, val in [
+                ("client_id", adapter.client_id),
+                ("client_secret", adapter.client_secret),
+                ("account_name", adapter.account_name),
+                ("engine_name", adapter.engine_name),
+            ]
+            if not val
+        ]
+        if missing:
+            raise ConfigurationError(
+                f"Firebolt Cloud configuration is incomplete. Missing: {', '.join(missing)}\n"
+                "Configure with:\n"
+                "  1. Environment variables: FIREBOLT_CLIENT_ID, FIREBOLT_CLIENT_SECRET, "
+                "FIREBOLT_ACCOUNT_NAME, FIREBOLT_ENGINE_NAME\n"
+                "  2. CLI options: --platform-option client_id=<id> --platform-option client_secret=<secret>\n"
+                "\n"
+                "Create service account credentials in the Firebolt console under Settings > Service Accounts."
+            )
+
+
+class FireboltAdapter(CursorValidationQueryExecutionMixin, PlatformAdapter):
     """Firebolt platform adapter for vectorized analytical query execution.
 
     Supports two deployment modes:
@@ -72,11 +132,14 @@ class FireboltAdapter(PlatformAdapter):
     - DBAPI 2.0 compliant Python SDK
 
     Firebolt Core Docker Setup:
+
         docker run -i --rm --ulimit memlock=8589934592:8589934592 \\
           --security-opt seccomp=unconfined -p 127.0.0.1:3473:3473 \\
           -v ./firebolt-core-data:/firebolt-core/volume \\
           ghcr.io/firebolt-db/firebolt-core:preview-rc
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         """Initialize Firebolt adapter.
@@ -110,12 +173,6 @@ class FireboltAdapter(PlatformAdapter):
 
         self._dialect = "postgres"  # Firebolt uses PostgreSQL-compatible dialect
 
-        # Mode detection with priority:
-        # 1. deployment_mode (from factory via colon syntax: firebolt:core)
-        # 2. firebolt_mode (legacy config key)
-        # 3. Infer from credentials
-        # 4. Default to 'core' (easiest onboarding - local Docker)
-
         # Credential loading with env var fallbacks (config takes priority)
         self.url = config.get("url") or config.get("engine_url")
         self.client_id = (
@@ -127,46 +184,7 @@ class FireboltAdapter(PlatformAdapter):
             or os.environ.get("SERVICE_ACCOUNT_SECRET")
         )
 
-        deployment_mode = config.get("deployment_mode")
-        legacy_mode = config.get("firebolt_mode")
-
-        if deployment_mode:
-            if deployment_mode not in {"core", "cloud"}:
-                raise ValueError(f"Invalid Firebolt deployment mode '{deployment_mode}'. Valid modes: core, cloud")
-            self.deployment_mode = deployment_mode
-        elif legacy_mode:
-            if legacy_mode not in {"core", "cloud"}:
-                raise ValueError(f"Invalid firebolt_mode '{legacy_mode}' (expected 'core' or 'cloud')")
-            self.deployment_mode = legacy_mode
-            # Log deprecation warning for legacy config key
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                "Config key 'firebolt_mode' is deprecated. Use deployment mode syntax "
-                "(firebolt:core, firebolt:cloud) or 'deployment_mode' config key."
-            )
-        elif self.url and not (self.client_id or self.client_secret):
-            self.deployment_mode = "core"
-        elif self.client_id and self.client_secret:
-            self.deployment_mode = "cloud"
-        else:
-            # Default to Core mode with localhost to mirror local dev experience
-            self.deployment_mode = "core"
-            if not self.url:
-                self.url = "http://localhost:3473"
-
-        # Guard against ambiguous config (both url and cloud credentials)
-        explicit_mode = deployment_mode or legacy_mode
-        if self.url and self.client_id and self.client_secret and not explicit_mode:
-            raise ValueError(
-                "Firebolt configuration is ambiguous: both Core URL and Cloud credentials provided. "
-                "Specify --platform firebolt:core or firebolt:cloud explicitly, "
-                "or use --platform-option deployment_mode=core|cloud."
-            )
-
-        # Store as mode for backward compatibility with existing code
-        self.mode = self.deployment_mode
+        self.deployment_mode = _resolve_firebolt_deployment_mode(config, self.url, self.client_id, self.client_secret)
 
         # Common configuration with env var fallback
         self.database = config.get("database") or os.environ.get("FIREBOLT_DATABASE") or "benchbox"
@@ -179,41 +197,22 @@ class FireboltAdapter(PlatformAdapter):
         )
 
         # Validate required fields per mode
-        if self.mode == "core":
-            if not self.url:
-                from benchbox.core.exceptions import ConfigurationError
+        _validate_firebolt_mode_config(self)
 
-                raise ConfigurationError(
-                    "Firebolt Core mode requires a URL to the local Firebolt instance.\n"
-                    "Configure with:\n"
-                    "  CLI option: --platform-option url=http://localhost:3473\n"
-                    "\n"
-                    "To start Firebolt Core locally:\n"
-                    "  docker run -p 3473:3473 ghcr.io/firebolt-db/firebolt-core"
-                )
-        else:
-            missing = [
-                name
-                for name, val in [
-                    ("client_id", self.client_id),
-                    ("client_secret", self.client_secret),
-                    ("account_name", self.account_name),
-                    ("engine_name", self.engine_name),
-                ]
-                if not val
-            ]
-            if missing:
-                from benchbox.core.exceptions import ConfigurationError
+        # S3 staging configuration (for cloud-mode data loading via COPY FROM S3)
+        self.s3_staging_url = config.get("s3_staging_url") or os.environ.get("FIREBOLT_S3_STAGING_URL") or None
+        self.s3_region = config.get("s3_region") or os.environ.get("FIREBOLT_S3_REGION") or None
 
+        # Validate S3 URL format if provided
+        if self.s3_staging_url:
+            if not self.s3_staging_url.startswith("s3://"):
                 raise ConfigurationError(
-                    f"Firebolt Cloud configuration is incomplete. Missing: {', '.join(missing)}\n"
-                    "Configure with:\n"
-                    "  1. Environment variables: FIREBOLT_CLIENT_ID, FIREBOLT_CLIENT_SECRET, "
-                    "FIREBOLT_ACCOUNT_NAME, FIREBOLT_ENGINE_NAME\n"
-                    "  2. CLI options: --platform-option client_id=<id> --platform-option client_secret=<secret>\n"
-                    "\n"
-                    "Create service account credentials in the Firebolt console under Settings > Service Accounts."
+                    f"Invalid S3 staging URL: '{self.s3_staging_url}'. "
+                    "Must start with 's3://' (e.g., s3://my-bucket/benchbox-staging/)"
                 )
+            # Ensure trailing slash for consistent path joining
+            if not self.s3_staging_url.endswith("/"):
+                self.s3_staging_url += "/"
 
         # Benchmark options
         self.disable_result_cache = self._coerce_bool(config.get("disable_result_cache"), True)
@@ -222,7 +221,7 @@ class FireboltAdapter(PlatformAdapter):
     @property
     def platform_name(self) -> str:
         """Return platform display name with mode indicator."""
-        return f"Firebolt ({self.mode.title()})"
+        return f"Firebolt ({self.deployment_mode.title()})"
 
     @staticmethod
     def add_cli_arguments(parser) -> None:
@@ -231,7 +230,7 @@ class FireboltAdapter(PlatformAdapter):
 
         # Mode selection
         firebolt_group.add_argument(
-            "--firebolt-mode",
+            "--deployment-mode",
             type=str,
             choices=["core", "cloud"],
             help="Firebolt deployment mode (auto-detected if not specified)",
@@ -281,6 +280,18 @@ class FireboltAdapter(PlatformAdapter):
             help="Database name (default: benchbox)",
         )
 
+        # S3 staging arguments (cloud mode data loading)
+        firebolt_group.add_argument(
+            "--firebolt-s3-staging-url",
+            type=str,
+            help="S3 URL for staging data files during cloud loading (e.g., s3://bucket/benchbox-staging/)",
+        )
+        firebolt_group.add_argument(
+            "--firebolt-s3-region",
+            type=str,
+            help="AWS region for the S3 staging bucket (e.g., us-east-1)",
+        )
+
         # Benchmark options
         firebolt_group.add_argument(
             "--disable-result-cache",
@@ -322,7 +333,9 @@ class FireboltAdapter(PlatformAdapter):
             "account_name",
             "engine_name",
             "api_endpoint",
-            "firebolt_mode",
+            "deployment_mode",
+            "s3_staging_url",
+            "s3_region",
             "disable_result_cache",
             "strict_validation",
         ]:
@@ -330,8 +343,8 @@ class FireboltAdapter(PlatformAdapter):
                 adapter_config[key] = config[key]
 
         # Handle mode override
-        if config.get("firebolt_mode"):
-            mode = config["firebolt_mode"]
+        if config.get("deployment_mode"):
+            mode = config["deployment_mode"]
             if mode == "core" and "url" not in adapter_config:
                 adapter_config["url"] = "http://localhost:3473"
 
@@ -349,13 +362,13 @@ class FireboltAdapter(PlatformAdapter):
         platform_info = {
             "platform_type": "firebolt",
             "platform_name": self.platform_name,
-            "connection_mode": self.mode,
+            "connection_mode": self.deployment_mode,
             "configuration": {
                 "database": self.database,
             },
         }
 
-        if self.mode == "core":
+        if self.deployment_mode == "core":
             platform_info["url"] = self.url
         else:
             platform_info["account_name"] = self.account_name
@@ -379,6 +392,8 @@ class FireboltAdapter(PlatformAdapter):
                 cursor.execute("SELECT version()")
                 result = cursor.fetchone()
                 platform_info["platform_version"] = result[0] if result else None
+                platform_info["engine_version"] = platform_info["platform_version"]
+                platform_info["engine_version_source"] = "sql_query"
             except Exception as e:
                 self.logger.debug(f"Error collecting Firebolt platform info: {e}")
                 platform_info["platform_version"] = None
@@ -407,7 +422,7 @@ class FireboltAdapter(PlatformAdapter):
             "database": self.database,
         }
 
-        if self.mode == "core":
+        if self.deployment_mode == "core":
             if not FireboltCore:
                 raise ImportError("firebolt-sdk is required for Firebolt Core mode")
             # Core mode requires FireboltCore auth and uses 'url' (not 'engine_url')
@@ -435,7 +450,7 @@ class FireboltAdapter(PlatformAdapter):
         """
         database = connection_config.get("database", self.database)
 
-        if self.mode == "core":
+        if self.deployment_mode == "core":
             # Core mode: databases are auto-created on connection.
             # We check for existing tables to determine if there's data to preserve.
             # An empty database is treated as "not existing" for benchmark purposes.
@@ -507,7 +522,7 @@ class FireboltAdapter(PlatformAdapter):
         """
         database = connection_config.get("database", self.database)
 
-        if self.mode == "core":
+        if self.deployment_mode == "core":
             self.log_verbose(f"Firebolt Core: database {database} will be recreated implicitly")
             return
 
@@ -539,7 +554,7 @@ class FireboltAdapter(PlatformAdapter):
         For Core mode, connects directly to the local endpoint.
         For Cloud mode, authenticates and connects to specified engine.
         """
-        mode_str = "Core" if self.mode == "core" else "Cloud"
+        mode_str = "Core" if self.deployment_mode == "core" else "Cloud"
         self.log_operation_start(f"Firebolt {mode_str} connection")
 
         # Handle existing database using base class method
@@ -551,7 +566,9 @@ class FireboltAdapter(PlatformAdapter):
         if "database" in connection_config:
             params["database"] = connection_config["database"]
 
-        self.log_very_verbose(f"Firebolt connection params: mode={self.mode}, database={params.get('database')}")
+        self.log_very_verbose(
+            f"Firebolt connection params: mode={self.deployment_mode}, database={params.get('database')}"
+        )
 
         try:
             connection = firebolt_connect(**params)
@@ -563,10 +580,10 @@ class FireboltAdapter(PlatformAdapter):
             cursor.close()
 
             # Disable result cache for accurate benchmarking (Cloud mode only)
-            if self.disable_result_cache and self.mode == "cloud":
+            if self.disable_result_cache and self.deployment_mode == "cloud":
                 self._disable_result_cache(connection)
 
-            endpoint = self.url if self.mode == "core" else f"{self.account_name}/{self.engine_name}"
+            endpoint = self.url if self.deployment_mode == "core" else f"{self.account_name}/{self.engine_name}"
             self.logger.info(f"Connected to Firebolt {mode_str} at {endpoint}")
 
             self.log_operation_complete(
@@ -635,13 +652,90 @@ class FireboltAdapter(PlatformAdapter):
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
-        """Load data using INSERT statements.
+        """Load data using INSERT batching or S3 staging (cloud mode).
 
-        Firebolt supports:
-        - INSERT INTO ... VALUES for batch loading
-        - For large datasets, S3 staging may be more efficient (Cloud mode)
+        Loading strategies:
+        - **S3 staging** (cloud mode with s3_staging_url): Upload CSV to S3, then use
+          Firebolt's external table function to ingest via INSERT INTO ... SELECT FROM s3().
+          This is significantly faster for large datasets.
+        - **INSERT batching** (default): Row-by-row INSERT batching via executemany.
+          Works for both Core and Cloud modes without external dependencies.
 
-        This implementation uses INSERT batching which works for both modes.
+        S3 staging is used when all conditions are met:
+        1. deployment_mode == "cloud"
+        2. s3_staging_url is configured
+        3. boto3 is available
+        """
+        use_s3_staging = self.deployment_mode == "cloud" and self.s3_staging_url is not None
+
+        if use_s3_staging:
+            return self._load_data_via_s3(benchmark, connection, data_dir)
+        return self._load_data_via_insert(benchmark, connection, data_dir)
+
+    @staticmethod
+    def _normalize_existing_files(file_paths: Any) -> list[Path]:
+        """Normalize file inputs to existing, non-empty local paths."""
+        normalized_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        valid_files: list[Path] = []
+        for file_path in normalized_paths:
+            path = Path(file_path)
+            if path.exists() and path.stat().st_size > 0:
+                valid_files.append(path)
+        return valid_files
+
+    def _resolve_data_files(self, benchmark, data_dir: Path) -> dict[str, list[Path]]:
+        """Resolve data files from benchmark tables or manifest fallback.
+
+        Returns:
+            Mapping of table_name -> list of file paths.
+
+        Raises:
+            ValueError: If no data files are found.
+        """
+        if hasattr(benchmark, "tables") and benchmark.tables:
+            # Normalize to dict[str, list[Path]]
+            result = {}
+            for table, paths in benchmark.tables.items():
+                if not isinstance(paths, list):
+                    paths = [paths]
+                result[table] = [Path(p) for p in paths]
+            return result
+
+        data_files = None
+        try:
+            manifest_path = Path(data_dir) / "_datagen_manifest.json"
+            if manifest_path.exists():
+                with open(manifest_path) as f:
+                    manifest = json.load(f)
+                tables = manifest.get("tables") or {}
+                mapping = {}
+                for table, entries in tables.items():
+                    if entries:
+                        chunk_paths = []
+                        for entry in entries:
+                            rel = entry.get("path")
+                            if rel:
+                                chunk_paths.append(Path(data_dir) / rel)
+                        if chunk_paths:
+                            mapping[table] = chunk_paths
+                if mapping:
+                    data_files = mapping
+                    self.logger.debug("Using data files from _datagen_manifest.json")
+        except Exception as e:
+            self.logger.debug(f"Manifest fallback failed: {e}")
+
+        if not data_files:
+            raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+
+        return data_files
+
+    def _load_data_via_insert(
+        self, benchmark, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Load data using INSERT statement batching.
+
+        This is the default loading path that works for both Core and Cloud modes
+        without requiring any external storage or additional dependencies.
         """
         start_time = mono_time()
         table_stats = {}
@@ -650,48 +744,11 @@ class FireboltAdapter(PlatformAdapter):
         placeholder = self._get_parameter_placeholder(cursor)
 
         try:
-            # Get data files from benchmark or manifest fallback
-            if hasattr(benchmark, "tables") and benchmark.tables:
-                data_files = benchmark.tables
-            else:
-                data_files = None
-                try:
-                    manifest_path = Path(data_dir) / "_datagen_manifest.json"
-                    if manifest_path.exists():
-                        with open(manifest_path) as f:
-                            manifest = json.load(f)
-                        tables = manifest.get("tables") or {}
-                        mapping = {}
-                        for table, entries in tables.items():
-                            if entries:
-                                chunk_paths = []
-                                for entry in entries:
-                                    rel = entry.get("path")
-                                    if rel:
-                                        chunk_paths.append(Path(data_dir) / rel)
-                                if chunk_paths:
-                                    mapping[table] = chunk_paths
-                        if mapping:
-                            data_files = mapping
-                            self.logger.debug("Using data files from _datagen_manifest.json")
-                except Exception as e:
-                    self.logger.debug(f"Manifest fallback failed: {e}")
-
-                if not data_files:
-                    raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+            data_files = self._resolve_data_files(benchmark, data_dir)
 
             # Load data using INSERT statements in batches
             for table_name, file_paths in data_files.items():
-                # Normalize to list
-                if not isinstance(file_paths, list):
-                    file_paths = [file_paths]
-
-                # Filter valid files
-                valid_files = []
-                for file_path in file_paths:
-                    file_path = Path(file_path)
-                    if file_path.exists() and file_path.stat().st_size > 0:
-                        valid_files.append(file_path)
+                valid_files = self._normalize_existing_files(file_paths)
 
                 if not valid_files:
                     self.logger.warning(f"Skipping {table_name} - no valid data files")
@@ -784,6 +841,186 @@ class FireboltAdapter(PlatformAdapter):
 
         return table_stats, total_time, None
 
+    def _load_data_via_s3(
+        self, benchmark, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Load data via S3 staging using Firebolt's external table function.
+
+        Workflow per table:
+        1. Upload local CSV/TSV file(s) to S3 staging location
+        2. Execute INSERT INTO ... SELECT * FROM s3(...) to ingest from S3
+        3. Track row counts from cursor.rowcount or COUNT(*)
+
+        AWS credentials are resolved from:
+        1. AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY environment variables
+        2. boto3 default credential chain (IAM role, ~/.aws/credentials, etc.)
+
+        Requires boto3 to be installed (lazy import with helpful error message).
+        """
+        try:
+            import boto3
+        except ImportError:
+            raise ImportError(
+                "boto3 is required for S3 staging data loading.\n"
+                "Install with: uv add boto3\n"
+                "Alternatively, remove --firebolt-s3-staging-url to use INSERT batching."
+            ) from None
+
+        start_time = mono_time()
+        table_stats = {}
+
+        # Resolve AWS credentials for the Firebolt s3() function
+        aws_key_id = os.environ.get("AWS_ACCESS_KEY_ID", "")
+        aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+
+        # Create S3 client for file uploads
+        s3_client_kwargs: dict[str, Any] = {}
+        if self.s3_region:
+            s3_client_kwargs["region_name"] = self.s3_region
+        s3_client = boto3.client("s3", **s3_client_kwargs)
+
+        # Parse S3 staging URL into bucket and prefix
+        s3_bucket, s3_prefix = self._parse_s3_url(self.s3_staging_url)
+
+        cursor = connection.cursor()
+
+        try:
+            data_files = self._resolve_data_files(benchmark, data_dir)
+
+            for table_name, file_paths in data_files.items():
+                if not isinstance(file_paths, list):
+                    file_paths = [file_paths]
+
+                # Filter valid files
+                valid_files = []
+                for file_path in file_paths:
+                    file_path = Path(file_path)
+                    if file_path.exists() and file_path.stat().st_size > 0:
+                        valid_files.append(file_path)
+
+                if not valid_files:
+                    self.logger.warning(f"Skipping {table_name} - no valid data files")
+                    table_stats[table_name.lower()] = 0
+                    continue
+
+                chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
+                self.log_verbose(f"Loading data for table (S3 staging): {table_name}{chunk_info}")
+
+                try:
+                    load_start = mono_time()
+                    table_name_lower = table_name.lower()
+                    table_name_quoted = self._quote_identifier(table_name_lower)
+                    total_rows_loaded = 0
+
+                    for file_path in valid_files:
+                        file_path = Path(file_path)
+
+                        # Detect delimiter
+                        delimiter = get_delimiter_for_file(file_path)
+
+                        # Determine the S3 key for this file
+                        s3_key = f"{s3_prefix}{table_name_lower}/{file_path.name}"
+                        s3_file_url = f"s3://{s3_bucket}/{s3_key}"
+
+                        # Upload file to S3
+                        upload_start = mono_time()
+                        self.log_verbose(f"Uploading {file_path.name} to {s3_file_url}")
+                        s3_client.upload_file(str(file_path), s3_bucket, s3_key)
+                        upload_time = elapsed_seconds(upload_start)
+                        self.log_verbose(f"Uploaded {file_path.name} in {upload_time:.2f}s")
+
+                        # Map delimiter to Firebolt s3() type parameter
+                        s3_type = "CSV" if delimiter == "," else "TSV"
+
+                        # Build the INSERT INTO ... SELECT FROM s3() statement
+                        # Firebolt s3() function signature:
+                        #   s3(url, aws_key_id, aws_secret_key, type [, ...])
+                        # Escape single quotes in credentials for SQL safety
+                        safe_key_id = aws_key_id.replace("'", "''")
+                        safe_secret = aws_secret_key.replace("'", "''")
+
+                        ingest_sql = (
+                            f"INSERT INTO {table_name_quoted} "
+                            f"SELECT * FROM s3("
+                            f"'{s3_file_url}', "
+                            f"'{safe_key_id}', "
+                            f"'{safe_secret}', "
+                            f"'{s3_type}'"
+                            f")"
+                        )
+
+                        ingest_start = mono_time()
+                        cursor.execute(ingest_sql)
+                        ingest_time = elapsed_seconds(ingest_start)
+
+                        # Get row count: prefer cursor.rowcount, fall back to COUNT(*)
+                        rows_loaded = getattr(cursor, "rowcount", -1)
+                        if rows_loaded is None or rows_loaded < 0:
+                            cursor.execute(f"SELECT COUNT(*) FROM {table_name_quoted}")
+                            count_result = cursor.fetchone()
+                            rows_loaded = count_result[0] if count_result else 0
+
+                        total_rows_loaded += rows_loaded
+                        self.log_verbose(
+                            f"Ingested {rows_loaded:,} rows from {file_path.name} via S3 in {ingest_time:.2f}s"
+                        )
+
+                    table_stats[table_name_lower] = total_rows_loaded
+
+                    load_time = elapsed_seconds(load_start)
+                    self.logger.info(
+                        f"Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} "
+                        f"via S3 staging in {load_time:.2f}s"
+                    )
+
+                except Exception as e:
+                    self.logger.error(f"Failed to load {table_name} via S3: {str(e)[:200]}...")
+                    table_stats[table_name.lower()] = 0
+
+            total_time = elapsed_seconds(start_time)
+            total_rows = sum(table_stats.values())
+            self.logger.info(f"Loaded {total_rows:,} total rows via S3 staging in {total_time:.2f}s")
+
+        except Exception as e:
+            self.logger.error(f"S3 staging data loading failed: {e}")
+            raise
+        finally:
+            cursor.close()
+
+        loading_metadata = {
+            "loading_method": "s3_staging",
+            "s3_staging_url": self.s3_staging_url,
+            "s3_region": self.s3_region,
+        }
+
+        return table_stats, total_time, loading_metadata
+
+    @staticmethod
+    def _parse_s3_url(s3_url: str) -> tuple[str, str]:
+        """Parse an S3 URL into (bucket, prefix) components.
+
+        Args:
+            s3_url: S3 URL like 's3://my-bucket/path/prefix/'
+
+        Returns:
+            Tuple of (bucket_name, key_prefix). Prefix includes trailing slash.
+
+        Examples:
+            >>> FireboltAdapter._parse_s3_url("s3://my-bucket/staging/")
+            ('my-bucket', 'staging/')
+            >>> FireboltAdapter._parse_s3_url("s3://my-bucket/")
+            ('my-bucket', '')
+        """
+        # Strip the s3:// prefix
+        path = s3_url[5:]  # len("s3://") == 5
+        # Split on first slash to separate bucket from prefix
+        if "/" in path:
+            bucket, prefix = path.split("/", 1)
+        else:
+            bucket = path
+            prefix = ""
+        return bucket, prefix
+
     def _execute_batch_insert(self, cursor: Any, insert_sql: str, rows: list[tuple[Any, ...]]) -> None:
         """Execute batch inserts with executemany fallback."""
         if not rows:
@@ -823,86 +1060,6 @@ class FireboltAdapter(PlatformAdapter):
         if benchmark_type.lower() in ["olap", "analytics", "tpch", "tpcds"]:
             self.log_verbose("Firebolt vectorized engine optimized for analytical workloads")
 
-    def execute_query(
-        self,
-        connection: Any,
-        query: str,
-        query_id: str,
-        benchmark_type: str | None = None,
-        scale_factor: float | None = None,
-        validate_row_count: bool = True,
-        stream_id: int | None = None,
-    ) -> dict[str, Any]:
-        """Execute query with detailed timing and performance tracking."""
-        start_time = mono_time()
-
-        cursor = connection.cursor()
-
-        try:
-            # Execute the query
-            cursor.execute(query)
-            result = cursor.fetchall()
-
-            execution_time = elapsed_seconds(start_time)
-            actual_row_count = len(result) if result else 0
-
-            # Query statistics
-            query_stats = {"execution_time_seconds": execution_time}
-
-            # Validate row count if enabled
-            validation_result = None
-            if validate_row_count and benchmark_type:
-                from benchbox.core.validation.query_validation import QueryValidator
-
-                validator = QueryValidator()
-                validation_result = validator.validate_query_result(
-                    benchmark_type=benchmark_type,
-                    query_id=query_id,
-                    actual_row_count=actual_row_count,
-                    scale_factor=scale_factor,
-                    stream_id=stream_id,
-                )
-
-                # Log validation result
-                if validation_result.warning_message:
-                    self.log_verbose(f"Row count validation: {validation_result.warning_message}")
-                elif not validation_result.is_valid:
-                    self.log_verbose(f"Row count validation FAILED: {validation_result.error_message}")
-                else:
-                    self.log_very_verbose(
-                        f"Row count validation PASSED: {actual_row_count} rows "
-                        f"(expected: {validation_result.expected_row_count})"
-                    )
-
-            # Build result with consistent validation field mapping
-            result_dict = self._build_query_result_with_validation(
-                query_id=query_id,
-                execution_time=execution_time,
-                actual_row_count=actual_row_count,
-                first_row=result[0] if result else None,
-                validation_result=validation_result,
-            )
-
-            # Include Firebolt-specific fields
-            result_dict["query_statistics"] = query_stats
-            result_dict["resource_usage"] = query_stats
-
-            return result_dict
-
-        except Exception as e:
-            execution_time = elapsed_seconds(start_time)
-
-            return {
-                "query_id": query_id,
-                "status": "FAILED",
-                "execution_time_seconds": execution_time,
-                "rows_returned": 0,
-                "error": str(e),
-                "error_type": type(e).__name__,
-            }
-        finally:
-            cursor.close()
-
     def _extract_table_name(self, statement: str) -> str | None:
         """Extract table name from CREATE TABLE statement."""
         try:
@@ -915,23 +1072,7 @@ class FireboltAdapter(PlatformAdapter):
 
     def _normalize_table_name_in_sql(self, sql: str) -> str:
         """Normalize table names in SQL to lowercase for Firebolt."""
-        # Match CREATE TABLE "TABLENAME" or CREATE TABLE TABLENAME
-        sql = re.sub(
-            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"CREATE TABLE {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        # Match foreign key references
-        sql = re.sub(
-            r'REFERENCES\s+"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"REFERENCES {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        return sql
+        return normalize_table_name_in_sql(sql)
 
     def _quote_identifier(self, name: str) -> str:
         """Safely quote identifiers for Firebolt."""
@@ -1178,7 +1319,7 @@ class FireboltAdapter(PlatformAdapter):
 
         Note: This only applies to Cloud mode - Core mode doesn't have result caching.
         """
-        if self.mode != "cloud":
+        if self.deployment_mode != "cloud":
             self.log_very_verbose("Result cache control only applicable to Cloud mode")
             return
 
@@ -1209,7 +1350,7 @@ class FireboltAdapter(PlatformAdapter):
         Raises:
             ConfigurationError: If strict_validation is enabled and validation fails.
         """
-        if self.mode != "cloud":
+        if self.deployment_mode != "cloud":
             return True  # Core mode doesn't have result caching
 
         cursor = connection.cursor()
@@ -1253,13 +1394,13 @@ class FireboltAdapter(PlatformAdapter):
         """
         params = self._get_connection_params()
 
-        if self.mode == "cloud":
+        if self.deployment_mode == "cloud":
             # Connect to information_schema for admin operations
             params["database"] = "information_schema"
 
         try:
             conn = firebolt_connect(**params)
-            self.log_very_verbose(f"Created Firebolt admin connection (mode={self.mode})")
+            self.log_very_verbose(f"Created Firebolt admin connection (mode={self.deployment_mode})")
             return conn
         except Exception as e:
             self.logger.error(f"Failed to create admin connection: {e}")
@@ -1274,7 +1415,7 @@ class FireboltAdapter(PlatformAdapter):
         - Version information
         """
         metadata: dict[str, Any] = {
-            "mode": self.mode,
+            "mode": self.deployment_mode,
             "database": self.database,
         }
 
@@ -1286,7 +1427,7 @@ class FireboltAdapter(PlatformAdapter):
             if result:
                 metadata["version"] = result[0]
 
-            if self.mode == "cloud":
+            if self.deployment_mode == "cloud":
                 metadata["account_name"] = self.account_name
                 metadata["engine_name"] = self.engine_name
                 metadata["api_endpoint"] = self.api_endpoint
@@ -1332,7 +1473,7 @@ def _build_firebolt_config(
     Returns:
         DatabaseConfig with credentials loaded
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials
@@ -1362,7 +1503,10 @@ def _build_firebolt_config(
         "account_name": merged_options.get("account_name"),
         "engine_name": merged_options.get("engine_name"),
         "api_endpoint": merged_options.get("api_endpoint"),
-        "firebolt_mode": overrides.get("firebolt_mode") or options.get("firebolt_mode"),
+        "deployment_mode": overrides.get("deployment_mode") or options.get("deployment_mode"),
+        # S3 staging configuration
+        "s3_staging_url": merged_options.get("s3_staging_url"),
+        "s3_region": merged_options.get("s3_region"),
         # Benchmark context for config-aware database naming
         "benchmark": overrides.get("benchmark"),
         "scale_factor": overrides.get("scale_factor"),

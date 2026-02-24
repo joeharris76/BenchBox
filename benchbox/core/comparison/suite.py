@@ -56,7 +56,7 @@ class UnifiedBenchmarkSuite:
 
         # Get summary
         summary = suite.get_summary(results)
-        print(f"Fastest: {summary.fastest_platform}")
+        emit(f"Fastest: {summary.fastest_platform}")
     """
 
     def __init__(self, config: UnifiedBenchmarkConfig | None = None):

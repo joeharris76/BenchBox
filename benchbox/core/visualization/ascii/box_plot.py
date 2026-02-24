@@ -166,9 +166,10 @@ class ASCIIBoxPlot(ASCIIChartBase):
         value_range = global_max - global_min if global_max > global_min else 1
 
         # Layout calculations — dynamic label width, capped at 30
-        max_label_len = min(30, max(len(s.name) for s in self.series))
+        name_width = min(30, max(len(s.name) for s in self.series))
+        label_width = name_width
 
-        plot_width = width - max_label_len - 4
+        plot_width = width - label_width - 4
         if plot_width < 20:
             plot_width = 20
 
@@ -189,7 +190,7 @@ class ASCIIBoxPlot(ASCIIChartBase):
         # Render each series as a horizontal box plot
         for i, (name, stats) in enumerate(stats_list):
             color = palette[i % len(palette)]
-            label = self._truncate_label(name, max_label_len).ljust(max_label_len)
+            label = self._truncate_label(name, name_width).ljust(label_width)
 
             # Convert values to positions
             def to_pos(val: float) -> int:
@@ -267,14 +268,14 @@ class ASCIIBoxPlot(ASCIIChartBase):
             bottom_colored = colors.colorize("".join(bottom_line), fg_color=color)
 
             colored_label = colors.colorize(label, fg_color=color)
-            lines.append(f"{' ' * max_label_len}  {top_colored}")
+            lines.append(f"{' ' * label_width}  {top_colored}")
             lines.append(f"{colored_label}  {mid_colored}")
-            lines.append(f"{' ' * max_label_len}  {bottom_colored}")
+            lines.append(f"{' ' * label_width}  {bottom_colored}")
             lines.append("")
 
         # X-axis scale
         axis_line = ["─"] * plot_width
-        lines.append(f"{' ' * max_label_len}  {''.join(axis_line)}")
+        lines.append(f"{' ' * label_width}  {''.join(axis_line)}")
 
         # Scale labels
         scale_line = [" "] * plot_width
@@ -289,7 +290,7 @@ class ASCIIBoxPlot(ASCIIChartBase):
         scale_line[mid_pos : mid_pos + len(mid_label)] = list(mid_label)
         scale_line[plot_width - len(max_label) :] = list(max_label)
 
-        lines.append(f"{' ' * max_label_len}  {''.join(scale_line)}")
+        lines.append(f"{' ' * label_width}  {''.join(scale_line)}")
 
         # Axis label
         lines.append(self._render_axis_label(self.y_label, width, axis="x"))

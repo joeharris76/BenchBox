@@ -15,7 +15,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     from datafusion import SessionConfig, SessionContext
@@ -30,11 +30,14 @@ except ImportError:
     SessionConfig = None  # type: ignore[assignment, misc]
     RuntimeEnv = None  # type: ignore[assignment, misc]
 
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.file_format import get_delimiter_for_file
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from benchbox.core.tuning.interface import TuningColumn
 
 
 class DataFusionCursorCompat:
@@ -116,6 +119,8 @@ class DataFusionConnectionCompat:
 
 class DataFusionAdapter(PlatformAdapter):
     """Apache DataFusion platform adapter with optimized bulk loading and execution."""
+
+    driver_isolation_capability = DriverIsolationCapability.SUPPORTED
 
     # Process-wide lock bookkeeping keyed by working-dir lock file path.
     # This ensures ownership/reentrancy is shared across adapter instances.
@@ -298,15 +303,28 @@ class DataFusionAdapter(PlatformAdapter):
             },
         }
 
-        # Get DataFusion version
+        # Get DataFusion version from live module (coupled: driver == engine).
         try:
             import datafusion as df_module
 
-            platform_info["client_library_version"] = df_module.__version__
-            platform_info["platform_version"] = df_module.__version__
+            live_version = df_module.__version__
+            platform_info["client_library_version"] = live_version
+            platform_info["platform_version"] = live_version
+            platform_info["driver_version_actual"] = live_version
+            self.driver_version_actual = live_version
         except (ImportError, AttributeError):
             platform_info["client_library_version"] = None
             platform_info["platform_version"] = None
+
+        # Propagate driver runtime contract metadata.
+        if self.driver_runtime_strategy:
+            platform_info["driver_runtime_strategy"] = self.driver_runtime_strategy
+        if self.driver_version_requested:
+            platform_info["driver_version_requested"] = self.driver_version_requested
+        if self.driver_version_resolved:
+            platform_info["driver_version_resolved"] = self.driver_version_resolved
+        if self.driver_version_actual:
+            platform_info["driver_version_actual"] = self.driver_version_actual
 
         return platform_info
 
@@ -685,6 +703,7 @@ class DataFusionAdapter(PlatformAdapter):
 
         table_stats = {}
         per_table_timings = {}
+        effective_tuning = self.unified_tuning_configuration if self.tuning_enabled else None
 
         # Load each table
         for table_name, file_paths in data_source.tables.items():
@@ -704,6 +723,9 @@ class DataFusionAdapter(PlatformAdapter):
                 # Load CSV directly
                 row_count = self._load_table_csv(connection, table_name_lower, file_paths, data_dir)
 
+            if effective_tuning:
+                self.apply_ctas_sort(table_name_lower, effective_tuning, connection)
+
             table_duration = elapsed_seconds(table_start)
             table_stats[table_name_lower] = row_count
             per_table_timings[table_name_lower] = {"total_ms": table_duration * 1000}
@@ -720,6 +742,14 @@ class DataFusionAdapter(PlatformAdapter):
         )
 
         return table_stats, total_duration, per_table_timings
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """Build DataFusion CTAS SQL used by PlatformAdapter.apply_ctas_sort.
+
+        ``sort_columns`` is pre-sorted by the caller; no internal sort needed.
+        """
+        order_by_clause = ", ".join(column.name for column in sort_columns)
+        return f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM {table_name} ORDER BY {order_by_clause};"
 
     def _detect_csv_format(self, file_paths: list[Path]) -> str:
         """Detect CSV delimiter from file extension.

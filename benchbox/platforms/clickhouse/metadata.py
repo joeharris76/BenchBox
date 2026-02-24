@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 
@@ -11,7 +10,7 @@ class ClickHouseMetadataMixin:
 
     @property
     def platform_name(self) -> str:
-        return f"ClickHouse ({self.mode.title()})"
+        return f"ClickHouse ({self.deployment_mode.title()})"
 
     @staticmethod
     def add_cli_arguments(parser) -> None:
@@ -20,13 +19,18 @@ class ClickHouseMetadataMixin:
         ch_group.add_argument(
             "--data-path", type=str, default="/tmp/benchbox_ch_local", help="Path for local mode data"
         )
-        ch_group.add_argument("--mode", type=str, default="local", help="ClickHouse connection mode (server or local)")
+        ch_group.add_argument(
+            "--deployment-mode",
+            type=str,
+            default="local",
+            help="ClickHouse deployment mode (server or local)",
+        )
 
     @classmethod
     def from_config(cls, config: dict[str, Any]):
         """Create ClickHouse adapter from unified configuration."""
         adapter_config = {
-            "mode": config.get("mode", "local"),
+            "deployment_mode": config.get("deployment_mode", "local"),
             "data_path": config.get("data_path", "/tmp/benchbox_ch_local"),
         }
 
@@ -39,7 +43,7 @@ class ClickHouseMetadataMixin:
 
     def get_database_path(self, **connection_config) -> str | None:
         """Get database path for local mode persistence."""
-        if self.mode == "local":
+        if self.deployment_mode == "local":
             # Use the database_path provided by orchestrator (already includes benchmark, scale, tuning info)
             db_path = connection_config.get("database_path")
             if db_path:
@@ -50,12 +54,7 @@ class ClickHouseMetadataMixin:
                     db_path += ".chdb"
                 return db_path
 
-            # Fallback for backward compatibility
-            databases_dir = Path("benchmark_runs/databases")
-            databases_dir.mkdir(parents=True, exist_ok=True)
-            db_name = connection_config.get("database_name", "clickhouse_local")
-            db_path = databases_dir / f"{db_name}.chdb"
-            return str(db_path)
+            return None
 
         # Server mode doesn't use file-based databases
         return None
@@ -79,25 +78,25 @@ class ClickHouseMetadataMixin:
         """
         platform_info = {
             "platform_type": "clickhouse",
-            "platform_name": f"ClickHouse ({self.mode.title()})",
-            "connection_mode": self.mode,
+            "platform_name": f"ClickHouse ({self.deployment_mode.title()})",
+            "connection_mode": self.deployment_mode,
             "configuration": {
-                "mode": self.mode,
+                "deployment_mode": self.deployment_mode,
                 "result_cache_enabled": not getattr(self, "disable_result_cache", True),
             },
         }
 
         # Add mode-specific configuration
-        if self.mode == "local":
+        if self.deployment_mode == "local":
             platform_info["configuration"]["data_path"] = getattr(self, "data_path", None)
-        elif self.mode == "server":
+        elif self.deployment_mode == "server":
             platform_info["configuration"]["host"] = getattr(self, "host", None)
             platform_info["configuration"]["port"] = getattr(self, "port", None)
             platform_info["configuration"]["database"] = getattr(self, "database", None)
 
         # Get client library version
         try:
-            if self.mode == "local":
+            if self.deployment_mode == "local":
                 import chdb
 
                 platform_info["client_library_version"] = getattr(chdb, "__version__", None)
@@ -112,13 +111,15 @@ class ClickHouseMetadataMixin:
         if connection:
             try:
                 # For local mode (chDB), connection is the chdb module itself
-                if self.mode == "local":
+                if self.deployment_mode == "local":
                     try:
                         result = connection.query("SELECT version()")
                         if result and len(result) > 0:
                             # chdb returns result as string, parse it
                             version_line = result.split("\n")[0] if isinstance(result, str) else str(result)
                             platform_info["platform_version"] = version_line.strip()
+                            platform_info["engine_version"] = platform_info["platform_version"]
+                            platform_info["engine_version_source"] = "sql_query"
                     except Exception as e:
                         self.logger.debug(f"Could not query ClickHouse version in local mode: {e}")
                         platform_info["platform_version"] = None
@@ -132,6 +133,8 @@ class ClickHouseMetadataMixin:
                         cursor.execute("SELECT version()")
                         result = cursor.fetchone()
                         platform_info["platform_version"] = result[0] if result else None
+                        platform_info["engine_version"] = platform_info["platform_version"]
+                        platform_info["engine_version_source"] = "sql_query"
 
                         # Get system settings (limited to important ones)
                         try:

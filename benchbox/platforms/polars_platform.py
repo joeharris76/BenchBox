@@ -29,7 +29,7 @@ try:
 except ImportError:
     pl = None
 
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,8 @@ class PolarsAdapter(PlatformAdapter):
     - Excellent parallel execution
     - Native support for many file formats
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_APPLICABLE
 
     @property
     def platform_name(self) -> str:

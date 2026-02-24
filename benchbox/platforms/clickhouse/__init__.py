@@ -29,10 +29,10 @@ try:
     PlatformHookRegistry.register_option_specs(
         "clickhouse",
         PlatformOptionSpec(
-            name="mode",
+            name="deployment_mode",
             choices=["server", "local"],
             default="server",
-            help="ClickHouse connection mode: 'server' for remote/local server, 'local' for embedded chDB",
+            help="ClickHouse deployment mode: 'server' for remote/local server, 'local' for embedded chDB",
         ),
         PlatformOptionSpec(
             name="data_path",

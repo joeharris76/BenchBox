@@ -578,8 +578,7 @@ class TestGetResultsImpl:
         """Non-existent result file returns RESOURCE_NOT_FOUND."""
         from benchbox.mcp.tools.results import _get_results_impl
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", Path("/nonexistent/path")):
-            result = _get_results_impl("missing_file.json")
+        result = _get_results_impl("missing_file.json", results_dir=Path("/nonexistent/path"))
 
         assert result["error"] is True
         assert result["error_code"] == "RESOURCE_NOT_FOUND"
@@ -606,8 +605,7 @@ class TestGetResultsImpl:
         result_file = tmp_path / "test_run.json"
         result_file.write_text(json.dumps(result_data))
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = _get_results_impl("test_run.json")
+        result = _get_results_impl("test_run.json", results_dir=tmp_path)
 
         assert "error" not in result
         assert result["benchmark"]["id"] == "tpch"
@@ -621,8 +619,7 @@ class TestGetResultsImpl:
         bad_file = tmp_path / "bad.json"
         bad_file.write_text("not valid json {{{")
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = _get_results_impl("bad.json")
+        result = _get_results_impl("bad.json", results_dir=tmp_path)
 
         assert result["error"] is True
         assert result["error_code"] == "RESOURCE_INVALID_FORMAT"
@@ -652,8 +649,7 @@ class TestGetResultsImpl:
         result_file = tmp_path / "with_queries.json"
         result_file.write_text(json.dumps(result_data))
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = _get_results_impl("with_queries.json", include_queries=True)
+        result = _get_results_impl("with_queries.json", include_queries=True, results_dir=tmp_path)
 
         assert len(result["queries"]) == 2
         assert result["queries"][0]["id"] == "1"
@@ -683,8 +679,7 @@ class TestGetResultsImpl:
             )
         )
 
-        with patch("benchbox.mcp.tools.results.DEFAULT_RESULTS_DIR", tmp_path):
-            result = _get_results_impl("run")
+        result = _get_results_impl("run", results_dir=tmp_path)
 
         assert "error" not in result
 

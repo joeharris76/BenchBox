@@ -90,8 +90,7 @@ class TestThroughputResult:
 class TestThroughputExecution:
     """Cover the public execution helpers."""
 
-    @patch("benchbox.core.tpch.throughput_test.time.sleep", return_value=None)
-    def test_execute_stream_produces_basic_statistics(self, _mock_sleep) -> None:
+    def test_execute_stream_produces_basic_statistics(self) -> None:
         benchmark = _make_benchmark_mock()
         connections: list[Mock] = []
         factory = _make_connection_factory(connections)
@@ -106,8 +105,7 @@ class TestThroughputExecution:
         assert len(stream_result.query_results) == 22
         assert connections and connections[0].close.called
 
-    @patch("benchbox.core.tpch.throughput_test.time.sleep", return_value=None)
-    def test_run_with_single_stream(self, _mock_sleep) -> None:
+    def test_run_with_single_stream(self) -> None:
         benchmark = _make_benchmark_mock()
         connections: list[Mock] = []
         factory = _make_connection_factory(connections)

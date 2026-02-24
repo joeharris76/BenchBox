@@ -209,7 +209,7 @@ class TestInstallationSuggestion:
         """Test installation suggestion for Pandas."""
         suggestion = get_installation_suggestion("pandas")
 
-        assert "dataframe-pandas" in suggestion
+        assert "benchbox[pandas]" in suggestion or "--extra pandas" in suggestion
         assert "uv add" in suggestion
 
     def test_suggestion_for_polars_core(self):

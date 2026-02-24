@@ -73,11 +73,11 @@ class ClickHouseSetupMixin:
     def _setup_cloud_mode(self, config):
         """Setup configuration for ClickHouse Cloud mode.
 
-        ClickHouse Cloud uses HTTPS (port 8443) with password authentication.
+        ClickHouse Cloud uses HTTPS (port 8443) with password or OAuth token authentication.
         Credentials can be provided via:
-        - Config parameters: host, password, username
+        - Config parameters: host, password, username, oauth_token
         - Environment variables: CLICKHOUSE_CLOUD_HOST, CLICKHOUSE_CLOUD_PASSWORD,
-          CLICKHOUSE_CLOUD_USER
+          CLICKHOUSE_CLOUD_USER, CLICKHOUSE_CLOUD_OAUTH_TOKEN
         """
         # Cloud connection configuration with env var fallbacks
         self.host = config.get("host") or os.environ.get("CLICKHOUSE_CLOUD_HOST")
@@ -85,7 +85,10 @@ class ClickHouseSetupMixin:
         self.username = config.get("username") or os.environ.get("CLICKHOUSE_CLOUD_USER", "default")
         self.database = config.get("database", "default")
 
-        # Validate required credentials
+        # OAuth token authentication (alternative to password)
+        self.oauth_token = config.get("oauth_token") or os.environ.get("CLICKHOUSE_CLOUD_OAUTH_TOKEN")
+
+        # Validate required credentials — either password or OAuth token must be provided
         if not self.host:
             raise ValueError(
                 "ClickHouse Cloud requires host configuration.\n"
@@ -93,11 +96,12 @@ class ClickHouseSetupMixin:
                 "CLICKHOUSE_CLOUD_HOST environment variable.\n"
                 "Example: abc123.us-east-2.aws.clickhouse.cloud"
             )
-        if not self.password:
+        if not self.password and not self.oauth_token:
             raise ValueError(
-                "ClickHouse Cloud requires password authentication.\n"
-                "Provide via --platform-option password=<password> or "
-                "CLICKHOUSE_CLOUD_PASSWORD environment variable."
+                "ClickHouse Cloud requires authentication.\n"
+                "Provide one of:\n"
+                "  - Password: --clickhouse-cloud-password or CLICKHOUSE_CLOUD_PASSWORD env var\n"
+                "  - OAuth token: --clickhouse-cloud-oauth-token or CLICKHOUSE_CLOUD_OAUTH_TOKEN env var"
             )
 
         # Cloud always uses HTTPS on port 8443
@@ -118,6 +122,37 @@ class ClickHouseSetupMixin:
 
         # Cloud-specific settings
         self.max_server_memory_usage_ratio = None  # Not applicable for cloud
+
+        # Cloud storage staging configuration for data loading
+        self.s3_staging_url = config.get("s3_staging_url") or os.environ.get("CLICKHOUSE_CLOUD_S3_STAGING_URL")
+        self.s3_region = config.get("s3_region") or os.environ.get("CLICKHOUSE_CLOUD_S3_REGION")
+        self.gcs_staging_url = config.get("gcs_staging_url") or os.environ.get("CLICKHOUSE_CLOUD_GCS_STAGING_URL")
+
+        # Validate S3 URL format if provided
+        if self.s3_staging_url:
+            if not self.s3_staging_url.startswith("s3://"):
+                from benchbox.core.exceptions import ConfigurationError
+
+                raise ConfigurationError(
+                    f"Invalid S3 staging URL: '{self.s3_staging_url}'. "
+                    "Must start with 's3://' (e.g., s3://my-bucket/benchbox-staging/)"
+                )
+            # Ensure trailing slash for consistent path joining
+            if not self.s3_staging_url.endswith("/"):
+                self.s3_staging_url += "/"
+
+        # Validate GCS URL format if provided
+        if self.gcs_staging_url:
+            if not self.gcs_staging_url.startswith("gs://"):
+                from benchbox.core.exceptions import ConfigurationError
+
+                raise ConfigurationError(
+                    f"Invalid GCS staging URL: '{self.gcs_staging_url}'. "
+                    "Must start with 'gs://' (e.g., gs://my-bucket/benchbox-staging/)"
+                )
+            # Ensure trailing slash for consistent path joining
+            if not self.gcs_staging_url.endswith("/"):
+                self.gcs_staging_url += "/"
 
     def _get_connection_params(self, **connection_config) -> dict[str, Any]:
         """Get standardized connection parameters."""
@@ -145,16 +180,16 @@ class ClickHouseSetupMixin:
 
     def create_connection(self, **connection_config) -> Any:
         """Create ClickHouse connection based on mode."""
-        self.log_operation_start("ClickHouse connection", f"mode: {self.mode}")
+        self.log_operation_start("ClickHouse connection", f"mode: {self.deployment_mode}")
 
-        if self.mode == "server":
+        if self.deployment_mode == "server":
             return self._create_server_connection(**connection_config)
-        elif self.mode == "local":
+        elif self.deployment_mode == "local":
             return self._create_local_connection(**connection_config)
-        elif self.mode == "cloud":
+        elif self.deployment_mode == "cloud":
             return self._create_cloud_connection(**connection_config)
         else:
-            raise ValueError(f"Unknown ClickHouse mode: {self.mode}")
+            raise ValueError(f"Unknown ClickHouse mode: {self.deployment_mode}")
 
     def _create_server_connection(self, **connection_config) -> Any:
         """Create server mode ClickHouse connection."""
@@ -215,6 +250,7 @@ class ClickHouseSetupMixin:
         """Create ClickHouse Cloud connection via HTTPS.
 
         Uses clickhouse-connect for HTTPS-based communication with ClickHouse Cloud.
+        Supports both password and OAuth/bearer token authentication.
         """
         # Handle existing database using base class method
         self.handle_existing_database(**connection_config)
@@ -225,6 +261,7 @@ class ClickHouseSetupMixin:
         username = connection_config.get("username", self.username)
         password = connection_config.get("password", self.password)
         database = connection_config.get("database", self.database)
+        oauth_token = connection_config.get("oauth_token", getattr(self, "oauth_token", None))
 
         try:
             client = ClickHouseCloudClient(
@@ -235,11 +272,13 @@ class ClickHouseSetupMixin:
                 database=database,
                 secure=True,
                 compress=self.compression,
+                access_token=oauth_token,
             )
 
             # Test connection
             client.execute("SELECT 1")
-            self.logger.info(f"Connected to ClickHouse Cloud at {host}:{port}")
+            auth_mode = "OAuth token" if oauth_token else "password"
+            self.logger.info(f"Connected to ClickHouse Cloud at {host}:{port} (auth: {auth_mode})")
 
             return client
 

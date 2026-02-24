@@ -111,15 +111,52 @@ class DuckLakeConverter(BaseFormatConverter):
 
         ducklake_table_path.mkdir(parents=True, exist_ok=True)
 
+        metadata_path, data_path = self._write_ducklake_table(
+            duckdb, ducklake_table_path, table_name, combined_table, progress_callback
+        )
+
+        # Calculate metrics and build result
+        row_count = combined_table.num_rows
+
+        if opts.validate_row_count:
+            try:
+                self.validate_row_count(source_files, row_count, table_name)
+            except ConversionError:
+                if ducklake_table_path.exists():
+                    shutil.rmtree(ducklake_table_path, ignore_errors=True)
+                raise
+
+        return self._build_conversion_result(
+            source_files,
+            ducklake_table_path,
+            metadata_path,
+            data_path,
+            column_names,
+            row_count,
+            opts,
+            progress_callback,
+        )
+
+    def _write_ducklake_table(
+        self,
+        duckdb,
+        ducklake_table_path: Path,
+        table_name: str,
+        combined_table,
+        progress_callback: Callable[[str, float], None] | None,
+    ) -> tuple[Path, Path]:
+        """Create DuckLake catalog and write data via DuckDB extension.
+
+        Returns:
+            Tuple of (metadata_path, data_path).
+        """
         conn = None
         try:
             if progress_callback:
                 progress_callback("Installing DuckLake extension", 0.65)
 
-            # Create an in-memory connection to work with the data
             conn = duckdb.connect(":memory:")
 
-            # Install and load the ducklake extension
             try:
                 conn.execute("INSTALL ducklake")
                 conn.execute("LOAD ducklake")
@@ -131,40 +168,30 @@ class DuckLakeConverter(BaseFormatConverter):
             if progress_callback:
                 progress_callback("Creating DuckLake catalog", 0.7)
 
-            # DuckLake stores metadata in a metadata file and data in a data directory
             metadata_path = ducklake_table_path / "metadata.ducklake"
             data_path = ducklake_table_path / "data"
             data_path.mkdir(parents=True, exist_ok=True)
 
-            # Attach DuckLake database with DATA_PATH option
             conn.execute(f"ATTACH 'ducklake:{metadata_path}' AS ducklake_db (DATA_PATH '{data_path}')")
 
             if progress_callback:
                 progress_callback("Writing DuckLake table", 0.8)
 
-            # Register the Arrow table as a view
             conn.register("source_data", combined_table)
-
-            # Create the schema (namespace) if it doesn't exist
             conn.execute("CREATE SCHEMA IF NOT EXISTS ducklake_db.main")
-
-            # Create table in DuckLake catalog
             conn.execute(f"CREATE OR REPLACE TABLE ducklake_db.main.{table_name} AS SELECT * FROM source_data")
 
             if progress_callback:
                 progress_callback("Finalizing DuckLake table", 0.9)
 
-            # Get row count for verification
-            row_count = combined_table.num_rows
-
-            # Close connection to ensure all data is flushed
             conn.close()
             conn = None
+
+            return metadata_path, data_path
 
         except ConversionError:
             raise
         except Exception as e:
-            # Clean up partial output on failure
             if ducklake_table_path.exists():
                 shutil.rmtree(ducklake_table_path, ignore_errors=True)
             raise ConversionError(f"Failed to write DuckLake table: {e}") from e
@@ -175,25 +202,21 @@ class DuckLakeConverter(BaseFormatConverter):
                 except Exception:
                     pass
 
-        # Calculate metrics
+    def _build_conversion_result(
+        self,
+        source_files: list[Path],
+        ducklake_table_path: Path,
+        metadata_path: Path,
+        data_path: Path,
+        column_names: list[str],
+        row_count: int,
+        opts: ConversionOptions,
+        progress_callback: Callable[[str, float], None] | None,
+    ) -> ConversionResult:
+        """Assemble the final ConversionResult with metrics and metadata."""
         source_size = self.calculate_file_size(source_files)
-        row_count = combined_table.num_rows
-
-        # Validate row count integrity (critical for TPC compliance)
-        # If validation fails, clean up output before raising
-        if opts.validate_row_count:
-            try:
-                self.validate_row_count(source_files, row_count, table_name)
-            except ConversionError:
-                # Clean up output directory since validation failed
-                if ducklake_table_path.exists():
-                    shutil.rmtree(ducklake_table_path, ignore_errors=True)
-                raise
-
-        # Calculate DuckLake table size (data files + catalog)
         output_size = sum(f.stat().st_size for f in ducklake_table_path.rglob("*") if f.is_file())
 
-        # Build metadata
         metadata = {
             "format": "ducklake",
             "partition_cols": opts.partition_cols if opts.partition_cols else [],
@@ -207,7 +230,6 @@ class DuckLakeConverter(BaseFormatConverter):
         if progress_callback:
             progress_callback(f"Conversion complete: {row_count:,} rows", 1.0)
 
-        # Detect source format from file extensions
         source_format = self._detect_source_format(source_files)
 
         return ConversionResult(

@@ -1,6 +1,6 @@
 <!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
 
-# AWS Athena Platform
+# Amazon Athena Platform
 
 ```{tags} intermediate, guide, athena, cloud-platform
 ```

@@ -56,7 +56,6 @@ from typing import Any, Optional
 import benchbox
 from benchbox.cli.exceptions import CloudStorageError, ValidationError, ValidationRules
 from benchbox.cli.main import setup_verbose_logging
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig
 from benchbox.core.config_utils import (
     build_benchmark_config,
     build_platform_adapter_config,
@@ -72,6 +71,7 @@ from benchbox.core.results.display import (
 )
 from benchbox.core.results.exporter import ResultExporter
 from benchbox.core.runner.runner import LifecyclePhases, ValidationOptions, run_benchmark_lifecycle
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
 from benchbox.core.system import SystemProfiler
 from benchbox.examples import ensure_output_directory, execute_example_dry_run
 from benchbox.utils.cloud_storage import is_cloud_path

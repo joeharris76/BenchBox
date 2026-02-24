@@ -21,7 +21,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from benchbox.core.config import BenchmarkConfig, SystemProfile
 from benchbox.core.constants import (
     GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS,
     GENERIC_POWER_DEFAULT_WARMUP_ITERATIONS,
@@ -44,6 +43,7 @@ from benchbox.core.results.models import (
     BenchmarkResults,
     TableLoadingStats,
 )
+from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 from benchbox.monitoring import PerformanceMonitor
 from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.printing import quiet_console
@@ -260,12 +260,17 @@ def _load_dataframe_data(
     if benchmark_ref is None:
         raise ValueError("No data source available. Either provide data_dir or generate data first.")
 
+    options_map = getattr(benchmark_config, "options", {}) or {}
+    df_tuning_config = options_map.get("df_tuning_config")
+    write_config = getattr(df_tuning_config, "write", None) if df_tuning_config else None
+
     # Always run through DataFrameDataLoader so format conversion/caching rules
     # are applied consistently (e.g., CSV/TBL -> Parquet for Polars/Pandas).
     data_paths = loader.prepare_benchmark_data(
         benchmark=benchmark_ref,
         scale_factor=getattr(benchmark_config, "scale_factor", 1.0),
         data_dir=data_dir,
+        write_config=write_config,
     )
 
     # Get schema info for column names
@@ -337,13 +342,9 @@ def _execute_dataframe_queries(
         or GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS
     )
 
-    # Set up seed-based parameter overrides for DataFrame queries.
-    # When a seed is configured, extract parameters from qgen/dsqgen to match
-    # the SQL variant's substitution values exactly.
     benchmark_id = normalize_benchmark_id(benchmark_config.name)
     seed = options.get("seed")
     scale_factor = getattr(benchmark_config, "scale_factor", 1.0)
-    _setup_parameter_overrides(benchmark_id, seed, scale_factor)
 
     # Get query subset filter if specified
     query_subset = getattr(benchmark_config, "queries", None)
@@ -360,110 +361,161 @@ def _execute_dataframe_queries(
                 normalized.add(f"Q{q_str}")
         query_filter = normalized
 
-    # Get initial query set to determine total count
-    initial_queries = _get_queries_for_benchmark(benchmark_config, benchmark_instance, stream_id=0)
-    if query_filter:
-        initial_queries = [q for q in initial_queries if q.query_id.upper() in query_filter]
-
-    if not initial_queries:
-        logger.warning("No queries found for execution")
-        return []
-
-    total_queries = len(initial_queries)
-    logger.info(f"Executing {total_queries} queries")
-    logger.info(f"Warmup iterations: {warmup_iterations}, Measurement iterations: {measurement_iterations}")
-
     query_results: list[dict[str, Any]] = []
+    override_contexts_applied: set[tuple[int, float, int | None]] = set()
+    try:
+        # Set up seed-based parameter overrides for DataFrame queries.
+        # For TPC-DS, this is stream-aware and applied per stream execution.
+        _setup_parameter_overrides_for_stream(
+            benchmark_id=benchmark_id,
+            seed=seed,
+            scale_factor=scale_factor,
+            stream_id=0,
+            applied_contexts=override_contexts_applied,
+        )
 
-    # Execute warmup iterations (emit results)
-    # Each warmup uses a different stream_id (0, 1, 2, ...)
-    if warmup_iterations > 0:
-        console.print(f"\n[yellow]Running {warmup_iterations} warmup iteration(s)...[/yellow]")
-        for warmup_iter in range(warmup_iterations):
-            warmup_stream_id = warmup_iter
-            warmup_queries = _get_queries_for_benchmark(
-                benchmark_config, benchmark_instance, stream_id=warmup_stream_id
+        # Get initial query set to determine total count
+        initial_queries = _get_queries_for_benchmark(benchmark_config, benchmark_instance, stream_id=0)
+        if query_filter:
+            initial_queries = [q for q in initial_queries if q.query_id.upper() in query_filter]
+
+        if not initial_queries:
+            logger.warning("No queries found for execution")
+            return []
+
+        total_queries = len(initial_queries)
+        logger.info(f"Executing {total_queries} queries")
+        logger.info(f"Warmup iterations: {warmup_iterations}, Measurement iterations: {measurement_iterations}")
+
+        # Execute warmup iterations (emit results)
+        # Each warmup uses a different stream_id (0, 1, 2, ...)
+        if warmup_iterations > 0:
+            console.print(f"\n[yellow]Running {warmup_iterations} warmup iteration(s)...[/yellow]")
+            for warmup_iter in range(warmup_iterations):
+                warmup_stream_id = warmup_iter
+                _setup_parameter_overrides_for_stream(
+                    benchmark_id=benchmark_id,
+                    seed=seed,
+                    scale_factor=scale_factor,
+                    stream_id=warmup_stream_id,
+                    applied_contexts=override_contexts_applied,
+                )
+                warmup_queries = _get_queries_for_benchmark(
+                    benchmark_config, benchmark_instance, stream_id=warmup_stream_id
+                )
+                if query_filter:
+                    warmup_queries = [q for q in warmup_queries if q.query_id.upper() in query_filter]
+
+                console.print(f"[dim]Warmup {warmup_iter + 1}/{warmup_iterations} (stream {warmup_stream_id})[/dim]")
+                for query in warmup_queries:
+                    try:
+                        result = adapter.execute_query(ctx, query)
+                        result = dict(result)
+                    except Exception as e:
+                        logger.warning(f"Warmup query {query.query_id} failed: {e}")
+                        result = {
+                            "query_id": query.query_id,
+                            "status": "FAILED",
+                            "error": str(e),
+                            "execution_time_seconds": 0.0,
+                        }
+                    result["iteration"] = 0
+                    result["stream_id"] = warmup_stream_id
+                    result["run_type"] = "warmup"
+                    query_results.append(result)
+
+        # Execute measurement iterations
+        # Each measurement iteration uses a different stream_id (continues from warmup)
+        console.print(
+            f"\n[cyan]Running {measurement_iterations} measurement iteration(s) with {total_queries} queries each...[/cyan]"
+        )
+
+        for iteration in range(measurement_iterations):
+            # Each measurement iteration uses a unique stream_id
+            # Stream IDs continue from where warmup left off
+            measurement_stream_id = warmup_iterations + iteration
+            _setup_parameter_overrides_for_stream(
+                benchmark_id=benchmark_id,
+                seed=seed,
+                scale_factor=scale_factor,
+                stream_id=measurement_stream_id,
+                applied_contexts=override_contexts_applied,
+            )
+            measurement_queries = _get_queries_for_benchmark(
+                benchmark_config, benchmark_instance, stream_id=measurement_stream_id
             )
             if query_filter:
-                warmup_queries = [q for q in warmup_queries if q.query_id.upper() in query_filter]
+                measurement_queries = [q for q in measurement_queries if q.query_id.upper() in query_filter]
 
-            console.print(f"[dim]Warmup {warmup_iter + 1}/{warmup_iterations} (stream {warmup_stream_id})[/dim]")
-            for query in warmup_queries:
-                try:
-                    result = adapter.execute_query(ctx, query)
-                    result = dict(result)
-                except Exception as e:
-                    logger.warning(f"Warmup query {query.query_id} failed: {e}")
-                    result = {
-                        "query_id": query.query_id,
-                        "status": "FAILED",
-                        "error": str(e),
-                        "execution_time_seconds": 0.0,
-                    }
-                result["iteration"] = 0
-                result["stream_id"] = warmup_stream_id
-                result["run_type"] = "warmup"
-                query_results.append(result)
+            console.print(
+                f"\n[green]Iteration {iteration + 1}/{measurement_iterations} (stream {measurement_stream_id})[/green]"
+            )
 
-    # Execute measurement iterations
-    # Each measurement iteration uses a different stream_id (continues from warmup)
-    console.print(
-        f"\n[cyan]Running {measurement_iterations} measurement iteration(s) with {total_queries} queries each...[/cyan]"
-    )
+            for i, query in enumerate(measurement_queries, 1):
+                if options.get("verbose") or options.get("very_verbose"):
+                    console.print(f"[blue]Executing query {i}/{total_queries}: {query.query_id}[/blue]")
 
-    for iteration in range(measurement_iterations):
-        # Each measurement iteration uses a unique stream_id
-        # Stream IDs continue from where warmup left off
-        measurement_stream_id = warmup_iterations + iteration
-        measurement_queries = _get_queries_for_benchmark(
-            benchmark_config, benchmark_instance, stream_id=measurement_stream_id
-        )
-        if query_filter:
-            measurement_queries = [q for q in measurement_queries if q.query_id.upper() in query_filter]
+                def execute_single_query(q=query):
+                    """Execute a single query and return the result."""
+                    try:
+                        result = adapter.execute_query(ctx, q)
+                        result = dict(result)
+                    except Exception as e:
+                        logger.error(f"Query {q.query_id} failed: {e}")
+                        result = {
+                            "query_id": q.query_id,
+                            "status": "FAILED",
+                            "error": str(e),
+                            "execution_time_seconds": 0.0,
+                        }
+                    result["iteration"] = iteration + 1
+                    result["stream_id"] = measurement_stream_id
+                    result["run_type"] = "measurement"
+                    query_results.append(result)
 
-        console.print(
-            f"\n[green]Iteration {iteration + 1}/{measurement_iterations} (stream {measurement_stream_id})[/green]"
-        )
-
-        for i, query in enumerate(measurement_queries, 1):
-            if options.get("verbose") or options.get("very_verbose"):
-                console.print(f"[blue]Executing query {i}/{total_queries}: {query.query_id}[/blue]")
-
-            def execute_single_query(q=query):
-                """Execute a single query and return the result."""
-                try:
-                    result = adapter.execute_query(ctx, q)
-                    result = dict(result)
-                except Exception as e:
-                    logger.error(f"Query {q.query_id} failed: {e}")
-                    result = {
-                        "query_id": q.query_id,
-                        "status": "FAILED",
-                        "error": str(e),
-                        "execution_time_seconds": 0.0,
-                    }
-                result["iteration"] = iteration + 1
-                result["stream_id"] = measurement_stream_id
-                result["run_type"] = "measurement"
-                query_results.append(result)
-
-            # Use time_operation context manager for consistent monitoring
-            if monitor:
-                with monitor.time_operation(f"query_{query.query_id}_iter{iteration + 1}"):
+                # Use time_operation context manager for consistent monitoring
+                if monitor:
+                    with monitor.time_operation(f"query_{query.query_id}_iter{iteration + 1}"):
+                        execute_single_query()
+                else:
                     execute_single_query()
-            else:
-                execute_single_query()
 
-    # Clear parameter overrides after execution
-    _clear_parameter_overrides(benchmark_id)
+        return query_results
+    finally:
+        # Always clear overrides, including early-return and exception paths.
+        _clear_parameter_overrides(benchmark_id)
 
-    return query_results
+
+def _setup_parameter_overrides_for_stream(
+    benchmark_id: str,
+    seed: int | None,
+    scale_factor: float,
+    stream_id: int,
+    applied_contexts: set[tuple[int, float, int | None]],
+) -> None:
+    """Apply parameter overrides once per unique seed/SF(/stream) context."""
+    if seed is None:
+        return
+
+    context_key: tuple[int, float, int | None]
+    if benchmark_id == "tpcds":
+        context_key = (seed, scale_factor, stream_id)
+    else:
+        # TPC-H extraction is stream-independent.
+        context_key = (seed, scale_factor, None)
+
+    if context_key in applied_contexts:
+        return
+
+    _setup_parameter_overrides(benchmark_id, seed, scale_factor, stream_id=stream_id)
+    applied_contexts.add(context_key)
 
 
 def _setup_parameter_overrides(
     benchmark_id: str,
     seed: int | None,
     scale_factor: float,
+    stream_id: int | None = None,
 ) -> None:
     """Set up seed-based parameter overrides for DataFrame queries.
 
@@ -500,16 +552,22 @@ def _setup_parameter_overrides(
             from benchbox.core.tpcds.dataframe_queries.parameters import set_parameter_overrides
             from benchbox.core.tpcds.parameter_extractor import get_tpcds_extracted_parameters
 
-            overrides = get_tpcds_extracted_parameters(seed, scale_factor)
+            overrides = get_tpcds_extracted_parameters(seed, scale_factor, stream_id)
             if overrides:
                 set_parameter_overrides(overrides)
-                logger.info(f"TPC-DS parameter overrides set for seed={seed} ({len(overrides)} queries)")
+                logger.info(
+                    "TPC-DS parameter overrides set for seed=%s stream=%s (%d queries)",
+                    seed,
+                    stream_id,
+                    len(overrides),
+                )
             else:
-                logger.debug(f"No TPC-DS parameter overrides extracted for seed={seed}")
+                logger.debug("No TPC-DS parameter overrides extracted for seed=%s stream=%s", seed, stream_id)
         except Exception:
             logger.warning(
-                "Failed to extract TPC-DS parameters for seed=%d; using static defaults",
+                "Failed to extract TPC-DS parameters for seed=%d stream=%s; using static defaults",
                 seed,
+                stream_id,
                 exc_info=True,
             )
 
@@ -558,118 +616,161 @@ def _get_queries_for_benchmark(
     if stream_id is None:
         stream_id = getattr(benchmark_config, "stream_id", 0)
 
-    # Check registry for pre-defined queries
-    if benchmark_id == "tpch":
-        from benchbox.core.tpch.dataframe_queries import TPCH_DATAFRAME_QUERIES
-        from benchbox.core.tpch.streams import TPCHStreams
+    _dispatch = {
+        "tpch": _get_tpch_dataframe_queries,
+        "tpcds": _get_tpcds_dataframe_queries,
+        "clickbench": _get_clickbench_dataframe_queries,
+    }
 
-        # Get query permutation for this stream (TPC-H specification)
-        query_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id % len(TPCHStreams.PERMUTATION_MATRIX)]
-
-        # Return queries in permuted order
-        queries = []
-        for query_num in query_permutation:
-            query_id = f"Q{query_num}"
-            query = TPCH_DATAFRAME_QUERIES.get(query_id)
-            if query:
-                queries.append(query)
-            else:
-                logger.warning(f"Query {query_id} not found in TPC-H DataFrame registry")
-        return queries
-
-    elif benchmark_id == "tpcds":
-        from benchbox.core.tpcds.dataframe_queries import TPCDS_DATAFRAME_QUERIES
-        from benchbox.core.tpcds.streams import create_standard_streams
-
-        options_map = getattr(benchmark_config, "options", {}) or {}
-        allow_variant_fallback = bool(options_map.get("tpcds_dataframe_variant_fallback", True))
-
-        available_query_ids = sorted(
-            int(qid[1:])
-            for qid in TPCDS_DATAFRAME_QUERIES.get_query_ids()
-            if qid.upper().startswith("Q") and qid[1:].isdigit()
-        )
-
-        query_manager = None
-        if benchmark_instance and hasattr(benchmark_instance, "query_manager"):
-            query_manager = benchmark_instance.query_manager
-        elif (
-            benchmark_instance
-            and hasattr(benchmark_instance, "_impl")
-            and hasattr(benchmark_instance._impl, "query_manager")
-        ):
-            query_manager = benchmark_instance._impl.query_manager
-
-        if query_manager is None:
-            logger.warning("TPC-DS query_manager unavailable; using legacy 99-query DataFrame ordering")
-            from benchbox.core.tpcds.streams import PermutationMode, TPCDSPermutationGenerator
-
-            generator = TPCDSPermutationGenerator(seed=42 + stream_id)
-            query_permutation = generator.generate_permutation(available_query_ids, PermutationMode.TPCDS_STANDARD)
-            queries = []
-            for query_num in query_permutation:
-                query_id = f"Q{query_num}"
-                query = TPCDS_DATAFRAME_QUERIES.get(query_id)
-                if query:
-                    queries.append(query)
-            return queries
-
-        stream_manager = create_standard_streams(
-            query_manager=query_manager,
-            num_streams=1,
-            query_ids=available_query_ids,
-            query_range=(1, 99),
-            base_seed=42 + stream_id,
-        )
-        stream_queries = stream_manager.generate_streams().get(0, [])
-
-        queries = []
-        missing_variants: list[str] = []
-        for stream_query in stream_queries:
-            base_query_id = f"Q{stream_query.query_id}"
-            base_query = TPCDS_DATAFRAME_QUERIES.get(base_query_id)
-            if base_query is None:
-                logger.warning("Query %s not found in TPC-DS DataFrame registry", base_query_id)
-                continue
-
-            if stream_query.variant is None:
-                queries.append(base_query)
-                continue
-
-            variant_id = f"{base_query_id}{stream_query.variant.lower()}"
-            variant_query = (
-                TPCDS_DATAFRAME_QUERIES.get(variant_id)
-                or TPCDS_DATAFRAME_QUERIES.get(variant_id.upper())
-                or TPCDS_DATAFRAME_QUERIES.get(variant_id.capitalize())
-            )
-            if variant_query is not None:
-                queries.append(variant_query)
-                continue
-
-            missing_variants.append(variant_id)
-            if allow_variant_fallback:
-                queries.append(replace(base_query, query_id=variant_id))
-
-        if missing_variants and not allow_variant_fallback:
-            missing = ", ".join(sorted(set(missing_variants)))
-            raise RuntimeError(
-                "TPC-DS DataFrame SQL parity check failed: missing variant DataFrame implementations "
-                f"for [{missing}]. Set option tpcds_dataframe_variant_fallback=true to allow "
-                "non-parity fallback execution."
-            )
-
-        return queries
-
-    elif benchmark_id == "clickbench":
-        from benchbox.core.clickbench.dataframe_queries import CLICKBENCH_DATAFRAME_QUERIES
-
-        return CLICKBENCH_DATAFRAME_QUERIES.get_all_queries()
+    handler = _dispatch.get(benchmark_id)
+    if handler:
+        return handler(benchmark_config, benchmark_instance, stream_id)
 
     # Try benchmark instance
     if benchmark_instance and hasattr(benchmark_instance, "get_dataframe_queries"):
         return benchmark_instance.get_dataframe_queries()
 
     return []
+
+
+def _get_tpch_dataframe_queries(
+    benchmark_config: BenchmarkConfig,
+    benchmark_instance: Any | None,
+    stream_id: int,
+) -> list[Any]:
+    """Get TPC-H DataFrame queries in permuted order for the given stream."""
+    from benchbox.core.tpch.dataframe_queries import TPCH_DATAFRAME_QUERIES
+    from benchbox.core.tpch.streams import TPCHStreams
+
+    query_permutation = TPCHStreams.PERMUTATION_MATRIX[stream_id % len(TPCHStreams.PERMUTATION_MATRIX)]
+
+    queries = []
+    for query_num in query_permutation:
+        query_id = f"Q{query_num}"
+        query = TPCH_DATAFRAME_QUERIES.get(query_id)
+        if query:
+            queries.append(query)
+        else:
+            logger.warning(f"Query {query_id} not found in TPC-H DataFrame registry")
+    return queries
+
+
+def _get_tpcds_dataframe_queries(
+    benchmark_config: BenchmarkConfig,
+    benchmark_instance: Any | None,
+    stream_id: int,
+) -> list[Any]:
+    """Get TPC-DS DataFrame queries in permuted order for the given stream."""
+    from benchbox.core.tpcds.dataframe_queries import TPCDS_DATAFRAME_QUERIES
+    from benchbox.core.tpcds.streams import create_standard_streams
+
+    options_map = getattr(benchmark_config, "options", {}) or {}
+    allow_variant_fallback = bool(options_map.get("tpcds_dataframe_variant_fallback", True))
+
+    available_query_ids = sorted(
+        int(qid[1:])
+        for qid in TPCDS_DATAFRAME_QUERIES.get_query_ids()
+        if qid.upper().startswith("Q") and qid[1:].isdigit()
+    )
+
+    query_manager = _resolve_tpcds_query_manager(benchmark_instance)
+
+    if query_manager is None:
+        return _get_tpcds_legacy_queries(available_query_ids, stream_id)
+
+    stream_manager = create_standard_streams(
+        query_manager=query_manager,
+        num_streams=1,
+        query_ids=available_query_ids,
+        query_range=(1, 99),
+        base_seed=42 + stream_id,
+    )
+    stream_queries = stream_manager.generate_streams().get(0, [])
+
+    return _resolve_tpcds_stream_queries(stream_queries, allow_variant_fallback)
+
+
+def _resolve_tpcds_query_manager(benchmark_instance: Any | None) -> Any | None:
+    """Resolve the TPC-DS query manager from a benchmark instance."""
+    if benchmark_instance and hasattr(benchmark_instance, "query_manager"):
+        return benchmark_instance.query_manager
+    if (
+        benchmark_instance
+        and hasattr(benchmark_instance, "_impl")
+        and hasattr(benchmark_instance._impl, "query_manager")
+    ):
+        return benchmark_instance._impl.query_manager
+    return None
+
+
+def _get_tpcds_legacy_queries(available_query_ids: list[int], stream_id: int) -> list[Any]:
+    """Get TPC-DS queries using legacy 99-query ordering (no query manager)."""
+    from benchbox.core.tpcds.dataframe_queries import TPCDS_DATAFRAME_QUERIES
+    from benchbox.core.tpcds.streams import PermutationMode, TPCDSPermutationGenerator
+
+    logger.warning("TPC-DS query_manager unavailable; using legacy 99-query DataFrame ordering")
+    generator = TPCDSPermutationGenerator(seed=42 + stream_id)
+    query_permutation = generator.generate_permutation(available_query_ids, PermutationMode.TPCDS_STANDARD)
+    queries = []
+    for query_num in query_permutation:
+        query_id = f"Q{query_num}"
+        query = TPCDS_DATAFRAME_QUERIES.get(query_id)
+        if query:
+            queries.append(query)
+    return queries
+
+
+def _resolve_tpcds_stream_queries(stream_queries: list[Any], allow_variant_fallback: bool) -> list[Any]:
+    """Resolve TPC-DS stream queries to DataFrame queries, handling variants."""
+    from benchbox.core.tpcds.dataframe_queries import TPCDS_DATAFRAME_QUERIES
+
+    queries = []
+    missing_variants: list[str] = []
+    for stream_query in stream_queries:
+        base_query_id = f"Q{stream_query.query_id}"
+        base_query = TPCDS_DATAFRAME_QUERIES.get(base_query_id)
+        if base_query is None:
+            logger.warning("Query %s not found in TPC-DS DataFrame registry", base_query_id)
+            continue
+
+        if stream_query.variant is None:
+            queries.append(base_query)
+            continue
+
+        variant_id = f"{base_query_id}{stream_query.variant.lower()}"
+        variant_query = (
+            TPCDS_DATAFRAME_QUERIES.get(variant_id)
+            or TPCDS_DATAFRAME_QUERIES.get(variant_id.upper())
+            or TPCDS_DATAFRAME_QUERIES.get(variant_id.capitalize())
+        )
+        if variant_query is not None:
+            queries.append(variant_query)
+            continue
+
+        missing_variants.append(variant_id)
+        if allow_variant_fallback:
+            queries.append(replace(base_query, query_id=variant_id))
+
+    if missing_variants and not allow_variant_fallback:
+        missing = ", ".join(sorted(set(missing_variants)))
+        raise RuntimeError(
+            "TPC-DS DataFrame SQL parity check failed: missing variant DataFrame implementations "
+            f"for [{missing}]. Set option tpcds_dataframe_variant_fallback=true to allow "
+            "non-parity fallback execution."
+        )
+
+    return queries
+
+
+def _get_clickbench_dataframe_queries(
+    benchmark_config: BenchmarkConfig,
+    benchmark_instance: Any | None,
+    stream_id: int,
+) -> list[Any]:
+    """Get ClickBench DataFrame queries."""
+    from benchbox.core.clickbench.dataframe_queries import CLICKBENCH_DATAFRAME_QUERIES
+
+    return CLICKBENCH_DATAFRAME_QUERIES.get_all_queries()
 
 
 def is_dataframe_execution(database_config: Any) -> bool:

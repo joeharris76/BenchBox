@@ -837,6 +837,11 @@ class ResultBuilder:
         if self._platform.config:
             info["configuration"] = self._platform.config
 
+        if self._platform.engine_version:
+            info["engine_version"] = self._platform.engine_version
+        if self._platform.engine_version_source:
+            info["engine_version_source"] = self._platform.engine_version_source
+
         return info
 
     def _build_execution_metadata(self) -> dict[str, Any]:

@@ -13,6 +13,17 @@ from pathlib import Path
 
 import pytest
 
+from benchbox.utils.printing import set_quiet
+
+
+@pytest.fixture(autouse=True)
+def _ensure_quiet_off():
+    """Ensure quiet mode is off so emit() output reaches capsys."""
+    set_quiet(False)
+    yield
+    set_quiet(False)
+
+
 from benchbox.release.content_validation import (
     EM_DASH,
     EN_DASH,

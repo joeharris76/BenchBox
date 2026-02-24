@@ -12,6 +12,8 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from typing import Any, Literal, Optional
 
 from benchbox.core.platform_registry import PlatformRegistry
+from benchbox.platforms.base.adapter import check_isolation_capability
+from benchbox.utils.runtime_env import ensure_driver_version
 
 
 def _normalize_platform_name(platform: str) -> tuple[str, bool, Optional[str]]:
@@ -211,32 +213,36 @@ def _get_dataframe_adapter(platform: str, **config: Any) -> Any:
     Returns:
         DataFrame adapter instance
     """
-    # Import here to avoid circular imports
-    from benchbox.platforms.dataframe import (
-        CUDF_AVAILABLE,
-        DASK_AVAILABLE,
-        DATAFUSION_DF_AVAILABLE,
-        MODIN_AVAILABLE,
-        PANDAS_AVAILABLE,
-        POLARS_AVAILABLE,
-        PYSPARK_AVAILABLE,
-        CuDFDataFrameAdapter,
-        DaskDataFrameAdapter,
-        DataFusionDataFrameAdapter,
-        ModinDataFrameAdapter,
-        PandasDataFrameAdapter,
-        PolarsDataFrameAdapter,
-        PySparkDataFrameAdapter,
+    # Import the module (not names) to avoid circular imports and to ensure
+    # monkeypatch/test stubs are visible via live attribute access.
+    import benchbox.platforms.dataframe as _df
+
+    driver_package = config.pop("driver_package", None)
+    driver_version = config.pop("driver_version", None) or config.pop("driver_version_requested", None)
+    driver_version_resolved = config.pop("driver_version_resolved", None)
+    driver_auto_install = bool(config.pop("driver_auto_install", False))
+
+    platform_info = PlatformRegistry.get_platform_info(platform)
+    package_hint = driver_package or (platform_info.driver_package if platform_info else None)
+    requested_version = driver_version
+    resolution = ensure_driver_version(
+        package_name=package_hint,
+        requested_version=requested_version,
+        auto_install=driver_auto_install,
+        install_hint=platform_info.installation_command if platform_info else None,
     )
+    resolved_version = resolution.resolved or driver_version_resolved
+    requested = driver_version or resolution.requested
 
     adapter_mapping = {
-        "polars": (PolarsDataFrameAdapter, POLARS_AVAILABLE, "pip install polars"),
-        "pandas": (PandasDataFrameAdapter, PANDAS_AVAILABLE, "pip install pandas"),
-        "modin": (ModinDataFrameAdapter, MODIN_AVAILABLE, "pip install modin[ray]"),
-        "cudf": (CuDFDataFrameAdapter, CUDF_AVAILABLE, "pip install cudf-cu12"),
-        "dask": (DaskDataFrameAdapter, DASK_AVAILABLE, "pip install dask[distributed]"),
-        "pyspark": (PySparkDataFrameAdapter, PYSPARK_AVAILABLE, "pip install pyspark"),
-        "datafusion": (DataFusionDataFrameAdapter, DATAFUSION_DF_AVAILABLE, "pip install datafusion"),
+        "polars": (_df.PolarsDataFrameAdapter, _df.POLARS_AVAILABLE, "pip install polars"),
+        "pandas": (_df.PandasDataFrameAdapter, _df.PANDAS_AVAILABLE, "pip install pandas"),
+        "modin": (_df.ModinDataFrameAdapter, _df.MODIN_AVAILABLE, "pip install modin[ray]"),
+        "cudf": (_df.CuDFDataFrameAdapter, _df.CUDF_AVAILABLE, "pip install cudf-cu12"),
+        "dask": (_df.DaskDataFrameAdapter, _df.DASK_AVAILABLE, "pip install dask[distributed]"),
+        "pyspark": (_df.PySparkDataFrameAdapter, _df.PYSPARK_AVAILABLE, "pip install pyspark"),
+        "lakesail": (_df.LakeSailDataFrameAdapter, _df.PYSPARK_AVAILABLE, "pip install pyspark"),
+        "datafusion": (_df.DataFusionDataFrameAdapter, _df.DATAFUSION_DF_AVAILABLE, "pip install datafusion"),
     }
 
     if platform not in adapter_mapping:
@@ -250,7 +256,19 @@ def _get_dataframe_adapter(platform: str, **config: Any) -> Any:
             f"DataFrame platform '{platform}' is not available. Install required dependencies: {install_cmd}"
         )
 
-    return adapter_class(**config)
+    check_isolation_capability(adapter_class, platform, resolution.runtime_strategy)
+
+    adapter = adapter_class(**config)
+    adapter.driver_package = resolution.package or package_hint
+    adapter.driver_version_requested = requested
+    adapter.driver_version_resolved = resolved_version
+    adapter.driver_version_actual = resolution.actual
+    adapter.driver_runtime_strategy = resolution.runtime_strategy
+    adapter.driver_runtime_path = resolution.runtime_path
+    adapter.driver_runtime_python_executable = resolution.runtime_python_executable
+    adapter.driver_auto_install_used = resolution.auto_install_used or driver_auto_install
+
+    return adapter
 
 
 def is_dataframe_mode(platform: str, mode: Optional[str] = None) -> bool:

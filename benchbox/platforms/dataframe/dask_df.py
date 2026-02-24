@@ -439,30 +439,17 @@ class DaskDataFrameAdapter(PandasFamilyAdapter[DaskDF]):
 
         return info
 
-    def merge(
+    def _merge_frames(
         self,
         left: DaskDF,
         right: DaskDF,
-        on: str | list[str] | None = None,
-        left_on: str | list[str] | None = None,
-        right_on: str | list[str] | None = None,
-        how: str = "inner",
+        *,
+        on: str | list[str] | None,
+        left_on: str | list[str] | None,
+        right_on: str | list[str] | None,
+        how: str,
     ) -> DaskDF:
-        """Merge two DataFrames.
-
-        Note: This is a lazy operation.
-
-        Args:
-            left: Left DataFrame
-            right: Right DataFrame
-            on: Column name(s) to join on (when same in both)
-            left_on: Column name(s) in left DataFrame
-            right_on: Column name(s) in right DataFrame
-            how: Join type ('inner', 'left', 'right', 'outer')
-
-        Returns:
-            Merged DataFrame (lazy)
-        """
+        """Use Dask's lazy merge implementation."""
         return dd.merge(
             left,
             right,

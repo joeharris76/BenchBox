@@ -15,11 +15,15 @@ This implementation is based on the TPC-DI specification.
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-from typing import Any, Optional
+from typing import Any
+
+from benchbox.core.query_manager import ParameterizedQueryManager
 
 
-class TPCDIValidationQueries:
+class TPCDIValidationQueries(ParameterizedQueryManager):
     """TPC-DI data quality validation query manager."""
+
+    invalid_query_label = "validation query"
 
     def __init__(self) -> None:
         """Initialize the validation query manager."""
@@ -544,46 +548,6 @@ LIMIT {limit_rows};
 
         return metadata
 
-    def get_query(self, query_id: str, params: Optional[dict[str, Any]] = None) -> str:
-        """Get a validation query with parameters.
-
-        Args:
-            query_id: Query identifier (VQ1, VQ2, etc.)
-            params: Optional parameter values. If None, uses defaults.
-
-        Returns:
-            SQL query with parameters replaced
-
-        Raises:
-            ValueError: If query_id is invalid
-        """
-        if query_id not in self._queries:
-            available = ", ".join(sorted(self._queries.keys()))
-            raise ValueError(f"Invalid validation query ID: {query_id}. Available: {available}")
-
-        template = self._queries[query_id]
-
-        if params is None:
-            params = self._generate_default_params(query_id)
-        else:
-            # Merge with defaults for any missing parameters
-            defaults = self._generate_default_params(query_id)
-            defaults.update(params)
-            params = defaults
-
-        return template.format(**params)
-
-    def get_all_queries(self) -> dict[str, str]:
-        """Get all validation queries with default parameters.
-
-        Returns:
-            Dictionary mapping query IDs to parameterized SQL
-        """
-        result = {}
-        for query_id in self._queries:
-            result[query_id] = self.get_query(query_id)
-        return result
-
     def _generate_default_params(self, query_id: str) -> dict[str, Any]:
         """Generate default parameters for validation queries.
 
@@ -626,11 +590,7 @@ LIMIT {limit_rows};
         Raises:
             ValueError: If query_id is invalid
         """
-        if query_id not in self._query_metadata:
-            available = ", ".join(sorted(self._query_metadata.keys()))
-            raise ValueError(f"Invalid validation query ID: {query_id}. Available: {available}")
-
-        return self._query_metadata[query_id].copy()
+        return self._get_query_metadata_copy(self._query_metadata, query_id, "validation query")
 
     def get_queries_by_category(self, category: str) -> list[str]:
         """Get all validation queries of a specific category.
@@ -649,10 +609,8 @@ LIMIT {limit_rows};
             "consistency",
             "business_rules",
         }
-        if category not in valid_categories:
-            raise ValueError(f"Invalid category: {category}. Valid categories: {', '.join(valid_categories)}")
-
-        return [query_id for query_id, metadata in self._query_metadata.items() if metadata["category"] == category]
+        self._validate_selector_value(category, valid_categories, "category", plural="categories")
+        return self._query_ids_by_metadata(self._query_metadata, "category", category)
 
     def get_queries_by_severity(self, severity: str) -> list[str]:
         """Get all validation queries of a specific severity level.
@@ -664,7 +622,5 @@ LIMIT {limit_rows};
             List of query IDs with the specified severity
         """
         valid_severities = {"critical", "high", "medium", "low"}
-        if severity not in valid_severities:
-            raise ValueError(f"Invalid severity: {severity}. Valid severities: {', '.join(valid_severities)}")
-
-        return [query_id for query_id, metadata in self._query_metadata.items() if metadata["severity"] == severity]
+        self._validate_selector_value(severity, valid_severities, "severity", plural="severities")
+        return self._query_ids_by_metadata(self._query_metadata, "severity", severity)

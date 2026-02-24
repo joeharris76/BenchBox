@@ -10,8 +10,8 @@ Example:
     >>> from benchbox.core.tuning.generators.firebolt import FireboltDDLGenerator
     >>> generator = FireboltDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
-    >>> print(clauses.distribute_by)  # "l_orderkey, l_linenumber"
-    >>> print(clauses.partition_by)   # "l_shipdate"
+    >>> emit(clauses.distribute_by)  # "l_orderkey, l_linenumber"
+    >>> emit(clauses.partition_by)   # "l_shipdate"
 
 Copyright 2026 Joe Harris / BenchBox Project
 
@@ -29,6 +29,7 @@ from benchbox.core.tuning.ddl_generator import (
     ColumnNullability,
     TuningClauses,
 )
+from benchbox.core.tuning.type_mapping import map_sql_type_with_fallback
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -37,6 +38,35 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+FIREBOLT_TYPE_MAPPING: dict[str, str] = {
+    # Integer types
+    "INTEGER": "INT",
+    "BIGINT": "LONG",
+    "SMALLINT": "INT",  # Firebolt doesn't have SMALLINT
+    "TINYINT": "INT",  # Firebolt doesn't have TINYINT
+    # Floating point
+    "FLOAT": "FLOAT",
+    "DOUBLE": "DOUBLE",
+    "REAL": "FLOAT",
+    "DOUBLE PRECISION": "DOUBLE",
+    # Decimal
+    "DECIMAL": "DECIMAL(38, 9)",
+    "NUMERIC": "DECIMAL(38, 9)",
+    # String types
+    "VARCHAR": "TEXT",
+    "CHAR": "TEXT",
+    "TEXT": "TEXT",
+    "STRING": "TEXT",
+    # Date/time
+    "DATE": "DATE",
+    "TIMESTAMP": "TIMESTAMP",
+    "DATETIME": "TIMESTAMP",
+    "TIME": "TEXT",  # Firebolt has limited TIME support
+    # Boolean
+    "BOOLEAN": "BOOLEAN",
+    "BOOL": "BOOLEAN",
+}
 
 
 class FireboltDDLGenerator(BaseDDLGenerator):
@@ -203,39 +233,7 @@ class FireboltDDLGenerator(BaseDDLGenerator):
         Returns:
             Firebolt-specific type name.
         """
-        type_mapping = {
-            # Integer types
-            "INTEGER": "INT",
-            "BIGINT": "LONG",
-            "SMALLINT": "INT",  # Firebolt doesn't have SMALLINT
-            "TINYINT": "INT",  # Firebolt doesn't have TINYINT
-            # Floating point
-            "FLOAT": "FLOAT",
-            "DOUBLE": "DOUBLE",
-            "REAL": "FLOAT",
-            "DOUBLE PRECISION": "DOUBLE",
-            # Decimal
-            "DECIMAL": "DECIMAL(38, 9)",
-            "NUMERIC": "DECIMAL(38, 9)",
-            # String types
-            "VARCHAR": "TEXT",
-            "CHAR": "TEXT",
-            "TEXT": "TEXT",
-            "STRING": "TEXT",
-            # Date/time
-            "DATE": "DATE",
-            "TIMESTAMP": "TIMESTAMP",
-            "DATETIME": "TIMESTAMP",
-            "TIME": "TEXT",  # Firebolt has limited TIME support
-            # Boolean
-            "BOOLEAN": "BOOLEAN",
-            "BOOL": "BOOLEAN",
-        }
-
-        # Check for type with precision (e.g., "DECIMAL(15,2)")
-        base_type = sql_type.split("(")[0].upper().strip()
-
-        return type_mapping.get(base_type, sql_type)
+        return map_sql_type_with_fallback(sql_type, FIREBOLT_TYPE_MAPPING)
 
 
 __all__ = [

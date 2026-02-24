@@ -58,7 +58,7 @@ class TestTPCDSRegression:
     def benchmark_instance(self):
         """Create a benchmark instance for regression testing."""
         return TPCDSBenchmark(
-            scale_factor=0.01,
+            scale_factor=1.0,
             verbose=False,
         )
 
@@ -519,10 +519,21 @@ class TestTPCDSRegression:
     @pytest.mark.parametrize("scale_factor", [0.01, 0.1, 1.0])
     def test_scale_factor_consistency(self, scale_factor):
         """Test that different scale factors don't break functionality."""
-        benchmark = TPCDSBenchmark(
-            scale_factor=scale_factor,
-            verbose=False,
-        )
+        if scale_factor < 1.0:
+            with pytest.warns(
+                UserWarning,
+                match=r"TPC-DS requires minimum scale_factor of 1.0.*Rounding up",
+            ):
+                benchmark = TPCDSBenchmark(
+                    scale_factor=scale_factor,
+                    verbose=False,
+                )
+            assert benchmark.scale_factor == 1.0
+        else:
+            benchmark = TPCDSBenchmark(
+                scale_factor=scale_factor,
+                verbose=False,
+            )
 
         # Basic functionality should work regardless of scale factor
         query = benchmark.get_query(1)

@@ -774,6 +774,11 @@ class ConfigManager:
                 "date_col",
                 "partition_col",
             ]
+            sample_config.platform_optimizations.databricks_clustering_strategy = "z_order"
+            sample_config.platform_optimizations.liquid_clustering_enabled = False
+            sample_config.platform_optimizations.liquid_clustering_columns = []
+            sample_config.platform_optimizations.sorted_ingestion_mode = "off"
+            sample_config.platform_optimizations.sorted_ingestion_method = "auto"
             sample_config.platform_optimizations.auto_optimize_enabled = True
             sample_config.platform_optimizations.bloom_filters_enabled = True
             sample_config.platform_optimizations.bloom_filter_columns = [

@@ -426,9 +426,6 @@ class DataVaultQueryManager:
     Use get_parameterized_query() for parameterized execution.
     """
 
-    # Legacy QUERIES dict for backward compatibility (populated at init with default params)
-    QUERIES: dict[int, str] = {}
-
     # Query templates with :param_name placeholders
     # Each query uses Hub-Link-Satellite joins with current record filtering
     QUERY_TEMPLATES: dict[int, str] = {
@@ -1005,7 +1002,7 @@ ORDER BY cntrycode
         """,
     }
 
-    # Default parameters for backward compatibility (using TPC-H defaults)
+    # Default parameters for deterministic query generation.
     DEFAULT_PARAMS: dict[int, dict[str, Any]] = {
         1: {"delta": 90},
         2: {"size": 15, "type_suffix": "BRASS", "region": "EUROPE"},
@@ -1047,12 +1044,6 @@ ORDER BY cntrycode
         """
         self._param_generator = DataVaultParameterGenerator(seed=seed, scale_factor=scale_factor)
         self._query_cache: dict[tuple[int, int], str] = {}
-
-        # Initialize legacy QUERIES dict with default parameters for backward compatibility
-        for qid in self.QUERY_TEMPLATES:
-            self.__class__.QUERIES[qid] = self._substitute_parameters(
-                self.QUERY_TEMPLATES[qid], self.DEFAULT_PARAMS[qid]
-            )
 
     def _substitute_parameters(self, template: str, params: dict[str, Any]) -> str:
         """Substitute parameters into a query template.

@@ -25,7 +25,7 @@ Looking ahead? See the [Development Roadmap](../development/roadmap.md) for plan
 | **Trino**           | Available | Distributed SQL (Trino/Starburst)                            | `uv add benchbox[trino]`                            |
 | **PrestoDB**        | Available | Distributed SQL (Meta's Presto)                              | `uv add benchbox[presto]`                           |
 | **SQLite**          | Built-in  | Embedded transactional database                              | (built-in)                                          |
-| **Azure Platforms** | Available | Microsoft Fabric, Azure Synapse, Fabric Spark, Synapse Spark | See [Azure Platforms](azure-platforms.md)           |
+| **Azure Platforms** | Available | Microsoft Fabric Warehouse, Azure Synapse Analytics, Microsoft Fabric Spark, Azure Synapse Analytics Spark | See [Azure Platforms](azure-platforms.md)           |
 
 ### DataFrame Platforms (Native API)
 
@@ -34,12 +34,12 @@ BenchBox supports benchmarking DataFrame libraries using their native APIs inste
 | Platform       | CLI Name        | Status    | Family     | Description                                            | Installation                                   |
 | -------------- | --------------- | --------- | ---------- | ------------------------------------------------------ | ---------------------------------------------- |
 | **Polars**     | `polars-df`     | Available | Expression | Fast Rust-based DataFrame library with lazy evaluation | (core dependency)                              |
-| **Pandas**     | `pandas-df`     | Available | Pandas     | Reference Pandas implementation                        | `uv add benchbox --extra dataframe-pandas`     |
-| **PySpark**    | `pyspark-df`    | Available | Expression | Apache Spark DataFrame API (distributed)               | `uv add benchbox --extra dataframe-pyspark`    |
-| **DataFusion** | `datafusion-df` | Available | Expression | Arrow-native query engine                              | `uv add benchbox --extra dataframe-datafusion` |
-| Modin          | `modin-df`      | Available | Pandas     | Distributed Pandas replacement                         | `uv add benchbox --extra dataframe-modin`      |
-| Dask           | `dask-df`       | Available | Pandas     | Parallel computing DataFrames                          | `uv add benchbox --extra dataframe-dask`       |
-| cuDF           | `cudf-df`       | Available | Pandas     | NVIDIA GPU-accelerated DataFrames                      | `uv add benchbox --extra dataframe-cudf`       |
+| **Pandas**     | `pandas-df`     | Available | Pandas     | Reference Pandas implementation                        | `uv add benchbox --extra pandas`     |
+| **PySpark**    | `pyspark-df`    | Available | Expression | Apache Spark DataFrame API (distributed)               | `uv add benchbox --extra pyspark`    |
+| **DataFusion** | `datafusion-df` | Available | Expression | Arrow-native query engine                              | `uv add benchbox --extra datafusion` |
+| Modin          | `modin-df`      | Available | Pandas     | Distributed Pandas replacement                         | `uv add benchbox --extra modin`      |
+| Dask           | `dask-df`       | Available | Pandas     | Parallel computing DataFrames                          | `uv add benchbox --extra dask`       |
+| cuDF           | `cudf-df`       | Available | Pandas     | NVIDIA GPU-accelerated DataFrames                      | `uv add benchbox --extra cudf`       |
 
 **Quick Start:**
 ```bash

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from benchbox.base import BaseBenchmark
+from benchbox.core.benchmark_mixins import DataGenerationMixin
+from benchbox.core.query_catalog_base import TranslatableQueryMixin
 
 if TYPE_CHECKING:
     from cloudpathlib import CloudPath
@@ -26,6 +28,7 @@ from benchbox.core.connection import DatabaseConnection
 from benchbox.core.read_primitives.generator import ReadPrimitivesDataGenerator
 from benchbox.core.read_primitives.queries import ReadPrimitivesQueryManager
 from benchbox.core.read_primitives.schema import TABLES, get_all_create_table_sql
+from benchbox.core.utils.tuning import extract_constraint_flags
 from benchbox.utils.cloud_storage import create_path_handler
 from benchbox.utils.file_format import get_delimiter_for_file, is_tpc_format
 from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
@@ -34,7 +37,7 @@ from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
 PathLike = Union[Path, "CloudPath", "DatabricksPath"]
 
 
-class ReadPrimitivesBenchmark(BaseBenchmark):
+class ReadPrimitivesBenchmark(TranslatableQueryMixin, DataGenerationMixin, BaseBenchmark):
     """Read Primitives benchmark implementation.
 
     Uses TPC-H schema with 8 tables and 80+ primitive read queries.
@@ -110,35 +113,9 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
             if hasattr(self.data_generator, "tpch_generator"):
                 self.data_generator.tpch_generator.output_dir = self._output_dir
 
-    def generate_data(self, tables: Optional[list[str]] = None, output_format: str = "csv") -> dict[str, str]:
-        """Generate Read Primitives data.
-
-        Args:
-            tables: Optional list of tables to generate. If None, generates all.
-            output_format: Format for output data (only "csv" supported currently)
-
-        Returns:
-            Dictionary mapping table names to file paths
-
-        Raises:
-            ValueError: If output_format is not supported or invalid table names
-        """
-        if output_format != "csv":
-            raise ValueError(f"Unsupported output format: {output_format}")
-
-        if tables is None:
-            tables = list(TABLES.keys())
-
-        # Validate table names
-        invalid_tables = set(tables) - set(TABLES.keys())
-        if invalid_tables:
-            raise ValueError(f"Invalid table names: {invalid_tables}")
-
-        # Generate data using the data generator
-        # Read Primitives uses TPC-H data, so this will generate TPC-H tables
-        self.tables = self.data_generator.generate_data(tables)
-
-        return self.tables
+    def _get_table_schema(self) -> dict[str, dict]:
+        """Provide schema mapping for shared data generation/loading mixin."""
+        return TABLES
 
     def get_query(self, query_id: Union[int, str], *, params: Optional[dict[str, Any]] = None) -> str:
         """Get SQL text for a specific Read Primitives query.
@@ -201,27 +178,7 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
 
         return base_queries
 
-    def translate_query_text(self, query_text: str, target_dialect: str) -> str:
-        """Translate a query from Read Primitives' source dialect to target dialect.
-
-        Args:
-            query_text: SQL query text to translate
-            target_dialect: Target SQL dialect (e.g., 'duckdb', 'bigquery', 'snowflake')
-
-        Returns:
-            Translated SQL query text
-        """
-        from benchbox.utils.dialect_utils import translate_sql_query
-
-        # Read Primitives uses "netezza" as source dialect, which maps to
-        # PostgreSQL in SQLGlot.  This gives the best compatibility with modern
-        # SQL features (DATE literals, EXTRACT, window functions) while keeping
-        # the source queries platform-neutral.  See dialect_utils.py for mapping.
-        return translate_sql_query(
-            query=query_text,
-            target_dialect=target_dialect,
-            source_dialect="netezza",
-        )
+    # translate_query_text() is inherited from TranslatableQueryMixin
 
     def get_all_queries(self) -> dict[str, str]:
         """Get all available Read Primitives queries.
@@ -309,87 +266,22 @@ class ReadPrimitivesBenchmark(BaseBenchmark):
         Returns:
             Complete SQL schema creation script
         """
-
-        # Extract constraint settings from tuning configuration
-        enable_primary_keys = False
-        enable_foreign_keys = False
-
-        if tuning_config:
-            try:
-                enable_primary_keys = tuning_config.primary_keys.enabled
-                enable_foreign_keys = tuning_config.foreign_keys.enabled
-            except AttributeError as e:
-                self.logger.error(
-                    f"Failed to extract constraint settings from tuning_config: {e}. "
-                    f"tuning_config type: {type(tuning_config)}"
-                )
-                raise RuntimeError(
-                    f"Invalid tuning_config object (missing primary_keys or foreign_keys attributes): {e}"
-                ) from e
+        try:
+            enable_primary_keys, enable_foreign_keys = extract_constraint_flags(tuning_config)
+        except AttributeError as e:
+            self.logger.error(
+                f"Failed to extract constraint settings from tuning_config: {e}. "
+                f"tuning_config type: {type(tuning_config)}"
+            )
+            raise RuntimeError(
+                f"Invalid tuning_config object (missing primary_keys or foreign_keys attributes): {e}"
+            ) from e
 
         return get_all_create_table_sql(
             dialect=dialect,
             enable_primary_keys=enable_primary_keys,
             enable_foreign_keys=enable_foreign_keys,
         )
-
-    def load_data_to_database(self, connection: Any, tables: Optional[list[str]] = None) -> None:
-        """Load generated data into a database.
-
-        Args:
-            connection: Database connection
-            tables: Optional list of tables to load. If None, loads all.
-
-        Raises:
-            ValueError: If data hasn't been generated yet
-        """
-        if not self.tables:
-            raise ValueError("No data generated. Call generate_data() first.")
-
-        if tables is None:
-            tables = list(self.tables.keys())
-
-        # Create tables first
-        schema_sql = self.get_create_tables_sql()
-        if hasattr(connection, "executescript"):
-            connection.executescript(schema_sql)
-        else:
-            cursor = connection.cursor()
-            for statement in schema_sql.split(";"):
-                if statement.strip():
-                    cursor.execute(statement)
-
-        # Load data from CSV files
-        for table_name in tables:
-            if table_name not in self.tables:
-                continue
-
-            file_path = self.tables[table_name]
-            table_schema = TABLES[table_name]
-
-            # Read CSV and insert data
-            import csv
-
-            with open(file_path) as f:
-                reader = csv.reader(f, delimiter="|")
-
-                # Prepare insert statement
-                columns = [col["name"] for col in table_schema["columns"]]
-                placeholders = ",".join(["?" for _ in columns])
-                insert_sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
-
-                # Insert data
-                if hasattr(connection, "executemany"):
-                    rows = list(reader)
-                    connection.executemany(insert_sql, rows)
-                else:
-                    cursor = connection.cursor()
-                    for row in reader:
-                        cursor.execute(insert_sql, row)
-
-        # Commit transaction
-        if hasattr(connection, "commit"):
-            connection.commit()
 
     def run_benchmark(
         self,

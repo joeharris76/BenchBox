@@ -424,6 +424,42 @@ class TestExtractEnvironment:
         env = _extract_environment({"total_memory_gb": 64.0})
         assert env == {"Memory": "64 GB"}
 
+    def test_platform_info_adds_driver_row(self):
+        """platform_info with platform_version adds a Driver row."""
+        env = _extract_environment(None, platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"})
+        assert env is not None
+        assert env["Driver"] == "DuckDB 1.4.3"
+
+    def test_platform_info_version_fallback_keys(self):
+        """Falls back to 'version' then 'driver_version_actual' when platform_version absent."""
+        env = _extract_environment(None, platform_info={"platform_name": "DuckDB", "version": "1.2.0"})
+        assert env is not None
+        assert env["Driver"] == "DuckDB 1.2.0"
+
+        env2 = _extract_environment(None, platform_info={"driver_version_actual": "1.1.3"})
+        assert env2 is not None
+        assert env2["Driver"] == "1.1.3"
+
+    def test_platform_info_no_version_skips_driver_row(self):
+        """platform_info without any version key produces no Driver row."""
+        env = _extract_environment({"cpu_count": 8}, platform_info={"platform_name": "DuckDB"})
+        assert env is not None
+        assert "Driver" not in env
+
+    def test_platform_info_combined_with_system_profile(self):
+        """platform_info Driver row appears alongside system profile rows."""
+        env = _extract_environment(
+            {"os_name": "Darwin", "os_version": "25.3.0"},
+            platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"},
+        )
+        assert env is not None
+        assert env["OS"] == "Darwin 25.3.0"
+        assert env["Driver"] == "DuckDB 1.4.3"
+
+    def test_both_none_returns_none(self):
+        """Both system_profile and platform_info being None returns None."""
+        assert _extract_environment(None, platform_info=None) is None
+
 
 class TestShouldUseHorizontal:
     """Tests for the _should_use_horizontal heuristic."""

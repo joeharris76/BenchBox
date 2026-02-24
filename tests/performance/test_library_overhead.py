@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from benchbox.core.config import BenchmarkConfig, SystemProfile
 from benchbox.core.results.exporter import ResultExporter
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.runner import LifecyclePhases, ValidationOptions, run_benchmark_lifecycle
+from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
 
 class DummyBenchmark:

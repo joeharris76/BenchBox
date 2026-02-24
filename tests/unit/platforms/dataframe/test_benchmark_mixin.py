@@ -12,8 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
-from benchbox.core.config import BenchmarkConfig
 from benchbox.core.dataframe.query import DataFrameQuery, QueryRegistry
+from benchbox.core.schemas import BenchmarkConfig
 from benchbox.platforms.dataframe.benchmark_mixin import (
     BenchmarkExecutionMixin,
     DataFramePhases,
@@ -51,6 +51,28 @@ class DummyAdapter(BenchmarkExecutionMixin):
 
     def get_platform_info(self):
         return {"platform": "Polars"}
+
+
+class DummyPandasProfiledAdapter(DummyAdapter):
+    family = "pandas"
+
+    def __init__(self, *, query_plan=None) -> None:  # noqa: ANN001
+        super().__init__()
+        self._query_plan = query_plan
+        self.profiled_called = False
+
+    # Intentionally no `capture_plan` parameter: this matches PandasFamilyAdapter.
+    def execute_query_profiled(self, ctx, query, query_id=None):
+        _ = (ctx, query, query_id)
+        self.profiled_called = True
+        result = {
+            "query_id": query.query_id,
+            "status": "SUCCESS",
+            "execution_time_seconds": 0.01,
+            "rows_returned": 1,
+        }
+        profile = SimpleNamespace(query_plan=self._query_plan)
+        return result, profile
 
 
 class FailingLoadAdapter(DummyAdapter):
@@ -247,6 +269,59 @@ def test_prefer_parquet_fails_fast_when_preparation_raises(tmp_path):
     assert result.validation_details.get("phase") == "data_loading"
     assert "Data preparation failed in prefer_parquet mode" in result.validation_details.get("error", "")
     assert adapter.execute_called is False
+
+
+def test_capture_plans_uses_profiled_execution_without_capture_plan_kw(tmp_path):
+    adapter = DummyPandasProfiledAdapter(query_plan={"kind": "logical"})
+    tbl_path = tmp_path / "customer.tbl"
+    tbl_path.write_text("1|Alice|\n")
+    benchmark = DummyBenchmark({"customer": tbl_path})
+    config = BenchmarkConfig(
+        name="dummy",
+        display_name="Dummy",
+        scale_factor=1.0,
+        options={"power_warmup_iterations": 0, "power_iterations": 1},
+        capture_plans=True,
+    )
+
+    result = adapter.run_benchmark(
+        benchmark,
+        benchmark_config=config,
+        phases=DataFramePhases(load=False, execute=True),
+        options=DataFrameRunOptions(prefer_parquet=False),
+    )
+
+    assert result.validation_status == "PASSED"
+    assert adapter.profiled_called is True
+    assert result.query_plans_captured == 1
+    assert result.plan_capture_failures == 0
+
+
+def test_capture_plans_counts_missing_plan_as_failure(tmp_path):
+    adapter = DummyPandasProfiledAdapter(query_plan=None)
+    tbl_path = tmp_path / "customer.tbl"
+    tbl_path.write_text("1|Alice|\n")
+    benchmark = DummyBenchmark({"customer": tbl_path})
+    config = BenchmarkConfig(
+        name="dummy",
+        display_name="Dummy",
+        scale_factor=1.0,
+        options={"power_warmup_iterations": 0, "power_iterations": 1},
+        capture_plans=True,
+    )
+
+    result = adapter.run_benchmark(
+        benchmark,
+        benchmark_config=config,
+        phases=DataFramePhases(load=False, execute=True),
+        options=DataFrameRunOptions(prefer_parquet=False),
+    )
+
+    assert result.validation_status == "PASSED"
+    assert result.query_plans_captured == 0
+    assert result.plan_capture_failures == 1
+    assert result.plan_capture_errors
+    assert result.plan_capture_errors[0]["query_id"] == "Q1"
 
 
 class _StubTPCDSQueryManager:

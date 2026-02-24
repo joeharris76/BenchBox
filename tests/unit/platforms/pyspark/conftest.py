@@ -8,6 +8,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 
 from __future__ import annotations
 
+import signal
 import sys
 from collections.abc import Generator
 
@@ -40,3 +41,11 @@ def reset_spark_session_manager() -> Generator[None, None, None]:
     SparkSessionManager.close()
     yield
     SparkSessionManager.close()
+    # PySpark installs a SIGINT handler on SparkContext creation. When running under
+    # pytest-xdist, that handler can fire after _jsc is set to None during worker
+    # shutdown, causing `AttributeError: 'NoneType' object has no attribute 'sc'`
+    # and hanging the worker process. Restore the default handler after teardown.
+    try:
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    except (ValueError, OSError):
+        pass  # No-op in non-main threads

@@ -68,6 +68,22 @@ benchbox run --platform databricks --benchmark tpch --scale 1.0 \
 | `schema` | (auto) | Schema name |
 | `use_volumes` | true | Use UC Volumes for staging |
 | `volume_path` | (auto) | Path within volume |
+| `driver_version` | (latest) | Pin the Databricks SQL connector version (e.g. `3.3.0`) |
+| `driver_auto_install` | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific Databricks Connector Version
+
+```bash
+benchbox run --platform databricks --benchmark tpch \
+  --platform-option driver_version=3.3.0 \
+  --platform-option driver_auto_install=true \
+  --platform-option warehouse_id=abc123xyz
+```
+
+The driver package for Databricks is `databricks-sql-connector`.
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Authentication Methods
 

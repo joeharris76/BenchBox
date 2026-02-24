@@ -62,6 +62,19 @@ class TPCDSOfficialBenchmarkResult:
     audit_trail_saved: bool = False
 
 
+def _extract_metric(result: Any, attr: str, default: float = 0.0) -> float:
+    """Extract a numeric metric from a result that may be a dataclass or dict."""
+    if hasattr(result, attr):
+        val = getattr(result, attr)
+        if val is not None:
+            return val
+    if isinstance(result, dict):
+        val = result.get(attr)
+        if val is not None:
+            return val
+    return default
+
+
 class TPCDSOfficialBenchmark:
     """TPC-DS Official Benchmark implementation following TPC-DS specification."""
 
@@ -150,13 +163,7 @@ class TPCDSOfficialBenchmark:
 
                     power_result = power_test.run()
                     result.power_test_result = power_result
-                    # Handle both dataclass and dict result types
-                    if hasattr(power_result, "power_at_size"):
-                        result.power_at_size = power_result.power_at_size
-                    elif isinstance(power_result, dict):
-                        result.power_at_size = power_result.get("power_at_size", 0.0)
-                    else:
-                        result.power_at_size = 0.0
+                    result.power_at_size = _extract_metric(power_result, "power_at_size")
 
                 except Exception as e:
                     result.errors.append(f"Power Test failed: {e}")
@@ -177,13 +184,7 @@ class TPCDSOfficialBenchmark:
 
                     throughput_result = throughput_test.run()
                     result.throughput_test_result = throughput_result
-                    # Handle both dataclass and dict result types
-                    if hasattr(throughput_result, "throughput_at_size"):
-                        result.throughput_at_size = throughput_result.throughput_at_size
-                    elif isinstance(throughput_result, dict):
-                        result.throughput_at_size = throughput_result.get("throughput_at_size", 0.0)
-                    else:
-                        result.throughput_at_size = 0.0
+                    result.throughput_at_size = _extract_metric(throughput_result, "throughput_at_size")
 
                 except Exception as e:
                     result.errors.append(f"Throughput Test failed: {e}")

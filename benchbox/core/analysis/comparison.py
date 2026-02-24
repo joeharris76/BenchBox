@@ -84,8 +84,8 @@ class PlatformComparison:
         >>>
         >>> # Generate comparison report
         >>> report = comparison.compare()
-        >>> print(f"Winner: {report.winner}")
-        >>> print(f"Rankings: {[r.platform for r in report.rankings]}")
+        >>> emit(f"Winner: {report.winner}")
+        >>> emit(f"Rankings: {[r.platform for r in report.rankings]}")
     """
 
     def __init__(
@@ -207,70 +207,21 @@ class PlatformComparison:
         """
         errors: list[str] = []
         warnings: list[str] = []
-        outliers_detected: list[Any] = []
 
-        # Check for minimum number of results
         if len(self.results) < 2:
             errors.append("At least two results are required for comparison")
 
-        # Check benchmark consistency
         benchmark_names = {r.benchmark_name for r in self.results}
         if len(benchmark_names) > 1:
             errors.append(f"Results are from different benchmarks: {benchmark_names}")
 
-        # Check scale factor consistency
         scale_factors = {r.scale_factor for r in self.results}
         if len(scale_factors) > 1:
             warnings.append(f"Results have different scale factors: {scale_factors}")
 
-        # Find common queries
-        query_sets = []
-        for result in self.results:
-            query_ids = _extract_query_ids(result)
-            query_sets.append(set(query_ids))
+        common_queries = self._validate_query_overlap(errors, warnings)
+        outliers_detected = self._detect_outliers(warnings)
 
-        if query_sets:
-            common_queries = set.intersection(*query_sets)
-            all_queries = set.union(*query_sets)
-
-            if not common_queries:
-                errors.append("No common queries found across all platforms")
-            elif len(common_queries) < len(all_queries):
-                missing_pct = (1 - len(common_queries) / len(all_queries)) * 100
-                warnings.append(
-                    f"Only {len(common_queries)}/{len(all_queries)} queries "
-                    f"are common across all platforms ({missing_pct:.1f}% missing)"
-                )
-
-                if self.config.require_all_queries:
-                    errors.append("Not all queries present in all results")
-        else:
-            common_queries = set()
-
-        # Detect outliers
-        if self.config.outlier_method != "none":
-            for result in self.results:
-                times = _extract_query_times(result)
-                if times:
-                    outlier_indices = detect_outliers_iqr(
-                        list(times.values()),
-                        self.config.outlier_threshold,
-                    )
-                    for _idx, value, deviation in outlier_indices:
-                        outlier_info = create_outlier_info(
-                            platform=result.platform,
-                            query_id="overall",
-                            value=value,
-                            method=self.config.outlier_method,
-                            threshold=self.config.outlier_threshold,
-                            deviation=deviation,
-                        )
-                        outliers_detected.append(outlier_info)
-
-            if outliers_detected:
-                warnings.append(f"Detected {len(outliers_detected)} outliers in results")
-
-        # Store validation result
         self._validation_result = ValidationResult(
             is_valid=len(errors) == 0,
             errors=errors,
@@ -281,6 +232,66 @@ class PlatformComparison:
         )
 
         return self._validation_result
+
+    def _validate_query_overlap(self, errors: list[str], warnings: list[str]) -> set[str]:
+        """Check query overlap across results and append any errors/warnings.
+
+        Mutates *errors* and *warnings* in-place by appending validation messages.
+        """
+        query_sets = [set(_extract_query_ids(result)) for result in self.results]
+
+        if not query_sets:
+            return set()
+
+        common_queries = set.intersection(*query_sets)
+        all_queries = set.union(*query_sets)
+
+        if not common_queries:
+            errors.append("No common queries found across all platforms")
+        elif len(common_queries) < len(all_queries):
+            missing_pct = (1 - len(common_queries) / len(all_queries)) * 100
+            warnings.append(
+                f"Only {len(common_queries)}/{len(all_queries)} queries "
+                f"are common across all platforms ({missing_pct:.1f}% missing)"
+            )
+            if self.config.require_all_queries:
+                errors.append("Not all queries present in all results")
+
+        return common_queries
+
+    def _detect_outliers(self, warnings: list[str]) -> list[Any]:
+        """Detect outliers across all results using IQR method.
+
+        Mutates *warnings* in-place by appending an outlier summary message.
+        """
+        if self.config.outlier_method == "none":
+            return []
+
+        outliers_detected: list[Any] = []
+        for result in self.results:
+            times = _extract_query_times(result)
+            if not times:
+                continue
+            outlier_indices = detect_outliers_iqr(
+                list(times.values()),
+                self.config.outlier_threshold,
+            )
+            for _idx, value, deviation in outlier_indices:
+                outliers_detected.append(
+                    create_outlier_info(
+                        platform=result.platform,
+                        query_id="overall",
+                        value=value,
+                        method=self.config.outlier_method,
+                        threshold=self.config.outlier_threshold,
+                        deviation=deviation,
+                    )
+                )
+
+        if outliers_detected:
+            warnings.append(f"Detected {len(outliers_detected)} outliers in results")
+
+        return outliers_detected
 
     def compare(self) -> ComparisonReport:
         """Generate a comprehensive comparison report.

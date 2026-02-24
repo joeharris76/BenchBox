@@ -1,9 +1,9 @@
 import pytest
 
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig
 from benchbox.core.platform_registry import PlatformRegistry
 from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 from benchbox.core.runner.runner import LifecyclePhases, ValidationOptions, run_benchmark_lifecycle
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
 from benchbox.core.system import SystemProfiler
 
 

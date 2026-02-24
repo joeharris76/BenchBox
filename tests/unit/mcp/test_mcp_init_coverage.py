@@ -13,7 +13,7 @@ pytestmark = pytest.mark.fast
 def test_create_server_delegates_to_factory(monkeypatch):
     sentinel = object()
     fake_server_module = types.ModuleType("benchbox.mcp.server")
-    fake_server_module.create_benchbox_server = lambda: sentinel
+    fake_server_module.create_benchbox_server = lambda **kwargs: sentinel
     monkeypatch.setitem(__import__("sys").modules, "benchbox.mcp.server", fake_server_module)
 
     assert mcp_module.create_server() is sentinel
@@ -21,7 +21,7 @@ def test_create_server_delegates_to_factory(monkeypatch):
 
 def test_run_server_invokes_run(monkeypatch):
     fake_server = MagicMock()
-    monkeypatch.setattr(mcp_module, "create_server", lambda: fake_server)
+    monkeypatch.setattr(mcp_module, "create_server", lambda **kwargs: fake_server)
 
     mcp_module.run_server()
 

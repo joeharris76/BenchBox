@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkConfigMixin,
     CloudSparkStaging,
@@ -108,6 +108,8 @@ class EMRServerlessAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdap
     - Memory GB-hour: ~$0.0057785
     - Pre-initialized capacity: charged when idle
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     # CloudSparkConfigMixin: Uses EMR Serverless-optimized config
     cloud_platform = CloudPlatform.EMR_SERVERLESS

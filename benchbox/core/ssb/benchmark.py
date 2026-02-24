@@ -14,17 +14,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from benchbox.base import BaseBenchmark
-from benchbox.core.connection import DatabaseConnection
+from benchbox.core.benchmark_mixins import DataGenerationMixin
+from benchbox.core.query_catalog_base import TranslatableQueryMixin
+from benchbox.core.simple_benchmark_mixin import SimpleBenchmarkMixin
 from benchbox.core.ssb.generator import SSBDataGenerator
 from benchbox.core.ssb.queries import SSBQueryManager
 from benchbox.core.ssb.schema import TABLES, get_all_create_table_sql
+from benchbox.core.utils.tuning import extract_constraint_flags
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
 
 
-class SSBBenchmark(BaseBenchmark):
+class SSBBenchmark(TranslatableQueryMixin, SimpleBenchmarkMixin, DataGenerationMixin, BaseBenchmark):
     """Star Schema Benchmark implementation.
 
     This class provides a complete implementation of the Star Schema Benchmark,
@@ -41,6 +44,9 @@ class SSBBenchmark(BaseBenchmark):
         query_manager: The SSB query manager
         data_generator: The SSB data generator
     """
+
+    _benchmark_label = "Star Schema Benchmark"
+    _table_load_order = ["date", "customer", "supplier", "part", "lineorder"]
 
     def __init__(
         self,
@@ -81,32 +87,9 @@ class SSBBenchmark(BaseBenchmark):
         # Data files mapping
         self.tables = {}
 
-    def generate_data(self, tables: Optional[list[str]] = None, output_format: str = "csv") -> dict[str, Any]:
-        """Generate SSB data.
-
-        Args:
-            tables: Optional list of tables to generate. If None, generates all.
-            output_format: Format for output data (only "csv" supported currently)
-
-        Returns:
-            Dictionary mapping table names to file paths
-
-        Raises:
-            ValueError: If output_format is not supported
-        """
-        if output_format != "csv":
-            raise ValueError(f"Unsupported output format: {output_format}")
-
-        if tables is None:
-            tables = list(TABLES.keys())
-
-        # Validate table names
-        invalid_tables = set(tables) - set(TABLES.keys())
-        if invalid_tables:
-            raise ValueError(f"Invalid table names: {invalid_tables}")
-
-        self.tables = self.data_generator.generate_data(tables)
-        return self.tables
+    def _get_table_schema(self) -> dict[str, dict]:
+        """Provide schema mapping for shared data generation/loading mixin."""
+        return TABLES
 
     def get_query(self, query_id: Union[int, str], *, params: Optional[dict[str, Any]] = None) -> str:
         """Get the SQL text for a specific SSB query.
@@ -143,25 +126,7 @@ class SSBBenchmark(BaseBenchmark):
 
         return queries
 
-    def translate_query_text(self, query_text: str, target_dialect: str) -> str:
-        """Translate a query from SSB's source dialect to target dialect.
-
-        Args:
-            query_text: SQL query text to translate
-            target_dialect: Target SQL dialect (e.g., 'duckdb', 'bigquery', 'snowflake')
-
-        Returns:
-            Translated SQL query text
-
-        """
-        from benchbox.utils.dialect_utils import translate_sql_query
-
-        # SSB queries use modern SQL (netezza/postgres) as source dialect
-        return translate_sql_query(
-            query=query_text,
-            target_dialect=target_dialect,
-            source_dialect="netezza",
-        )
+    # translate_query_text() is inherited from TranslatableQueryMixin
 
     def get_all_queries(self) -> dict[str, str]:
         """Get all available SSB queries.
@@ -230,73 +195,12 @@ class SSBBenchmark(BaseBenchmark):
         Returns:
             Complete SQL schema creation script
         """
-        # Extract constraint settings from tuning configuration
-        enable_primary_keys = tuning_config.primary_keys.enabled if tuning_config else False
-        enable_foreign_keys = tuning_config.foreign_keys.enabled if tuning_config else False
-
+        enable_primary_keys, enable_foreign_keys = extract_constraint_flags(tuning_config)
         return get_all_create_table_sql(
             dialect=dialect,
             enable_primary_keys=enable_primary_keys,
             enable_foreign_keys=enable_foreign_keys,
         )
-
-    def load_data_to_database(self, connection: Any, tables: Optional[list[str]] = None) -> None:
-        """Load generated data into a database.
-
-        Args:
-            connection: Database connection
-            tables: Optional list of tables to load. If None, loads all.
-
-        Raises:
-            ValueError: If data hasn't been generated yet
-        """
-        if not self.tables:
-            raise ValueError("No data generated. Call generate_data() first.")
-
-        if tables is None:
-            tables = list(self.tables.keys())
-
-        # Create tables first
-        schema_sql = self.get_create_tables_sql()
-        if hasattr(connection, "executescript"):
-            connection.executescript(schema_sql)
-        else:
-            cursor = connection.cursor()
-            for statement in schema_sql.split(";"):
-                if statement.strip():
-                    cursor.execute(statement)
-
-        # Load data from CSV files
-        for table_name in tables:
-            if table_name not in self.tables:
-                continue
-
-            file_path = self.tables[table_name]
-            table_schema = TABLES[table_name]
-
-            # Read CSV and insert data
-            import csv
-
-            with open(file_path) as f:
-                reader = csv.reader(f, delimiter="|")
-
-                # Prepare insert statement
-                columns = [col["name"] for col in table_schema["columns"]]
-                placeholders = ",".join(["?" for _ in columns])
-                insert_sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
-
-                # Insert data
-                if hasattr(connection, "executemany"):
-                    rows = list(reader)
-                    connection.executemany(insert_sql, rows)
-                else:
-                    cursor = connection.cursor()
-                    for row in reader:
-                        cursor.execute(insert_sql, row)
-
-        # Commit transaction
-        if hasattr(connection, "commit"):
-            connection.commit()
 
     def run_benchmark(
         self, connection: Any, queries: Optional[list[str]] = None, iterations: int = 1
@@ -404,117 +308,3 @@ class SSBBenchmark(BaseBenchmark):
             "ignore_errors=false",  # Don't ignore errors - we want strict parsing
             "auto_detect=true",  # Auto-detect types
         ]
-
-    def _load_data(self, connection: DatabaseConnection) -> None:
-        """Load SSB data into the database.
-
-        This method loads the generated SSB data files (.csv format) into the database
-        using a simple, database-agnostic approach with INSERT statements.
-
-        Args:
-            connection: DatabaseConnection wrapper for database operations
-
-        Raises:
-            ValueError: If data hasn't been generated yet
-            Exception: If data loading fails
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # Check if data has been generated
-        if not self.tables:
-            raise ValueError("No data has been generated. Call generate_data() first.")
-
-        logger.info("Loading SSB data into database...")
-
-        # Create database schema first
-        try:
-            schema_sql = self.get_create_tables_sql()
-            # Handle databases that don't support multiple statements at once
-            if ";" in schema_sql:
-                # Split by semicolons and execute each statement separately
-                statements = [stmt.strip() for stmt in schema_sql.split(";") if stmt.strip()]
-                for statement in statements:
-                    connection.execute(statement)
-            else:
-                connection.execute(schema_sql)
-            connection.commit()
-            logger.info("✅ Created SSB database schema")
-        except Exception as e:
-            logger.error(f"Failed to create database schema: {e}")
-            raise
-
-        # Load data for each table
-        total_rows = 0
-        loaded_tables = 0
-
-        # Load tables in dependency order
-        table_order = ["date", "customer", "supplier", "part", "lineorder"]
-
-        for table_name in table_order:
-            if table_name not in self.tables:
-                logger.warning(f"Skipping {table_name} - no data file found")
-                continue
-
-            data_file = Path(self.tables[table_name])
-            if not data_file.exists():
-                logger.warning(f"Skipping {table_name} - data file does not exist: {data_file}")
-                continue
-
-            try:
-                logger.info(f"Loading data for {table_name.upper()}...")
-                rows_loaded = self._load_table_data(connection, table_name, data_file)
-
-                total_rows += rows_loaded
-                loaded_tables += 1
-                logger.info(f"✅ Loaded {rows_loaded:,} rows into {table_name.upper()}")
-
-            except Exception as e:
-                logger.error(f"Failed to load data for {table_name}: {e}")
-                raise
-
-        # Commit all changes
-        try:
-            connection.commit()
-            logger.info(f"✅ Successfully loaded {total_rows:,} total rows across {loaded_tables} tables")
-        except Exception as e:
-            logger.error(f"Failed to commit data loading transaction: {e}")
-            raise
-
-    def _load_table_data(self, connection: DatabaseConnection, table_name: str, data_file: Path) -> int:
-        """Load data into a database table using simple INSERT statements.
-
-        Args:
-            connection: DatabaseConnection wrapper
-            table_name: Name of the table to load data into
-            data_file: Path to the data file
-
-        Returns:
-            Number of rows loaded
-        """
-        import csv
-
-        # Get table schema to determine column count
-        table_schema = TABLES[table_name]
-        num_columns = len(table_schema["columns"])
-
-        # Prepare insert statement with parameter placeholders
-        placeholders = ", ".join(["?" for _ in range(num_columns)])
-        insert_sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
-
-        rows_loaded = 0
-
-        with open(data_file, newline="", encoding="utf-8") as f:
-            reader = csv.reader(f, delimiter="|")
-
-            for row in reader:
-                # Validate row has correct number of columns
-                if len(row) != num_columns:
-                    continue  # Skip malformed rows
-
-                # Execute individual INSERT
-                connection.execute(insert_sql, row)
-                rows_loaded += 1
-
-        return rows_loaded

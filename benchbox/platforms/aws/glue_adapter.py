@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkStaging,
     SparkConfigOptimizer,
@@ -101,6 +101,8 @@ class AWSGlueAdapter(SparkTuningMixin, PlatformAdapter):
     - Native AWS integration (S3, Data Catalog, CloudWatch)
     - Supports both SQL and DataFrame execution modes
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     def __init__(self, **config: Any) -> None:
         """Initialize AWS Glue adapter.
@@ -523,7 +525,7 @@ result_df.write.mode("overwrite").json(output_path)
 
 # Also write row count for validation
 row_count = result_df.count()
-print(f"Query returned {row_count} rows")
+glueContext.get_logger().info(f"Query returned {row_count} rows")
 
 job.commit()
 """

@@ -159,6 +159,10 @@ class ClickHouseCloudClient:
 
     This client provides a compatible interface with ClickHouseLocalClient and
     clickhouse-driver's Client, enabling ClickHouse Cloud connections via HTTPS.
+
+    Authentication modes:
+    - Password: Traditional username/password authentication (default)
+    - OAuth/Bearer token: Token-based authentication via clickhouse-connect's access_token parameter
     """
 
     def __init__(
@@ -169,6 +173,7 @@ class ClickHouseCloudClient:
         password: str = "",
         database: str = "default",
         secure: bool = True,
+        access_token: str | None = None,
         **kwargs,
     ):
         """Initialize cloud client.
@@ -180,6 +185,8 @@ class ClickHouseCloudClient:
             password: Password for authentication
             database: Database name (default: default)
             secure: Use HTTPS (default: True, required for cloud)
+            access_token: OAuth/bearer token for token-based authentication.
+                When provided, this is used instead of username/password.
             **kwargs: Additional clickhouse-connect options
         """
         from ._dependencies import clickhouse_connect
@@ -194,16 +201,27 @@ class ClickHouseCloudClient:
         self._port = port
         self._database = database
 
+        # Build connection kwargs based on authentication mode
+        connect_kwargs: dict = {
+            "host": host,
+            "port": port,
+            "database": database,
+            "secure": secure,
+        }
+
+        if access_token:
+            # OAuth/bearer token authentication — pass via clickhouse-connect's access_token parameter
+            connect_kwargs["access_token"] = access_token
+            logger.info("Using OAuth/bearer token authentication for ClickHouse Cloud")
+        else:
+            # Traditional password authentication
+            connect_kwargs["username"] = user
+            connect_kwargs["password"] = password
+
+        connect_kwargs.update(kwargs)
+
         # Create clickhouse-connect client
-        self._client = clickhouse_connect.get_client(
-            host=host,
-            port=port,
-            username=user,
-            password=password,
-            database=database,
-            secure=secure,
-            **kwargs,
-        )
+        self._client = clickhouse_connect.get_client(**connect_kwargs)
 
         logger.info(f"ClickHouse Cloud client initialized: {host}:{port}")
 

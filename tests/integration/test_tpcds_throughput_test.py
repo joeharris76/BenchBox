@@ -368,8 +368,8 @@ class TestThroughputTest:
         assert len(result.stream_results) == 2
         assert result.success is True
 
-        # Verify scale_factor property (backward compatibility)
-        assert result.scale_factor == throughput_test_config.scale_factor
+        # Verify scale factor via canonical config path
+        assert result.config.scale_factor == throughput_test_config.scale_factor
 
 
 class TestBenchmarkIntegration:

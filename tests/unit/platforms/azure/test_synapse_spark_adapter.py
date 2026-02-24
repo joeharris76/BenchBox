@@ -201,7 +201,7 @@ class TestSynapseSparkAdapterPlatformInfo:
             info = adapter.get_platform_info()
 
             assert info["platform"] == "synapse-spark"
-            assert info["display_name"] == "Azure Synapse Spark"
+            assert info["display_name"] == "Azure Synapse Analytics Spark"
             assert info["vendor"] == "Microsoft"
             assert info["type"] == "managed_spark"
             assert info["workspace_name"] == "test-workspace"
@@ -514,7 +514,7 @@ class TestSynapseSparkAdapterRegistry:
         assert "synapse-spark" in all_metadata
         metadata = all_metadata["synapse-spark"]
 
-        assert metadata["display_name"] == "Azure Synapse Spark"
+        assert metadata["display_name"] == "Azure Synapse Analytics Spark"
         assert metadata["category"] == "cloud"
         assert "azure-identity" in str(metadata.get("libraries", []))
 

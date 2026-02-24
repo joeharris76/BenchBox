@@ -173,7 +173,7 @@ class TestDuckDBQueryPerformance:
 
     def test_tpcds_query_performance(self, duckdb_with_extensions, tmp_path, memory_monitor):
         """Test TPC-DS query performance."""
-        tpcds = TPCDS(scale_factor=0.01, output_dir=tmp_path / "tpcds_perf", verbose=False)
+        tpcds = TPCDS(scale_factor=1.0, output_dir=tmp_path / "tpcds_perf", verbose=False)
 
         # Mock data generation
         with patch.object(tpcds, "generate_data") as mock_gen:

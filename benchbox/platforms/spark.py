@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.core.sql_utils import normalize_table_name_in_sql
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
 if TYPE_CHECKING:
@@ -30,7 +31,8 @@ from ..utils.dependencies import (
     check_platform_dependencies,
     get_dependency_error_message,
 )
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
+from .base.spark_execution_mixin import SparkDataLoadMixin, SparkQueryExecutionMixin
 
 try:
     from pyspark.sql import SparkSession
@@ -56,7 +58,7 @@ except ImportError:
     DateType = None
 
 
-class SparkAdapter(PlatformAdapter):
+class SparkAdapter(SparkDataLoadMixin, SparkQueryExecutionMixin, PlatformAdapter):
     """Apache Spark platform adapter for distributed SQL query execution.
 
     Spark is a distributed computing framework for large-scale data processing.
@@ -70,6 +72,8 @@ class SparkAdapter(PlatformAdapter):
     - Adaptive Query Execution (AQE) for dynamic optimization
     - Catalyst optimizer for query planning
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -481,129 +485,10 @@ class SparkAdapter(PlatformAdapter):
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
         """Load data using Spark DataFrame/SQL with DataSourceResolver.
 
-        Spark supports data loading via:
-        1. DataFrame API for reading CSV/Parquet files
-        2. INSERT INTO ... SELECT for data transformation
-        3. COPY INTO for Delta Lake tables
+        Delegates to SparkDataLoadMixin._load_data_spark for the shared
+        DataFrame-based loading implementation.
         """
-        from benchbox.platforms.base.data_loading import DataSourceResolver
-        from benchbox.platforms.base.utils import detect_file_format
-
-        start_time = mono_time()
-        table_stats = {}
-        per_table_timings = {}
-
-        spark = connection
-
-        try:
-            # Use DataSourceResolver for consistent data source resolution
-            resolver = DataSourceResolver()
-            data_source = resolver.resolve(benchmark, Path(data_dir))
-
-            if not data_source or not data_source.tables:
-                raise ValueError(
-                    f"No data files found in {data_dir}. Ensure benchmark.generate_data() was called first."
-                )
-
-            self.log_verbose(f"Data source type: {data_source.source_type}")
-
-            # Load data using Spark DataFrame API
-            for table_name, file_paths in data_source.tables.items():
-                # Normalize and filter to valid files using base class helper
-                valid_files = self._normalize_and_validate_file_paths(file_paths)
-
-                if not valid_files:
-                    self.logger.warning(f"Skipping {table_name} - no valid data files")
-                    table_stats[table_name.lower()] = 0
-                    continue
-
-                chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
-                self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
-
-                try:
-                    load_start = mono_time()
-                    table_name_lower = table_name.lower()
-                    total_rows_loaded = 0
-
-                    # Get table schema for proper reading
-                    table_schema = self._get_table_schema(spark, table_name_lower)
-
-                    # Detect file format using shared utility
-                    format_info = detect_file_format(valid_files)
-
-                    for file_path in valid_files:
-                        file_path = Path(file_path)
-
-                        if format_info.format_type == "parquet":
-                            # Read Parquet directly
-                            df = spark.read.parquet(str(file_path))
-                        else:
-                            # Read CSV/TPC files
-                            df = (
-                                spark.read.option("header", "false")
-                                .option("delimiter", format_info.delimiter)
-                                .option("inferSchema", "false")
-                                .csv(str(file_path))
-                            )
-
-                            # Apply schema if available (rename columns)
-                            if table_schema:
-                                existing_cols = [f.name for f in table_schema.fields]
-                                for i, col_name in enumerate(existing_cols):
-                                    if i < len(df.columns):
-                                        df = df.withColumnRenamed(df.columns[i], col_name)
-
-                            # Trailing delimiter handling is done via shared utility in pyspark_df.py
-
-                        if table_schema:
-                            df = self._cast_dataframe_to_schema(df, table_schema)
-
-                        # Cache to avoid double read (count + write), then insert
-                        df.cache()
-                        row_count = df.count()
-                        df.write.mode("append").insertInto(table_name_lower)
-                        total_rows_loaded += row_count
-                        df.unpersist()
-
-                    table_stats[table_name_lower] = total_rows_loaded
-
-                    load_time = elapsed_seconds(load_start)
-                    per_table_timings[table_name_lower] = {"total_ms": load_time * 1000}
-                    self.logger.info(
-                        f"Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
-                    )
-
-                except Exception as e:
-                    self.logger.error(f"Failed to load {table_name}: {str(e)[:100]}...")
-                    table_stats[table_name.lower()] = 0
-
-            total_time = elapsed_seconds(start_time)
-            total_rows = sum(table_stats.values())
-            self.logger.info(f"Loaded {total_rows:,} total rows in {total_time:.2f}s")
-
-        except Exception as e:
-            self.logger.error(f"Data loading failed: {e}")
-            raise
-
-        return table_stats, total_time, per_table_timings
-
-    def _get_table_schema(self, spark, table_name: str):
-        """Get schema of an existing table."""
-        try:
-            return spark.table(table_name).schema
-        except Exception:
-            return None
-
-    def _cast_dataframe_to_schema(self, df, schema):
-        """Cast DataFrame columns to match target Spark schema."""
-        for field in schema.fields:
-            if field.name in df.columns:
-                df = df.withColumn(field.name, df[field.name].cast(field.dataType))
-
-        ordered_columns = [field.name for field in schema.fields if field.name in df.columns]
-        if ordered_columns:
-            df = df.select(*ordered_columns)
-        return df
+        return self._load_data_spark(benchmark, data_dir, connection)
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply Spark-specific optimizations based on benchmark type."""
@@ -636,74 +521,20 @@ class SparkAdapter(PlatformAdapter):
         validate_row_count: bool = True,
         stream_id: int | None = None,
     ) -> dict[str, Any]:
-        """Execute query with detailed timing and performance tracking."""
-        # Handle dry-run mode using base class helper
-        if self.dry_run_mode:
-            self.capture_sql(query, "query", None)
-            return self._build_dry_run_result(query_id)
+        """Execute query with detailed timing and performance tracking.
 
-        start_time = mono_time()
-
-        spark = connection
-
-        try:
-            # Disable caching for accurate benchmarking
-            if self.disable_cache:
-                spark.catalog.clearCache()
-
-            # Execute the query
-            result_df = spark.sql(query)
-            result = result_df.collect()
-
-            execution_time = elapsed_seconds(start_time)
-            actual_row_count = len(result) if result else 0
-
-            # Get query statistics
-            query_stats = {"execution_time_seconds": execution_time}
-
-            # Validate row count if enabled and benchmark type is provided
-            validation_result = None
-            if validate_row_count and benchmark_type:
-                from benchbox.core.validation.query_validation import QueryValidator
-
-                validator = QueryValidator()
-                validation_result = validator.validate_query_result(
-                    benchmark_type=benchmark_type,
-                    query_id=query_id,
-                    actual_row_count=actual_row_count,
-                    scale_factor=scale_factor,
-                    stream_id=stream_id,
-                )
-
-                # Log validation result
-                if validation_result.warning_message:
-                    self.log_verbose(f"Row count validation: {validation_result.warning_message}")
-                elif not validation_result.is_valid:
-                    self.log_verbose(f"Row count validation FAILED: {validation_result.error_message}")
-                else:
-                    self.log_very_verbose(
-                        f"Row count validation PASSED: {actual_row_count} rows "
-                        f"(expected: {validation_result.expected_row_count})"
-                    )
-
-            # Use base helper to build result with consistent validation field mapping
-            result_dict = self._build_query_result_with_validation(
-                query_id=query_id,
-                execution_time=execution_time,
-                actual_row_count=actual_row_count,
-                first_row=tuple(result[0]) if result else None,
-                validation_result=validation_result,
-            )
-
-            # Include Spark-specific fields
-            result_dict["query_statistics"] = query_stats
-            result_dict["resource_usage"] = query_stats
-
-            return result_dict
-
-        except Exception as e:
-            # Use base class helper for consistent failure result
-            return self._build_query_failure_result(query_id, start_time, e)
+        Delegates to SparkQueryExecutionMixin._execute_query_spark for the
+        shared execution implementation.
+        """
+        return self._execute_query_spark(
+            connection=connection,
+            query=query,
+            query_id=query_id,
+            benchmark_type=benchmark_type,
+            scale_factor=scale_factor,
+            validate_row_count=validate_row_count,
+            stream_id=stream_id,
+        )
 
     def _extract_table_name(self, statement: str) -> str | None:
         """Extract table name from CREATE TABLE statement."""
@@ -719,25 +550,7 @@ class SparkAdapter(PlatformAdapter):
 
     def _normalize_table_name_in_sql(self, sql: str) -> str:
         """Normalize table names in SQL to lowercase for Spark."""
-        import re
-
-        # Match CREATE TABLE "TABLENAME" or CREATE TABLE TABLENAME
-        sql = re.sub(
-            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"CREATE TABLE {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        # Match foreign key references
-        sql = re.sub(
-            r'REFERENCES\s+"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"REFERENCES {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        return sql
+        return normalize_table_name_in_sql(sql)
 
     def _optimize_table_definition(self, statement: str) -> str:
         """Optimize table definition for Spark.
@@ -1009,7 +822,7 @@ def _build_spark_config(
     Returns:
         DatabaseConfig with configuration loaded
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

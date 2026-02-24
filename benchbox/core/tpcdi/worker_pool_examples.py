@@ -24,6 +24,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
+from benchbox.utils.printing import emit
+
 
 def simple_parallel_processing(
     items: list[Any],
@@ -285,11 +287,11 @@ def example_usage() -> None:
 
     # Sequential processing (default)
     results1 = simple_parallel_processing(items, sample_processor)
-    print(f"Sequential results: {results1}")
+    emit(f"Sequential results: {results1}")
 
     # Parallel processing (opt-in)
     results2 = simple_parallel_processing(items, sample_processor, max_workers=4, enable_parallel=True)
-    print(f"Parallel results: {results2}")
+    emit(f"Parallel results: {results2}")
 
     # Example 2: Using the simplified manager
     manager = SimpleWorkerPoolManager(max_workers=4, enable_parallel=True)
@@ -306,7 +308,7 @@ def example_usage() -> None:
     }
 
     transformed = manager.transform_tables(tables, table_transformer)
-    print(f"Transformed tables: {transformed}")
+    emit(f"Transformed tables: {transformed}")
 
 
 if __name__ == "__main__":

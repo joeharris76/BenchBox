@@ -7,6 +7,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import sys
 from datetime import datetime
 from unittest.mock import Mock, patch
 
@@ -14,7 +15,7 @@ import pytest
 from click.testing import CliRunner
 
 from benchbox.cli.main import cli
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
 from benchbox.platforms.base import BenchmarkResults
 
 pytestmark = pytest.mark.medium  # CLI execution tests spawn subprocesses (2-5s)
@@ -28,6 +29,10 @@ class TestCLITestExecution:
         """Set up test environment."""
         self.runner = CliRunner()
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     def test_power_phase_validation(self):
         """Test that power phase works correctly."""
         with (
@@ -87,6 +92,10 @@ class TestCLITestExecution:
         # Look for evidence that the command ran successfully
         assert "running tpch on duckdb" in result.output.lower() or "power test execution" in result.output.lower()
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     def test_throughput_phase_validation(self):
         """Test that throughput phase works correctly."""
         with (
@@ -146,6 +155,10 @@ class TestCLITestExecution:
         # Look for evidence that the command ran successfully
         assert "running tpch on duckdb" in result.output.lower() or "throughput test execution" in result.output.lower()
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     def test_maintenance_phase_validation(self):
         """Test that maintenance phase works correctly."""
         with (
@@ -207,6 +220,10 @@ class TestCLITestExecution:
             "running tpch on duckdb" in result.output.lower() or "maintenance test execution" in result.output.lower()
         )
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     def test_combined_phases_validation(self):
         """Test that combined phases work correctly."""
         with (
@@ -293,6 +310,10 @@ class TestCLITestExecution:
         config = BenchmarkConfig(name="tpch", display_name="TPC-H")
         assert config.test_execution_type == "standard"
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     def test_no_tuning_disables_constraints(self):
         """Test that `--tuning notuning` properly disables constraints."""
         with (
@@ -615,7 +636,7 @@ class TestResultHandling:
 
     def test_cli_benchmark_results_tpc_fields(self):
         """Test that CLI BenchmarkResults includes TPC fields."""
-        from benchbox.cli.types import BenchmarkResults
+        from benchbox.core.results.models import BenchmarkResults
 
         result = make_benchmark_results(
             benchmark_id="tpch-001",

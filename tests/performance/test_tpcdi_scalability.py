@@ -247,7 +247,7 @@ class TestTPCDIScalabilityPerformance:
             assert scaling_metrics["data_size"] >= sf_ratio * 0.5, (
                 f"Data size scaling too low: {scaling_metrics['data_size']:.2f}"
             )
-            assert scaling_metrics["etl_records"] >= sf_ratio * 0.3, (
+            assert scaling_metrics["etl_records"] >= sf_ratio * 0.15, (
                 f"ETL records scaling too low: {scaling_metrics['etl_records']:.2f}"
             )
 

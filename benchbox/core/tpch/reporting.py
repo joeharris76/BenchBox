@@ -27,9 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
-from benchbox.core.tpch.official_benchmark import (
-    QphHResult,
-)
+from benchbox.core.tpch.official_benchmark import TPCHOfficialBenchmarkResult
 
 
 @dataclass
@@ -95,7 +93,7 @@ class TPCHReportGenerator:
 
     def generate_detailed_report(
         self,
-        result: QphHResult,
+        result: TPCHOfficialBenchmarkResult,
         report_title: str = "TPC-H Benchmark Report",
         include_detailed_analysis: bool = True,
         include_certification_info: bool = True,
@@ -135,7 +133,7 @@ class TPCHReportGenerator:
 
         return report_file
 
-    def generate_certification_report(self, result: QphHResult) -> Path:
+    def generate_certification_report(self, result: TPCHOfficialBenchmarkResult) -> Path:
         """Generate a certification-ready TPC-H report.
 
         Args:
@@ -228,7 +226,7 @@ class TPCHReportGenerator:
 
         return report_file
 
-    def generate_performance_csv(self, result: QphHResult) -> Path:
+    def generate_performance_csv(self, result: TPCHOfficialBenchmarkResult) -> Path:
         """Generate CSV file with detailed performance data.
 
         Args:
@@ -279,8 +277,8 @@ class TPCHReportGenerator:
 
     def compare_results(
         self,
-        baseline_result: QphHResult,
-        current_result: QphHResult,
+        baseline_result: TPCHOfficialBenchmarkResult,
+        current_result: TPCHOfficialBenchmarkResult,
         significance_threshold: float = 0.05,
     ) -> ComparisonResult:
         """Compare two benchmark results for performance changes.
@@ -327,8 +325,8 @@ class TPCHReportGenerator:
 
     def generate_comparison_report(
         self,
-        baseline_result: QphHResult,
-        current_result: QphHResult,
+        baseline_result: TPCHOfficialBenchmarkResult,
+        current_result: TPCHOfficialBenchmarkResult,
         report_title: str = "TPC-H Performance Comparison",
     ) -> Path:
         """Generate a comparison report between two benchmark results.
@@ -354,7 +352,7 @@ class TPCHReportGenerator:
 
         return report_file
 
-    def _calculate_performance_metrics(self, result: QphHResult) -> PerformanceMetrics:
+    def _calculate_performance_metrics(self, result: TPCHOfficialBenchmarkResult) -> PerformanceMetrics:
         """Calculate comprehensive performance metrics."""
         query_times = list(result.power_test.query_times.values())
 
@@ -390,57 +388,12 @@ class TPCHReportGenerator:
             scale_factor=result.scale_factor,
         )
 
-    def _validate_result(self, result: QphHResult) -> ValidationResult:
+    def _validate_result(self, result: TPCHOfficialBenchmarkResult) -> ValidationResult:
         """Validate benchmark result against TPC-H specification."""
-        issues = []
-        warnings = []
-        recommendations = []
+        issues = self._check_basic_requirements(result)
+        warnings = self._check_execution_warnings(result)
+        recommendations = self._generate_recommendations(result)
 
-        # Check basic requirements
-        if not result.success:
-            issues.append("Benchmark did not complete successfully")
-
-        if result.qphh_at_size <= 0:
-            issues.append("QphH@Size must be positive")
-
-        # Check Power Test
-        if not result.power_test.success:
-            issues.append("Power Test failed")
-        elif len(result.power_test.query_times) != 22:
-            issues.append(f"Power Test must execute all 22 queries, got {len(result.power_test.query_times)}")
-
-        # Check Throughput Test
-        if not result.throughput_test.success:
-            issues.append("Throughput Test failed")
-        elif result.throughput_test.num_streams < 1:
-            issues.append("Throughput Test must have at least 1 stream")
-
-        # Check execution times
-        if result.power_test.total_time < 10:
-            warnings.append("Power Test execution time seems unusually fast")
-
-        if result.throughput_test.total_time < 10:
-            warnings.append("Throughput Test execution time seems unusually fast")
-
-        # Check for query time outliers
-        if result.power_test.query_times:
-            query_times = list(result.power_test.query_times.values())
-            avg_time = statistics.mean(query_times)
-
-            for query_id, query_time in result.power_test.query_times.items():
-                if query_time > avg_time * 10:
-                    warnings.append(f"Query {query_id} took unusually long: {query_time:.2f}s")
-                elif query_time < avg_time * 0.01:
-                    warnings.append(f"Query {query_id} completed unusually fast: {query_time:.2f}s")
-
-        # Generate recommendations
-        if result.throughput_test.num_streams < 2:
-            recommendations.append("Consider using more streams in Throughput Test for better performance measurement")
-
-        if result.scale_factor < 1:
-            recommendations.append("Consider using scale factor >= 1 for meaningful results")
-
-        # Determine compliance
         compliant = len(issues) == 0
         certification_ready = compliant and len(warnings) == 0
 
@@ -451,6 +404,51 @@ class TPCHReportGenerator:
             warnings=warnings,
             recommendations=recommendations,
         )
+
+    def _check_basic_requirements(self, result: TPCHOfficialBenchmarkResult) -> list[str]:
+        """Check basic TPC-H compliance requirements."""
+        issues = []
+        if not result.success:
+            issues.append("Benchmark did not complete successfully")
+        if result.qphh_at_size <= 0:
+            issues.append("QphH@Size must be positive")
+        if not result.power_test.success:
+            issues.append("Power Test failed")
+        elif len(result.power_test.query_times) != 22:
+            issues.append(f"Power Test must execute all 22 queries, got {len(result.power_test.query_times)}")
+        if not result.throughput_test.success:
+            issues.append("Throughput Test failed")
+        elif result.throughput_test.num_streams < 1:
+            issues.append("Throughput Test must have at least 1 stream")
+        return issues
+
+    def _check_execution_warnings(self, result: TPCHOfficialBenchmarkResult) -> list[str]:
+        """Check for execution time warnings and query outliers."""
+        warnings = []
+        if result.power_test.total_time < 10:
+            warnings.append("Power Test execution time seems unusually fast")
+        if result.throughput_test.total_time < 10:
+            warnings.append("Throughput Test execution time seems unusually fast")
+
+        # Check for query time outliers
+        if result.power_test.query_times:
+            query_times = list(result.power_test.query_times.values())
+            avg_time = statistics.mean(query_times)
+            for query_id, query_time in result.power_test.query_times.items():
+                if query_time > avg_time * 10:
+                    warnings.append(f"Query {query_id} took unusually long: {query_time:.2f}s")
+                elif query_time < avg_time * 0.01:
+                    warnings.append(f"Query {query_id} completed unusually fast: {query_time:.2f}s")
+        return warnings
+
+    def _generate_recommendations(self, result: TPCHOfficialBenchmarkResult) -> list[str]:
+        """Generate improvement recommendations."""
+        recommendations = []
+        if result.throughput_test.num_streams < 2:
+            recommendations.append("Consider using more streams in Throughput Test for better performance measurement")
+        if result.scale_factor < 1:
+            recommendations.append("Consider using scale factor >= 1 for meaningful results")
+        return recommendations
 
     def _classify_query_type(self, query_id: int) -> str:
         """Classify query type based on TPC-H query characteristics."""
@@ -499,7 +497,7 @@ class TPCHReportGenerator:
 
     def _generate_html_report(
         self,
-        result: QphHResult,
+        result: TPCHOfficialBenchmarkResult,
         metrics: PerformanceMetrics,
         validation: ValidationResult,
         title: str,
@@ -620,8 +618,8 @@ class TPCHReportGenerator:
 
     def _generate_comparison_html(
         self,
-        baseline_result: QphHResult,
-        current_result: QphHResult,
+        baseline_result: TPCHOfficialBenchmarkResult,
+        current_result: TPCHOfficialBenchmarkResult,
         comparison: ComparisonResult,
         title: str,
     ) -> str:

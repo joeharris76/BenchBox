@@ -51,11 +51,6 @@ class ValidationResult:
     details: dict[str, Any] = field(default_factory=dict)
     remote_manifest: dict[str, Any] | None = None
 
-    @property
-    def passed(self) -> bool:
-        """Legacy property for backward compatibility."""
-        return self.is_valid
-
 
 @dataclass
 class ValidationSummary:

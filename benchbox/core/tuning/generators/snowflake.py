@@ -8,7 +8,7 @@ Example:
     >>> from benchbox.core.tuning.generators.snowflake import SnowflakeDDLGenerator
     >>> generator = SnowflakeDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
-    >>> print(generator.generate_create_table_ddl("lineitem", columns, clauses))
+    >>> emit(generator.generate_create_table_ddl("lineitem", columns, clauses))
     CREATE TABLE lineitem (
         l_orderkey NUMBER(38,0) NOT NULL,
         l_shipdate DATE,

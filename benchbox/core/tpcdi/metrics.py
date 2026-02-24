@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from benchbox.utils.printing import emit
+
 from .etl import ETLResult
 from .validation import DataQualityResult
 
@@ -281,54 +283,54 @@ class TPCDIMetrics:
         Args:
             metrics: Calculated benchmark metrics
         """
-        print("\n" + "=" * 80)
-        print("OFFICIAL TPC-DI BENCHMARK RESULTS")
-        print("=" * 80)
+        emit("\n" + "=" * 80)
+        emit("OFFICIAL TPC-DI BENCHMARK RESULTS")
+        emit("=" * 80)
 
-        print(f"Scale Factor: {metrics.scale_factor}")
-        print(f"Total Execution Time: {self._format_duration(metrics.total_execution_time)}")
-        print(f"TPC-DI Compliant: {'YES' if metrics.tpc_di_compliant else 'NO'}")
-        print(f"Benchmark Date: {metrics.benchmark_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        emit(f"Scale Factor: {metrics.scale_factor}")
+        emit(f"Total Execution Time: {self._format_duration(metrics.total_execution_time)}")
+        emit(f"TPC-DI Compliant: {'YES' if metrics.tpc_di_compliant else 'NO'}")
+        emit(f"Benchmark Date: {metrics.benchmark_date.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        print("\nOFFICIAL TPC-DI METRICS:")
-        print("-" * 40)
-        print(f"ETL Throughput: {metrics.etl_throughput:,.2f} records/second")
-        print(f"Data Quality Score: {metrics.data_quality_score:.1%}")
-        print(f"Overall Performance: {metrics.overall_performance:.2f}")
+        emit("\nOFFICIAL TPC-DI METRICS:")
+        emit("-" * 40)
+        emit(f"ETL Throughput: {metrics.etl_throughput:,.2f} records/second")
+        emit(f"Data Quality Score: {metrics.data_quality_score:.1%}")
+        emit(f"Overall Performance: {metrics.overall_performance:.2f}")
 
-        print("\nEXECUTION BREAKDOWN:")
-        print("-" * 40)
-        print(f"Total Records Processed: {metrics.total_records_processed:,}")
+        emit("\nEXECUTION BREAKDOWN:")
+        emit("-" * 40)
+        emit(f"Total Records Processed: {metrics.total_records_processed:,}")
 
         if metrics.historical_load_records > 0:
-            print(
+            emit(
                 f"Historical Load: {metrics.historical_load_records:,} records in {self._format_duration(metrics.historical_load_time)}"
             )
             if metrics.historical_load_time > 0:
                 hist_throughput = metrics.historical_load_records / metrics.historical_load_time
-                print(f"  Throughput: {hist_throughput:,.2f} records/second")
+                emit(f"  Throughput: {hist_throughput:,.2f} records/second")
 
         if metrics.incremental_load_records > 0:
-            print(
+            emit(
                 f"Incremental Loads: {metrics.incremental_load_records:,} records in {self._format_duration(metrics.incremental_load_time)}"
             )
             if metrics.incremental_load_time > 0:
                 inc_throughput = metrics.incremental_load_records / metrics.incremental_load_time
-                print(f"  Throughput: {inc_throughput:,.2f} records/second")
+                emit(f"  Throughput: {inc_throughput:,.2f} records/second")
 
-        print("\nDATA QUALITY ASSESSMENT:")
-        print("-" * 40)
-        print(f"Validations Passed: {metrics.validations_passed}/{metrics.validations_total}")
-        print(f"Data Integrity Score: {metrics.data_integrity_score:.1%}")
+        emit("\nDATA QUALITY ASSESSMENT:")
+        emit("-" * 40)
+        emit(f"Validations Passed: {metrics.validations_passed}/{metrics.validations_total}")
+        emit(f"Data Integrity Score: {metrics.data_integrity_score:.1%}")
 
         if not metrics.tpc_di_compliant:
-            print("\nCOMPLIANCE ISSUES:")
-            print("-" * 40)
-            print("⚠️️  Benchmark does not meet all TPC-DI compliance requirements")
+            emit("\nCOMPLIANCE ISSUES:")
+            emit("-" * 40)
+            emit("⚠️️  Benchmark does not meet all TPC-DI compliance requirements")
             if metrics.data_quality_score < 1.0:
-                print(f"   - Data quality issues: {(1.0 - metrics.data_quality_score) * 100:.1f}% validation failures")
+                emit(f"   - Data quality issues: {(1.0 - metrics.data_quality_score) * 100:.1f}% validation failures")
 
-        print("=" * 80)
+        emit("=" * 80)
 
     def export_metrics_json(self, metrics: BenchmarkMetrics) -> dict[str, Any]:
         """Export metrics as JSON-serializable dictionary.

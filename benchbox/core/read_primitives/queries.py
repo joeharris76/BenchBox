@@ -9,10 +9,11 @@ query orchestration.
 
 from __future__ import annotations
 
+from benchbox.core.query_catalog_base import BaseQueryCatalogMixin
 from benchbox.core.read_primitives.catalog import PrimitiveQuery, load_primitives_catalog
 
 
-class ReadPrimitivesQueryManager:
+class ReadPrimitivesQueryManager(BaseQueryCatalogMixin):
     """Manager for Read Primitives benchmark queries backed by the catalog file."""
 
     def __init__(self) -> None:
@@ -36,44 +37,7 @@ class ReadPrimitivesQueryManager:
 
         return self._catalog_version
 
-    def get_query(self, query_id: str, dialect: str | None = None) -> str:
-        """Get a Read Primitives query, optionally using a dialect-specific variant.
-
-        Args:
-            query_id: Query identifier
-            dialect: Optional target dialect (e.g., 'duckdb', 'bigquery'). If provided
-                    and a dialect-specific variant exists, returns the variant instead
-                    of the base query.
-
-        Returns:
-            SQL query text (variant if available for dialect, otherwise base query)
-
-        Raises:
-            ValueError: If query_id is invalid or query should be skipped on this dialect
-        """
-
-        try:
-            entry = self._entries[query_id]
-        except KeyError as exc:
-            available = ", ".join(sorted(self._queries.keys()))
-            raise ValueError(f"Invalid query ID: {query_id}. Available: {available}") from exc
-
-        # Check if query should be skipped on this dialect
-        if dialect and entry.skip_on:
-            normalized_dialect = dialect.lower().strip()
-            if normalized_dialect in entry.skip_on:
-                raise ValueError(
-                    f"Query '{query_id}' is not supported on dialect '{dialect}' (marked as skip_on: {entry.skip_on})"
-                )
-
-        # Return dialect-specific variant if available
-        if dialect and entry.variants:
-            normalized_dialect = dialect.lower().strip()
-            if normalized_dialect in entry.variants:
-                return entry.variants[normalized_dialect]
-
-        # Return base query
-        return self._queries[query_id]
+    # get_query() is inherited from BaseQueryCatalogMixin
 
     def get_all_queries(self) -> dict[str, str]:
         """Get all Read Primitives queries.

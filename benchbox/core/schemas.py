@@ -9,7 +9,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, ClassVar, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -91,6 +91,10 @@ class RunConfig(BaseModel):
     driver_package: Optional[str] = None
     driver_version: Optional[str] = None
     driver_version_resolved: Optional[str] = None
+    driver_version_actual: Optional[str] = None
+    driver_runtime_strategy: Optional[str] = None
+    driver_runtime_path: Optional[str] = None
+    driver_runtime_python_executable: Optional[str] = None
     driver_auto_install: bool = False
     verbose: bool = False
     verbose_level: int = 0
@@ -161,28 +165,30 @@ class RunConfig(BaseModel):
             return v_lower
         return v
 
+    # (attr_name, options_key, expected_type) — populated by populate_driver_metadata.
+    _DRIVER_OPTION_FIELDS: ClassVar[list[tuple[str, str, type]]] = [
+        ("driver_version", "driver_version", str),
+        ("driver_package", "driver_package", str),
+        ("driver_version_resolved", "driver_version_resolved", str),
+        ("driver_version_actual", "driver_version_actual", str),
+        ("driver_runtime_strategy", "driver_runtime_strategy", str),
+        ("driver_runtime_path", "driver_runtime_path", str),
+        ("driver_runtime_python_executable", "driver_runtime_python_executable", str),
+    ]
+
     @model_validator(mode="after")
     def populate_driver_metadata(self) -> "RunConfig":
         """Populate driver metadata from options if not explicitly provided."""
-        if self.driver_version is None and "driver_version" in self.options:
-            option_value = self.options.get("driver_version")
-            if isinstance(option_value, str):
-                self.driver_version = option_value
+        for attr, option_key, expected_type in self._DRIVER_OPTION_FIELDS:
+            if getattr(self, attr) is None:
+                value = self.options.get(option_key)
+                if isinstance(value, expected_type):
+                    setattr(self, attr, value)
 
         if not self.driver_auto_install:
             auto_install_option = self.options.get("driver_auto_install")
             if isinstance(auto_install_option, bool):
                 self.driver_auto_install = auto_install_option
-
-        if self.driver_package is None:
-            package_hint = self.options.get("driver_package")
-            if isinstance(package_hint, str):
-                self.driver_package = package_hint
-
-        if self.driver_version_resolved is None:
-            resolved_hint = self.options.get("driver_version_resolved")
-            if isinstance(resolved_hint, str):
-                self.driver_version_resolved = resolved_hint
 
         # Apply verbosity settings normalization
         verbosity_source: dict[str, Any] = {
@@ -279,6 +285,10 @@ class DatabaseConfig(BaseModel):
     driver_package: Optional[str] = None
     driver_version: Optional[str] = None
     driver_version_resolved: Optional[str] = None
+    driver_version_actual: Optional[str] = None
+    driver_runtime_strategy: Optional[str] = None
+    driver_runtime_path: Optional[str] = None
+    driver_runtime_python_executable: Optional[str] = None
     driver_auto_install: bool = False
     execution_mode: Optional[Literal["sql", "dataframe", "data_only"]] = None
 
@@ -358,6 +368,8 @@ class PlatformInfo(BaseModel):
     driver_package: Optional[str] = None
     driver_version_requested: Optional[str] = None
     driver_version_resolved: Optional[str] = None
+    driver_version_actual: Optional[str] = None
+    driver_runtime_strategy: Optional[str] = None
 
 
 class ExecutionContext(BaseModel):
@@ -429,57 +441,49 @@ class ExecutionContext(BaseModel):
         """
         args: list[str] = []
 
-        # Phases (default is ["power"])
         if self.phases != ["power"]:
             args.extend(["--phases", ",".join(self.phases)])
-
-        # Seed
         if self.seed is not None:
             args.extend(["--seed", str(self.seed)])
 
-        # Compression
+        # Compression (nested logic)
         if self.compression_enabled and self.compression_type != "none":
+            comp = self.compression_type
             if self.compression_level is not None:
-                args.extend(["--compression", f"{self.compression_type}:{self.compression_level}"])
-            else:
-                args.extend(["--compression", self.compression_type])
+                comp = f"{comp}:{self.compression_level}"
+            args.extend(["--compression", comp])
 
-        # Mode (default is "sql")
-        if self.mode != "sql":
-            args.extend(["--mode", self.mode])
+        # Simple value flags
+        _VALUE_FLAGS: list[tuple[str, str, Any]] = [
+            ("mode", "--mode", "sql"),
+            ("validation_mode", "--validation", None),
+        ]
+        for attr, flag, default in _VALUE_FLAGS:
+            value = getattr(self, attr)
+            if value and value != default:
+                args.extend([flag, value])
 
-        # Official TPC mode
-        if self.official:
-            args.append("--official")
-
-        # Validation
-        if self.validation_mode:
-            args.extend(["--validation", self.validation_mode])
+        # Boolean flags
+        _BOOL_FLAGS = [
+            ("official", "--official"),
+            ("capture_plans", "--capture-plans"),
+            ("non_interactive", "--non-interactive"),
+        ]
+        for attr, flag in _BOOL_FLAGS:
+            if getattr(self, attr):
+                args.append(flag)
 
         # Force flags
-        force_parts = []
-        if self.force_datagen:
-            force_parts.append("datagen")
-        if self.force_upload:
-            force_parts.append("upload")
+        force_parts = [
+            f for f, attr in [("datagen", "force_datagen"), ("upload", "force_upload")] if getattr(self, attr)
+        ]
         if force_parts:
             args.extend(["--force", ",".join(force_parts)])
 
-        # Query subset
         if self.query_subset:
             args.extend(["--queries", ",".join(self.query_subset)])
-
-        # Plan capture
-        if self.capture_plans:
-            args.append("--capture-plans")
         if self.strict_plan_capture:
             args.extend(["--plan-config", "strict:true"])
-
-        # Non-interactive
-        if self.non_interactive:
-            args.append("--non-interactive")
-
-        # Tuning
         if self.tuning_mode and self.tuning_mode != "notuning":
             args.extend(["--tuning", self.tuning_mode])
 

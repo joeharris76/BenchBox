@@ -43,6 +43,12 @@ CANONICAL_SQL_PLATFORMS = {
     "synapse",
     "fabric_dw",
     "influxdb",
+    "starrocks",
+    "doris",
+    "databend",
+    "questdb",
+    "lakesail",
+    "fabric-lakehouse",
 }
 # Note: polars was removed from CANONICAL_SQL_PLATFORMS as SQL mode is no longer supported
 
@@ -50,7 +56,6 @@ CANONICAL_SQL_PLATFORMS = {
 PLATFORM_ALIASES = {
     "sqlite3": "sqlite",
     "azure_synapse": "synapse",
-    "clickhouse:cloud": "clickhouse-cloud",  # Backward compatibility
 }
 
 # DataFrame-only platforms that should NOT be in get_platform_adapter()
@@ -84,8 +89,10 @@ PLATFORMS_NOT_YET_IN_ADAPTER_MAPPING = {
     "snowpark-connect",
     # Onehouse Quanton - managed serverless Spark (submit via Onehouse API)
     "quanton",
-    # PostgreSQL extension - uses postgresql adapter with TimescaleDB-specific tuning
+    # PostgreSQL extensions - use postgresql adapter with extension-specific tuning
     "timescaledb",
+    "pg-duckdb",
+    "pg-mooncake",
 }
 
 
@@ -111,6 +118,7 @@ class TestPlatformRegistrationAlignment:
             DatabricksAdapter,
             DataFusionAdapter,
             DuckDBAdapter,
+            FabricLakehouseAdapter,
             FabricWarehouseAdapter,
             FireboltAdapter,
             InfluxDBAdapter,
@@ -125,7 +133,12 @@ class TestPlatformRegistrationAlignment:
             SQLiteAdapter,
             TrinoAdapter,
         )
+        from benchbox.platforms.databend import DatabendAdapter
+        from benchbox.platforms.doris import DorisAdapter
+        from benchbox.platforms.lakesail import LakeSailAdapter
+        from benchbox.platforms.questdb import QuestDBAdapter
         from benchbox.platforms.starburst import StarburstAdapter
+        from benchbox.platforms.starrocks import StarRocksAdapter
 
         return {
             "duckdb": DuckDBAdapter,
@@ -151,7 +164,13 @@ class TestPlatformRegistrationAlignment:
             "synapse": AzureSynapseAdapter,
             "azure_synapse": AzureSynapseAdapter,
             "fabric_dw": FabricWarehouseAdapter,
+            "fabric-lakehouse": FabricLakehouseAdapter,
             "influxdb": InfluxDBAdapter,
+            "starrocks": StarRocksAdapter,
+            "doris": DorisAdapter,
+            "databend": DatabendAdapter,
+            "questdb": QuestDBAdapter,
+            "lakesail": LakeSailAdapter,
         }
 
     def test_all_canonical_platforms_in_registry_metadata(self):

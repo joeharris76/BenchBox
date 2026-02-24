@@ -52,10 +52,10 @@ Modin partitions DataFrames across CPU cores and executes operations in parallel
 
 ```bash
 # Install Modin with Ray backend (recommended)
-uv add benchbox --extra dataframe-modin
+uv add benchbox --extra modin
 
 # Or with pip
-pip install "benchbox[dataframe-modin]"
+pip install "benchbox[modin]"
 
 # For Dask backend
 pip install "modin[dask]"

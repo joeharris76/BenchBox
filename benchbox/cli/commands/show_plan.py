@@ -6,17 +6,15 @@ import json
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 
+from benchbox.cli.shared import console
 from benchbox.core.query_plans.visualization import (
     VisualizationOptions,
     render_plan,
     render_summary,
 )
 from benchbox.core.results.models import BenchmarkResults
-
-console = Console()
 
 
 @click.command("show-plan")

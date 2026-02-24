@@ -10,8 +10,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from benchbox.core.config import DatabaseConfig
 from benchbox.core.platform_registry import PlatformInfo, PlatformRegistry
+from benchbox.core.schemas import DatabaseConfig
 
 
 class PlatformOptionError(ValueError):
@@ -158,13 +158,8 @@ class PlatformHookRegistry:
         builder = cls._config_builders.get(platform, cls._default_builder)
         config = builder(platform, options, overrides, info)
 
-        # Only update options if builder returned empty options dict
-        # This preserves backward compatibility with older builders that expect
-        # options to be populated via update(), while allowing new credential-loading
-        # builders to return pre-merged options
-        if not config.options:
-            config.options.update(options)
-            config.options.update(overrides)
+        config.options.update(options)
+        config.options.update(overrides)
 
         return config
 

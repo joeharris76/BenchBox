@@ -164,41 +164,23 @@ def _get_optimizations_suffix(tuning_config: Optional[Any]) -> str:
     platform_opts = config_dict.get("platform_optimizations", {})
     table_tunings = config_dict.get("table_tunings", {})
 
-    # Platform-level optimizations
-    if platform_opts.get("z_ordering_enabled", False):
-        components.append("zorder")
+    _PLATFORM_OPT_LABELS = [
+        ("z_ordering_enabled", "zorder"),
+        ("auto_optimize_enabled", "autoopt"),
+        ("materialized_views_enabled", "matview"),
+    ]
+    components.extend(label for key, label in _PLATFORM_OPT_LABELS if platform_opts.get(key, False))
 
-    if platform_opts.get("auto_optimize_enabled", False):
-        components.append("autoopt")
-
-    if platform_opts.get("materialized_views_enabled", False):
-        components.append("matview")
-
-    # Table-level optimizations
-    has_partitioning = False
-    has_clustering = False
-    has_sorting = False
-    has_distribution = False
-
-    for table_config in table_tunings.values():
-        if isinstance(table_config, dict):
-            if table_config.get("partitioning"):
-                has_partitioning = True
-            if table_config.get("clustering"):
-                has_clustering = True
-            if table_config.get("sorting"):
-                has_sorting = True
-            if table_config.get("distribution"):
-                has_distribution = True
-
-    if has_partitioning:
-        components.append("part")
-    if has_clustering:
-        components.append("clust")
-    if has_sorting:
-        components.append("sort")
-    if has_distribution:
-        components.append("dist")
+    _TABLE_TUNING_LABELS = [
+        ("partitioning", "part"),
+        ("clustering", "clust"),
+        ("sorting", "sort"),
+        ("distribution", "dist"),
+    ]
+    detected = {
+        key for tc in table_tunings.values() if isinstance(tc, dict) for key, _ in _TABLE_TUNING_LABELS if tc.get(key)
+    }
+    components.extend(label for key, label in _TABLE_TUNING_LABELS if key in detected)
 
     return "_".join(components) if components else ""
 
@@ -356,7 +338,7 @@ def generate_database_filename(
         "cudf-df": ".cudf-df",
         "modin-df": ".modin-df",
         "dask-df": ".dask-df",
-        # Legacy/fallback entries (explicit to avoid .db collision)
+        # Additional platform-specific entries
         "cudf": ".cudf",
         "spark": ".spark",
     }
@@ -399,7 +381,6 @@ def parse_database_name(database_name: str) -> dict[str, Any]:
         ".modin-df",
         ".dask-df",
         ".spark",
-        ".db",  # Legacy fallback
     ]
     for ext in known_extensions:
         if name.endswith(ext):

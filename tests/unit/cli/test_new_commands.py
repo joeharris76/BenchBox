@@ -278,12 +278,12 @@ class TestShellCommand:
 
     @skip_py310_cli_mock
     def test_shell_sqlite_autodetect(self):
-        """Test shell auto-detects SQLite from .db extension."""
+        """Test shell auto-detects SQLite from .sqlite extension."""
         runner = CliRunner()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a .db file
-            db_path = Path(tmpdir) / "test.db"
+            # Create a .sqlite file
+            db_path = Path(tmpdir) / "test.sqlite"
             db_path.touch()
 
             # Don't specify --platform, should auto-detect
@@ -298,7 +298,7 @@ class TestShellCommand:
         runner = CliRunner()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "test.db"
+            db_path = Path(tmpdir) / "test.sqlite"
             db_path.touch()
 
             result = runner.invoke(cli, ["shell", "--platform", "unsupported", "--database", str(db_path)])

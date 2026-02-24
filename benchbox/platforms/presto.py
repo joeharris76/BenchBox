@@ -26,13 +26,14 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchbox.core.benchmark_mixins import CursorValidationQueryExecutionMixin
+from benchbox.core.sql_utils import normalize_table_name_in_sql
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
-from .base.data_loading import FileFormatRegistry
+from .base.data_loading import DataSourceResolver, FileFormatRegistry
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -47,7 +48,7 @@ from ..utils.dependencies import (
     get_dependency_error_message,
 )
 from ..utils.file_format import get_delimiter_for_file
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 
 try:
     import prestodb
@@ -59,7 +60,7 @@ except ImportError:
 PRESTO_DIALECT = "presto"
 
 
-class PrestoAdapter(PlatformAdapter):
+class PrestoAdapter(CursorValidationQueryExecutionMixin, PlatformAdapter):
     """PrestoDB platform adapter for distributed SQL query execution.
 
     PrestoDB is a distributed SQL query engine designed for interactive analytics
@@ -78,6 +79,8 @@ class PrestoAdapter(PlatformAdapter):
     - AWS Athena: Use AthenaAdapter instead (managed Presto-compatible service)
     - Starburst Enterprise: Use TrinoAdapter (Trino-based)
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -711,6 +714,129 @@ class PrestoAdapter(PlatformAdapter):
 
         return elapsed_seconds(start_time)
 
+    def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
+        """Resolve benchmark data files from benchmark tables or manifest."""
+        resolver = DataSourceResolver()
+        data_source = resolver.resolve(benchmark, data_dir)
+        if not data_source or not data_source.tables:
+            raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+        return data_source.tables
+
+    @staticmethod
+    def _normalize_existing_files(file_paths: Any) -> list[Path]:
+        """Normalize file inputs to existing, non-empty local paths."""
+        normalized_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        valid_files: list[Path] = []
+        for file_path in normalized_paths:
+            path = Path(file_path)
+            if path.exists() and path.stat().st_size > 0:
+                valid_files.append(path)
+        return valid_files
+
+    def _escape_insert_value(self, value: str) -> str:
+        """Format a CSV field as a Presto literal for INSERT VALUES."""
+        if value == "" or value.lower() == "null":
+            return "NULL"
+        if self._is_date_value(value):
+            return f"DATE '{value}'"
+        try:
+            float(value)
+            return value
+        except ValueError:
+            return "'" + str(value).replace("'", "''") + "'"
+
+    def _load_file_batches(self, cursor: Any, file_path: Path, qualified_table: str) -> int:
+        """Load one file into Presto using batched INSERT statements."""
+        delimiter = get_delimiter_for_file(file_path)
+        compression_handler = FileFormatRegistry.get_compression_handler(file_path)
+        rows_loaded = 0
+
+        with compression_handler.open(file_path) as file_handle:
+            batch_size = 500
+            batch_data: list[str] = []
+
+            for line in file_handle:
+                line = line.strip()
+                if line and line.endswith(delimiter):
+                    line = line[:-1]
+                if not line:
+                    continue
+
+                escaped_values = [self._escape_insert_value(value) for value in line.split(delimiter)]
+                batch_data.append(f"({', '.join(escaped_values)})")
+
+                if len(batch_data) >= batch_size:
+                    cursor.execute(f"INSERT INTO {qualified_table} VALUES " + ", ".join(batch_data))
+                    rows_loaded += len(batch_data)
+                    batch_data = []
+
+            if batch_data:
+                cursor.execute(f"INSERT INTO {qualified_table} VALUES " + ", ".join(batch_data))
+                rows_loaded += len(batch_data)
+
+        return rows_loaded
+
+    def _load_table_data(
+        self,
+        cursor: Any,
+        table_name: str,
+        file_paths: Any,
+        target_catalog: str,
+        target_schema: str,
+    ) -> tuple[int, int] | None:
+        """Load one table and return (rows_loaded, valid_file_count)."""
+        valid_files = self._normalize_existing_files(file_paths)
+        table_name_lower = table_name.lower()
+
+        if not valid_files:
+            self.logger.warning(f"Skipping {table_name} - no valid data files")
+            return None
+
+        if not self._validate_identifier(table_name_lower):
+            self.logger.warning(f"Skipping {table_name} - invalid table identifier")
+            return None
+
+        chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
+        self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
+
+        qualified_table = f"{target_catalog}.{target_schema}.{table_name_lower}"
+        rows_loaded = 0
+        for file_path in valid_files:
+            rows_loaded += self._load_file_batches(cursor, file_path, qualified_table)
+
+        return rows_loaded, len(valid_files)
+
+    def _log_memory_limit_guidance(self, error_str: str) -> None:
+        """Log one-time guidance for memory-limit errors."""
+        is_memory_error = "MEMORY_LIMIT_EXCEEDED" in error_str or "exceeds max memory" in error_str.lower()
+        if not is_memory_error or hasattr(self, "_memory_error_logged"):
+            return
+
+        self._memory_error_logged = True
+        self.logger.error(
+            "\n"
+            "╭─────────────────────────────────────────────────────────────────╮\n"
+            "│ PRESTO MEMORY LIMIT EXCEEDED                                    │\n"
+            "├─────────────────────────────────────────────────────────────────┤\n"
+            "│ The Presto server has insufficient memory for this data load.  │\n"
+            "│                                                                 │\n"
+            "│ Options to resolve:                                             │\n"
+            "│                                                                 │\n"
+            "│ 1. Increase Presto memory (recommended for SF1+):              │\n"
+            "│    Edit jvm.config: -Xmx4G                                     │\n"
+            "│    Edit config.properties:                                     │\n"
+            "│      query.max-memory=2GB                                      │\n"
+            "│      query.max-memory-per-node=2GB                             │\n"
+            "│                                                                 │\n"
+            "│ 2. Use a smaller scale factor:                                 │\n"
+            "│    benchbox run --platform presto --scale 0.1 ...              │\n"
+            "│                                                                 │\n"
+            "│ 3. Use a persistent catalog instead of 'memory':               │\n"
+            "│    The memory catalog stores all data in RAM.                  │\n"
+            "│    For SF1+, use hive, iceberg, or delta catalogs.             │\n"
+            "╰─────────────────────────────────────────────────────────────────╯"
+        )
+
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
@@ -726,6 +852,7 @@ class PrestoAdapter(PlatformAdapter):
         """
         start_time = mono_time()
         table_stats = {}
+        total_time = 0.0
 
         cursor = connection.cursor()
         target_catalog = self.catalog
@@ -735,164 +862,30 @@ class PrestoAdapter(PlatformAdapter):
             raise ValueError(f"Invalid catalog or schema for load: {target_catalog}.{target_schema}")
 
         try:
-            # Get data files from benchmark or manifest fallback
-            if hasattr(benchmark, "tables") and benchmark.tables:
-                data_files = benchmark.tables
-            else:
-                data_files = None
-                try:
-                    manifest_path = Path(data_dir) / "_datagen_manifest.json"
-                    if manifest_path.exists():
-                        with open(manifest_path) as f:
-                            manifest = json.load(f)
-                        tables = manifest.get("tables") or {}
-                        mapping = {}
-                        for table, entries in tables.items():
-                            if entries:
-                                chunk_paths = []
-                                for entry in entries:
-                                    rel = entry.get("path")
-                                    if rel:
-                                        chunk_paths.append(Path(data_dir) / rel)
-                                if chunk_paths:
-                                    mapping[table] = chunk_paths
-                        if mapping:
-                            data_files = mapping
-                            self.logger.debug("Using data files from _datagen_manifest.json")
-                except Exception as e:
-                    self.logger.debug(f"Manifest fallback failed: {e}")
-                if not data_files:
-                    raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+            data_files = self._resolve_data_files(benchmark, data_dir)
 
-            # Load data using INSERT statements (row by row for memory catalog)
             for table_name, file_paths in data_files.items():
-                # Normalize to list
-                if not isinstance(file_paths, list):
-                    file_paths = [file_paths]
-
-                # Filter valid files
-                valid_files = []
-                for file_path in file_paths:
-                    file_path = Path(file_path)
-                    if file_path.exists() and file_path.stat().st_size > 0:
-                        valid_files.append(file_path)
-
-                if not valid_files:
-                    self.logger.warning(f"Skipping {table_name} - no valid data files")
-                    table_stats[table_name.lower()] = 0
-                    continue
-
-                table_name_lower = table_name.lower()
-
-                if not self._validate_identifier(table_name_lower):
-                    self.logger.warning(f"Skipping {table_name} - invalid table identifier")
-                    table_stats[table_name_lower] = 0
-                    continue
-
-                qualified_table = f"{target_catalog}.{target_schema}.{table_name_lower}"
-
-                chunk_info = f" from {len(valid_files)} file(s)" if len(valid_files) > 1 else ""
-                self.log_verbose(f"Loading data for table: {table_name}{chunk_info}")
-
                 try:
                     load_start = mono_time()
-                    total_rows_loaded = 0
+                    table_result = self._load_table_data(cursor, table_name, file_paths, target_catalog, target_schema)
 
-                    for file_path in valid_files:
-                        file_path = Path(file_path)
+                    table_name_lower = table_name.lower()
+                    if table_result is None:
+                        table_stats[table_name_lower] = 0
+                        continue
 
-                        # Detect delimiter from file extension (handle compressed extensions)
-                        delimiter = get_delimiter_for_file(file_path)
-
-                        # Get compression handler (handles .zst, .gz, or uncompressed)
-                        compression_handler = FileFormatRegistry.get_compression_handler(file_path)
-
-                        # Load data using INSERT statements in batches
-                        with compression_handler.open(file_path) as f:
-                            batch_size = 500  # Smaller batch for Presto
-                            batch_data = []
-
-                            for line in f:
-                                line = line.strip()
-                                if line and line.endswith(delimiter):
-                                    line = line[:-1]
-
-                                if not line:
-                                    continue
-
-                                values = line.split(delimiter)
-                                # Escape values for SQL - Presto memory catalog is strict about types
-                                escaped_values = []
-                                for v in values:
-                                    if v == "" or v.lower() == "null":
-                                        escaped_values.append("NULL")
-                                    elif self._is_date_value(v):
-                                        # DATE columns need DATE literal syntax
-                                        escaped_values.append(f"DATE '{v}'")
-                                    else:
-                                        # Check if value is numeric (int or decimal)
-                                        # Presto requires unquoted numbers for INTEGER/DECIMAL columns
-                                        try:
-                                            # Try parsing as number - handles integers and decimals
-                                            float(v)
-                                            # If it's a valid number, don't quote it
-                                            escaped_values.append(v)
-                                        except ValueError:
-                                            # Not a number - quote and escape single quotes
-                                            escaped_values.append("'" + str(v).replace("'", "''") + "'")
-                                batch_data.append(f"({', '.join(escaped_values)})")
-
-                                if len(batch_data) >= batch_size:
-                                    insert_sql = f"INSERT INTO {qualified_table} VALUES " + ", ".join(batch_data)
-                                    cursor.execute(insert_sql)
-                                    total_rows_loaded += len(batch_data)
-                                    batch_data = []
-
-                            # Insert remaining batch
-                            if batch_data:
-                                insert_sql = f"INSERT INTO {qualified_table} VALUES " + ", ".join(batch_data)
-                                cursor.execute(insert_sql)
-                                total_rows_loaded += len(batch_data)
-
+                    total_rows_loaded, file_count = table_result
                     table_stats[table_name_lower] = total_rows_loaded
-
-                    load_time = elapsed_seconds(load_start)
+                    chunk_info = f" from {file_count} file(s)" if file_count > 1 else ""
                     self.logger.info(
-                        f"✅ Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in {load_time:.2f}s"
+                        f"✅ Loaded {total_rows_loaded:,} rows into {table_name_lower}{chunk_info} in "
+                        f"{elapsed_seconds(load_start):.2f}s"
                     )
 
                 except Exception as e:
                     error_str = str(e)
                     self.logger.error(f"Failed to load {table_name}: {error_str[:100]}...")
-
-                    # Detect memory limit errors and provide actionable guidance
-                    is_memory_error = "MEMORY_LIMIT_EXCEEDED" in error_str or "exceeds max memory" in error_str.lower()
-                    if is_memory_error and not hasattr(self, "_memory_error_logged"):
-                        self._memory_error_logged = True
-                        self.logger.error(
-                            "\n"
-                            "╭─────────────────────────────────────────────────────────────────╮\n"
-                            "│ PRESTO MEMORY LIMIT EXCEEDED                                    │\n"
-                            "├─────────────────────────────────────────────────────────────────┤\n"
-                            "│ The Presto server has insufficient memory for this data load.  │\n"
-                            "│                                                                 │\n"
-                            "│ Options to resolve:                                             │\n"
-                            "│                                                                 │\n"
-                            "│ 1. Increase Presto memory (recommended for SF1+):              │\n"
-                            "│    Edit jvm.config: -Xmx4G                                     │\n"
-                            "│    Edit config.properties:                                     │\n"
-                            "│      query.max-memory=2GB                                      │\n"
-                            "│      query.max-memory-per-node=2GB                             │\n"
-                            "│                                                                 │\n"
-                            "│ 2. Use a smaller scale factor:                                 │\n"
-                            "│    benchbox run --platform presto --scale 0.1 ...              │\n"
-                            "│                                                                 │\n"
-                            "│ 3. Use a persistent catalog instead of 'memory':               │\n"
-                            "│    The memory catalog stores all data in RAM.                  │\n"
-                            "│    For SF1+, use hive, iceberg, or delta catalogs.             │\n"
-                            "╰─────────────────────────────────────────────────────────────────╯"
-                        )
-
+                    self._log_memory_limit_guidance(error_str)
                     table_stats[table_name.lower()] = 0
 
             total_time = elapsed_seconds(start_time)
@@ -938,86 +931,6 @@ class PrestoAdapter(PlatformAdapter):
         finally:
             cursor.close()
 
-    def execute_query(
-        self,
-        connection: Any,
-        query: str,
-        query_id: str,
-        benchmark_type: str | None = None,
-        scale_factor: float | None = None,
-        validate_row_count: bool = True,
-        stream_id: int | None = None,
-    ) -> dict[str, Any]:
-        """Execute query with detailed timing and performance tracking."""
-        start_time = mono_time()
-
-        cursor = connection.cursor()
-
-        try:
-            # Execute the query
-            cursor.execute(query)
-            result = cursor.fetchall()
-
-            execution_time = elapsed_seconds(start_time)
-            actual_row_count = len(result) if result else 0
-
-            # Get query statistics
-            query_stats = {"execution_time_seconds": execution_time}
-
-            # Validate row count if enabled and benchmark type is provided
-            validation_result = None
-            if validate_row_count and benchmark_type:
-                from benchbox.core.validation.query_validation import QueryValidator
-
-                validator = QueryValidator()
-                validation_result = validator.validate_query_result(
-                    benchmark_type=benchmark_type,
-                    query_id=query_id,
-                    actual_row_count=actual_row_count,
-                    scale_factor=scale_factor,
-                    stream_id=stream_id,
-                )
-
-                # Log validation result
-                if validation_result.warning_message:
-                    self.log_verbose(f"Row count validation: {validation_result.warning_message}")
-                elif not validation_result.is_valid:
-                    self.log_verbose(f"Row count validation FAILED: {validation_result.error_message}")
-                else:
-                    self.log_very_verbose(
-                        f"Row count validation PASSED: {actual_row_count} rows "
-                        f"(expected: {validation_result.expected_row_count})"
-                    )
-
-            # Use base helper to build result with consistent validation field mapping
-            result_dict = self._build_query_result_with_validation(
-                query_id=query_id,
-                execution_time=execution_time,
-                actual_row_count=actual_row_count,
-                first_row=result[0] if result else None,
-                validation_result=validation_result,
-            )
-
-            # Include Presto-specific fields
-            result_dict["query_statistics"] = query_stats
-            result_dict["resource_usage"] = query_stats
-
-            return result_dict
-
-        except Exception as e:
-            execution_time = elapsed_seconds(start_time)
-
-            return {
-                "query_id": query_id,
-                "status": "FAILED",
-                "execution_time_seconds": execution_time,
-                "rows_returned": 0,
-                "error": str(e),
-                "error_type": type(e).__name__,
-            }
-        finally:
-            cursor.close()
-
     def _is_date_value(self, value: str) -> bool:
         """Check if a value looks like a date in YYYY-MM-DD format.
 
@@ -1043,25 +956,7 @@ class PrestoAdapter(PlatformAdapter):
 
     def _normalize_table_name_in_sql(self, sql: str) -> str:
         """Normalize table names in SQL to lowercase for Presto."""
-        import re
-
-        # Match CREATE TABLE "TABLENAME" or CREATE TABLE TABLENAME
-        sql = re.sub(
-            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"CREATE TABLE {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        # Match foreign key references
-        sql = re.sub(
-            r'REFERENCES\s+"?([A-Za-z_][A-Za-z0-9_]*)"?',
-            lambda m: f"REFERENCES {m.group(1).lower()}",
-            sql,
-            flags=re.IGNORECASE,
-        )
-
-        return sql
+        return normalize_table_name_in_sql(sql)
 
     def _optimize_table_definition(self, statement: str) -> str:
         """Optimize table definition for Presto.
@@ -1312,7 +1207,7 @@ def _build_presto_config(
     Returns:
         DatabaseConfig with credentials loaded
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

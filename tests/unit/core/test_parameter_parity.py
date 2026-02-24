@@ -14,11 +14,15 @@ Copyright 2026 Joe Harris / BenchBox Project
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from benchbox.core.runner.dataframe_runner import _clear_parameter_overrides, _setup_parameter_overrides
+from benchbox.core.runner.dataframe_runner import (
+    _clear_parameter_overrides,
+    _execute_dataframe_queries,
+    _setup_parameter_overrides,
+)
 from benchbox.core.tpcds.dataframe_queries.parameters import (
     TPCDS_DEFAULT_PARAMS,
     get_parameters,
@@ -266,7 +270,7 @@ class TestRunnerParameterWiring:
         ):
             _setup_parameter_overrides("tpcds", 42, 1.0)
 
-            mock_extract.assert_called_once_with(42, 1.0)
+            mock_extract.assert_called_once_with(42, 1.0, None)
             mock_set.assert_called_once_with(mock_overrides)
 
     def test_setup_graceful_on_extractor_failure(self):
@@ -289,6 +293,185 @@ class TestRunnerParameterWiring:
         ):
             _setup_parameter_overrides("tpch", 42, 0.01)
             mock_set.assert_not_called()
+
+    def test_execute_queries_clears_overrides_on_no_query_path(self):
+        """_execute_dataframe_queries clears overrides even when no queries are discovered."""
+        config = MagicMock()
+        config.name = "tpch"
+        config.scale_factor = 0.01
+        config.options = {"seed": 7, "power_warmup_iterations": 0, "power_iterations": 1}
+        config.queries = None
+
+        adapter = MagicMock()
+        ctx = MagicMock()
+        benchmark_instance = MagicMock()
+
+        with (
+            patch("benchbox.core.runner.dataframe_runner._get_queries_for_benchmark", return_value=[]),
+            patch("benchbox.core.runner.dataframe_runner._clear_parameter_overrides") as mock_clear,
+        ):
+            out = _execute_dataframe_queries(adapter, ctx, config, benchmark_instance, monitor=None)
+            assert out == []
+            mock_clear.assert_called_once_with("tpch")
+
+    def test_execute_queries_clears_overrides_on_unexpected_exception(self):
+        """_execute_dataframe_queries clears overrides when execution path raises unexpectedly."""
+        config = MagicMock()
+        config.name = "tpcds"
+        config.scale_factor = 1.0
+        config.options = {"seed": 11, "power_warmup_iterations": 0, "power_iterations": 1}
+        config.queries = None
+
+        adapter = MagicMock()
+        ctx = MagicMock()
+        benchmark_instance = MagicMock()
+        query = MagicMock()
+        query.query_id = "Q1"
+
+        # Initial discovery succeeds; measurement query retrieval fails unexpectedly.
+        side_effect = [[query], RuntimeError("boom")]
+        with (
+            patch("benchbox.core.runner.dataframe_runner._get_queries_for_benchmark", side_effect=side_effect),
+            patch("benchbox.core.runner.dataframe_runner._clear_parameter_overrides") as mock_clear,
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            _execute_dataframe_queries(adapter, ctx, config, benchmark_instance, monitor=None)
+
+        mock_clear.assert_called_once_with("tpcds")
+
+    def test_execute_queries_clears_overrides_on_unexpected_exception_tpch(self):
+        """TPC-H execution also clears overrides on unexpected exceptions."""
+        config = MagicMock()
+        config.name = "tpch"
+        config.scale_factor = 1.0
+        config.options = {"seed": 11, "power_warmup_iterations": 0, "power_iterations": 1}
+        config.queries = None
+
+        adapter = MagicMock()
+        ctx = MagicMock()
+        benchmark_instance = MagicMock()
+        query = MagicMock()
+        query.query_id = "Q1"
+
+        side_effect = [[query], RuntimeError("tpch-boom")]
+        with (
+            patch("benchbox.core.runner.dataframe_runner._get_queries_for_benchmark", side_effect=side_effect),
+            patch("benchbox.core.runner.dataframe_runner._clear_parameter_overrides") as mock_clear,
+            pytest.raises(RuntimeError, match="tpch-boom"),
+        ):
+            _execute_dataframe_queries(adapter, ctx, config, benchmark_instance, monitor=None)
+
+        mock_clear.assert_called_once_with("tpch")
+
+    def test_execute_queries_tpcds_sets_overrides_per_stream(self):
+        """TPC-DS override setup is stream-aware during query execution."""
+        config = MagicMock()
+        config.name = "tpcds"
+        config.scale_factor = 1.0
+        config.options = {"seed": 42, "power_warmup_iterations": 1, "power_iterations": 2}
+        config.queries = None
+
+        adapter = MagicMock()
+        adapter.execute_query.return_value = {"query_id": "Q1", "status": "OK", "execution_time_seconds": 0.1}
+        ctx = MagicMock()
+        benchmark_instance = MagicMock()
+        query = MagicMock()
+        query.query_id = "Q1"
+
+        with (
+            patch("benchbox.core.runner.dataframe_runner._get_queries_for_benchmark", return_value=[query]),
+            patch("benchbox.core.runner.dataframe_runner._setup_parameter_overrides") as mock_setup,
+        ):
+            _execute_dataframe_queries(adapter, ctx, config, benchmark_instance, monitor=None)
+
+        # Stream 0 is setup once (initial + warmup deduped), then stream 1 and 2.
+        expected = [
+            (("tpcds", 42, 1.0), {"stream_id": 0}),
+            (("tpcds", 42, 1.0), {"stream_id": 1}),
+            (("tpcds", 42, 1.0), {"stream_id": 2}),
+        ]
+        actual = [(call.args, call.kwargs) for call in mock_setup.call_args_list]
+        assert actual == expected
+
+    def test_execute_queries_tpcds_stream_specific_overrides_flow_to_execution(self):
+        """Mock stream-specific extractor values and assert execution sees per-stream overrides."""
+        config = MagicMock()
+        config.name = "tpcds"
+        config.scale_factor = 1.0
+        config.options = {"seed": 9, "power_warmup_iterations": 1, "power_iterations": 2}
+        config.queries = None
+
+        query = MagicMock()
+        query.query_id = "Q1"
+        ctx = MagicMock()
+        benchmark_instance = MagicMock()
+
+        def _extract(seed: int, scale_factor: float, stream_id: int | None):
+            assert seed == 9
+            assert scale_factor == 1.0
+            assert stream_id is not None
+            return {1: {"year": 2000 + stream_id}}
+
+        def _execute_query(_ctx, _query):
+            params = get_parameters(1)
+            return {
+                "query_id": "Q1",
+                "status": "OK",
+                "execution_time_seconds": 0.01,
+                "year": params.get("year"),
+            }
+
+        adapter = MagicMock()
+        adapter.execute_query.side_effect = _execute_query
+
+        with (
+            patch("benchbox.core.runner.dataframe_runner._get_queries_for_benchmark", return_value=[query]),
+            patch("benchbox.core.tpcds.parameter_extractor.get_tpcds_extracted_parameters", side_effect=_extract),
+        ):
+            out = _execute_dataframe_queries(adapter, ctx, config, benchmark_instance, monitor=None)
+
+        # 1 warmup stream (0) + 2 measurement streams (1,2).
+        years_by_stream = {(row["stream_id"], row["run_type"]): row["year"] for row in out}
+        assert years_by_stream[(0, "warmup")] == 2000
+        assert years_by_stream[(1, "measurement")] == 2001
+        assert years_by_stream[(2, "measurement")] == 2002
+
+    def test_execute_queries_tpcds_stream_inputs_align_for_queries_and_extractor(self):
+        """Stream IDs used for query retrieval align with stream IDs used for override extraction."""
+        config = MagicMock()
+        config.name = "tpcds"
+        config.scale_factor = 0.01
+        config.options = {"seed": 17, "power_warmup_iterations": 1, "power_iterations": 2}
+        config.queries = None
+
+        query = MagicMock()
+        query.query_id = "Q1"
+        ctx = MagicMock()
+        benchmark_instance = MagicMock()
+        adapter = MagicMock()
+        adapter.execute_query.return_value = {"query_id": "Q1", "status": "OK", "execution_time_seconds": 0.01}
+
+        query_stream_calls: list[int] = []
+        extractor_stream_calls: list[int | None] = []
+
+        def _get_queries(_cfg, _instance, stream_id=None):
+            query_stream_calls.append(stream_id)
+            return [query]
+
+        def _extract(_seed: int, _sf: float, stream_id: int | None):
+            extractor_stream_calls.append(stream_id)
+            return {1: {"year": 2000}}
+
+        with (
+            patch("benchbox.core.runner.dataframe_runner._get_queries_for_benchmark", side_effect=_get_queries),
+            patch("benchbox.core.tpcds.parameter_extractor.get_tpcds_extracted_parameters", side_effect=_extract),
+        ):
+            _execute_dataframe_queries(adapter, ctx, config, benchmark_instance, monitor=None)
+
+        # Query discovery + warmup + measurement streams.
+        assert query_stream_calls == [0, 0, 1, 2]
+        # Stream-specific overrides are applied once per unique stream context.
+        assert extractor_stream_calls == [0, 1, 2]
 
 
 # =============================================================================

@@ -11,7 +11,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.platforms.base.models import PlatformInfo
 
 # Import and re-export the Databricks adapters
@@ -50,7 +50,7 @@ def _build_databricks_config(
     Returns:
         DatabaseConfig with credentials loaded and platform-specific fields at top-level
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

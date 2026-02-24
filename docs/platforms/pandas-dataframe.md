@@ -28,10 +28,10 @@ Pandas is the most widely-used Python data analysis library, with over 50 millio
 
 ```bash
 # Install Pandas DataFrame support
-uv add benchbox --extra dataframe-pandas
+uv add benchbox --extra pandas
 
 # Or with pip
-pip install "benchbox[dataframe-pandas]"
+pip install "benchbox[pandas]"
 
 # Verify installation
 python -c "import pandas; print(f'Pandas {pandas.__version__}')"

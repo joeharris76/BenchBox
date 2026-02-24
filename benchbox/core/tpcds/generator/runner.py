@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from benchbox.utils.printing import emit
 from benchbox.utils.tpc_compilation import CompilationStatus, ensure_tpc_binaries
 
 
@@ -41,7 +42,7 @@ class DsdgenRunnerMixin:
             and dsdgen_result.binary_path.exists()
         ):
             if self.verbose:
-                print(f"Using dsdgen binary: {dsdgen_result.binary_path}")
+                emit(f"Using dsdgen binary: {dsdgen_result.binary_path}")
             logger.info(f"Using dsdgen binary: {dsdgen_result.binary_path}")
             return dsdgen_result.binary_path
 
@@ -51,7 +52,7 @@ class DsdgenRunnerMixin:
 
         if dsdgen_exe.exists():
             if self.verbose:
-                print(f"Using existing dsdgen executable: {dsdgen_exe}")
+                emit(f"Using existing dsdgen executable: {dsdgen_exe}")
             # Validate the executable is actually executable
             if not os.access(dsdgen_exe, os.X_OK):
                 raise PermissionError(f"dsdgen executable at {dsdgen_exe} is not executable")
@@ -202,7 +203,7 @@ class DsdgenRunnerMixin:
 
             # Debug: Check what files were created after dsdgen completes
             if self.verbose:
-                print(f"Files after dsdgen: {list(output_dir.glob('*.dat'))}")
+                emit(f"Files after dsdgen: {list(output_dir.glob('*.dat'))}")
 
         except subprocess.CalledProcessError as e:
             error_msg = f"Failed to generate TPC-DS data with exit code {e.returncode}"

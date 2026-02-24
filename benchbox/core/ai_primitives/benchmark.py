@@ -417,7 +417,6 @@ class AIPrimitivesBenchmark(BaseBenchmark):
         Returns:
             AIBenchmarkResult with benchmark results
         """
-        # Use instance dry_run setting if not overridden
         if not dry_run:
             dry_run = self.dry_run
 
@@ -427,40 +426,50 @@ class AIPrimitivesBenchmark(BaseBenchmark):
             dry_run=dry_run,
         )
 
-        # Check platform support
         if not self.is_platform_supported(platform):
             logger.warning(f"Platform '{platform}' does not support AI functions")
             result.skipped_queries = len(self.query_manager.get_all_queries())
             return result
 
-        # Determine queries to run
+        query_ids = self._resolve_query_ids(queries, categories, platform)
+        result.total_queries = len(query_ids)
+
+        total_cost, estimates = self._prepare_cost_tracking(platform, query_ids, dry_run)
+        result.total_cost_estimated_usd = total_cost
+
+        if dry_run:
+            return self._build_dry_run_result(result, estimates)
+
+        self._execute_ai_queries(result, query_ids, connection, platform)
+        result.cost_tracker = self.cost_tracker
+        return result
+
+    def _resolve_query_ids(self, queries: list[str] | None, categories: list[str] | None, platform: str) -> list[str]:
+        """Determine which query IDs to run based on explicit list, categories, or platform defaults."""
         if queries is not None:
-            query_ids = queries
-        elif categories:
-            query_ids = []
+            return queries
+        if categories:
+            query_ids: list[str] = []
             for category in categories:
                 cat_queries = self.query_manager.get_queries_by_category(category)
                 query_ids.extend(cat_queries.keys())
-        else:
-            query_ids = list(self.query_manager.get_supported_queries(platform).keys())
+            return query_ids
+        return list(self.query_manager.get_supported_queries(platform).keys())
 
-        result.total_queries = len(query_ids)
-
-        # Estimate costs
+    def _prepare_cost_tracking(
+        self, platform: str, query_ids: list[str], dry_run: bool
+    ) -> tuple[float, list[CostEstimate]]:
+        """Estimate costs, initialize tracker, and enforce budget limits."""
         total_cost, estimates = self.estimate_cost(platform, query_ids)
-        result.total_cost_estimated_usd = total_cost
 
-        # Initialize cost tracker
         self.cost_tracker = CostTracker(platform=platform, budget_usd=self.max_cost_usd)
         for estimate in estimates:
             self.cost_tracker.add_estimate(estimate)
 
-        # Show cost warning
         if total_cost > 0:
             warning = format_cost_warning(total_cost, self.max_cost_usd or None, platform)
             logger.info(warning)
 
-        # Check budget
         if self.max_cost_usd > 0 and total_cost > self.max_cost_usd:
             logger.error(f"Estimated cost ${total_cost:.4f} exceeds budget ${self.max_cost_usd:.4f}")
             if not dry_run:
@@ -469,59 +478,53 @@ class AIPrimitivesBenchmark(BaseBenchmark):
                     "Use --dry-run to preview costs or increase --max-ai-cost."
                 )
 
-        # If dry run, return estimates only
-        if dry_run:
-            logger.info("Dry run mode - returning cost estimates only")
-            for estimate in estimates:
-                query_result = AIQueryResult(
-                    query_id=estimate.query_id,
-                    category=self.query_manager.get_query_entry(estimate.query_id).category,
-                    tokens_estimated=estimate.estimated_tokens,
-                    cost_estimated_usd=estimate.estimated_cost_usd,
-                    success=True,
-                )
-                result.query_results.append(query_result)
-            return result
+        return total_cost, estimates
 
-        # Execute queries
+    def _build_dry_run_result(self, result: AIBenchmarkResult, estimates: list[CostEstimate]) -> AIBenchmarkResult:
+        """Build result containing cost estimates only (dry run mode)."""
+        logger.info("Dry run mode - returning cost estimates only")
+        for estimate in estimates:
+            query_result = AIQueryResult(
+                query_id=estimate.query_id,
+                category=self.query_manager.get_query_entry(estimate.query_id).category,
+                tokens_estimated=estimate.estimated_tokens,
+                cost_estimated_usd=estimate.estimated_cost_usd,
+                success=True,
+            )
+            result.query_results.append(query_result)
+        return result
+
+    def _execute_ai_queries(
+        self, result: AIBenchmarkResult, query_ids: list[str], connection: Any, platform: str
+    ) -> None:
+        """Execute AI queries with budget checking and cost tracking."""
         start_time = time.perf_counter()
 
         for query_id in query_ids:
             try:
                 entry = self.query_manager.get_query_entry(query_id)
 
-                # Skip if not supported
                 if entry.skip_on and platform.lower() in entry.skip_on:
                     result.skipped_queries += 1
                     continue
 
-                # Check remaining budget
                 estimated_cost = (entry.estimated_tokens * entry.batch_size / 1000) * entry.cost_per_1k_tokens
                 if not self.cost_tracker.check_budget(estimated_cost):
                     logger.warning(f"Skipping {query_id} - would exceed budget")
                     result.skipped_queries += 1
                     continue
 
-                # Execute query
                 query_result = self.execute_query(query_id, connection, platform)
                 result.query_results.append(query_result)
 
                 if query_result.success:
                     result.successful_queries += 1
                     self.cost_tracker.record_execution(
-                        query_id,
-                        query_result.tokens_estimated,
-                        query_result.cost_estimated_usd,
-                        success=True,
+                        query_id, query_result.tokens_estimated, query_result.cost_estimated_usd, success=True
                     )
                 else:
                     result.failed_queries += 1
-                    self.cost_tracker.record_execution(
-                        query_id,
-                        0,
-                        0,
-                        success=False,
-                    )
+                    self.cost_tracker.record_execution(query_id, 0, 0, success=False)
 
             except Exception as e:
                 logger.error(f"Error executing query {query_id}: {e}")
@@ -529,9 +532,6 @@ class AIPrimitivesBenchmark(BaseBenchmark):
 
         end_time = time.perf_counter()
         result.total_execution_time_ms = (end_time - start_time) * 1000
-        result.cost_tracker = self.cost_tracker
-
-        return result
 
     def get_benchmark_info(self) -> dict[str, Any]:
         """Get information about the benchmark.

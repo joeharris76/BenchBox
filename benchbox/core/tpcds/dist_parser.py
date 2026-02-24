@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+from benchbox.utils.printing import emit
+
 
 class TPCDSDistribution:
     """Represents a single TPC-DS distribution from a .dst file."""
@@ -185,7 +187,7 @@ class TPCDSDistributionParser:
                 distributions = self.parse_file(dst_file)
                 all_distributions.update(distributions)
             except Exception as e:
-                print(f"Warning: Failed to parse {dst_file}: {e}")
+                emit(f"Warning: Failed to parse {dst_file}: {e}")
 
         return all_distributions
 
@@ -221,12 +223,12 @@ add ("Oak Grove":160, 1, 1, 0, 0, 600);
     try:
         distributions = parser.parse_file(Path(temp_file))  # pragma: no cover
         for name, dist in distributions.items():  # pragma: no cover
-            print(f"Distribution: {name}")
-            print(f"  Types: {dist.types}")
-            print(f"  Weights: {dist.weights}")
-            print(f"  Weight names: {dist.weight_names}")
-            print(f"  Entries: {len(dist.entries)}")
+            emit(f"Distribution: {name}")
+            emit(f"  Types: {dist.types}")
+            emit(f"  Weights: {dist.weights}")
+            emit(f"  Weight names: {dist.weight_names}")
+            emit(f"  Entries: {len(dist.entries)}")
             for entry in dist.entries[:3]:  # Show first 3 entries
-                print(f"    {entry['value']}: {entry['weights']}")
+                emit(f"    {entry['value']}: {entry['weights']}")
     finally:  # pragma: no cover
         os.unlink(temp_file)

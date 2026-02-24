@@ -13,6 +13,7 @@ from typing import Union
 
 from .compression import CompressionError, CompressionManager
 from .file_format import strip_compression_suffix
+from .printing import emit
 
 
 class CompressionMixin:
@@ -196,8 +197,8 @@ class CompressionMixin:
         if not report:
             return
 
-        print(f"\nCompression Report ({self.compression_type})")
-        print("=" * 50)
+        emit(f"\nCompression Report ({self.compression_type})")
+        emit("=" * 50)
 
         if verbose and len(report) > 1:
             for table_name, info in report.items():
@@ -207,22 +208,22 @@ class CompressionMixin:
                 original_mb = info["original_size"] / (1024 * 1024)
                 compressed_mb = info["compressed_size"] / (1024 * 1024)
 
-                print(f"{table_name}:")
-                print(f"  Original: {original_mb:.2f} MB")
-                print(f"  Compressed: {compressed_mb:.2f} MB")
-                print(f"  Ratio: {info['compression_ratio']:.2f}:1")
-                print(f"  Savings: {info['space_savings_percent']:.1f}%")
-                print()
+                emit(f"{table_name}:")
+                emit(f"  Original: {original_mb:.2f} MB")
+                emit(f"  Compressed: {compressed_mb:.2f} MB")
+                emit(f"  Ratio: {info['compression_ratio']:.2f}:1")
+                emit(f"  Savings: {info['space_savings_percent']:.1f}%")
+                emit()
 
         if "total" in report:
             total = report["total"]
             original_mb = total["original_size"] / (1024 * 1024)
             compressed_mb = total["compressed_size"] / (1024 * 1024)
 
-            print(f"Total Original Size: {original_mb:.2f} MB")
-            print(f"Total Compressed Size: {compressed_mb:.2f} MB")
-            print(f"Overall Compression Ratio: {total['compression_ratio']:.2f}:1")
-            print(f"Space Savings: {total['space_savings_percent']:.1f}%")
+            emit(f"Total Original Size: {original_mb:.2f} MB")
+            emit(f"Total Compressed Size: {compressed_mb:.2f} MB")
+            emit(f"Overall Compression Ratio: {total['compression_ratio']:.2f}:1")
+            emit(f"Space Savings: {total['space_savings_percent']:.1f}%")
 
     def should_use_compression(self) -> bool:
         """Check if compression should be used."""

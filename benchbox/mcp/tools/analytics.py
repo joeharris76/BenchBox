@@ -22,6 +22,7 @@ from mcp.types import ToolAnnotations
 from benchbox.core.results.exporter import ResultExporter
 from benchbox.core.results.query_normalizer import normalize_query_id
 from benchbox.mcp.errors import ErrorCode, make_error, make_not_found_error
+from benchbox.mcp.tools.path_utils import resolve_result_file_path
 from benchbox.utils.printing import get_quiet_console
 
 logger = logging.getLogger(__name__)
@@ -35,12 +36,10 @@ ANALYTICS_READONLY_ANNOTATIONS = ToolAnnotations(
     openWorldHint=False,
 )
 
-# Default results directory
-DEFAULT_RESULTS_DIR = Path("benchmark_runs/results")
 
-
-def register_analytics_tools(mcp: FastMCP) -> None:
+def register_analytics_tools(mcp: FastMCP, *, results_dir: Path) -> None:
     """Register analytics tools with the MCP server."""
+    configured_results_dir = Path(results_dir)
 
     @mcp.tool(annotations=ANALYTICS_READONLY_ANNOTATIONS)
     def analyze_results(
@@ -79,16 +78,16 @@ def register_analytics_tools(mcp: FastMCP) -> None:
                     "compare analysis requires file1 and file2 parameters",
                     suggestion="Provide both file1 and file2 for comparison",
                 )
-            return _compare_results_impl(file1, file2, threshold_percent)
+            return _compare_results_impl(file1, file2, threshold_percent, configured_results_dir)
 
         elif analysis_lower == "regressions":
-            return _detect_regressions_impl(platform, benchmark, threshold_percent, limit)
+            return _detect_regressions_impl(platform, benchmark, threshold_percent, limit, configured_results_dir)
 
         elif analysis_lower == "trends":
-            return _get_performance_trends_impl(platform, benchmark, metric, limit)
+            return _get_performance_trends_impl(platform, benchmark, metric, limit, configured_results_dir)
 
         elif analysis_lower == "aggregate":
-            return _aggregate_results_impl(platform, benchmark, group_by)
+            return _aggregate_results_impl(platform, benchmark, group_by, configured_results_dir)
 
         else:
             return make_error(
@@ -122,14 +121,8 @@ def register_analytics_tools(mcp: FastMCP) -> None:
                 details={"valid_formats": valid_formats},
             )
 
-        results_dir = DEFAULT_RESULTS_DIR
-        file_path = results_dir / result_file
-
-        if not file_path.exists():
-            if not result_file.endswith(".json"):
-                file_path = results_dir / (result_file + ".json")
-
-        if not file_path.exists():
+        file_path = resolve_result_file_path(result_file, configured_results_dir)
+        if file_path is None:
             return make_error(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 f"Result file not found: {result_file}",
@@ -137,63 +130,7 @@ def register_analytics_tools(mcp: FastMCP) -> None:
             )
 
         try:
-            with open(file_path) as f:
-                data = json.load(f)
-
-            normalized_id = normalize_query_id(query_id)
-
-            query_exec = None
-            for query_result in data.get("queries", []):
-                qid = query_result.get("id", "")
-                if normalize_query_id(qid) == normalized_id:
-                    query_exec = query_result
-                    break
-
-            if not query_exec:
-                available_ids = [str(q.get("id", "")) for q in data.get("queries", []) if q.get("id")]
-                return make_not_found_error("query", query_id, available=sorted(set(available_ids))[:20])
-
-            plans_path = file_path.with_suffix("").with_suffix(".plans.json")
-            if not plans_path.exists():
-                plans_path = Path(str(file_path).replace(".json", ".plans.json"))
-
-            if not plans_path.exists():
-                return {
-                    "status": "no_plan",
-                    "query_id": normalized_id,
-                    "message": "No query plan captured for this query",
-                    "suggestion": "Run benchmark with --capture-plans flag",
-                    "query_info": {"runtime_ms": query_exec.get("ms"), "status": query_exec.get("status")},
-                }
-
-            with open(plans_path) as plans_handle:
-                plans_data = json.load(plans_handle)
-
-            query_plan_entry = plans_data.get("queries", {}).get(normalized_id)
-            if not query_plan_entry or "plan" not in query_plan_entry:
-                return {
-                    "status": "no_plan",
-                    "query_id": normalized_id,
-                    "message": "No query plan captured for this query",
-                    "query_info": {"runtime_ms": query_exec.get("ms"), "status": query_exec.get("status")},
-                }
-
-            query_plan = query_plan_entry.get("plan")
-            response: dict[str, Any] = {
-                "status": "success",
-                "query_id": normalized_id,
-                "runtime_ms": query_exec.get("ms"),
-            }
-
-            if format_lower == "json":
-                response["plan"] = query_plan
-            elif format_lower == "summary":
-                response["summary"] = _extract_plan_summary(query_plan)
-            else:
-                response["plan_tree"] = _format_plan_tree(query_plan)
-
-            return response
-
+            return _get_query_plan_impl(file_path, result_file, query_id, format_lower)
         except json.JSONDecodeError as e:
             return make_error(
                 ErrorCode.RESOURCE_INVALID_FORMAT,
@@ -209,21 +146,129 @@ def register_analytics_tools(mcp: FastMCP) -> None:
             )
 
 
-def _compare_results_impl(file1: str, file2: str, threshold_percent: float) -> dict[str, Any]:
+def _list_result_files(results_dir: Path) -> list[Path]:
+    """List and sort result JSON files, excluding plans and tuning files."""
+    result_files = [
+        path
+        for path in results_dir.glob("*.json")
+        if not path.name.endswith(".plans.json") and not path.name.endswith(".tuning.json")
+    ]
+    return sorted(result_files, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _extract_measurement_timings(data: dict[str, Any]) -> list[float]:
+    """Extract measurement timings from result data."""
+    timings: list[float] = []
+    for query in data.get("queries", []):
+        if query.get("run_type") != "measurement":
+            continue
+        runtime = query.get("ms")
+        if runtime is not None and runtime > 0:
+            timings.append(float(runtime))
+    return timings
+
+
+def _matches_filters(
+    run_platform: str,
+    run_benchmark: str,
+    platform: str | None,
+    benchmark: str | None,
+) -> bool:
+    """Check if a run matches platform and benchmark filters."""
+    if platform and platform.lower() not in run_platform.lower():
+        return False
+    if benchmark and benchmark.lower() not in run_benchmark.lower():
+        return False
+    return True
+
+
+def _extract_run_identity(data: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
+    """Extract platform name, benchmark block, and benchmark id from result data."""
+    run_platform = data.get("platform", {}).get("name", "unknown")
+    benchmark_block = data.get("benchmark", {}) if isinstance(data.get("benchmark"), dict) else {}
+    run_benchmark = benchmark_block.get("id", "unknown")
+    return run_platform, benchmark_block, run_benchmark
+
+
+def _find_query_execution(data: dict[str, Any], normalized_id: str) -> dict | None:
+    """Find a query execution result by normalized query ID."""
+    for query_result in data.get("queries", []):
+        qid = query_result.get("id", "")
+        if normalize_query_id(qid) == normalized_id:
+            return query_result
+    return None
+
+
+def _resolve_plans_path(file_path: Path) -> Path | None:
+    """Resolve the plans file path for a result file."""
+    plans_path = file_path.with_suffix("").with_suffix(".plans.json")
+    if not plans_path.exists():
+        plans_path = Path(str(file_path).replace(".json", ".plans.json"))
+    return plans_path if plans_path.exists() else None
+
+
+def _format_plan_response(query_plan: dict, format_lower: str, normalized_id: str, runtime_ms: Any) -> dict[str, Any]:
+    """Format a query plan into the requested output format."""
+    response: dict[str, Any] = {
+        "status": "success",
+        "query_id": normalized_id,
+        "runtime_ms": runtime_ms,
+    }
+
+    if format_lower == "json":
+        response["plan"] = query_plan
+    elif format_lower == "summary":
+        response["summary"] = _extract_plan_summary(query_plan)
+    else:
+        response["plan_tree"] = _format_plan_tree(query_plan)
+
+    return response
+
+
+def _get_query_plan_impl(file_path: Path, result_file: str, query_id: str, format_lower: str) -> dict[str, Any]:
+    """Core implementation for getting a query plan."""
+    with open(file_path) as f:
+        data = json.load(f)
+
+    normalized_id = normalize_query_id(query_id)
+    query_exec = _find_query_execution(data, normalized_id)
+
+    if not query_exec:
+        available_ids = [str(q.get("id", "")) for q in data.get("queries", []) if q.get("id")]
+        return make_not_found_error("query", query_id, available=sorted(set(available_ids))[:20])
+
+    plans_path = _resolve_plans_path(file_path)
+    query_info = {"runtime_ms": query_exec.get("ms"), "status": query_exec.get("status")}
+
+    if plans_path is None:
+        return {
+            "status": "no_plan",
+            "query_id": normalized_id,
+            "message": "No query plan captured for this query",
+            "suggestion": "Run benchmark with --capture-plans flag",
+            "query_info": query_info,
+        }
+
+    with open(plans_path) as plans_handle:
+        plans_data = json.load(plans_handle)
+
+    query_plan_entry = plans_data.get("queries", {}).get(normalized_id)
+    if not query_plan_entry or "plan" not in query_plan_entry:
+        return {
+            "status": "no_plan",
+            "query_id": normalized_id,
+            "message": "No query plan captured for this query",
+            "query_info": query_info,
+        }
+
+    return _format_plan_response(query_plan_entry["plan"], format_lower, normalized_id, query_exec.get("ms"))
+
+
+def _compare_results_impl(file1: str, file2: str, threshold_percent: float, results_dir: Path) -> dict[str, Any]:
     """Compare two benchmark runs."""
-    results_dir = DEFAULT_RESULTS_DIR
     exporter = ResultExporter(anonymize=False, console=get_quiet_console())
-
-    def resolve_result_path(filename: str) -> Path | None:
-        path = results_dir / filename
-        if not path.exists() and not filename.endswith(".json"):
-            path = results_dir / (filename + ".json")
-        if not path.exists():
-            return None
-        return path
-
-    path1 = resolve_result_path(file1)
-    path2 = resolve_result_path(file2)
+    path1 = resolve_result_file_path(file1, results_dir)
+    path2 = resolve_result_file_path(file2, results_dir)
 
     if path1 is None:
         return make_error(
@@ -275,45 +320,22 @@ def _compare_results_impl(file1: str, file2: str, threshold_percent: float) -> d
     return comparison
 
 
-def _detect_regressions_impl(
+def _load_regression_runs(
+    result_files: list[Path],
     platform: str | None,
     benchmark: str | None,
-    threshold_percent: float,
     lookback_runs: int,
-) -> dict[str, Any]:
-    """Detect performance regressions across recent runs."""
-    results_dir = DEFAULT_RESULTS_DIR
-
-    if not results_dir.exists():
-        return {"status": "no_data", "message": f"No results directory found at {results_dir}", "regressions": []}
-
-    result_files = [
-        path
-        for path in results_dir.glob("*.json")
-        if not path.name.endswith(".plans.json") and not path.name.endswith(".tuning.json")
-    ]
-    if len(result_files) < 2:
-        return {
-            "status": "insufficient_data",
-            "message": f"Need at least 2 benchmark runs for comparison, found {len(result_files)}",
-            "regressions": [],
-        }
-
-    result_files = sorted(result_files, key=lambda p: p.stat().st_mtime, reverse=True)
-
+) -> list[dict[str, Any]]:
+    """Load and filter result files for regression detection."""
     runs: list[dict[str, Any]] = []
     for file_path in result_files[: lookback_runs * 2]:
         try:
             with open(file_path) as f:
                 data = json.load(f)
 
-            run_platform = data.get("platform", {}).get("name", "unknown")
-            benchmark_block = data.get("benchmark", {}) if isinstance(data.get("benchmark"), dict) else {}
-            run_benchmark = benchmark_block.get("id", "unknown")
+            run_platform, benchmark_block, run_benchmark = _extract_run_identity(data)
 
-            if platform and platform.lower() not in run_platform.lower():
-                continue
-            if benchmark and benchmark.lower() not in run_benchmark.lower():
+            if not _matches_filters(run_platform, run_benchmark, platform, benchmark):
                 continue
 
             runs.append(
@@ -334,6 +356,91 @@ def _detect_regressions_impl(
         except Exception as e:
             logger.warning(f"Could not parse result file {file_path}: {e}")
             continue
+    return runs
+
+
+def _extract_keyed_timings(run_data: dict) -> dict[str, float]:
+    """Extract query ID to timing mapping from result data."""
+    timings: dict[str, float] = {}
+    for query in run_data.get("queries", []):
+        if query.get("run_type") != "measurement":
+            continue
+        qid = str(query.get("id", ""))
+        runtime = query.get("ms")
+        if qid and runtime is not None:
+            timings[qid] = float(runtime)
+    return timings
+
+
+def _classify_query_changes(
+    older_timings: dict[str, float],
+    newer_timings: dict[str, float],
+    threshold_percent: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Classify queries as regressions, improvements, or stable."""
+    regressions: list[dict[str, Any]] = []
+    improvements: list[dict[str, Any]] = []
+    stable: list[str] = []
+
+    all_queries = set(older_timings.keys()) | set(newer_timings.keys())
+    for qid in sorted(all_queries):
+        old_time = older_timings.get(qid)
+        new_time = newer_timings.get(qid)
+
+        if old_time is None or new_time is None or old_time <= 0:
+            continue
+
+        delta_ms = new_time - old_time
+        delta_pct = (delta_ms / old_time) * 100
+
+        if delta_pct > threshold_percent:
+            regressions.append(
+                {
+                    "query_id": qid,
+                    "baseline_ms": round(old_time, 2),
+                    "current_ms": round(new_time, 2),
+                    "delta_ms": round(delta_ms, 2),
+                    "delta_percent": round(delta_pct, 1),
+                    "severity": _classify_regression_severity(delta_pct),
+                }
+            )
+        elif delta_pct < -threshold_percent:
+            improvements.append(
+                {
+                    "query_id": qid,
+                    "baseline_ms": round(old_time, 2),
+                    "current_ms": round(new_time, 2),
+                    "delta_ms": round(delta_ms, 2),
+                    "delta_percent": round(delta_pct, 1),
+                }
+            )
+        else:
+            stable.append(qid)
+
+    regressions.sort(key=lambda r: r["delta_percent"], reverse=True)
+    return regressions, improvements, stable
+
+
+def _detect_regressions_impl(
+    platform: str | None,
+    benchmark: str | None,
+    threshold_percent: float,
+    lookback_runs: int,
+    results_dir: Path,
+) -> dict[str, Any]:
+    """Detect performance regressions across recent runs."""
+    if not results_dir.exists():
+        return {"status": "no_data", "message": f"No results directory found at {results_dir}", "regressions": []}
+
+    result_files = _list_result_files(results_dir)
+    if len(result_files) < 2:
+        return {
+            "status": "insufficient_data",
+            "message": f"Need at least 2 benchmark runs for comparison, found {len(result_files)}",
+            "regressions": [],
+        }
+
+    runs = _load_regression_runs(result_files, platform, benchmark, lookback_runs)
 
     if len(runs) < 2:
         return {
@@ -346,59 +453,12 @@ def _detect_regressions_impl(
     newer_run = runs[0]
     older_run = runs[1]
 
-    def extract_timings(run_data: dict) -> dict[str, float]:
-        timings: dict[str, float] = {}
-        for query in run_data.get("queries", []):
-            if query.get("run_type") != "measurement":
-                continue
-            qid = str(query.get("id", ""))
-            runtime = query.get("ms")
-            if qid and runtime is not None:
-                timings[qid] = float(runtime)
-        return timings
+    older_timings = _extract_keyed_timings(older_run["data"])
+    newer_timings = _extract_keyed_timings(newer_run["data"])
 
-    older_timings = extract_timings(older_run["data"])
-    newer_timings = extract_timings(newer_run["data"])
-
-    regressions: list[dict[str, Any]] = []
-    improvements: list[dict[str, Any]] = []
-    stable: list[str] = []
+    regressions, improvements, stable = _classify_query_changes(older_timings, newer_timings, threshold_percent)
 
     all_queries = set(older_timings.keys()) | set(newer_timings.keys())
-    for qid in sorted(all_queries):
-        old_time = older_timings.get(qid)
-        new_time = newer_timings.get(qid)
-
-        if old_time is not None and new_time is not None and old_time > 0:
-            delta_ms = new_time - old_time
-            delta_pct = (delta_ms / old_time) * 100
-
-            if delta_pct > threshold_percent:
-                regressions.append(
-                    {
-                        "query_id": qid,
-                        "baseline_ms": round(old_time, 2),
-                        "current_ms": round(new_time, 2),
-                        "delta_ms": round(delta_ms, 2),
-                        "delta_percent": round(delta_pct, 1),
-                        "severity": _classify_regression_severity(delta_pct),
-                    }
-                )
-            elif delta_pct < -threshold_percent:
-                improvements.append(
-                    {
-                        "query_id": qid,
-                        "baseline_ms": round(old_time, 2),
-                        "current_ms": round(new_time, 2),
-                        "delta_ms": round(delta_ms, 2),
-                        "delta_percent": round(delta_pct, 1),
-                    }
-                )
-            else:
-                stable.append(qid)
-
-    regressions.sort(key=lambda r: r["delta_percent"], reverse=True)
-
     total_old = sum(older_timings.values())
     total_new = sum(newer_timings.values())
     total_delta_pct = ((total_new - total_old) / total_old * 100) if total_old > 0 else 0
@@ -432,11 +492,86 @@ def _detect_regressions_impl(
     }
 
 
+def _resolve_timestamp_str(timestamp: Any, file_path: Path) -> str:
+    """Resolve a timestamp value to an ISO format string."""
+    if timestamp:
+        try:
+            if isinstance(timestamp, str):
+                ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            else:
+                ts = datetime.fromtimestamp(timestamp)
+            return ts.isoformat()
+        except Exception:
+            return str(timestamp)
+    return datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
+
+
+def _compute_trend_direction(runs: list[dict[str, Any]]) -> tuple[str, float]:
+    """Compute trend direction and percentage from ordered data points."""
+    if len(runs) < 2:
+        return "insufficient_data", 0
+
+    first_value = runs[0]["value"]
+    last_value = runs[-1]["value"]
+    if first_value <= 0:
+        return "unknown", 0
+
+    trend_pct = ((last_value - first_value) / first_value) * 100
+    if trend_pct < -5:
+        return "improving", trend_pct
+    elif trend_pct > 5:
+        return "degrading", trend_pct
+    return "stable", trend_pct
+
+
+def _load_trend_data_point(
+    file_path: Path,
+    platform: str | None,
+    benchmark: str | None,
+    metric_lower: str,
+) -> dict[str, Any] | None:
+    """Load a single result file as a trend data point, or None if filtered/invalid."""
+    try:
+        with open(file_path) as f:
+            data = json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not parse result file {file_path}: {e}")
+        return None
+
+    run_platform = data.get("platform", {}).get("name", "unknown")
+    benchmark_block = data.get("benchmark", {}) if isinstance(data.get("benchmark"), dict) else {}
+    run_benchmark = benchmark_block.get("id", "unknown")
+
+    if platform and platform.lower() not in run_platform.lower():
+        return None
+    if benchmark and benchmark.lower() not in run_benchmark.lower():
+        return None
+
+    timings = _extract_measurement_timings(data)
+    if not timings:
+        return None
+
+    metric_value = _calculate_metric(timings, metric_lower)
+    timestamp_str = _resolve_timestamp_str(data.get("run", {}).get("timestamp"), file_path)
+
+    return {
+        "file": file_path.name,
+        "platform": run_platform,
+        "benchmark": run_benchmark,
+        "scale_factor": benchmark_block.get("scale_factor"),
+        "timestamp": timestamp_str,
+        "query_count": len(timings),
+        "metric": metric_lower,
+        "value": round(metric_value, 2),
+    }
+
+
 def _get_performance_trends_impl(
     platform: str | None,
     benchmark: str | None,
     metric: str,
     limit: int,
+    results_dir: Path,
 ) -> dict[str, Any]:
     """Get performance trends over multiple benchmark runs."""
     valid_metrics = ["geometric_mean", "p50", "p95", "p99", "total_time"]
@@ -448,77 +583,18 @@ def _get_performance_trends_impl(
             details={"valid_metrics": valid_metrics},
         )
 
-    results_dir = DEFAULT_RESULTS_DIR
     if not results_dir.exists():
         return {"status": "no_data", "message": f"No results directory found at {results_dir}", "trends": []}
 
-    result_files = [
-        path
-        for path in results_dir.glob("*.json")
-        if not path.name.endswith(".plans.json") and not path.name.endswith(".tuning.json")
-    ]
-    result_files = sorted(result_files, key=lambda p: p.stat().st_mtime, reverse=True)
+    result_files = _list_result_files(results_dir)
 
     runs: list[dict[str, Any]] = []
     for file_path in result_files:
         if len(runs) >= limit:
             break
-
-        try:
-            with open(file_path) as f:
-                data = json.load(f)
-
-            run_platform = data.get("platform", {}).get("name", "unknown")
-            benchmark_block = data.get("benchmark", {}) if isinstance(data.get("benchmark"), dict) else {}
-            run_benchmark = benchmark_block.get("id", "unknown")
-
-            if platform and platform.lower() not in run_platform.lower():
-                continue
-            if benchmark and benchmark.lower() not in run_benchmark.lower():
-                continue
-
-            timings: list[float] = []
-            for query in data.get("queries", []):
-                if query.get("run_type") != "measurement":
-                    continue
-                runtime = query.get("ms")
-                if runtime is not None and runtime > 0:
-                    timings.append(float(runtime))
-
-            if not timings:
-                continue
-
-            metric_value = _calculate_metric(timings, metric_lower)
-
-            timestamp = data.get("run", {}).get("timestamp")
-            if timestamp:
-                try:
-                    if isinstance(timestamp, str):
-                        ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    else:
-                        ts = datetime.fromtimestamp(timestamp)
-                    timestamp_str = ts.isoformat()
-                except Exception:
-                    timestamp_str = str(timestamp)
-            else:
-                timestamp_str = datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
-
-            runs.append(
-                {
-                    "file": file_path.name,
-                    "platform": run_platform,
-                    "benchmark": run_benchmark,
-                    "scale_factor": benchmark_block.get("scale_factor"),
-                    "timestamp": timestamp_str,
-                    "query_count": len(timings),
-                    "metric": metric_lower,
-                    "value": round(metric_value, 2),
-                }
-            )
-
-        except Exception as e:
-            logger.warning(f"Could not parse result file {file_path}: {e}")
-            continue
+        data_point = _load_trend_data_point(file_path, platform, benchmark, metric_lower)
+        if data_point is not None:
+            runs.append(data_point)
 
     if not runs:
         return {
@@ -529,24 +605,7 @@ def _get_performance_trends_impl(
         }
 
     runs.reverse()
-
-    if len(runs) >= 2:
-        first_value = runs[0]["value"]
-        last_value = runs[-1]["value"]
-        if first_value > 0:
-            trend_pct = ((last_value - first_value) / first_value) * 100
-            if trend_pct < -5:
-                trend_direction = "improving"
-            elif trend_pct > 5:
-                trend_direction = "degrading"
-            else:
-                trend_direction = "stable"
-        else:
-            trend_direction = "unknown"
-            trend_pct = 0
-    else:
-        trend_direction = "insufficient_data"
-        trend_pct = 0
+    trend_direction, trend_pct = _compute_trend_direction(runs)
 
     return {
         "status": "success",
@@ -563,10 +622,64 @@ def _get_performance_trends_impl(
     }
 
 
+def _resolve_date_group_key(data: dict[str, Any], file_path: Path) -> str:
+    """Resolve date-based group key from result data."""
+    timestamp = data.get("run", {}).get("timestamp", file_path.stat().st_mtime)
+    if isinstance(timestamp, str):
+        try:
+            ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            return ts.strftime("%Y-%m-%d")
+        except Exception:
+            return timestamp[:10] if len(timestamp) >= 10 else "unknown"
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+
+
+def _resolve_group_key(
+    group_by_lower: str,
+    run_platform: str,
+    run_benchmark: str,
+    data: dict[str, Any],
+    file_path: Path,
+) -> str:
+    """Resolve group key based on the grouping strategy."""
+    if group_by_lower == "platform":
+        return run_platform
+    elif group_by_lower == "benchmark":
+        return run_benchmark
+    return _resolve_date_group_key(data, file_path)
+
+
+def _compute_group_stats(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute aggregate statistics for a group of runs."""
+    all_timings = [t for run in runs for t in run["timings"]]
+    total_times = [run["total_time"] for run in runs]
+
+    return {
+        "run_count": len(runs),
+        "total_queries": len(all_timings),
+        "query_stats": {
+            "mean_ms": round(sum(all_timings) / len(all_timings), 2) if all_timings else 0,
+            "std_ms": round(_std_dev(all_timings), 2) if len(all_timings) > 1 else 0,
+            "min_ms": round(min(all_timings), 2) if all_timings else 0,
+            "max_ms": round(max(all_timings), 2) if all_timings else 0,
+            "p50_ms": round(_percentile(all_timings, 50), 2) if all_timings else 0,
+            "p95_ms": round(_percentile(all_timings, 95), 2) if all_timings else 0,
+        },
+        "run_stats": {
+            "mean_total_ms": round(sum(total_times) / len(total_times), 2) if total_times else 0,
+            "std_total_ms": round(_std_dev(total_times), 2) if len(total_times) > 1 else 0,
+            "min_total_ms": round(min(total_times), 2) if total_times else 0,
+            "max_total_ms": round(max(total_times), 2) if total_times else 0,
+        },
+        "files": [run["file"] for run in runs],
+    }
+
+
 def _aggregate_results_impl(
     platform: str | None,
     benchmark: str | None,
     group_by: str,
+    results_dir: Path,
 ) -> dict[str, Any]:
     """Aggregate multiple benchmark results into summary statistics."""
     valid_group_by = ["platform", "benchmark", "date"]
@@ -578,16 +691,10 @@ def _aggregate_results_impl(
             details={"valid_options": valid_group_by},
         )
 
-    results_dir = DEFAULT_RESULTS_DIR
     if not results_dir.exists():
         return {"status": "no_data", "message": f"No results directory found at {results_dir}", "aggregates": {}}
 
-    result_files = [
-        path
-        for path in results_dir.glob("*.json")
-        if not path.name.endswith(".plans.json") and not path.name.endswith(".tuning.json")
-    ]
-
+    result_files = _list_result_files(results_dir)
     groups: dict[str, list[dict[str, Any]]] = {}
 
     for file_path in result_files:
@@ -595,45 +702,17 @@ def _aggregate_results_impl(
             with open(file_path) as f:
                 data = json.load(f)
 
-            run_platform = data.get("platform", {}).get("name", "unknown")
-            benchmark_block = data.get("benchmark", {}) if isinstance(data.get("benchmark"), dict) else {}
-            run_benchmark = benchmark_block.get("id", "unknown")
+            run_platform, benchmark_block, run_benchmark = _extract_run_identity(data)
 
-            if platform and platform.lower() not in run_platform.lower():
-                continue
-            if benchmark and benchmark.lower() not in run_benchmark.lower():
+            if not _matches_filters(run_platform, run_benchmark, platform, benchmark):
                 continue
 
-            if group_by_lower == "platform":
-                group_key = run_platform
-            elif group_by_lower == "benchmark":
-                group_key = run_benchmark
-            else:
-                timestamp = data.get("run", {}).get("timestamp", file_path.stat().st_mtime)
-                if isinstance(timestamp, str):
-                    try:
-                        ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                        group_key = ts.strftime("%Y-%m-%d")
-                    except Exception:
-                        group_key = timestamp[:10] if len(timestamp) >= 10 else "unknown"
-                else:
-                    group_key = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
-
-            timings: list[float] = []
-            for query in data.get("queries", []):
-                if query.get("run_type") != "measurement":
-                    continue
-                runtime = query.get("ms")
-                if runtime is not None and runtime > 0:
-                    timings.append(float(runtime))
-
+            timings = _extract_measurement_timings(data)
             if not timings:
                 continue
 
-            if group_key not in groups:
-                groups[group_key] = []
-
-            groups[group_key].append(
+            group_key = _resolve_group_key(group_by_lower, run_platform, run_benchmark, data, file_path)
+            groups.setdefault(group_key, []).append(
                 {
                     "file": file_path.name,
                     "timings": timings,
@@ -655,30 +734,7 @@ def _aggregate_results_impl(
             "aggregates": {},
         }
 
-    aggregates: dict[str, dict[str, Any]] = {}
-    for group_key, runs in sorted(groups.items()):
-        all_timings = [t for run in runs for t in run["timings"]]
-        total_times = [run["total_time"] for run in runs]
-
-        aggregates[group_key] = {
-            "run_count": len(runs),
-            "total_queries": len(all_timings),
-            "query_stats": {
-                "mean_ms": round(sum(all_timings) / len(all_timings), 2) if all_timings else 0,
-                "std_ms": round(_std_dev(all_timings), 2) if len(all_timings) > 1 else 0,
-                "min_ms": round(min(all_timings), 2) if all_timings else 0,
-                "max_ms": round(max(all_timings), 2) if all_timings else 0,
-                "p50_ms": round(_percentile(all_timings, 50), 2) if all_timings else 0,
-                "p95_ms": round(_percentile(all_timings, 95), 2) if all_timings else 0,
-            },
-            "run_stats": {
-                "mean_total_ms": round(sum(total_times) / len(total_times), 2) if total_times else 0,
-                "std_total_ms": round(_std_dev(total_times), 2) if len(total_times) > 1 else 0,
-                "min_total_ms": round(min(total_times), 2) if total_times else 0,
-                "max_total_ms": round(max(total_times), 2) if total_times else 0,
-            },
-            "files": [run["file"] for run in runs],
-        }
+    aggregates = {key: _compute_group_stats(runs) for key, runs in sorted(groups.items())}
 
     return {
         "status": "success",

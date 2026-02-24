@@ -22,15 +22,7 @@ def list_tsbs_devops_queries(
     category: QueryCategory | None = None,
 ) -> list[DataFrameQuery]:
     """List TSBS DevOps DataFrame queries with optional filtering."""
-    queries = TSBS_DEVOPS_DATAFRAME_QUERIES.get_all_queries()
-
-    if family:
-        queries = [q for q in queries if q.get_impl_for_family(family) is not None]
-
-    if category:
-        queries = [q for q in queries if category in q.categories]
-
-    return queries
+    return TSBS_DEVOPS_DATAFRAME_QUERIES.list_queries(family=family, category=category)
 
 
 def register_query(query: DataFrameQuery) -> None:

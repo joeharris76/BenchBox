@@ -11,7 +11,7 @@ Example usage:
     >>> generator = RedshiftDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
     >>> ddl = generator.generate_create_table_ddl("lineitem", columns, clauses)
-    >>> print(ddl)
+    >>> emit(ddl)
     CREATE TABLE lineitem (...)
     DISTSTYLE KEY DISTKEY(l_orderkey)
     COMPOUND SORTKEY(l_shipdate, l_orderkey);
@@ -639,6 +639,7 @@ def get_ddl_generator(platform_type: str) -> BaseDDLGenerator:
     from benchbox.core.tuning.generators.azure_synapse import AzureSynapseDDLGenerator
     from benchbox.core.tuning.generators.bigquery import BigQueryDDLGenerator
     from benchbox.core.tuning.generators.clickhouse import ClickHouseDDLGenerator
+    from benchbox.core.tuning.generators.doris import DorisDDLGenerator
     from benchbox.core.tuning.generators.duckdb import DuckDBDDLGenerator
     from benchbox.core.tuning.generators.firebolt import FireboltDDLGenerator
     from benchbox.core.tuning.generators.postgresql import PostgreSQLDDLGenerator
@@ -651,6 +652,7 @@ def get_ddl_generator(platform_type: str) -> BaseDDLGenerator:
     # Map platform types to generators
     generators: dict[str, type[BaseDDLGenerator]] = {
         # Core platforms
+        "doris": DorisDDLGenerator,
         "duckdb": DuckDBDDLGenerator,
         "snowflake": SnowflakeDDLGenerator,
         "bigquery": BigQueryDDLGenerator,

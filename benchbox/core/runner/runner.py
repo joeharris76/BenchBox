@@ -8,9 +8,9 @@ used by both programmatic clients and the CLI wrapper.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
+import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -18,12 +18,6 @@ from typing import Any
 
 from benchbox.core.benchmark_loader import (
     get_benchmark_instance,
-)
-from benchbox.core.config import (
-    BenchmarkConfig,
-    DatabaseConfig,
-    RunConfig,
-    SystemProfile,
 )
 from benchbox.core.constants import (
     GENERIC_POWER_DEFAULT_MEASUREMENT_ITERATIONS,
@@ -33,13 +27,20 @@ from benchbox.core.results.models import (
     BenchmarkResults,
 )
 from benchbox.core.runner.conversion import FormatConversionOrchestrator
-from benchbox.core.schemas import ExecutionContext
+from benchbox.core.schemas import (
+    BenchmarkConfig,
+    DatabaseConfig,
+    ExecutionContext,
+    RunConfig,
+    SystemProfile,
+)
 from benchbox.core.validation import ValidationResult
 from benchbox.monitoring import PerformanceMonitor, ResourceMonitor, attach_snapshot_to_result
 from benchbox.platforms import get_platform_adapter
 from benchbox.platforms.dataframe.benchmark_mixin import DataFramePhases, DataFrameRunOptions
 from benchbox.utils.cloud_storage import create_path_handler
 from benchbox.utils.format_converters import ConversionOptions
+from benchbox.utils.printing import emit
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings
 
 logger = logging.getLogger(__name__)
@@ -237,6 +238,92 @@ def _finalize_validation_metadata(
         result.validation_status = aggregate_status
     else:
         result.validation_status = current_status
+
+    return result
+
+
+_DRIVER_STR_FIELDS = [
+    "driver_package",
+    "driver_version_requested",
+    "driver_version_resolved",
+    "driver_version_actual",
+    "driver_runtime_strategy",
+    "driver_runtime_path",
+    "driver_runtime_python_executable",
+]
+
+# Config attribute names differ from local field names for a few fields.
+_CONFIG_FIELD_MAP: dict[str, str] = {
+    "driver_version_requested": "driver_version",
+    "driver_auto_install_used": "driver_auto_install",
+}
+
+# execution_metadata fields that use setdefault (preserve existing); others overwrite.
+_EXEC_META_SETDEFAULT = {"driver_package", "driver_version_requested", "driver_auto_install_used"}
+
+
+def _apply_driver_meta_to_dicts(meta: dict[str, Any], result: BenchmarkResults) -> None:
+    """Push resolved driver metadata into execution_metadata and platform_info dicts."""
+    execution_metadata = result.execution_metadata if isinstance(result.execution_metadata, dict) else None
+    if execution_metadata is not None:
+        for field in _DRIVER_STR_FIELDS + ["driver_auto_install_used"]:
+            value = meta[field]
+            if value or field == "driver_auto_install_used":
+                if field in _EXEC_META_SETDEFAULT:
+                    execution_metadata.setdefault(field, value)
+                else:
+                    execution_metadata[field] = value
+
+    platform_info = result.platform_info if isinstance(result.platform_info, dict) else None
+    if platform_info is not None:
+        for field in _DRIVER_STR_FIELDS:
+            if meta[field]:
+                platform_info.setdefault(field, meta[field])
+
+
+def _enrich_driver_runtime_metadata(
+    result: BenchmarkResults,
+    *,
+    adapter: Any | None,
+    database_config: DatabaseConfig | None,
+) -> BenchmarkResults:
+    """Attach resolved driver runtime metadata to result objects.
+
+    Lifecycle runs can return BenchmarkResults built through benchmark helpers
+    that normalize ``platform_info`` and drop custom top-level fields. Persist
+    driver metadata explicitly on result and execution metadata to keep exports
+    consistent across all adapters.
+    """
+    meta: dict[str, Any] = dict.fromkeys(_DRIVER_STR_FIELDS)
+    meta["driver_auto_install_used"] = False
+
+    if adapter is not None:
+        for field in _DRIVER_STR_FIELDS:
+            meta[field] = getattr(adapter, field, None) or meta[field]
+        meta["driver_auto_install_used"] = getattr(adapter, "driver_auto_install_used", False)
+
+    if database_config is not None:
+        for field in _DRIVER_STR_FIELDS:
+            if not meta[field]:
+                config_attr = _CONFIG_FIELD_MAP.get(field, field)
+                meta[field] = getattr(database_config, config_attr, None)
+        # driver_version_resolved also falls back to driver_version
+        if not meta["driver_version_resolved"]:
+            meta["driver_version_resolved"] = database_config.driver_version
+        if not meta["driver_auto_install_used"]:
+            meta["driver_auto_install_used"] = database_config.driver_auto_install
+
+        resolved = meta["driver_version_resolved"]
+        if resolved and database_config.driver_version_resolved != resolved:
+            database_config.driver_version_resolved = resolved
+
+    # Apply to result object
+    for field in _DRIVER_STR_FIELDS:
+        setattr(result, field, meta[field])
+    result.driver_auto_install = meta["driver_auto_install_used"]
+
+    # Apply to execution_metadata and platform_info dicts
+    _apply_driver_meta_to_dicts(meta, result)
 
     return result
 
@@ -563,6 +650,7 @@ def run_benchmark_lifecycle(
         )
         result_obj._benchmark_id_override = benchmark_config.name
         result_obj = _finalize_validation_metadata(result_obj, validation_records)
+        result_obj = _enrich_driver_runtime_metadata(result_obj, adapter=None, database_config=database_config)
         if execution_context is not None:
             result_obj.execution_context = execution_context.model_dump()
         return result_obj
@@ -639,6 +727,7 @@ def run_benchmark_lifecycle(
                 validation_records.append(("post_load", postload_result))
 
         result_obj = _finalize_validation_metadata(result_obj, validation_records)
+        result_obj = _enrich_driver_runtime_metadata(result_obj, adapter=adapter, database_config=database_config)
         if execution_context is not None:
             result_obj.execution_context = execution_context.model_dump()
         return result_obj
@@ -662,6 +751,7 @@ def run_benchmark_lifecycle(
             execution_metadata={"mode": "setup_only"},
         )
         result_obj = _finalize_validation_metadata(result_obj, validation_records)
+        result_obj = _enrich_driver_runtime_metadata(result_obj, adapter=adapter, database_config=database_config)
         if execution_context is not None:
             result_obj.execution_context = execution_context.model_dump()
         return result_obj
@@ -747,6 +837,11 @@ def run_benchmark_lifecycle(
         resource_monitor.stop()
 
     result_with_validation = _finalize_validation_metadata(result_obj, validation_records)
+    result_with_validation = _enrich_driver_runtime_metadata(
+        result_with_validation,
+        adapter=adapter,
+        database_config=database_config,
+    )
 
     # Attach performance monitoring snapshot to result
     if monitor is not None:
@@ -823,20 +918,15 @@ def _ensure_data_generated(benchmark: Any, config: BenchmarkConfig) -> bool:
         reason = "manifest is invalid or stale" if manifest_found else "manifest is missing"
         raise RuntimeError(f"no_regenerate is set but {reason}")
 
-    # If manifest existed but failed validation, emit a debug message before regenerating
+    # If manifest existed but failed validation, warn before regenerating
     if manifest_found and not manifest_valid:
-        try:
-            log_method = getattr(benchmark, "log_verbose", None)
-            message = "⚠️ Manifest validation failed; regenerating benchmark data"
-            if callable(log_method):
-                log_method(message)
-            else:
-                print(message)
-        except Exception:  # pragma: no cover - logging should not block generation
-            pass
+        emit("⚠️ Manifest validation failed; regenerating benchmark data")
 
     # Perform generation (force_regenerate_flag is respected by skipping reuse)
+    emit("Generating benchmark data...")
+    _gen_start = time.monotonic()
     benchmark.generate_data()
+    emit(f"✅ Data generation completed in {time.monotonic() - _gen_start:.2f}s")
     return True
 
 
@@ -893,20 +983,7 @@ def _emit_manifest_reuse_message(benchmark: Any, summary: dict[str, Any]) -> Non
     timestamp = f"created {created_at}" if created_at else "existing manifest"
     table_label = "table" if table_count == 1 else "tables"
     file_label = "file" if file_count == 1 else "files"
-    message = f"🔄 Reusing benchmark data ({timestamp}; {table_count} {table_label}, {file_count} {file_label})"
-
-    # Prefer benchmark verbosity-aware logging when available
-    log_method = getattr(benchmark, "log_verbose", None)
-    if callable(log_method):
-        try:
-            log_method(message)
-            return
-        except Exception:
-            pass
-
-    # Fall back to standard output if verbose logging is not available
-    with contextlib.suppress(Exception):
-        print(message)
+    emit(f"🔄 Reusing benchmark data ({timestamp}; {table_count} {table_label}, {file_count} {file_label})")
 
 
 def _validate_manifest_if_present(benchmark: Any, config: BenchmarkConfig) -> tuple[bool, dict | None, bool]:

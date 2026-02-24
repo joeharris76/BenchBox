@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from benchbox.core.benchmark_loader import get_benchmark_instance
-from benchbox.core.config import BenchmarkConfig, SystemProfile
+from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
 
 @pytest.fixture
@@ -256,7 +256,7 @@ class TestPhasesDataReuse:
 
             # Run the lifecycle - data should be reused, not regenerated
             try:
-                from benchbox.core.config import DatabaseConfig
+                from benchbox.core.schemas import DatabaseConfig
 
                 db_config = DatabaseConfig(type="duckdb", name="test")
                 result = run_benchmark_lifecycle(

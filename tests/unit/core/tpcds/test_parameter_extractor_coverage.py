@@ -48,6 +48,81 @@ def test_extract_common_params_cd_alias_keys_and_missing_values() -> None:
     }
 
 
+def test_extract_common_params_extended_key_families() -> None:
+    sql = """
+    where d_year = 2002
+      and d_moy in (3, 4, 5)
+      and d_qoy = 2
+      and d_qoy in (1, 2, 3)
+      and d_dom = 11
+      and t_hour between 8 and 9
+      and t_hour between 19 and 20
+      and s_state in ('TX', 'OR', 'AZ')
+      and ca_city in ('Edgewood', 'Midway')
+      and s_county = 'Williamson County'
+      and i_category in ('Books', 'Music')
+      and i_color in ('slate', 'blanched')
+      and i_manager_id = 28
+      and i_class_id = 1
+      and i_category_id = 5
+      and d_month_seq = 1212
+      and s_gmt_offset = -5.0
+      and ib_lower_bound >= 38128
+    """
+    expected = {
+        "year",
+        "months",
+        "quarter",
+        "quarters",
+        "day",
+        "hours",
+        "states",
+        "cities",
+        "county",
+        "categories",
+        "colors",
+        "manager_id",
+        "class_id",
+        "category_id",
+        "d_month_seq",
+        "gmt_offset",
+        "income_band",
+    }
+    out = pe._extract_common_params(sql, expected)
+    assert out == {
+        "year": 2002,
+        "months": [3, 4, 5],
+        "quarter": 2,
+        "quarters": [1, 2, 3],
+        "day": 11,
+        "hours": [(8, 9), (19, 20)],
+        "states": ["TX", "OR", "AZ"],
+        "cities": ["Edgewood", "Midway"],
+        "county": "Williamson County",
+        "categories": ["Books", "Music"],
+        "colors": ["slate", "blanched"],
+        "manager_id": 28,
+        "class_id": 1,
+        "category_id": 5,
+        "d_month_seq": 1212,
+        "gmt_offset": -5.0,
+        "income_band": 38128,
+    }
+
+
+def test_extract_common_params_filters_to_expected_keys() -> None:
+    sql = """
+    where d_year = 2002 and d_moy = 11 and s_state = 'CA' and i_manager_id = 42 and i_color = 'red'
+    """
+    out = pe._extract_common_params(sql, {"month", "manager_id"})
+    assert out == {"month": 11, "manager_id": 42}
+
+
+def test_extract_common_params_malformed_sql_falls_back_to_empty() -> None:
+    out = pe._extract_common_params("select from ???", {"year", "hours", "states", "categories"})
+    assert out == {}
+
+
 def test_extract_tpcds_parameters_filters_and_collects(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeDSQGen:
         def generate(self, query_id: int, seed: int, scale_factor: float, stream_id: int | None) -> str:
@@ -120,3 +195,21 @@ def test_clear_cache_empties_store() -> None:
     pe._cache[(1, 1.0, None)] = {1: {"year": 1998}}
     pe.clear_cache()
     assert pe._cache == {}
+
+
+def test_supported_key_set_grows_and_is_tracked() -> None:
+    keys = pe.get_supported_parameter_keys()
+    assert {"year", "state", "hours", "categories", "city", "income_band"} <= keys
+
+
+def test_unsupported_key_set_exposes_fallback_surface() -> None:
+    keys = pe.get_unsupported_parameter_keys()
+    assert "zip_codes" in keys
+    assert "channel_type" in keys
+
+
+def test_parameter_key_coverage_inventory_is_ranked() -> None:
+    coverage = pe.get_parameter_key_coverage()
+    assert coverage
+    assert {"key", "queries", "supported", "risk"} <= set(coverage[0])
+    assert coverage == sorted(coverage, key=lambda item: (-item["queries"], item["key"]))

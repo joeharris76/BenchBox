@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from benchbox.utils.file_format import detect_compression, strip_compression_suffix
+from benchbox.utils.printing import emit
 
 logger = logging.getLogger(__name__)
 
@@ -177,49 +178,9 @@ class BenchmarkDataValidator:
         # If we have specific expectations for this benchmark
         if self.table_expectations:
             for table_name, expectation in self.table_expectations.items():
-                table_valid = True
-
-                # Resolve data files that may be compressed or chunked.
-                resolved_files = self._resolve_table_files(data_path, table_name, expectation.expected_files)
-
-                if not resolved_files:
-                    missing_tables.append(table_name)
-                    issues.append(f"Missing data files for table {table_name}")
-                    table_valid = False
-                else:
-                    # Record sizes and check empties
-                    for f in resolved_files:
-                        try:
-                            size = f.stat().st_size
-                            file_size_info[f.name] = size
-                            if size == 0 and not expectation.allow_zero_rows:
-                                table_valid = False
-                                issues.append(f"File {f.name} is empty")
-                        except Exception as e:
-                            table_valid = False
-                            issues.append(f"Failed to stat {f}: {e}")
-
-                # For TPC-H/TPC-DS, perform row count validation (best-effort for compressed formats)
-                if table_valid and self.benchmark_name in ["tpch", "tpcds"]:
-                    try:
-                        actual_rows = self._count_rows_paths(resolved_files)
-                        expected_rows = expectation.expected_rows
-
-                        # Allow for some variance in row counts (±5%)
-                        tolerance = max(1, int(expected_rows * 0.05))
-                        if actual_rows > 0 and abs(actual_rows - expected_rows) > tolerance:
-                            row_count_mismatches[table_name] = (
-                                expected_rows,
-                                actual_rows,
-                            )
-                            table_valid = False
-                            issues.append(
-                                f"Table {table_name}: expected ~{expected_rows} rows, found {actual_rows} rows"
-                            )
-                    except Exception as e:
-                        # If counting fails (e.g., zstd not available), we do not hard-fail here
-                        logger.debug(f"Row counting skipped for {table_name}: {e}")
-
+                table_valid = self._validate_single_table(
+                    data_path, table_name, expectation, missing_tables, row_count_mismatches, file_size_info, issues
+                )
                 tables_validated[table_name] = table_valid
         else:
             # For unknown benchmarks, just check if directory has any data files
@@ -263,6 +224,52 @@ class BenchmarkDataValidator:
             logger.debug(f"Skipping manifest write after scan: {e}")
 
         return result
+
+    def _validate_single_table(
+        self,
+        data_path: Path,
+        table_name: str,
+        expectation: TableExpectation,
+        missing_tables: list[str],
+        row_count_mismatches: dict[str, tuple[int, int]],
+        file_size_info: dict[str, int],
+        issues: list[str],
+    ) -> bool:
+        """Validate a single table's data files. Returns True if valid."""
+        table_valid = True
+        resolved_files = self._resolve_table_files(data_path, table_name, expectation.expected_files)
+
+        if not resolved_files:
+            missing_tables.append(table_name)
+            issues.append(f"Missing data files for table {table_name}")
+            return False
+
+        # Record sizes and check empties
+        for f in resolved_files:
+            try:
+                size = f.stat().st_size
+                file_size_info[f.name] = size
+                if size == 0 and not expectation.allow_zero_rows:
+                    table_valid = False
+                    issues.append(f"File {f.name} is empty")
+            except Exception as e:
+                table_valid = False
+                issues.append(f"Failed to stat {f}: {e}")
+
+        # For TPC-H/TPC-DS, perform row count validation
+        if table_valid and self.benchmark_name in ["tpch", "tpcds"]:
+            try:
+                actual_rows = self._count_rows_paths(resolved_files)
+                expected_rows = expectation.expected_rows
+                tolerance = max(1, int(expected_rows * 0.05))
+                if actual_rows > 0 and abs(actual_rows - expected_rows) > tolerance:
+                    row_count_mismatches[table_name] = (expected_rows, actual_rows)
+                    table_valid = False
+                    issues.append(f"Table {table_name}: expected ~{expected_rows} rows, found {actual_rows} rows")
+            except Exception as e:
+                logger.debug(f"Row counting skipped for {table_name}: {e}")
+
+        return table_valid
 
     def _count_rows_in_files(self, data_dir: Path, file_names: list[str]) -> int:
         """Count total rows across multiple data files."""
@@ -397,28 +404,28 @@ class BenchmarkDataValidator:
     def print_validation_report(self, result: DataValidationResult, verbose: bool = True) -> None:
         """Print a human-readable validation report."""
         if result.valid:
-            print("✅ Data validation PASSED")
+            emit("✅ Data validation PASSED")
             if verbose:
-                print(f"   Validated {len(result.tables_validated)} tables")
+                emit(f"   Validated {len(result.tables_validated)} tables")
                 total_size = sum(result.file_size_info.values())
-                print(f"   Total data size: {self._format_bytes(total_size)}")
+                emit(f"   Total data size: {self._format_bytes(total_size)}")
         else:
-            print("❌ Data validation FAILED")
+            emit("❌ Data validation FAILED")
 
             if result.missing_tables:
-                print(f"   Missing tables: {', '.join(result.missing_tables)}")
+                emit(f"   Missing tables: {', '.join(result.missing_tables)}")
 
             if result.row_count_mismatches:
-                print("   Row count mismatches:")
+                emit("   Row count mismatches:")
                 for table, (expected, actual) in result.row_count_mismatches.items():
-                    print(f"     {table}: expected {expected:,}, found {actual:,}")
+                    emit(f"     {table}: expected {expected:,}, found {actual:,}")
 
             if result.issues and verbose:
-                print("   Issues:")
+                emit("   Issues:")
                 for issue in result.issues[:5]:  # Show first 5 issues
-                    print(f"     - {issue}")
+                    emit(f"     - {issue}")
                 if len(result.issues) > 5:
-                    print(f"     ... and {len(result.issues) - 5} more issues")
+                    emit(f"     ... and {len(result.issues) - 5} more issues")
 
     def _format_bytes(self, size_bytes: int) -> str:
         """Format bytes into human readable format."""
@@ -470,7 +477,7 @@ class BenchmarkDataValidator:
         # If we have concrete expectations, validate them against manifest entries
         if self.table_expectations:
             for table_name, expectation in self.table_expectations.items():
-                # Use get_table_files which handles both V1 and V2 manifest formats
+                # Use get_table_files to read canonical manifest file entries
                 entries = get_table_files(manifest, table_name)
                 if not entries:
                     missing_tables.append(table_name)

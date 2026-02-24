@@ -21,7 +21,7 @@ from benchbox.tsbs_devops import TSBSDevOps
 
 from . import platforms
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 # Perform version consistency check on import (but don't fail - just warn)
 try:

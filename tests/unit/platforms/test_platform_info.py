@@ -90,7 +90,7 @@ class TestClickHousePlatformInfo(TestPlatformInfoBase):
             patch("benchbox.platforms.clickhouse.setup.ClickHouseClient"),
             patch("benchbox.platforms.clickhouse.adapter.check_platform_dependencies", return_value=(True, [])),
         ):
-            adapter = ClickHouseAdapter(mode="server", host="localhost", port=9000, database="test")
+            adapter = ClickHouseAdapter(deployment_mode="server", host="localhost", port=9000, database="test")
             platform_info = adapter.get_platform_info()
 
             self.validate_platform_info_schema(platform_info, "clickhouse")
@@ -114,7 +114,7 @@ class TestClickHousePlatformInfo(TestPlatformInfoBase):
         # Add a fake __spec__ so importlib.util.find_spec works
         fake_chdb.__spec__ = importlib.machinery.ModuleSpec("chdb", None)
         with patch.dict("sys.modules", {"chdb": fake_chdb}):
-            adapter = ClickHouseAdapter(mode="embedded", data_path="/tmp/chdb")
+            adapter = ClickHouseAdapter(deployment_mode="local", data_path="/tmp/chdb")
             platform_info = adapter.get_platform_info()
 
             self.validate_platform_info_schema(platform_info, "clickhouse")

@@ -94,7 +94,7 @@ def setup_credentials(ctx, platform, validate_only, list_platforms_flag, show_st
             return
 
     # Interactive setup
-    _interactive_setup(cred_manager, platform_lower)
+    run_platform_credential_setup(platform_lower, console, show_welcome=True)
 
 
 def _list_platforms(cred_manager: CredentialManager):
@@ -327,11 +327,6 @@ def _validate_credentials(cred_manager: CredentialManager, platform: str):
         console.print(f"[red]❌ Validation module not available: {e}[/red]")
     except Exception as e:
         console.print(f"[red]❌ Validation failed: {e}[/red]")
-
-
-def _interactive_setup(cred_manager: CredentialManager, platform: str):
-    """Run interactive setup for a platform (wrapper for backward compatibility)."""
-    run_platform_credential_setup(platform, console, show_welcome=True)
 
 
 def run_platform_credential_setup(platform: str, console_obj, show_welcome: bool = True) -> bool:

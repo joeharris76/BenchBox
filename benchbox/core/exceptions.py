@@ -51,3 +51,7 @@ class ConfigurationError(BenchBoxError):
         self.message = message
         self.details = details or {}
         super().__init__(message)
+
+
+class ReadOnlyPlatformError(BenchBoxError):
+    """Raised when a write operation is attempted on a read-only platform."""

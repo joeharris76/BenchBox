@@ -274,6 +274,8 @@ class TestCmdPull:
             force=False,
             dry_run=False,
             delete=False,
+            revspec=None,
+            max_files=100,
         )
         assert cmd_pull(args) == 1
 
@@ -288,6 +290,8 @@ class TestCmdPull:
             force=False,
             dry_run=False,
             delete=False,
+            revspec=None,
+            max_files=100,
         )
         assert cmd_pull(args) == 1
 
@@ -306,7 +310,15 @@ class TestCmdPull:
         mock_comparison.summary.return_value = "No changes"
         mock_compare.return_value = mock_comparison
 
-        args = argparse.Namespace(source=source, target=target, force=False, dry_run=False, delete=False)
+        args = argparse.Namespace(
+            source=source,
+            target=target,
+            force=False,
+            dry_run=False,
+            delete=False,
+            revspec=None,
+            max_files=100,
+        )
         assert cmd_pull(args) == 0
 
     @patch("benchbox.release.sync.compare_repos")
@@ -328,7 +340,15 @@ class TestCmdPull:
         mock_comparison.summary.return_value = "1 added"
         mock_compare.return_value = mock_comparison
 
-        args = argparse.Namespace(source=source, target=target, force=False, dry_run=True, delete=False)
+        args = argparse.Namespace(
+            source=source,
+            target=target,
+            force=False,
+            dry_run=True,
+            delete=False,
+            revspec=None,
+            max_files=100,
+        )
         assert cmd_pull(args) == 0
 
     @patch("benchbox.release.sync.compare_repos")
@@ -347,8 +367,119 @@ class TestCmdPull:
         mock_comparison.summary.return_value = "1 conflict"
         mock_compare.return_value = mock_comparison
 
-        args = argparse.Namespace(source=source, target=target, force=False, dry_run=False, delete=False)
+        args = argparse.Namespace(
+            source=source,
+            target=target,
+            force=False,
+            dry_run=False,
+            delete=False,
+            revspec=None,
+            max_files=100,
+        )
         assert cmd_pull(args) == 1
+
+    @patch("benchbox.release.sync.compare_repos")
+    def test_pull_preserves_private_gitignore(self, mock_compare, tmp_path):
+        from benchbox.release.sync import cmd_pull
+
+        source = tmp_path / "private"
+        source.mkdir()
+        target = tmp_path / "public"
+        target.mkdir()
+
+        (source / ".gitignore").write_text("private-only-pattern\n", encoding="utf-8")
+        (target / ".gitignore").write_text("public-pattern\n", encoding="utf-8")
+        (target / "new.py").write_text("print('synced')\n", encoding="utf-8")
+
+        mock_comparison = MagicMock()
+        mock_comparison.has_changes = True
+        mock_comparison.has_conflicts = False
+        mock_comparison.added = {Path("new.py")}
+        mock_comparison.modified = {Path(".gitignore")}
+        mock_comparison.deleted = set()
+        mock_comparison.conflicts = set()
+        mock_comparison.summary.return_value = "1 added, 1 modified"
+        mock_compare.return_value = mock_comparison
+
+        args = argparse.Namespace(
+            source=source,
+            target=target,
+            force=False,
+            dry_run=False,
+            delete=False,
+            revspec=None,
+            max_files=100,
+        )
+        assert cmd_pull(args) == 0
+        assert (source / "new.py").read_text(encoding="utf-8") == "print('synced')\n"
+        assert (source / ".gitignore").read_text(encoding="utf-8") == "private-only-pattern\n"
+
+    @patch("benchbox.release.sync.compare_repos")
+    def test_pull_aborts_on_large_change_set_without_force(self, mock_compare, tmp_path):
+        from benchbox.release.sync import cmd_pull
+
+        source = tmp_path / "source"
+        source.mkdir()
+        target = tmp_path / "target"
+        target.mkdir()
+
+        mock_comparison = MagicMock()
+        mock_comparison.has_changes = True
+        mock_comparison.has_conflicts = False
+        mock_comparison.added = {Path(f"f{i}.py") for i in range(80)}
+        mock_comparison.modified = {Path(f"m{i}.py") for i in range(80)}
+        mock_comparison.deleted = set()
+        mock_comparison.conflicts = set()
+        mock_comparison.summary.return_value = "160 changed"
+        mock_compare.return_value = mock_comparison
+
+        args = argparse.Namespace(
+            source=source,
+            target=target,
+            force=False,
+            dry_run=False,
+            delete=False,
+            revspec=None,
+            max_files=100,
+        )
+        assert cmd_pull(args) == 1
+
+    @patch("benchbox.release.sync.git_changed_files")
+    @patch("benchbox.release.sync.compare_repos")
+    def test_pull_revspec_filters_files(self, mock_compare, mock_changed_files, tmp_path):
+        from benchbox.release.sync import cmd_pull
+
+        source = tmp_path / "private"
+        source.mkdir()
+        target = tmp_path / "public"
+        target.mkdir()
+
+        (target / "keep.py").write_text("print('keep')\n", encoding="utf-8")
+        (target / "drop.py").write_text("print('drop')\n", encoding="utf-8")
+
+        mock_comparison = MagicMock()
+        mock_comparison.has_changes = True
+        mock_comparison.has_conflicts = False
+        mock_comparison.added = {Path("keep.py"), Path("drop.py")}
+        mock_comparison.modified = set()
+        mock_comparison.deleted = set()
+        mock_comparison.conflicts = set()
+        mock_comparison.summary.return_value = "2 added"
+        mock_compare.return_value = mock_comparison
+        mock_changed_files.return_value = {Path("keep.py")}
+
+        args = argparse.Namespace(
+            source=source,
+            target=target,
+            force=False,
+            dry_run=False,
+            delete=False,
+            revspec="HEAD~1..HEAD",
+            max_files=100,
+        )
+        assert cmd_pull(args) == 0
+        assert (source / "keep.py").exists()
+        assert not (source / "drop.py").exists()
 
 
 class TestMainArgparser:

@@ -20,6 +20,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from benchbox.platforms.base.adapter import DriverIsolationCapability
+
 from .trino import TrinoAdapter
 
 if TYPE_CHECKING:
@@ -61,6 +63,8 @@ class StarburstAdapter(TrinoAdapter):
             --platform-option username=joe@example.com/accountadmin \\
             --platform-option password=my-password
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     def __init__(self, **config):
         # Configure Starburst Galaxy defaults before calling parent __init__
@@ -284,7 +288,7 @@ def _build_starburst_config(
     Returns:
         DatabaseConfig with credentials loaded
     """
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     # Load saved credentials

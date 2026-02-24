@@ -794,6 +794,40 @@ class TPCHMaintenanceTest:
 
         return operation
 
+    def _execute_count_query(self, connection: Any, sql: str) -> int:
+        """Execute a COUNT(*) validation query and return the first value."""
+        cursor = connection.execute(sql)
+        result = cursor.fetchone()
+        return result[0] if result else 0
+
+    def _run_integrity_check(
+        self,
+        connection: Any,
+        *,
+        sql: str,
+        exception_message: str,
+        violation_message: str,
+        success_message: str | None,
+        critical_violation: bool,
+    ) -> bool:
+        """Run one integrity check and report whether a critical violation occurred."""
+        try:
+            count = self._execute_count_query(connection, sql)
+        except Exception as e:
+            if self.verbose:
+                self.logger.warning(f"{exception_message}: {e}")
+            return False
+
+        if count > 0:
+            if self.verbose:
+                log_fn = self.logger.error if critical_violation else self.logger.info
+                log_fn(violation_message.format(count=count))
+            return critical_violation
+
+        if success_message and self.verbose:
+            self.logger.info(success_message)
+        return False
+
     def validate_data_integrity(self) -> bool:
         """Validate database integrity after maintenance operations.
 
@@ -805,6 +839,51 @@ class TPCHMaintenanceTest:
         Returns:
             True if all integrity checks pass, False if any violations found
         """
+        orphaned_lineitems_sql = """
+            SELECT COUNT(*) as orphan_count
+            FROM LINEITEM l
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ORDERS o WHERE o.O_ORDERKEY = l.L_ORDERKEY
+            )
+        """
+        date_violations_sql = """
+            SELECT COUNT(*) as violation_count
+            FROM LINEITEM
+            WHERE L_SHIPDATE > L_COMMITDATE
+               OR L_COMMITDATE > L_RECEIPTDATE
+               OR L_SHIPDATE > L_RECEIPTDATE
+        """
+        orderless_lineitems_sql = """
+            SELECT COUNT(*) as orderless_count
+            FROM ORDERS o
+            WHERE NOT EXISTS (
+                SELECT 1 FROM LINEITEM l WHERE l.L_ORDERKEY = o.O_ORDERKEY
+            )
+        """
+        checks = [
+            {
+                "sql": orphaned_lineitems_sql,
+                "exception_message": "Could not check orphaned lineitems",
+                "violation_message": "Integrity violation: {count} orphaned LINEITEM records found",
+                "success_message": "✓ No orphaned LINEITEM records",
+                "critical_violation": True,
+            },
+            {
+                "sql": date_violations_sql,
+                "exception_message": "Could not check date constraints",
+                "violation_message": "Integrity violation: {count} LINEITEM date constraint violations",
+                "success_message": "✓ All LINEITEM date constraints valid",
+                "critical_violation": True,
+            },
+            {
+                "sql": orderless_lineitems_sql,
+                "exception_message": "Could not check orders without lineitems",
+                "violation_message": "Note: {count} ORDERS without LINEITEM records (may be expected)",
+                "success_message": None,
+                "critical_violation": False,
+            },
+        ]
+
         try:
             connection = self.connection_factory()
             violations_found = False
@@ -812,75 +891,16 @@ class TPCHMaintenanceTest:
             if self.verbose:
                 self.logger.info("Starting TPC-H data integrity validation")
 
-            # Check 1: No orphaned LINEITEM records (L_ORDERKEY must reference valid ORDERS)
-            orphaned_lineitems_sql = """
-                SELECT COUNT(*) as orphan_count
-                FROM LINEITEM l
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM ORDERS o WHERE o.O_ORDERKEY = l.L_ORDERKEY
+            for check in checks:
+                has_critical_violation = self._run_integrity_check(
+                    connection,
+                    sql=check["sql"],
+                    exception_message=check["exception_message"],
+                    violation_message=check["violation_message"],
+                    success_message=check["success_message"],
+                    critical_violation=check["critical_violation"],
                 )
-            """
-            try:
-                cursor = connection.execute(orphaned_lineitems_sql)
-                result = cursor.fetchone()
-                orphan_count = result[0] if result else 0
-
-                if orphan_count > 0:
-                    violations_found = True
-                    if self.verbose:
-                        self.logger.error(f"Integrity violation: {orphan_count} orphaned LINEITEM records found")
-                elif self.verbose:
-                    self.logger.info("✓ No orphaned LINEITEM records")
-            except Exception as e:
-                if self.verbose:
-                    self.logger.warning(f"Could not check orphaned lineitems: {e}")
-
-            # Check 2: Date constraints (SHIPDATE <= COMMITDATE <= RECEIPTDATE)
-            date_violations_sql = """
-                SELECT COUNT(*) as violation_count
-                FROM LINEITEM
-                WHERE L_SHIPDATE > L_COMMITDATE
-                   OR L_COMMITDATE > L_RECEIPTDATE
-                   OR L_SHIPDATE > L_RECEIPTDATE
-            """
-            try:
-                cursor = connection.execute(date_violations_sql)
-                result = cursor.fetchone()
-                date_violation_count = result[0] if result else 0
-
-                if date_violation_count > 0:
-                    violations_found = True
-                    if self.verbose:
-                        self.logger.error(
-                            f"Integrity violation: {date_violation_count} LINEITEM date constraint violations"
-                        )
-                elif self.verbose:
-                    self.logger.info("✓ All LINEITEM date constraints valid")
-            except Exception as e:
-                if self.verbose:
-                    self.logger.warning(f"Could not check date constraints: {e}")
-
-            # Check 3: All ORDERS have at least one LINEITEM
-            # (This is a business rule - every order should have line items)
-            orderless_lineitems_sql = """
-                SELECT COUNT(*) as orderless_count
-                FROM ORDERS o
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM LINEITEM l WHERE l.L_ORDERKEY = o.O_ORDERKEY
-                )
-            """
-            try:
-                cursor = connection.execute(orderless_lineitems_sql)
-                result = cursor.fetchone()
-                orderless_count = result[0] if result else 0
-
-                # This is a warning, not a critical violation (some orders may legitimately have no items yet)
-                if orderless_count > 0:
-                    if self.verbose:
-                        self.logger.info(f"Note: {orderless_count} ORDERS without LINEITEM records (may be expected)")
-            except Exception as e:
-                if self.verbose:
-                    self.logger.warning(f"Could not check orders without lineitems: {e}")
+                violations_found = violations_found or has_critical_violation
 
             connection.close()
 

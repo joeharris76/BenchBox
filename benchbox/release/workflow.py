@@ -131,26 +131,14 @@ PYPROJECT_SUBSTITUTIONS: dict[str, str] = {
 # These are private-only patterns that don't apply to public users
 # Sections are identified by their comment headers (removes until next section or EOF)
 GITIGNORE_PRIVATE_SECTIONS: Sequence[str] = (
-    # _project/ directory exclusions with marketing doc exceptions
     "# Exclude everything in _project/",
-    # _binaries/ complex include patterns (public has files directly)
-    "# Include pre-compiled TPC binaries",
-    # _sources/ include patterns
-    "# Include TPC compilation infrastructure",
-    # _sources/ build artifacts and specific excludes
-    "# TPC source build artifacts",
-    # TODO system _project/ includes
-    "# TODO system infrastructure",
-    # Firebolt-specific data directories
     "# Firebolt data and core data directories",
-    # Claude Code local settings (private dev config)
-    "# Claude Code configuration",
 )
 
 # Individual gitignore lines to remove (exact match after stripping whitespace)
 GITIGNORE_PRIVATE_LINES: Sequence[str] = (
-    "_sources/join-order-benchmark/",  # Private benchmark data
-    ".mcp.json",  # Private MCP configuration
+    "_sources/join-order-benchmark/",
+    ".mcp.json",
 )
 
 
@@ -546,29 +534,12 @@ def _should_exclude_file(rel_path: Path, root_item: str) -> bool:
     name = rel_path.name
 
     # Check global excludes
-    for pattern in GLOBAL_EXCLUDES:
-        if fnmatch.fnmatch(name, pattern):
-            return True
-        # Also check if any parent directory matches
-        for part in parts:
-            if fnmatch.fnmatch(part, pattern):
-                return True
+    if _matches_global_excludes(name, parts, fnmatch):
+        return True
 
     # Check directory-specific excludes
-    if root_item == "docs":
-        for exclude in DOCS_DIR_EXCLUDES:
-            if name == exclude or exclude in parts:
-                return True
-    elif root_item == "tests":
-        for exclude in TESTS_DIR_EXCLUDES:
-            if name == exclude or exclude in parts:
-                return True
-    elif root_item == "benchbox":
-        for exclude in HOLD_BACK_PATHS:
-            # Check if any part of the path matches the holdback pattern
-            rel_str = str(rel_path)
-            if rel_str.startswith(exclude) or exclude in parts:
-                return True
+    if _matches_dir_specific_excludes(rel_path, root_item, name, parts):
+        return True
 
     # Check forbidden patterns (data files that shouldn't be synced)
     rel_path_str = str(rel_path)
@@ -576,6 +547,38 @@ def _should_exclude_file(rel_path: Path, root_item: str) -> bool:
     if not in_allowed_path:
         for pattern in FORBIDDEN_PATTERNS:
             if fnmatch.fnmatch(name, pattern):
+                return True
+
+    return False
+
+
+def _matches_global_excludes(name: str, parts: tuple, fnmatch) -> bool:
+    """Check if a file matches any global exclude pattern."""
+    for pattern in GLOBAL_EXCLUDES:
+        if fnmatch.fnmatch(name, pattern):
+            return True
+        for part in parts:
+            if fnmatch.fnmatch(part, pattern):
+                return True
+    return False
+
+
+def _matches_dir_specific_excludes(rel_path: Path, root_item: str, name: str, parts: tuple) -> bool:
+    """Check directory-specific exclude lists based on root_item."""
+    _dir_excludes = {
+        "docs": DOCS_DIR_EXCLUDES,
+        "tests": TESTS_DIR_EXCLUDES,
+    }
+
+    excludes = _dir_excludes.get(root_item)
+    if excludes is not None:
+        for exclude in excludes:
+            if name == exclude or exclude in parts:
+                return True
+    elif root_item == "benchbox":
+        rel_str = str(rel_path)
+        for exclude in HOLD_BACK_PATHS:
+            if rel_str.startswith(exclude) or exclude in parts:
                 return True
 
     return False

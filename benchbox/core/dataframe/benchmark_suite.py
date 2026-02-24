@@ -31,7 +31,7 @@ Usage:
     # Run benchmarks across platforms
     results = suite.run_comparison(
         platforms=["polars-df", "pandas-df", "datafusion-df"],
-        data_dir="benchmark_runs/tpch/sf0.01/data",
+        data_dir="benchmark_runs/datagen/tpch_sf001",
     )
 
     # Get statistical summary
@@ -59,6 +59,7 @@ from benchbox.core.dataframe.profiling import (
     MemoryTracker,
 )
 from benchbox.core.tpch.dataframe_queries import get_tpch_dataframe_queries
+from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
 
 if TYPE_CHECKING:
     from benchbox.core.dataframe.context import DataFrameContext
@@ -416,7 +417,7 @@ class DataFrameBenchmarkSuite:
         )
         results = suite.run_comparison(
             platforms=["polars-df", "pandas-df"],
-            data_dir="benchmark_runs/tpch/sf0.01/data",
+            data_dir="benchmark_runs/datagen/tpch_sf001",
         )
         summary = suite.get_summary(results)
     """
@@ -982,7 +983,7 @@ class SQLVsDataFrameBenchmark:
         summary = benchmark.run_comparison(
             sql_platform="duckdb",
             df_platform="polars-df",
-            data_dir="benchmark_runs/tpch/sf001/data",
+            data_dir="benchmark_runs/datagen/tpch_sf001",
         )
     """
 
@@ -1096,7 +1097,6 @@ class SQLVsDataFrameBenchmark:
         """
         from benchbox.core.tpch.queries import TPCHQuery
 
-        # Get SQL query text
         query_num = int(query_id.replace("Q", ""))
         tpch_query = TPCHQuery.get_query(query_num, dialect=sql_platform)
 
@@ -1105,70 +1105,62 @@ class SQLVsDataFrameBenchmark:
             parquet_dir = data_path
 
         if sql_platform == "duckdb":
-            import duckdb
-
-            conn = duckdb.connect()
-
-            # Register tables from parquet
-            tables = ["lineitem", "orders", "customer", "supplier", "part", "partsupp", "nation", "region"]
-            for table in tables:
-                table_path = parquet_dir / f"{table}.parquet"
-                if table_path.exists():
-                    conn.execute(f"CREATE TABLE {table} AS SELECT * FROM read_parquet('{table_path}')")
-
-            # Warmup
-            for _ in range(self.config.warmup_iterations):
-                conn.execute(tpch_query.sql).fetchall()
-
-            # Benchmark
-            times = []
-            row_count = 0
-            for i in range(self.config.benchmark_iterations):
-                start = time.perf_counter()
-                result = conn.execute(tpch_query.sql).fetchall()
-                elapsed_ms = (time.perf_counter() - start) * 1000
-                times.append(elapsed_ms)
-                if i == 0:
-                    row_count = len(result)
-
-            conn.close()
-            return statistics.mean(times), row_count
-
+            conn = self._connect_duckdb(parquet_dir)
         elif sql_platform == "sqlite":
-            import sqlite3
-
-            import pandas as pd
-
-            conn = sqlite3.connect(":memory:")
-
-            # Load data via pandas
-            tables = ["lineitem", "orders", "customer", "supplier", "part", "partsupp", "nation", "region"]
-            for table in tables:
-                table_path = parquet_dir / f"{table}.parquet"
-                if table_path.exists():
-                    df = pd.read_parquet(str(table_path))
-                    df.to_sql(table, conn, index=False)
-
-            # Warmup
-            for _ in range(self.config.warmup_iterations):
-                conn.execute(tpch_query.sql).fetchall()
-
-            # Benchmark
-            times = []
-            row_count = 0
-            for i in range(self.config.benchmark_iterations):
-                start = time.perf_counter()
-                result = conn.execute(tpch_query.sql).fetchall()
-                elapsed_ms = (time.perf_counter() - start) * 1000
-                times.append(elapsed_ms)
-                if i == 0:
-                    row_count = len(result)
-
-            conn.close()
-            return statistics.mean(times), row_count
-
+            conn = self._connect_sqlite(parquet_dir)
         else:
             raise ValueError(f"Unsupported SQL platform: {sql_platform}")
+
+        try:
+            return self._warmup_and_benchmark(conn, tpch_query.sql)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _connect_duckdb(parquet_dir: Path) -> Any:
+        """Create an in-memory DuckDB connection with TPC-H tables loaded from Parquet."""
+        import duckdb
+
+        conn = duckdb.connect()
+        tables = ["lineitem", "orders", "customer", "supplier", "part", "partsupp", "nation", "region"]
+        for table in tables:
+            table_path = parquet_dir / f"{table}.parquet"
+            if table_path.exists():
+                conn.execute(f"CREATE TABLE {table} AS SELECT * FROM read_parquet('{table_path}')")
+        return conn
+
+    @staticmethod
+    def _connect_sqlite(parquet_dir: Path) -> Any:
+        """Create an in-memory SQLite connection with TPC-H tables loaded from Parquet via pandas."""
+        import sqlite3
+
+        import pandas as pd
+
+        conn = sqlite3.connect(":memory:")
+        tables = ["lineitem", "orders", "customer", "supplier", "part", "partsupp", "nation", "region"]
+        for table in tables:
+            table_path = parquet_dir / f"{table}.parquet"
+            if table_path.exists():
+                df = pd.read_parquet(str(table_path))
+                df.to_sql(table, conn, index=False)
+        return conn
+
+    def _warmup_and_benchmark(self, conn: Any, sql: str) -> tuple[float, int]:
+        """Run warmup iterations followed by timed benchmark iterations."""
+        for _ in range(self.config.warmup_iterations):
+            conn.execute(sql).fetchall()
+
+        times = []
+        row_count = 0
+        for i in range(self.config.benchmark_iterations):
+            start = time.perf_counter()
+            result = conn.execute(sql).fetchall()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            times.append(elapsed_ms)
+            if i == 0:
+                row_count = len(result)
+
+        return statistics.mean(times), row_count
 
     def _run_df_query(
         self,
@@ -1380,8 +1372,7 @@ def run_quick_comparison(
         platforms = suite.get_available_platforms()
 
     if data_dir is None:
-        sf_str = f"sf{scale_factor}".replace(".", "")
-        data_dir = Path(f"benchmark_runs/tpch/{sf_str}/data")
+        data_dir = get_benchmark_runs_datagen_path("tpch", scale_factor)
 
     return suite.run_comparison(platforms=platforms, data_dir=data_dir)
 
@@ -1417,8 +1408,7 @@ def run_sql_vs_dataframe(
     )
 
     if data_dir is None:
-        sf_str = f"sf{scale_factor}".replace(".", "")
-        data_dir = Path(f"benchmark_runs/tpch/{sf_str}/data")
+        data_dir = get_benchmark_runs_datagen_path("tpch", scale_factor)
 
     return benchmark.run_comparison(
         sql_platform=sql_platform,

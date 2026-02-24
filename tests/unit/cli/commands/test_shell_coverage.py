@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.fast, pytest.mark.unit]
 
 def test_platform_extension_mapping() -> None:
     assert mod._get_platform_from_extension(".duckdb") == "duckdb"
-    assert mod._get_platform_from_extension(".db") == "sqlite"
+    assert mod._get_platform_from_extension(".sqlite") == "sqlite"
     assert mod._get_platform_from_extension(".unknown") == "unknown"
 
 
@@ -88,7 +88,7 @@ def test_table_and_selection_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_shell_command_routing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db = tmp_path / "x.duckdb"
     db.write_text("x", encoding="utf-8")
-    sqlite = tmp_path / "x.db"
+    sqlite = tmp_path / "x.sqlite"
     sqlite.write_text("x", encoding="utf-8")
 
     calls = {}

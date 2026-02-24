@@ -66,7 +66,7 @@ examples_dir = Path(__file__).parent.parent.parent.parent / "examples"
 sys.path.insert(0, str(examples_dir))
 import unified_runner  # noqa: E402
 
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
 
 
 class TestUnifiedRunner:
@@ -126,21 +126,21 @@ class TestUnifiedRunner:
 
         # Test that main returns 0 when --list-platforms is used
         with patch("sys.argv", ["unified_runner.py", "--list-platforms"]):
-            with patch("builtins.print") as mock_print:
+            with patch("benchbox.core.results.display.emit") as mock_emit:
                 result = unified_runner.main()
                 assert result == 0
                 # Check that platform information is printed
-                assert any("duckdb" in str(call) for call in mock_print.call_args_list)
+                assert any("duckdb" in str(call) for call in mock_emit.call_args_list)
 
     def test_list_benchmarks_functionality(self):
         """Test --list-benchmarks functionality."""
         # Test that main returns 0 when --list-benchmarks is used
         with patch("sys.argv", ["unified_runner.py", "--list-benchmarks"]):
-            with patch("builtins.print") as mock_print:
+            with patch("benchbox.core.results.display.emit") as mock_emit:
                 result = unified_runner.main()
                 assert result == 0
                 # Check that benchmark information is printed
-                calls = [str(call) for call in mock_print.call_args_list]
+                calls = [str(call) for call in mock_emit.call_args_list]
                 assert any("tpch" in call for call in calls)
                 assert any("tpcds" in call for call in calls)
                 assert any("Available benchmarks" in call for call in calls)

@@ -41,7 +41,7 @@ class TPCHavoc(BaseBenchmark):
         >>>
         >>> # Get variant description
         >>> desc = benchmark.get_variant_description(query_id=1, variant_id=1)
-        >>> print(desc)  # "Join order permutation: customers first"
+        >>> emit(desc)  # "Join order permutation: customers first"
         >>>
         >>> # Export all variants
         >>> benchmark.export_variant_queries(output_dir="./queries")

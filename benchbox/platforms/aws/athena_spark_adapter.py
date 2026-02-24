@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     )
 
 from benchbox.core.exceptions import ConfigurationError
-from benchbox.platforms.base import PlatformAdapter
+from benchbox.platforms.base import DriverIsolationCapability, PlatformAdapter
 from benchbox.platforms.base.cloud_spark import (
     CloudSparkConfigMixin,
     CloudSparkStaging,
@@ -138,6 +138,8 @@ class AthenaSparkAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdapte
     - Minimum: 1 DPU
     - Billed per session duration
     """
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     # CloudSparkConfigMixin: Uses EMR config as base for Athena Spark
     cloud_platform = CloudPlatform.EMR
@@ -266,6 +268,7 @@ class AthenaSparkAdapter(CloudSparkConfigMixin, SparkTuningMixin, PlatformAdapte
             "region": self.region,
             "workgroup": self.workgroup,
             "engine_version": self.engine_version,
+            "engine_version_source": "config",
             "supports_sql": True,
             "supports_dataframe": True,
             "billing_model": "DPU-hour",

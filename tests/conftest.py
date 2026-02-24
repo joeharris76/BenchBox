@@ -7,6 +7,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import os
 import tempfile
+import warnings
 from collections.abc import Generator, Iterable
 from contextlib import ExitStack
 from datetime import datetime
@@ -15,6 +16,16 @@ from typing import Any, Optional
 from unittest.mock import patch
 
 import pytest
+
+# Sphinx 11 deprecations in third-party extensions (sphinx_tags, myst_parser, ablog, napoleon).
+# Guarded because older Sphinx versions (e.g. on Python 3.10) lack this class,
+# and --strict-config in pytest.ini would abort on an unresolvable category.
+try:
+    from sphinx.deprecation import RemovedInSphinx11Warning
+
+    warnings.filterwarnings("ignore", category=RemovedInSphinx11Warning)
+except (ImportError, AttributeError):
+    pass
 
 from benchbox.core.results.models import BenchmarkResults
 
@@ -140,6 +151,10 @@ SLOW_SPEED_PATTERNS = frozenset(
         "tests/unit/platforms/test_platform_info.py",
         # CLI power/throughput tests spawn subprocesses (~10-15s)
         "tests/unit/cli/test_cli_power_throughput.py",
+        # TPC-DS integration tests run dsdgen at SF 1.0 (minimum, takes several minutes)
+        "tests/integration/test_tpcds_query_generation.py",
+        # Sphinx docs build takes several minutes
+        "tests/docs/",
     }
 )
 
@@ -167,8 +182,6 @@ MEDIUM_SPEED_PATTERNS = frozenset(
         "tests/unit/test_release_infrastructure.py",
         # Query generation preflight invokes dsqgen
         "tests/unit/test_query_generation_preflight.py",
-        # Cloud storage tests have network-like operations
-        "tests/unit/utils/test_cloud_storage.py",
         # BigQuery staging root tests
         "tests/unit/platforms/test_bigquery_staging_root.py",
         # Plan capture tests have timeouts
@@ -224,7 +237,8 @@ def pytest_collection_modifyitems(config, items) -> None:
                 marker_names.add("performance")
 
         # Speed markers with pattern-based classification
-        if not {"fast", "medium", "slow"} & marker_names:
+        # stress is also a terminal speed marker — don't add a second one
+        if not {"fast", "medium", "slow", "stress"} & marker_names:
             # First check if this path matches known slow/medium patterns
             speed_marker = _get_speed_marker_for_path(test_path)
 

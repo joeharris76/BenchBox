@@ -11,8 +11,9 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from benchbox.core.dataframe.tuning.types import DataFrameTuningType
 from benchbox.core.dataframe.tuning.write_config import DataFrameWriteConfiguration
@@ -499,65 +500,42 @@ class DataFrameTuningConfiguration:
             metadata=TuningMetadata.from_dict(data["_metadata"]) if "_metadata" in data else None,
         )
 
+    # (predicate_fn, DataFrameTuningType) — checked by get_enabled_settings.
+    _SETTING_CHECKS: ClassVar[list[tuple[Callable[[DataFrameTuningConfiguration], bool], DataFrameTuningType]]] = [
+        # Parallelism
+        (lambda s: s.parallelism.thread_count is not None, DataFrameTuningType.THREAD_COUNT),
+        (lambda s: s.parallelism.worker_count is not None, DataFrameTuningType.WORKER_COUNT),
+        (lambda s: s.parallelism.threads_per_worker is not None, DataFrameTuningType.THREADS_PER_WORKER),
+        # Memory
+        (lambda s: s.memory.memory_limit is not None, DataFrameTuningType.MEMORY_LIMIT),
+        (lambda s: s.memory.chunk_size is not None, DataFrameTuningType.CHUNK_SIZE),
+        (lambda s: s.memory.spill_to_disk, DataFrameTuningType.SPILL_TO_DISK),
+        (lambda s: not s.memory.rechunk_after_filter, DataFrameTuningType.RECHUNK),
+        # Execution
+        (lambda s: s.execution.streaming_mode, DataFrameTuningType.STREAMING_MODE),
+        (lambda s: s.execution.engine_affinity is not None, DataFrameTuningType.ENGINE_AFFINITY),
+        (lambda s: not s.execution.lazy_evaluation, DataFrameTuningType.LAZY_EVALUATION),
+        # Data types
+        (lambda s: s.data_types.dtype_backend != "numpy_nullable", DataFrameTuningType.DTYPE_BACKEND),
+        (lambda s: s.data_types.enable_string_cache, DataFrameTuningType.STRING_CACHE),
+        # I/O
+        (lambda s: s.io.memory_pool != "default", DataFrameTuningType.MEMORY_POOL),
+        (lambda s: s.io.memory_map, DataFrameTuningType.MEMORY_MAP),
+        (lambda s: not s.io.pre_buffer, DataFrameTuningType.PRE_BUFFER),
+        (lambda s: s.io.row_group_size is not None, DataFrameTuningType.ROW_GROUP_SIZE),
+        # GPU
+        (lambda s: s.gpu.enabled, DataFrameTuningType.GPU_DEVICE),
+        (lambda s: s.gpu.enabled and not s.gpu.spill_to_host, DataFrameTuningType.GPU_SPILL_TO_HOST),
+        (lambda s: s.gpu.enabled and s.gpu.pool_type != "default", DataFrameTuningType.GPU_POOL_TYPE),
+    ]
+
     def get_enabled_settings(self) -> set[DataFrameTuningType]:
         """Get set of tuning types that have non-default values.
 
         Returns:
             Set of DataFrameTuningType values that are configured
         """
-        enabled: set[DataFrameTuningType] = set()
-
-        # Parallelism
-        if self.parallelism.thread_count is not None:
-            enabled.add(DataFrameTuningType.THREAD_COUNT)
-        if self.parallelism.worker_count is not None:
-            enabled.add(DataFrameTuningType.WORKER_COUNT)
-        if self.parallelism.threads_per_worker is not None:
-            enabled.add(DataFrameTuningType.THREADS_PER_WORKER)
-
-        # Memory
-        if self.memory.memory_limit is not None:
-            enabled.add(DataFrameTuningType.MEMORY_LIMIT)
-        if self.memory.chunk_size is not None:
-            enabled.add(DataFrameTuningType.CHUNK_SIZE)
-        if self.memory.spill_to_disk:
-            enabled.add(DataFrameTuningType.SPILL_TO_DISK)
-        if not self.memory.rechunk_after_filter:  # Non-default is False
-            enabled.add(DataFrameTuningType.RECHUNK)
-
-        # Execution
-        if self.execution.streaming_mode:
-            enabled.add(DataFrameTuningType.STREAMING_MODE)
-        if self.execution.engine_affinity is not None:
-            enabled.add(DataFrameTuningType.ENGINE_AFFINITY)
-        if not self.execution.lazy_evaluation:  # Non-default is False
-            enabled.add(DataFrameTuningType.LAZY_EVALUATION)
-
-        # Data types
-        if self.data_types.dtype_backend != "numpy_nullable":
-            enabled.add(DataFrameTuningType.DTYPE_BACKEND)
-        if self.data_types.enable_string_cache:
-            enabled.add(DataFrameTuningType.STRING_CACHE)
-
-        # I/O
-        if self.io.memory_pool != "default":
-            enabled.add(DataFrameTuningType.MEMORY_POOL)
-        if self.io.memory_map:
-            enabled.add(DataFrameTuningType.MEMORY_MAP)
-        if not self.io.pre_buffer:  # Non-default is False
-            enabled.add(DataFrameTuningType.PRE_BUFFER)
-        if self.io.row_group_size is not None:
-            enabled.add(DataFrameTuningType.ROW_GROUP_SIZE)
-
-        # GPU
-        if self.gpu.enabled:
-            enabled.add(DataFrameTuningType.GPU_DEVICE)
-        if self.gpu.enabled and not self.gpu.spill_to_host:
-            enabled.add(DataFrameTuningType.GPU_SPILL_TO_HOST)
-        if self.gpu.enabled and self.gpu.pool_type != "default":
-            enabled.add(DataFrameTuningType.GPU_POOL_TYPE)
-
-        return enabled
+        return {tt for check, tt in self._SETTING_CHECKS if check(self)}
 
     def is_default(self) -> bool:
         """Check if all configuration values are at their defaults.

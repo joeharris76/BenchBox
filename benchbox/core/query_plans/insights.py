@@ -91,6 +91,26 @@ class PlanAnalysisResult:
         }
 
 
+def _get_join_complexity(op: LogicalOperator) -> int:
+    """Return join complexity weight for the given operator."""
+    if op.join_type == JoinType.CROSS:
+        return 3
+    if op.join_type in (JoinType.FULL, JoinType.ANTI):
+        return 2
+    return 1
+
+
+def _classify_complexity_level(overall_score: int) -> str:
+    """Classify numeric complexity score into a named level."""
+    if overall_score < 20:
+        return "low"
+    if overall_score < 50:
+        return "medium"
+    if overall_score < 80:
+        return "high"
+    return "very_high"
+
+
 def compute_complexity_score(plan: QueryPlanDAG) -> PlanComplexityScore:
     """
     Compute complexity score from plan structure.
@@ -106,34 +126,26 @@ def compute_complexity_score(plan: QueryPlanDAG) -> PlanComplexityScore:
     """
     score = PlanComplexityScore()
 
+    # Dispatch map: operator type -> score field incrementer
+    _counter_map = {
+        LogicalOperatorType.AGGREGATE: "aggregation_count",
+        LogicalOperatorType.SCAN: "scan_count",
+        LogicalOperatorType.FILTER: "filter_count",
+        LogicalOperatorType.SORT: "sort_count",
+    }
+
     def analyze_node(op: LogicalOperator, depth: int) -> None:
         score.total_operators += 1
         score.max_tree_depth = max(score.max_tree_depth, depth)
 
         if op.operator_type == LogicalOperatorType.JOIN:
             score.join_count += 1
-            # Cross joins are more complex
-            if op.join_type == JoinType.CROSS:
-                score.join_complexity += 3
-            elif op.join_type in (JoinType.FULL, JoinType.ANTI):
-                score.join_complexity += 2
-            else:
-                score.join_complexity += 1
-
-        elif op.operator_type == LogicalOperatorType.AGGREGATE:
-            score.aggregation_count += 1
-
-        elif op.operator_type == LogicalOperatorType.SCAN:
-            score.scan_count += 1
-
-        elif op.operator_type == LogicalOperatorType.FILTER:
-            score.filter_count += 1
-
-        elif op.operator_type == LogicalOperatorType.SORT:
-            score.sort_count += 1
-
+            score.join_complexity += _get_join_complexity(op)
         elif op.operator_type == LogicalOperatorType.SUBQUERY:
             score.subquery_depth = max(score.subquery_depth, 1)
+        elif op.operator_type in _counter_map:
+            field_name = _counter_map[op.operator_type]
+            setattr(score, field_name, getattr(score, field_name) + 1)
 
         for child in op.children:
             analyze_node(child, depth + 1)
@@ -153,15 +165,7 @@ def compute_complexity_score(plan: QueryPlanDAG) -> PlanComplexityScore:
         ),
     )
 
-    # Determine complexity level
-    if score.overall_score < 20:
-        score.complexity_level = "low"
-    elif score.overall_score < 50:
-        score.complexity_level = "medium"
-    elif score.overall_score < 80:
-        score.complexity_level = "high"
-    else:
-        score.complexity_level = "very_high"
+    score.complexity_level = _classify_complexity_level(score.overall_score)
 
     return score
 

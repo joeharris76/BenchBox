@@ -169,7 +169,7 @@ class TestFireboltCloudMode:
             )
 
             assert adapter.url == "http://localhost:3473"
-            assert adapter.mode == "core"
+            assert adapter.deployment_mode == "core"
 
     def test_core_mode_inferred_default_url(self):
         """Core mode is inferred with default URL when only URL provided."""
@@ -190,7 +190,7 @@ class TestFireboltCloudMode:
             adapter = FireboltAdapter(url="http://localhost:3473")
 
             assert adapter.url == "http://localhost:3473"
-            assert adapter.mode == "core"
+            assert adapter.deployment_mode == "core"
 
     def test_invalid_deployment_mode(self):
         """Invalid deployment mode raises error."""

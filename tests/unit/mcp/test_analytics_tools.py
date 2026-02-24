@@ -5,11 +5,8 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-import json
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,7 +24,7 @@ class TestGetQueryPlanTool:
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
         # Get the registered tool function
         tools = list(mcp._tool_manager._tools.values())
@@ -48,7 +45,7 @@ class TestGetQueryPlanTool:
             from benchbox.mcp.tools.analytics import register_analytics_tools
 
             mcp = FastMCP("test")
-            register_analytics_tools(mcp)
+            register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
             tools = list(mcp._tool_manager._tools.values())
             get_query_plan = next(t for t in tools if t.name == "get_query_plan")
@@ -66,7 +63,7 @@ class TestGetQueryPlanTool:
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
         tools = list(mcp._tool_manager._tools.values())
         get_query_plan = next(t for t in tools if t.name == "get_query_plan")
@@ -80,21 +77,19 @@ class TestGetQueryPlanTool:
 class TestAnalyzeResultsRegressions:
     """Tests for analyze_results with analysis='regressions'."""
 
-    def test_no_results_directory_returns_no_data(self):
+    def test_no_results_directory_returns_no_data(self, tmp_path):
         """Test that missing results directory returns no_data status."""
         from mcp.server.fastmcp import FastMCP
 
-        from benchbox.mcp.tools.analytics import DEFAULT_RESULTS_DIR, register_analytics_tools
+        from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=tmp_path / "nonexistent")
 
         tools = list(mcp._tool_manager._tools.values())
         analyze_results = next(t for t in tools if t.name == "analyze_results")
 
-        # Mock the results directory to not exist
-        with patch.object(Path, "exists", return_value=False):
-            result = analyze_results.fn(analysis="regressions")
+        result = analyze_results.fn(analysis="regressions")
 
         assert result["status"] in ["no_data", "insufficient_data"]
 
@@ -105,7 +100,7 @@ class TestAnalyzeResultsRegressions:
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
         tools = list(mcp._tool_manager._tools.values())
         analyze_results = next(t for t in tools if t.name == "analyze_results")
@@ -127,7 +122,7 @@ class TestAnalyzeResultsTrends:
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
         tools = list(mcp._tool_manager._tools.values())
         analyze_results = next(t for t in tools if t.name == "analyze_results")
@@ -146,7 +141,7 @@ class TestAnalyzeResultsTrends:
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
         tools = list(mcp._tool_manager._tools.values())
         analyze_results = next(t for t in tools if t.name == "analyze_results")
@@ -158,21 +153,19 @@ class TestAnalyzeResultsTrends:
             if "error" in result:
                 assert result.get("error_code") != "VALIDATION_ERROR"
 
-    def test_no_results_returns_no_data(self):
+    def test_no_results_returns_no_data(self, tmp_path):
         """Test that missing results returns appropriate status."""
         from mcp.server.fastmcp import FastMCP
 
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=tmp_path / "nonexistent")
 
         tools = list(mcp._tool_manager._tools.values())
         analyze_results = next(t for t in tools if t.name == "analyze_results")
 
-        # Use a non-existent directory
-        with patch("benchbox.mcp.tools.analytics.DEFAULT_RESULTS_DIR", Path("/nonexistent")):
-            result = analyze_results.fn(analysis="trends")
+        result = analyze_results.fn(analysis="trends")
 
         assert result["status"] in ["no_data", "no_matching_data"]
 
@@ -187,7 +180,7 @@ class TestAnalyzeResultsAggregate:
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
         tools = list(mcp._tool_manager._tools.values())
         analyze_results = next(t for t in tools if t.name == "analyze_results")
@@ -206,7 +199,7 @@ class TestAnalyzeResultsAggregate:
         from benchbox.mcp.tools.analytics import register_analytics_tools
 
         mcp = FastMCP("test")
-        register_analytics_tools(mcp)
+        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
 
         tools = list(mcp._tool_manager._tools.values())
         analyze_results = next(t for t in tools if t.name == "analyze_results")

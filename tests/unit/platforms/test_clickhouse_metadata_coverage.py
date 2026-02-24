@@ -11,8 +11,8 @@ pytestmark = pytest.mark.fast
 
 
 class DummyClickHouse(ClickHouseMetadataMixin):
-    def __init__(self, mode="local"):
-        self.mode = mode
+    def __init__(self, deployment_mode="local"):
+        self.deployment_mode = deployment_mode
         self.data_path = "/tmp/ch"
         self.host = "localhost"
         self.port = 9000
@@ -23,30 +23,29 @@ class DummyClickHouse(ClickHouseMetadataMixin):
 
 class TestClickHouseMetadataCoverage:
     def test_platform_name_and_target_dialect(self):
-        assert DummyClickHouse(mode="local").platform_name == "ClickHouse (Local)"
-        assert DummyClickHouse(mode="server").get_target_dialect() == "clickhouse"
+        assert DummyClickHouse(deployment_mode="local").platform_name == "ClickHouse (Local)"
+        assert DummyClickHouse(deployment_mode="server").get_target_dialect() == "clickhouse"
 
     def test_get_database_path_variants(self, tmp_path):
-        adapter = DummyClickHouse(mode="local")
+        adapter = DummyClickHouse(deployment_mode="local")
 
         assert adapter.get_database_path(database_path="/tmp/db.duckdb").endswith(".chdb")
         assert adapter.get_database_path(database_path="/tmp/db").endswith(".chdb")
 
-        fallback = adapter.get_database_path(database_name="bench_local")
-        assert fallback.endswith("bench_local.chdb")
+        assert adapter.get_database_path(database_name="bench_local") is None
 
-        server_adapter = DummyClickHouse(mode="server")
+        server_adapter = DummyClickHouse(deployment_mode="server")
         assert server_adapter.get_database_path(database_path="/tmp/db.duckdb") is None
 
     def test_get_platform_info_local_no_connection(self):
-        adapter = DummyClickHouse(mode="local")
+        adapter = DummyClickHouse(deployment_mode="local")
         info = adapter.get_platform_info(connection=None)
         assert info["platform_type"] == "clickhouse"
         assert info["platform_version"] is None
-        assert info["configuration"]["mode"] == "local"
+        assert info["configuration"]["deployment_mode"] == "local"
 
     def test_get_platform_info_local_connection(self):
-        adapter = DummyClickHouse(mode="local")
+        adapter = DummyClickHouse(deployment_mode="local")
 
         class LocalConn:
             def query(self, _sql):
@@ -56,7 +55,7 @@ class TestClickHouseMetadataCoverage:
         assert info["platform_version"] == "24.10.1.1234"
 
     def test_get_platform_info_server_connection(self):
-        adapter = DummyClickHouse(mode="server")
+        adapter = DummyClickHouse(deployment_mode="server")
 
         class Cursor:
             def __init__(self):

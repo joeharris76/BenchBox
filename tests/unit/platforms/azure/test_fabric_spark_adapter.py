@@ -358,11 +358,13 @@ class TestFabricSparkAdapterDataLoading:
 
                 import tempfile
 
+                mock_benchmark = MagicMock()
+                mock_benchmark.tables = {"lineitem": None, "orders": None}
+
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    adapter.load_data(
-                        tables=["lineitem", "orders"],
-                        source_dir=tmpdir,
-                    )
+                    from pathlib import Path
+
+                    adapter.load_data(mock_benchmark, None, Path(tmpdir))
 
                     # Should not call upload_tables since tables exist
                     mock_staging_instance.upload_tables.assert_not_called()
@@ -394,7 +396,7 @@ class TestFabricSparkAdapterTuning:
                 lakehouse_id="lakehouse-xyz",
             )
 
-            adapter.configure_for_benchmark("tpch", scale_factor=10.0)
+            adapter.configure_for_benchmark(None, "tpch", scale_factor=10.0)
 
             assert adapter._benchmark_type == "tpch"
             assert adapter._scale_factor == 10.0
@@ -423,7 +425,7 @@ class TestFabricSparkAdapterTuning:
                 lakehouse_id="lakehouse-xyz",
             )
 
-            adapter.configure_for_benchmark("tpcds", scale_factor=100.0)
+            adapter.configure_for_benchmark(None, "tpcds", scale_factor=100.0)
 
             assert adapter._benchmark_type == "tpcds"
             assert adapter._scale_factor == 100.0

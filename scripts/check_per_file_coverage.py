@@ -17,7 +17,10 @@ from pathlib import Path
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover
-    tomllib = None  # type: ignore[assignment]
+    try:
+        import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)

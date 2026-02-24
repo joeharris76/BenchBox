@@ -74,8 +74,11 @@ jobs:
         if [ -d "docs/_build/html/blog" ]; then
           cp -R docs/_build/html/blog/* site/blog/
         fi
-        # Copy _static assets to site root for blog pages (they reference ../_static/)
+        # Copy _static and _images assets to site root for blog pages (they reference ../_static/ and ../_images/)
         cp -R docs/_build/html/_static site/_static
+        if [ -d "docs/_build/html/_images" ]; then
+          cp -R docs/_build/html/_images site/_images
+        fi
         # Copy CNAME if it exists
         [ -f docs/CNAME ] && cp docs/CNAME site/CNAME || true
         touch site/.nojekyll

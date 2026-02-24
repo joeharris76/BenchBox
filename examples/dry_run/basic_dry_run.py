@@ -16,10 +16,11 @@ Licensed under the MIT License.
 
 from pathlib import Path
 
+from benchbox.cli.types import BenchmarkConfig
+
 from benchbox.cli.database import DatabaseConfig
 from benchbox.cli.dryrun import DryRunExecutor
 from benchbox.cli.system import SystemProfiler
-from benchbox.cli.types import BenchmarkConfig
 
 
 def main():

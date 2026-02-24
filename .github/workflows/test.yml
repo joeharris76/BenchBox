@@ -56,6 +56,7 @@ jobs:
         run: |
           # -p pytest_cov re-enables coverage plugin (disabled by default in pytest.ini)
           uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=xml --cov-report=term-missing --cov-fail-under=50
+          uv run -- python scripts/check_module_coverage.py --coverage-xml coverage.xml --threshold 50
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
@@ -118,6 +119,7 @@ jobs:
   # Full integration test suite - runs on push to main or with label
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-integration'))
     steps:
       - name: Checkout code
@@ -137,7 +139,7 @@ jobs:
 
       - name: Run integration tests
         run: |
-          uv run -- python -m pytest tests -m "integration and not slow" --tb=short --maxfail=5
+          uv run -- python -m pytest tests/integration -m "integration and not slow and not stress" --tb=short --maxfail=5 --timeout=300
 
   # Package build and install test
   test-package:

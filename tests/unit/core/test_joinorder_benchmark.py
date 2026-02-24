@@ -5,8 +5,8 @@ from datetime import datetime
 import pytest
 
 from benchbox.core.benchmark_loader import get_benchmark_instance
-from benchbox.core.config import BenchmarkConfig, SystemProfile
 from benchbox.core.joinorder.benchmark import JoinOrderBenchmark
+from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
 pytestmark = pytest.mark.fast
 

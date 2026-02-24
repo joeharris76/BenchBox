@@ -29,12 +29,15 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from typing import Any, Optional
 
+from benchbox.core.query_manager import ParameterizedQueryManager
+from benchbox.utils.printing import emit
+
 from .query_analytics import TPCDIAnalyticalQueries
 from .query_etl import TPCDIETLQueries
 from .query_validation import TPCDIValidationQueries
 
 
-class TPCDIQueryManager:
+class TPCDIQueryManager(ParameterizedQueryManager):
     """Comprehensive manager for TPC-DI benchmark queries.
 
     This manager provides a unified interface to all TPC-DI queries including:
@@ -53,15 +56,16 @@ class TPCDIQueryManager:
         self.analytical_queries = TPCDIAnalyticalQueries()
         self.etl_queries = TPCDIETLQueries()
 
-        # Load original queries for backward compatibility
-        self._original_queries = self._load_original_queries()
-        self._original_query_metadata = self._load_original_query_metadata()
+        # Load base validation and analytical queries.
+        self._base_queries = self._load_base_queries()
+        self._queries = self._base_queries
+        self._base_query_metadata = self._load_base_query_metadata()
 
         # Build comprehensive query catalog
         self._all_queries = self._build_comprehensive_catalog()
         self._all_metadata = self._build_comprehensive_metadata()
 
-    def _load_original_queries(self) -> dict[str, str]:
+    def _load_base_queries(self) -> dict[str, str]:
         """Load all TPC-DI validation and analytical queries.
 
         Returns:
@@ -194,7 +198,7 @@ LIMIT {limit_rows};
 
         return queries
 
-    def _load_original_query_metadata(self) -> dict[str, dict[str, Any]]:
+    def _load_base_query_metadata(self) -> dict[str, dict[str, Any]]:
         """Load metadata for all TPC-DI queries including dependencies.
 
         Returns:
@@ -268,8 +272,8 @@ LIMIT {limit_rows};
         """
         catalog = {}
 
-        # Include original queries for backward compatibility
-        catalog.update(self._original_queries)
+        # Include base queries.
+        catalog.update(self._base_queries)
 
         # Add extended validation queries
         catalog.update(self.validation_queries.get_all_queries())
@@ -290,8 +294,8 @@ LIMIT {limit_rows};
         """
         metadata = {}
 
-        # Add original query metadata
-        metadata.update(self._original_query_metadata)
+        # Add base query metadata.
+        metadata.update(self._base_query_metadata)
 
         # Add extended validation query metadata
         for query_id in self.validation_queries._queries:
@@ -328,15 +332,8 @@ LIMIT {limit_rows};
         """
         # Route to appropriate query manager
         query = None
-        if query_id in self._original_queries:
-            template = self._original_queries[query_id]
-            if params is None:
-                params = self._generate_default_params(query_id)
-            else:
-                defaults = self._generate_default_params(query_id)
-                defaults.update(params)
-                params = defaults
-            query = template.format(**params)
+        if query_id in self._base_queries:
+            query = super().get_query(query_id, params)
         elif query_id.startswith("VQ"):
             query = self.validation_queries.get_query(query_id, params)
         elif query_id.startswith("AQ"):
@@ -414,11 +411,7 @@ LIMIT {limit_rows};
         Raises:
             ValueError: If query_id is invalid
         """
-        if query_id not in self._all_metadata:
-            available = ", ".join(sorted(self._all_metadata.keys()))
-            raise ValueError(f"Invalid query ID: {query_id}. Available: {available}")
-
-        return self._all_metadata[query_id].copy()
+        return self._get_query_metadata_copy(self._all_metadata, query_id, "query")
 
     def get_queries_by_type(self, query_type: str) -> list[str]:
         """Get all queries of a specific type.
@@ -433,10 +426,8 @@ LIMIT {limit_rows};
             ValueError: If query_type is invalid
         """
         valid_types = {"validation", "analytical", "etl_validation"}
-        if query_type not in valid_types:
-            raise ValueError(f"Invalid query type: {query_type}. Valid types: {', '.join(valid_types)}")
-
-        return [query_id for query_id, metadata in self._all_metadata.items() if metadata["query_type"] == query_type]
+        self._validate_selector_value(query_type, valid_types, "query type")
+        return self._query_ids_by_metadata(self._all_metadata, "query_type", query_type)
 
     def resolve_query_order(self, query_ids: Optional[list[str]] = None) -> list[str]:
         """Resolve queries in dependency order using topological sort.
@@ -609,7 +600,7 @@ LIMIT {limit_rows};
 
         return {
             "total_queries": len(all_queries),
-            "original_queries": len(self._original_queries),
+            "base_queries": len(self._base_queries),
             "extended_validation_queries": len(self.validation_queries._queries),
             "extended_analytical_queries": len(self.analytical_queries._queries),
             "etl_validation_queries": len(self.etl_queries._queries),
@@ -617,7 +608,7 @@ LIMIT {limit_rows};
             "queries_by_category": category_counts,
             "queries_by_complexity": complexity_counts,
             "queries_by_severity": severity_counts,
-            "query_expansion_factor": len(all_queries) / len(self._original_queries),
+            "query_expansion_factor": len(all_queries) / len(self._base_queries),
         }
 
     def translate_query_text(self, query: str, dialect: str) -> str:
@@ -646,5 +637,5 @@ LIMIT {limit_rows};
             raise ImportError("sqlglot is required for SQL dialect translation. Install with: pip install sqlglot")
         except Exception as e:
             # If translation fails, return the original query with a warning
-            print(f"Warning: Failed to translate query to {dialect}: {e}")
+            emit(f"Warning: Failed to translate query to {dialect}: {e}")
             return query

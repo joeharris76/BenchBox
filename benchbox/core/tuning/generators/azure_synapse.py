@@ -11,7 +11,7 @@ Example:
     >>> from benchbox.core.tuning.generators.azure_synapse import AzureSynapseDDLGenerator
     >>> generator = AzureSynapseDDLGenerator()
     >>> clauses = generator.generate_tuning_clauses(table_tuning)
-    >>> print(clauses.distribute_by)  # "HASH([l_orderkey])"
+    >>> emit(clauses.distribute_by)  # "HASH([l_orderkey])"
 
 Copyright 2026 Joe Harris / BenchBox Project
 
@@ -30,6 +30,7 @@ from benchbox.core.tuning.ddl_generator import (
     ColumnNullability,
     TuningClauses,
 )
+from benchbox.core.tuning.type_mapping import map_sql_type_with_fallback
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import (
@@ -38,6 +39,36 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+SYNAPSE_TYPE_MAPPING: dict[str, str] = {
+    # Integer types
+    "INTEGER": "INT",
+    "INT": "INT",
+    "BIGINT": "BIGINT",
+    "SMALLINT": "SMALLINT",
+    "TINYINT": "TINYINT",
+    # Floating point
+    "FLOAT": "FLOAT",
+    "DOUBLE": "FLOAT",  # Synapse uses FLOAT for double precision
+    "REAL": "REAL",
+    "DOUBLE PRECISION": "FLOAT",
+    # Decimal
+    "DECIMAL": "DECIMAL(38, 9)",
+    "NUMERIC": "NUMERIC(38, 9)",
+    # String types
+    "VARCHAR": "NVARCHAR(4000)",
+    "CHAR": "NCHAR(255)",
+    "TEXT": "NVARCHAR(MAX)",
+    "STRING": "NVARCHAR(4000)",
+    # Date/time
+    "DATE": "DATE",
+    "TIMESTAMP": "DATETIME2",
+    "DATETIME": "DATETIME2",
+    "TIME": "TIME",
+    # Boolean (Synapse doesn't have native BOOLEAN)
+    "BOOLEAN": "BIT",
+    "BOOL": "BIT",
+}
 
 
 class DistributionType(str, Enum):
@@ -291,40 +322,7 @@ class AzureSynapseDDLGenerator(BaseDDLGenerator):
         Returns:
             Synapse-specific type name.
         """
-        type_mapping = {
-            # Integer types
-            "INTEGER": "INT",
-            "INT": "INT",
-            "BIGINT": "BIGINT",
-            "SMALLINT": "SMALLINT",
-            "TINYINT": "TINYINT",
-            # Floating point
-            "FLOAT": "FLOAT",
-            "DOUBLE": "FLOAT",  # Synapse uses FLOAT for double precision
-            "REAL": "REAL",
-            "DOUBLE PRECISION": "FLOAT",
-            # Decimal
-            "DECIMAL": "DECIMAL(38, 9)",
-            "NUMERIC": "NUMERIC(38, 9)",
-            # String types
-            "VARCHAR": "NVARCHAR(4000)",
-            "CHAR": "NCHAR(255)",
-            "TEXT": "NVARCHAR(MAX)",
-            "STRING": "NVARCHAR(4000)",
-            # Date/time
-            "DATE": "DATE",
-            "TIMESTAMP": "DATETIME2",
-            "DATETIME": "DATETIME2",
-            "TIME": "TIME",
-            # Boolean (Synapse doesn't have native BOOLEAN)
-            "BOOLEAN": "BIT",
-            "BOOL": "BIT",
-        }
-
-        # Check for type with precision (e.g., "DECIMAL(15,2)")
-        base_type = sql_type.split("(")[0].upper().strip()
-
-        return type_mapping.get(base_type, sql_type)
+        return map_sql_type_with_fallback(sql_type, SYNAPSE_TYPE_MAPPING)
 
 
 __all__ = [

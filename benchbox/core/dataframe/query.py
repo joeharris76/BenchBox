@@ -388,6 +388,25 @@ class QueryRegistry:
         else:
             raise ValueError(f"Unknown family: {family}. Must be 'pandas' or 'expression'")
 
+    def list_queries(
+        self,
+        family: str | None = None,
+        category: QueryCategory | None = None,
+    ) -> list[DataFrameQuery]:
+        """List queries with optional family and category filters.
+
+        Args:
+            family: Optional family filter ("pandas" or "expression")
+            category: Optional category filter
+
+        Returns:
+            Filtered list of queries
+        """
+        queries = self.get_all_queries() if family is None else self.get_queries_for_family(family)
+        if category is not None:
+            queries = [query for query in queries if query.in_category(category)]
+        return queries
+
     def __len__(self) -> int:
         """Return the number of registered queries."""
         return len(self._queries)

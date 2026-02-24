@@ -5,6 +5,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,6 +24,10 @@ class TestCompressionCLI:
         """Set up test fixtures."""
         self.runner = CliRunner()
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     @patch("benchbox.cli.main.get_config_manager")
     @patch("benchbox.cli.commands.run.BenchmarkOrchestrator")
     @patch("benchbox.cli.commands.run.DatabaseManager")
@@ -97,6 +102,10 @@ class TestCompressionCLI:
         assert benchmark_config.compression_type == "zstd"
         assert benchmark_config.compression_level == 5
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     @patch("benchbox.cli.main.get_config_manager")
     @patch("benchbox.cli.commands.run.BenchmarkOrchestrator")
     @patch("benchbox.cli.commands.run.DatabaseManager")
@@ -192,6 +201,10 @@ class TestCompressionCLI:
         assert result.exit_code != 0
         assert "Invalid compression" in result.output or "error" in result.output.lower()
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="Click command mock.patch requires Python 3.11+ for attribute access",
+    )
     @patch("benchbox.cli.main.get_config_manager")
     @patch("benchbox.cli.dryrun.DryRunExecutor")
     @patch("benchbox.cli.commands.run.DatabaseManager")

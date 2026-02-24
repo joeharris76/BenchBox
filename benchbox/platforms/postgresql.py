@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
         TableTuning,
+        TuningColumn,
         UnifiedTuningConfiguration,
     )
 
@@ -33,7 +34,7 @@ from ..utils.dependencies import (
     get_dependency_error_message,
 )
 from ..utils.file_format import get_delimiter_for_file, is_tpc_format
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 
 # PostgreSQL dialect for SQLGlot
 POSTGRES_DIALECT = "postgres"
@@ -51,6 +52,8 @@ class PostgreSQLAdapter(PlatformAdapter):
     Supports PostgreSQL 12+ and optional TimescaleDB extensions.
     Uses psycopg2 for database connectivity with efficient COPY loading.
     """
+
+    driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
 
     @property
     def platform_name(self) -> str:
@@ -439,6 +442,7 @@ class PostgreSQLAdapter(PlatformAdapter):
         table_stats = {}
 
         self.log_operation_start("Data loading", f"source: {data_dir}")
+        effective_tuning = self.unified_tuning_configuration if self.tuning_enabled else None
 
         cursor = connection.cursor()
 
@@ -496,6 +500,9 @@ class PostgreSQLAdapter(PlatformAdapter):
                 row_count = cursor.fetchone()[0]
                 table_stats[table_name_lower] = row_count
 
+                if effective_tuning:
+                    self.apply_ctas_sort(table_name_lower, effective_tuning, connection)
+
                 self.log_verbose(f"Loaded {row_count:,} rows into {table_name_lower}")
 
             except Exception as e:
@@ -510,6 +517,14 @@ class PostgreSQLAdapter(PlatformAdapter):
         self.log_operation_complete("Data loading", loading_time, f"Loaded {total_rows:,} total rows")
 
         return table_stats, loading_time, None
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> list[str] | None:
+        """PostgreSQL CTAS table-rewrite sorting is intentionally unsupported.
+
+        DROP+CTAS+RENAME would strip indexes, constraints, and other schema metadata.
+        PostgreSQL physical ordering should instead be handled via schema/index strategy.
+        """
+        return None
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply PostgreSQL optimizations for benchmark type."""

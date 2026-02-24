@@ -60,6 +60,7 @@ except ImportError:
     DATAFUSION_DF_AVAILABLE = False
 
 from benchbox.core.dataframe.tuning import DataFrameTuningConfiguration
+from benchbox.platforms.base.adapter import DriverIsolationCapability
 from benchbox.platforms.dataframe.expression_family import (
     ExpressionFamilyAdapter,
 )
@@ -104,6 +105,8 @@ class DataFusionDataFrameAdapter(ExpressionFamilyAdapter[DataFusionDF, DataFusio
         repartition_joins: Whether to repartition data for joins
         parquet_pushdown: Enable predicate pushdown for Parquet
     """
+
+    driver_isolation_capability = DriverIsolationCapability.SUPPORTED
 
     def __init__(
         self,
@@ -1132,8 +1135,11 @@ class DataFusionDataFrameAdapter(ExpressionFamilyAdapter[DataFusionDF, DataFusio
         }
 
         if DATAFUSION_DF_AVAILABLE:
-            info["version"] = datafusion.__version__
+            live_version = datafusion.__version__
+            info["version"] = live_version
+            self.driver_version_actual = live_version
 
+        self._enrich_with_driver_metadata(info)
         return info
 
     def get_tuning_summary(self) -> dict[str, Any]:

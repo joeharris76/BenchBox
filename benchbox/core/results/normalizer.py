@@ -24,7 +24,7 @@ Usage:
     >>> with open("result.json") as f:
     ...     data = json.load(f)
     >>> normalized = normalize_result_dict(data)
-    >>> print(normalized.total_time_ms, normalized.platform)
+    >>> emit(normalized.total_time_ms, normalized.platform)
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def normalize_result_dict(data: dict[str, Any]) -> NormalizedResultDict:
     Example:
         >>> data = json.load(open("result.json"))
         >>> result = normalize_result_dict(data)
-        >>> print(f"{result.platform}: {result.total_time_ms}ms")
+        >>> emit(f"{result.platform}: {result.total_time_ms}ms")
     """
     schema_version = detect_schema_version(data)
     is_v2 = schema_version in ("2.0", "2.1")

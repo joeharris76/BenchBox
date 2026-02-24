@@ -39,7 +39,7 @@ class TestSSBClickHouseIntegration:
 
     def test_clickhouse_tuning_configuration_override(self):
         """Test that ClickHouse adapter creates proper tuning configuration."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
 
         # Should create effective tuning config even when none provided
         config = adapter.get_effective_tuning_configuration()
@@ -53,7 +53,7 @@ class TestSSBClickHouseIntegration:
 
     def test_clickhouse_constraint_configuration(self):
         """Test ClickHouse constraint configuration override."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
 
         # ClickHouse should always enable primary keys
         enable_primary_keys, enable_foreign_keys = adapter._get_constraint_configuration()
@@ -71,7 +71,7 @@ class TestSSBClickHouseIntegration:
 
         try:
             client = ClickHouseLocalClient(db_path=temp_dir)
-            adapter = ClickHouseAdapter(mode="local")
+            adapter = ClickHouseAdapter(deployment_mode="local")
             # Use compression_type="none" to avoid zstd dependency
             benchmark = SSBBenchmark(scale_factor=0.01, compress_data=False, compression_type="none")
 
@@ -110,7 +110,7 @@ class TestSSBClickHouseIntegration:
 
         try:
             client = ClickHouseLocalClient(db_path=temp_dir)
-            adapter = ClickHouseAdapter(mode="local")
+            adapter = ClickHouseAdapter(deployment_mode="local")
             benchmark = SSBBenchmark(
                 scale_factor=0.01,
                 output_dir=data_dir,
@@ -164,7 +164,7 @@ class TestSSBClickHouseIntegration:
 
         try:
             client = ClickHouseLocalClient(db_path=temp_dir)
-            adapter = ClickHouseAdapter(mode="local")
+            adapter = ClickHouseAdapter(deployment_mode="local")
             benchmark = SSBBenchmark(
                 scale_factor=0.01,
                 output_dir=data_dir,

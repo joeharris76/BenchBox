@@ -268,6 +268,7 @@ class TestRunDataframeBenchmark:
             benchmark=benchmark_instance,
             scale_factor=1.0,
             data_dir=None,
+            write_config=None,
         )
         adapter.load_table.assert_called_once()
         args, kwargs = adapter.load_table.call_args

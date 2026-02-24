@@ -30,7 +30,7 @@ Example:
     >>> results = adapter.run_benchmark(benchmark)
     >>>
     >>> # Get skew information
-    >>> print(benchmark.get_skew_info())
+    >>> emit(benchmark.get_skew_info())
 
 Copyright 2026 Joe Harris / BenchBox Project
 
@@ -298,7 +298,7 @@ class TPCHSkew(BaseBenchmark):
             >>>
             >>> # Compare queries 1, 6, and 14
             >>> results = benchmark.compare_with_uniform(adapter, queries=[1, 6, 14])
-            >>> print(results["summary"]["avg_ratio"])
+            >>> emit(results["summary"]["avg_ratio"])
         """
         return self._impl.compare_with_uniform(
             adapter=adapter,

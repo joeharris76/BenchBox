@@ -46,6 +46,23 @@ npx @modelcontextprotocol/inspector -- uv run python -m benchbox.mcp
 
 This opens a web UI at `http://localhost:6274` where you can browse and test all BenchBox tools.
 
+## MCP Runtime Configuration
+
+The `benchbox-mcp` entry point supports MCP-specific runtime options:
+
+```bash
+benchbox-mcp --results-dir /tmp/benchbox-results --charts-dir /tmp/benchbox-charts --log-level DEBUG
+```
+
+If flags are omitted, BenchBox resolves values with this precedence:
+
+1. Explicit flag (`--results-dir`, `--charts-dir`, `--log-level`)
+2. Env vars (`BENCHBOX_RESULTS_DIR`, `BENCHBOX_CHARTS_DIR`, `BENCHBOX_LOG_LEVEL`)
+3. Derived from `BENCHBOX_OUTPUT_DIR` (for results/charts only)
+4. Defaults (`benchmark_runs/results`, `benchmark_runs/charts`, `INFO`)
+
+This ensures MCP read/write tools and benchmark export paths stay aligned to the same configured `results_dir`.
+
 ## Agent Setup
 
 Choose your AI assistant below for setup instructions.
@@ -59,6 +76,9 @@ Add BenchBox as an MCP server using the Claude Code CLI:
 ```bash
 # Using benchbox-mcp entry point (recommended if in PATH)
 claude mcp add benchbox --scope project -- benchbox-mcp
+
+# With custom MCP paths
+claude mcp add benchbox --scope project -- benchbox-mcp --results-dir /tmp/benchbox-results
 
 # Using uv (works from any directory with BenchBox installed)
 claude mcp add benchbox --scope project -- uv run python -m benchbox.mcp
@@ -120,6 +140,9 @@ Add BenchBox as an MCP server using the Codex CLI:
 ```bash
 # Using the benchbox-mcp entry point (recommended)
 codex mcp add benchbox -- benchbox-mcp
+
+# With custom MCP paths
+codex mcp add benchbox -- benchbox-mcp --results-dir /tmp/benchbox-results
 
 # Or using uv if benchbox-mcp isn't in PATH
 codex mcp add benchbox -- uv run python -m benchbox.mcp

@@ -38,7 +38,7 @@ class TestPerformanceMonitoring:
     def benchmark_instance(self):
         """Create a benchmark instance for monitoring tests."""
         return TPCDSBenchmark(
-            scale_factor=0.01,
+            scale_factor=1.0,
             verbose=False,
         )
 

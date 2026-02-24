@@ -1,0 +1,73 @@
+"""TPC-DS specification constants.
+
+Copyright 2026 Joe Harris / BenchBox Project
+
+Licensed under the MIT License. See LICENSE file in the project root for details.
+"""
+
+from __future__ import annotations
+
+# Canonical list of TPC-DS tables from the specification (alphabetical order).
+TPCDS_TABLE_NAMES: list[str] = [
+    "call_center",
+    "catalog_page",
+    "catalog_returns",
+    "catalog_sales",
+    "customer",
+    "customer_address",
+    "customer_demographics",
+    "date_dim",
+    "household_demographics",
+    "income_band",
+    "inventory",
+    "item",
+    "promotion",
+    "reason",
+    "ship_mode",
+    "store",
+    "store_returns",
+    "store_sales",
+    "time_dim",
+    "warehouse",
+    "web_page",
+    "web_returns",
+    "web_sales",
+    "web_site",
+]
+
+# TPC-DS table loading order respecting foreign key dependencies.
+# Dimension tables first, then fact tables.  Used by load phases.
+TPCDS_TABLE_LOADING_ORDER: list[str] = [
+    # Basic dimension tables (no dependencies)
+    "date_dim",
+    "time_dim",
+    "income_band",
+    "reason",
+    "ship_mode",
+    # Location and address tables
+    "customer_address",
+    "customer_demographics",
+    "household_demographics",
+    # Business entity tables
+    "call_center",
+    "catalog_page",
+    "warehouse",
+    "web_site",
+    "web_page",
+    # Product and store tables
+    "item",
+    "store",
+    "promotion",
+    # Customer table (depends on address/demographics)
+    "customer",
+    # Fact tables (depend on dimension tables)
+    "inventory",
+    "store_sales",
+    "store_returns",
+    "catalog_sales",
+    "catalog_returns",
+    "web_sales",
+    "web_returns",
+    # Metadata table
+    "dbgen_version",
+]

@@ -82,6 +82,9 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
             force_regenerate: Force data regeneration even if valid data exists
             **kwargs: Additional arguments including compression options
         """
+        # Extract data organization config before passing kwargs to super
+        self._data_organization_config = kwargs.pop("data_organization", None)
+
         # Initialize compression mixin
         super().__init__(**kwargs)
 
@@ -968,6 +971,73 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
             Dictionary mapping table names to file path(s). For single files,
             returns a Path. For sharded files, returns a list of Paths.
         """
+        table_paths, precompressed_tables = self._gather_generated_table_paths(target_dir)
+
+        if self.should_use_compression():
+            compressed_paths = self._compress_table_paths(target_dir, table_paths, precompressed_tables)
+
+            if self.verbose_enabled and compressed_paths:
+                flat_paths = {k: (v[0] if isinstance(v, list) else v) for k, v in compressed_paths.items()}
+                self.print_compression_report(flat_paths)
+
+            self._validate_file_format_consistency(target_dir)
+            self._write_manifest(target_dir, compressed_paths)
+            return compressed_paths
+
+        # Apply data organization (sorted Parquet export) if configured
+        if self._data_organization_config is not None:
+            table_paths = self._apply_data_organization(target_dir, table_paths)
+
+        self._write_manifest(target_dir, table_paths)
+        return table_paths
+
+    def _apply_data_organization(
+        self,
+        target_dir: Path,
+        table_paths: dict[str, Path | list[Path]],
+    ) -> dict[str, Path | list[Path]]:
+        """Post-process generated TBL files into sorted Parquet.
+
+        Reads the TBL source files and writes sorted Parquet files alongside them.
+        Returns updated table_paths with Parquet paths replacing TBL paths for
+        tables that have sort columns configured.
+
+        Args:
+            target_dir: Directory containing generated TBL files.
+            table_paths: Current table name → path mapping (TBL files).
+
+        Returns:
+            Updated table_paths with Parquet paths for sorted tables.
+        """
+        from benchbox.core.data_organization.sorting import SortedParquetWriter
+
+        config = self._data_organization_config
+        writer = SortedParquetWriter(config)
+        result = dict(table_paths)
+
+        for table_name, paths in table_paths.items():
+            sort_columns = config.get_sort_columns_for_table(table_name)
+            if not sort_columns:
+                continue
+
+            # Normalize to list of source files
+            source_files = paths if isinstance(paths, list) else [paths]
+
+            parquet_path = writer.write_sorted_parquet(
+                table_name=table_name,
+                source_files=source_files,
+                output_dir=target_dir,
+            )
+            result[table_name] = parquet_path
+
+        return result
+
+    def _gather_generated_table_paths(self, target_dir: Path) -> tuple[dict[str, Path | list[Path]], set[str]]:
+        """Locate generated table files from various possible locations.
+
+        Returns:
+            Tuple of (table_paths dict, set of already-compressed table names).
+        """
         table_files = {
             "customer": "customer.tbl",
             "lineitem": "lineitem.tbl",
@@ -1004,11 +1074,11 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
             ]
             if chunk_files:
                 sorted_chunks = sorted(chunk_files, key=lambda f: f.name)
-                # Return ALL shards, not just the first one
                 table_paths[table_name] = sorted_chunks
                 self.log_verbose(f"Generated {len(chunk_files)} chunk files for {table_name}")
                 continue
 
+            # Try recovering files from dbgen source or binary directories
             source_file = self.dbgen_path / filename
             binary_dir = self.dbgen_exe.parent
             binary_source_file = binary_dir / filename
@@ -1031,58 +1101,54 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
                 binary_source_file,
             )
 
-        if self.should_use_compression():
-            compressed_paths: dict[str, Path | list[Path]] = {}
-            for table_name, file_path_or_paths in table_paths.items():
-                if table_name in precompressed_tables:
-                    compressed_paths[table_name] = file_path_or_paths
-                    continue
+        return table_paths, precompressed_tables
 
-                # Handle both single file and list of shards
-                if isinstance(file_path_or_paths, list):
-                    # Compress all shards
-                    compressed_chunk_files = []
-                    for chunk_file in file_path_or_paths:
-                        compressed_chunk = self.compress_existing_file(chunk_file, remove_original=True)
-                        compressed_chunk_files.append(compressed_chunk)
-                        self.log_verbose(f"Compressed {chunk_file.name} to {compressed_chunk.name}")
-                    if compressed_chunk_files:
-                        # Return ALL compressed shards, not just the first one
-                        compressed_paths[table_name] = sorted(compressed_chunk_files, key=lambda f: f.name)
-                else:
-                    file_path = file_path_or_paths
-                    filename = file_path.name
-                    if "." in filename and filename.split(".")[-1].isdigit():
-                        # Legacy path for single shard reference (shouldn't happen with new code)
-                        base_filename = ".".join(filename.split(".")[:-1])
-                        chunk_files = [
-                            cf for cf in target_dir.glob(f"{base_filename}.*") if cf.name.split(".")[-1].isdigit()
-                        ]
-                        compressed_chunk_files = []
-                        for chunk_file in chunk_files:
-                            compressed_chunk = self.compress_existing_file(chunk_file, remove_original=True)
-                            compressed_chunk_files.append(compressed_chunk)
-                            self.log_verbose(f"Compressed {chunk_file.name} to {compressed_chunk.name}")
-                        if compressed_chunk_files:
-                            # Return ALL compressed shards
-                            compressed_paths[table_name] = sorted(compressed_chunk_files, key=lambda f: f.name)
-                    else:
-                        compressed_file = self.compress_existing_file(file_path, remove_original=True)
-                        compressed_paths[table_name] = compressed_file
-                        self.log_verbose(f"Compressed {file_path.name} to {compressed_file.name}")
+    def _compress_table_paths(
+        self,
+        target_dir: Path,
+        table_paths: dict[str, Path | list[Path]],
+        precompressed_tables: set[str],
+    ) -> dict[str, Path | list[Path]]:
+        """Compress all uncompressed table files and return updated paths."""
+        compressed_paths: dict[str, Path | list[Path]] = {}
+        for table_name, file_path_or_paths in table_paths.items():
+            if table_name in precompressed_tables:
+                compressed_paths[table_name] = file_path_or_paths
+                continue
 
-            if self.verbose_enabled and compressed_paths:
-                # For compression report, flatten any lists to their first element for display
-                # (the report is just for verbose output, not critical)
-                flat_paths = {k: (v[0] if isinstance(v, list) else v) for k, v in compressed_paths.items()}
-                self.print_compression_report(flat_paths)
+            if isinstance(file_path_or_paths, list):
+                compressed_chunks = self._compress_file_list(file_path_or_paths)
+                if compressed_chunks:
+                    compressed_paths[table_name] = sorted(compressed_chunks, key=lambda f: f.name)
+            else:
+                compressed_paths[table_name] = self._compress_single_or_legacy_shards(target_dir, file_path_or_paths)
 
-            self._validate_file_format_consistency(target_dir)
-            self._write_manifest(target_dir, compressed_paths)
-            return compressed_paths
+        return compressed_paths
 
-        self._write_manifest(target_dir, table_paths)
-        return table_paths
+    def _compress_file_list(self, file_paths: list[Path]) -> list[Path]:
+        """Compress a list of shard files, returning compressed paths."""
+        compressed_chunk_files = []
+        for chunk_file in file_paths:
+            compressed_chunk = self.compress_existing_file(chunk_file, remove_original=True)
+            compressed_chunk_files.append(compressed_chunk)
+            self.log_verbose(f"Compressed {chunk_file.name} to {compressed_chunk.name}")
+        return compressed_chunk_files
+
+    def _compress_single_or_legacy_shards(self, target_dir: Path, file_path: Path) -> Path | list[Path]:
+        """Compress a single file or discover and compress legacy shards."""
+        filename = file_path.name
+        if "." in filename and filename.split(".")[-1].isdigit():
+            # Legacy path for single shard reference
+            base_filename = ".".join(filename.split(".")[:-1])
+            chunk_files = [cf for cf in target_dir.glob(f"{base_filename}.*") if cf.name.split(".")[-1].isdigit()]
+            compressed_chunks = self._compress_file_list(chunk_files)
+            if compressed_chunks:
+                return sorted(compressed_chunks, key=lambda f: f.name)
+            return file_path  # fallback: return original if nothing compressed
+
+        compressed_file = self.compress_existing_file(file_path, remove_original=True)
+        self.log_verbose(f"Compressed {file_path.name} to {compressed_file.name}")
+        return compressed_file
 
     def _validate_file_format_consistency(self, target_dir: Path) -> None:
         """Ensure format invariants under compression for TPCH outputs."""

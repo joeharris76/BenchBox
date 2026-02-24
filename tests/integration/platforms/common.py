@@ -163,13 +163,28 @@ def install_databricks_stub(monkeypatch, *, catalog: str = "main", schema: str =
     client_module = types.ModuleType("databricks.sql.client")
     client_module.Connection = _DatabricksConnection
 
+    class _DatabricksFilesAPI:
+        def upload(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    class _WorkspaceClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.args = args
+            self.kwargs = kwargs
+            self.files = _DatabricksFilesAPI()
+
+    sdk_module = types.ModuleType("databricks.sdk")
+    sdk_module.WorkspaceClient = _WorkspaceClient
+
     root_module = types.ModuleType("databricks")
     root_module.__path__ = []  # Mark as package
     root_module.sql = sql_module
+    root_module.sdk = sdk_module
 
     sql_module.client = client_module
 
     monkeypatch.setitem(sys.modules, "databricks", root_module)
+    monkeypatch.setitem(sys.modules, "databricks.sdk", sdk_module)
     monkeypatch.setitem(sys.modules, "databricks.sql", sql_module)
     monkeypatch.setitem(sys.modules, "databricks.sql.client", client_module)
 
@@ -1281,6 +1296,9 @@ __all__ = [
     "install_presto_stub",
     "install_postgresql_stub",
     "install_influxdb_stub",
+    "install_starrocks_stub",
+    "install_databend_stub",
+    "install_doris_stub",
     "DatabricksStubState",
     "BigQueryStubState",
     "RedshiftStubState",
@@ -1291,6 +1309,9 @@ __all__ = [
     "PrestoStubState",
     "PostgreSQLStubState",
     "InfluxDBStubState",
+    "StarRocksStubState",
+    "DatabendStubState",
+    "DorisStubState",
 ]
 
 
@@ -1859,5 +1880,389 @@ def install_dataproc_serverless_stub(
         return original_check(platform)
 
     monkeypatch.setattr(dep_utils, "check_platform_dependencies", patched_check)
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# StarRocks stub implementation
+
+
+@dataclass
+class StarRocksStubState:
+    host: str = "localhost"
+    port: int = 9030
+    database: str = "benchbox"
+    statements: list[str] = field(default_factory=list)
+    row_counts: dict[str, int] = field(default_factory=lambda: {"lineitem": 2})
+    inserts: list[tuple[str, Any]] = field(default_factory=list)
+
+
+class _StarRocksCursor:
+    def __init__(self, state: StarRocksStubState):
+        self._state = state
+        self._results: list[tuple[Any, ...]] = []
+        self.closed = False
+        self.description = None
+        self.rowcount = 0
+
+    def execute(self, sql: str, args: Any = None) -> None:
+        self._state.statements.append(sql)
+        lowered = sql.strip().lower()
+
+        if lowered == "select 1":
+            self._results = [(1,)]
+        elif lowered.startswith("select version"):
+            self._results = [("3.3.0-a1b2c3d",)]
+        elif "select count" in lowered:
+            from_index = lowered.find("from")
+            if from_index >= 0:
+                table_fragment = sql[from_index + len("from") :].strip()
+                table_name = table_fragment.split()[0].strip("`").lower()
+                self._results = [(self._state.row_counts.get(table_name, 0),)]
+            else:
+                self._results = [(0,)]
+        elif lowered.startswith("show databases"):
+            self._results = [(self._state.database,)]
+        elif lowered.startswith("show tables"):
+            self._results = [("lineitem",)]
+        elif lowered.startswith("insert into"):
+            self._state.inserts.append((sql, args))
+            self._results = []
+        elif lowered.startswith("select 1 from"):
+            self._results = [(1,)]
+        else:
+            self._results = []
+
+        self.rowcount = len(self._results)
+
+    def executemany(self, sql: str, args: Any = None) -> None:
+        self._state.statements.append(sql)
+        self._state.inserts.append((sql, args))
+        self.rowcount = len(args) if args else 0
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return list(self._results)
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._results[0] if self._results else None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _StarRocksConnection:
+    def __init__(self, state: StarRocksStubState, **_: Any) -> None:
+        self._state = state
+        self._autocommit = False
+
+    def cursor(self) -> _StarRocksCursor:
+        return _StarRocksCursor(self._state)
+
+    def commit(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    @property
+    def autocommit(self) -> bool:
+        return self._autocommit
+
+    @autocommit.setter
+    def autocommit(self, value: bool) -> None:
+        self._autocommit = value
+
+
+def install_starrocks_stub(
+    monkeypatch,
+    *,
+    host: str = "localhost",
+    port: int = 9030,
+) -> StarRocksStubState:
+    """Install pymysql stub for StarRocks adapter testing."""
+
+    state = StarRocksStubState(host=host, port=port)
+
+    pymysql_module = types.ModuleType("pymysql")
+    pymysql_module.connect = lambda **kwargs: _StarRocksConnection(state, **kwargs)
+    pymysql_module.__version__ = "1.1.0"
+
+    cursors_module = types.ModuleType("pymysql.cursors")
+    cursors_module.DictCursor = type("DictCursor", (), {})
+
+    err_module = types.ModuleType("pymysql.err")
+
+    class OperationalError(Exception):
+        pass
+
+    class ProgrammingError(Exception):
+        pass
+
+    err_module.OperationalError = OperationalError
+    err_module.ProgrammingError = ProgrammingError
+    pymysql_module.OperationalError = OperationalError
+    pymysql_module.ProgrammingError = ProgrammingError
+    pymysql_module.err = err_module
+
+    monkeypatch.setitem(sys.modules, "pymysql", pymysql_module)
+    monkeypatch.setitem(sys.modules, "pymysql.cursors", cursors_module)
+    monkeypatch.setitem(sys.modules, "pymysql.err", err_module)
+
+    import benchbox.platforms.starrocks._dependencies as deps_module
+
+    monkeypatch.setattr(deps_module, "pymysql", pymysql_module)
+    monkeypatch.setattr(deps_module, "PyMySQLDictCursor", cursors_module.DictCursor)
+    monkeypatch.setattr(deps_module, "PYMYSQL_AVAILABLE", True)
+    monkeypatch.setattr(deps_module, "STARROCKS_AVAILABLE", True)
+
+    import benchbox.platforms.starrocks.setup as setup_module
+
+    monkeypatch.setattr(setup_module, "pymysql", pymysql_module)
+    monkeypatch.setattr(setup_module, "PYMYSQL_AVAILABLE", True)
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Databend stub implementation
+
+
+@dataclass
+class DatabendStubState:
+    host: str = "localhost"
+    port: int = 8000
+    database: str = "benchbox"
+    statements: list[str] = field(default_factory=list)
+    row_counts: dict[str, int] = field(default_factory=lambda: {"lineitem": 2})
+    inserts: list[str] = field(default_factory=list)
+
+
+class _DatabendRow:
+    """Stub row object returned by Databend driver queries."""
+
+    def __init__(self, data: tuple[Any, ...]):
+        self._data = data
+
+    def values(self) -> tuple[Any, ...]:
+        return self._data
+
+
+class _DatabendBlockingClient:
+    """Stub for databend_driver.BlockingDatabendClient."""
+
+    def __init__(self, dsn: str, state: DatabendStubState):
+        self._dsn = dsn
+        self._state = state
+
+    def exec(self, sql: str) -> None:
+        self._state.statements.append(sql)
+        lowered = sql.strip().lower()
+        if lowered.startswith("insert into"):
+            self._state.inserts.append(sql)
+
+    def query_row(self, sql: str) -> _DatabendRow | None:
+        self._state.statements.append(sql)
+        lowered = sql.strip().lower()
+
+        if lowered == "select 1":
+            return _DatabendRow((1,))
+        elif lowered.startswith("select version"):
+            return _DatabendRow(("v1.2.100-nightly",))
+        elif "select count" in lowered:
+            from_index = lowered.find("from")
+            if from_index >= 0:
+                table_fragment = sql[from_index + len("from") :].strip()
+                table_name = table_fragment.split()[0].strip("`").lower()
+                return _DatabendRow((self._state.row_counts.get(table_name, 0),))
+            return _DatabendRow((0,))
+        else:
+            return _DatabendRow((None,))
+
+    def query_iter(self, sql: str) -> Iterable[_DatabendRow]:
+        self._state.statements.append(sql)
+        lowered = sql.strip().lower()
+
+        if lowered == "select 1":
+            return [_DatabendRow((1,))]
+        elif lowered.startswith("select version"):
+            return [_DatabendRow(("v1.2.100-nightly",))]
+        elif "select count" in lowered:
+            from_index = lowered.find("from")
+            if from_index >= 0:
+                table_fragment = sql[from_index + len("from") :].strip()
+                table_name = table_fragment.split()[0].strip("`").lower()
+                return [_DatabendRow((self._state.row_counts.get(table_name, 0),))]
+            return [_DatabendRow((0,))]
+        elif lowered.startswith("show databases"):
+            return [_DatabendRow((self._state.database,))]
+        elif lowered.startswith("explain"):
+            return [_DatabendRow(("TableScan: lineitem",))]
+        else:
+            return [_DatabendRow((1, "result"))]
+
+    def close(self) -> None:
+        pass
+
+
+def install_databend_stub(
+    monkeypatch,
+    *,
+    host: str = "localhost",
+    port: int = 8000,
+) -> DatabendStubState:
+    """Install databend_driver stub for Databend adapter testing."""
+
+    state = DatabendStubState(host=host, port=port)
+
+    def make_client(dsn: str) -> _DatabendBlockingClient:
+        return _DatabendBlockingClient(dsn, state)
+
+    driver_module = types.ModuleType("databend_driver")
+    driver_module.BlockingDatabendClient = make_client
+    driver_module.__version__ = "0.20.0"
+
+    monkeypatch.setitem(sys.modules, "databend_driver", driver_module)
+
+    # Patch the adapter module's import state
+    import benchbox.platforms.databend.adapter as adapter_module
+
+    monkeypatch.setattr(adapter_module, "DATABEND_AVAILABLE", True)
+    monkeypatch.setattr(adapter_module, "databend_driver", driver_module)
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Apache Doris stub implementation
+
+
+@dataclass
+class DorisStubState:
+    host: str = "localhost"
+    port: int = 9030
+    http_port: int = 8030
+    database: str = "benchbox"
+    statements: list[str] = field(default_factory=list)
+    row_counts: dict[str, int] = field(default_factory=lambda: {"lineitem": 2})
+    inserts: list[tuple[str, Any]] = field(default_factory=list)
+
+
+class _DorisCursor:
+    def __init__(self, state: DorisStubState):
+        self._state = state
+        self._results: list[tuple[Any, ...]] = []
+        self.description = None
+        self.rowcount = 0
+
+    def execute(self, sql: str, args: Any = None) -> None:
+        self._state.statements.append(sql)
+        lowered = sql.strip().lower()
+
+        if lowered == "select 1" or lowered == "select 1 as test_value":
+            self._results = [(1,)]
+        elif lowered.startswith("select version"):
+            self._results = [("5.7.99-Doris-2.1.7",)]
+        elif lowered.startswith("select database"):
+            self._results = [(self._state.database,)]
+        elif "select count" in lowered:
+            from_index = lowered.find("from")
+            if from_index >= 0:
+                table_fragment = sql[from_index + len("from") :].strip()
+                table_name = table_fragment.split()[0].strip("`").lower()
+                self._results = [(self._state.row_counts.get(table_name, 0),)]
+            else:
+                self._results = [(0,)]
+        elif lowered.startswith("show databases"):
+            self._results = [(self._state.database,)]
+        elif lowered.startswith("show tables"):
+            self._results = [("lineitem",)]
+        elif lowered.startswith("show frontends"):
+            self._results = [("fe1", "127.0.0.1", "9010", "true")]
+        elif lowered.startswith("insert into"):
+            self._state.inserts.append((sql, args))
+            self._results = []
+        elif lowered.startswith(("set ", "analyze")):
+            self._results = []
+        elif lowered.startswith("explain"):
+            self._results = [("0:OlapScanNode TABLE: lineitem",)]
+        else:
+            self._results = []
+
+        self.rowcount = len(self._results)
+
+    def executemany(self, sql: str, args: Any = None) -> None:
+        self._state.statements.append(sql)
+        self._state.inserts.append((sql, args))
+        self.rowcount = len(args) if args else 0
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return list(self._results)
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._results[0] if self._results else None
+
+    def close(self) -> None:
+        pass
+
+
+class _DorisConnection:
+    def __init__(self, state: DorisStubState, **_: Any) -> None:
+        self._state = state
+
+    def cursor(self) -> _DorisCursor:
+        return _DorisCursor(self._state)
+
+    def commit(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def install_doris_stub(
+    monkeypatch,
+    *,
+    host: str = "localhost",
+    port: int = 9030,
+) -> DorisStubState:
+    """Install pymysql stub for Apache Doris adapter testing."""
+
+    state = DorisStubState(host=host, port=port)
+
+    pymysql_module = types.ModuleType("pymysql")
+    pymysql_module.connect = lambda **kwargs: _DorisConnection(state, **kwargs)
+    pymysql_module.__version__ = "1.1.1"
+
+    cursors_module = types.ModuleType("pymysql.cursors")
+    cursors_module.DictCursor = type("DictCursor", (), {})
+
+    err_module = types.ModuleType("pymysql.err")
+
+    class OperationalError(Exception):
+        pass
+
+    class ProgrammingError(Exception):
+        pass
+
+    err_module.OperationalError = OperationalError
+    err_module.ProgrammingError = ProgrammingError
+    pymysql_module.OperationalError = OperationalError
+    pymysql_module.ProgrammingError = ProgrammingError
+    pymysql_module.err = err_module
+
+    monkeypatch.setitem(sys.modules, "pymysql", pymysql_module)
+    monkeypatch.setitem(sys.modules, "pymysql.cursors", cursors_module)
+    monkeypatch.setitem(sys.modules, "pymysql.err", err_module)
+
+    # Patch the adapter module to use our stubs
+    try:
+        import benchbox.platforms.doris as adapter_module
+
+        adapter_module.pymysql = pymysql_module
+        # Disable requests so load_data uses INSERT fallback (testable without HTTP)
+        adapter_module._requests = None
+    except ImportError:  # pragma: no cover - defensive
+        pass
 
     return state

@@ -232,6 +232,39 @@ def test_write_manifest_skips_empty_staging_tables(
     assert wrote["value"]
 
 
+def test_write_manifest_writes_entries_and_file(
+    generator: TransactionPrimitivesDataGenerator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify _write_manifest creates entries for each table and writes the manifest."""
+    import benchbox.core.transaction_primitives.generator as gen_mod
+
+    entries_added: list[tuple[str, Path, int]] = []
+    wrote = {"value": False}
+
+    class FakeManifest:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def add_entry(self, table_name: str, file_path: Path, row_count: int) -> None:
+            entries_added.append((table_name, file_path, row_count))
+
+        def write(self) -> None:
+            wrote["value"] = True
+
+    monkeypatch.setattr(gen_mod, "DataGenerationManifest", FakeManifest)
+    monkeypatch.setattr(gen_mod, "resolve_compression_metadata", lambda _tpch: {"type": "none"})
+    generator.tpch_generator = SimpleNamespace(seed=7)
+    monkeypatch.setattr(generator, "_get_tpch_row_count", lambda _name: 10)
+
+    orders_path = generator.output_dir / "orders.tbl"
+    generator._write_manifest({"orders": orders_path})
+
+    assert wrote["value"], "Manifest.write() must be called"
+    assert len(entries_added) == 1
+    assert entries_added[0] == ("orders", orders_path, 10)
+
+
 def test_lock_acquire_and_release(generator: TransactionPrimitivesDataGenerator) -> None:
     assert generator._acquire_bulk_load_lock(timeout=1)
     assert (generator.files_dir / ".bulk_load_generation.lock").exists()

@@ -4,11 +4,11 @@ from typing import ClassVar
 
 
 class BenchmarkPhase:
-    """TPC-DS benchmark phases (legacy compatibility)."""
+    """TPC-DS benchmark phases."""
 
-    POWER_TEST: ClassVar[str] = "power_test"
-    THROUGHPUT_TEST: ClassVar[str] = "throughput_test"
-    MAINTENANCE_TEST: ClassVar[str] = "maintenance_test"
+    POWER: ClassVar[str] = "power"
+    THROUGHPUT: ClassVar[str] = "throughput"
+    MAINTENANCE: ClassVar[str] = "maintenance"
 
 
 __all__ = ["BenchmarkPhase"]

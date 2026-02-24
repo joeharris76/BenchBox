@@ -175,7 +175,7 @@ class TestTPCTestRouting:
             # Check each result has required fields
             for query_result in result:
                 assert "query_id" in query_result
-                assert "execution_time" in query_result
+                assert "execution_time_seconds" in query_result
                 assert "status" in query_result
                 assert "test_type" in query_result
                 assert query_result["test_type"] == "power"

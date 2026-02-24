@@ -37,12 +37,15 @@ def _short_config_manager():
 def test_power_run_iteration_times_out_quickly():
     """Power run iterations should return promptly when exceeding timeout."""
     executor = PowerRunExecutor(config_manager=_short_config_manager())
-    iteration_result = executor._execute_single_iteration(_SlowPowerTest(0.2), iteration_id=1, is_warm_up=False)
+    # Sleep is intentionally long (5s) so there is an unambiguous gap between
+    # the ~0.06s timeout and the full sleep duration; avoids flakiness caused
+    # by macOS ARM scheduler imprecision with very short thread.join timeouts.
+    iteration_result = executor._execute_single_iteration(_SlowPowerTest(5.0), iteration_id=1, is_warm_up=False)
 
     assert iteration_result.timed_out is True
     assert iteration_result.success is False
     assert "timed out" in (iteration_result.error or "").lower()
-    assert iteration_result.duration < 0.2  # Should not wait for full sleep
+    assert iteration_result.duration < 2.0  # Should return long before full 5s sleep
 
 
 def test_resource_limit_flag_aborts_power_run(monkeypatch):

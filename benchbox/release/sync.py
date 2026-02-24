@@ -32,6 +32,7 @@ from benchbox.release.workflow import (
     compare_repos,
     should_transform,
 )
+from benchbox.utils.printing import emit
 
 
 def is_git_repo(path: Path) -> bool:
@@ -61,6 +62,28 @@ def git_fetch(path: Path) -> bool:
     return result.returncode == 0
 
 
+def git_changed_files(path: Path, revspec: str) -> set[Path]:
+    """Return changed files in a git revision spec.
+
+    Args:
+        path: Repository root
+        revspec: Git revision spec (e.g., "HEAD~1..HEAD")
+
+    Returns:
+        Set of relative paths changed in the revision range
+    """
+    result = subprocess.run(
+        ["git", "diff", "--name-only", revspec],
+        cwd=path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Invalid revspec '{revspec}': {result.stderr.strip()}")
+
+    return {Path(line.strip()) for line in result.stdout.splitlines() if line.strip()}
+
+
 def git_add_files(path: Path, files: set[Path]) -> bool:
     """Stage specific files for commit.
 
@@ -82,7 +105,7 @@ def git_add_files(path: Path, files: set[Path]) -> bool:
             text=True,
         )
         if result.returncode != 0:
-            print(f"Error staging {rel_path}: {result.stderr}")
+            emit(f"Error staging {rel_path}: {result.stderr}")
             return False
     return True
 
@@ -105,7 +128,7 @@ def git_commit(path: Path, message: str) -> bool:
         text=True,
     )
     if not result.stdout.strip():
-        print("No changes to commit")
+        emit("No changes to commit")
         return True
 
     # Commit
@@ -116,7 +139,7 @@ def git_commit(path: Path, message: str) -> bool:
         text=True,
     )
     if result.returncode != 0:
-        print(f"Error committing: {result.stderr}")
+        emit(f"Error committing: {result.stderr}")
         return False
 
     return True
@@ -128,62 +151,52 @@ def cmd_status(args: argparse.Namespace) -> int:
     target = args.target.resolve()
 
     if not source.exists():
-        print(f"Error: Source repository not found: {source}")
+        emit(f"Error: Source repository not found: {source}")
         return 1
 
     if not target.exists():
-        print(f"Target repository not found: {target}")
-        print("This is expected for first sync. Use 'push' to initialize.")
+        emit(f"Target repository not found: {target}")
+        emit("This is expected for first sync. Use 'push' to initialize.")
         return 0
 
-    print("Comparing repositories...")
-    print(f"  Private (source): {source}")
-    print(f"  Public (target):  {target}")
-    print()
+    emit("Comparing repositories...")
+    emit(f"  Private (source): {source}")
+    emit(f"  Public (target):  {target}")
+    emit()
 
     comparison = compare_repos(source, target, check_conflicts=True)
 
-    # Show summary
-    print(f"Summary: {comparison.summary()}")
-    print()
+    emit(f"Summary: {comparison.summary()}")
+    emit()
 
-    # Show details
-    if comparison.added:
-        print(f"Added ({len(comparison.added)} files):")
-        for f in sorted(comparison.added)[:20]:
-            print(f"  + {f}")
-        if len(comparison.added) > 20:
-            print(f"  ... and {len(comparison.added) - 20} more")
-        print()
-
-    if comparison.modified:
-        print(f"Modified ({len(comparison.modified)} files):")
-        for f in sorted(comparison.modified)[:20]:
-            print(f"  M {f}")
-        if len(comparison.modified) > 20:
-            print(f"  ... and {len(comparison.modified) - 20} more")
-        print()
-
-    if comparison.deleted:
-        print(f"Deleted ({len(comparison.deleted)} files):")
-        for f in sorted(comparison.deleted)[:20]:
-            print(f"  - {f}")
-        if len(comparison.deleted) > 20:
-            print(f"  ... and {len(comparison.deleted) - 20} more")
-        print()
+    _emit_file_list(comparison.added, "Added", "+")
+    _emit_file_list(comparison.modified, "Modified", "M")
+    _emit_file_list(comparison.deleted, "Deleted", "-")
 
     if comparison.conflicts:
-        print(f"⚠️  Conflicts ({len(comparison.conflicts)} files):")
+        emit(f"  Conflicts ({len(comparison.conflicts)} files):")
         for f in sorted(comparison.conflicts):
-            print(f"  ! {f}")
-        print()
-        print("Use --force to overwrite public changes.")
-        print()
+            emit(f"  ! {f}")
+        emit()
+        emit("Use --force to overwrite public changes.")
+        emit()
 
     if not comparison.has_changes and not comparison.has_conflicts:
-        print("Repositories are in sync.")
+        emit("Repositories are in sync.")
 
     return 0
+
+
+def _emit_file_list(files: set, label: str, prefix: str, limit: int = 20) -> None:
+    """Emit a truncated file list section for status output."""
+    if not files:
+        return
+    emit(f"{label} ({len(files)} files):")
+    for f in sorted(files)[:limit]:
+        emit(f"  {prefix} {f}")
+    if len(files) > limit:
+        emit(f"  ... and {len(files) - limit} more")
+    emit()
 
 
 def cmd_push(args: argparse.Namespace) -> int:
@@ -192,64 +205,64 @@ def cmd_push(args: argparse.Namespace) -> int:
     target = args.target.resolve()
 
     if not source.exists():
-        print(f"Error: Source repository not found: {source}")
+        emit(f"Error: Source repository not found: {source}")
         return 1
 
     # Validate target
     if target.exists():
         if not is_git_repo(target):
-            print(f"Error: Target exists but is not a git repository: {target}")
+            emit(f"Error: Target exists but is not a git repository: {target}")
             return 1
 
         if not is_repo_clean(target):
-            print(f"Error: Target repository has uncommitted changes: {target}")
-            print("Please commit or stash changes before syncing.")
+            emit(f"Error: Target repository has uncommitted changes: {target}")
+            emit("Please commit or stash changes before syncing.")
             return 1
 
         # Fetch latest
-        print("Fetching latest from public origin...")
+        emit("Fetching latest from public origin...")
         if not git_fetch(target):
-            print("Warning: Could not fetch from origin")
+            emit("Warning: Could not fetch from origin")
 
     # Compare repos
-    print("\nComparing repositories...")
+    emit("\nComparing repositories...")
     comparison = compare_repos(source, target, check_conflicts=True)
 
-    print(f"Summary: {comparison.summary()}")
-    print()
+    emit(f"Summary: {comparison.summary()}")
+    emit()
 
     if comparison.has_conflicts and not args.force:
-        print("⚠️  Conflicts detected:")
+        emit("⚠️  Conflicts detected:")
         for f in sorted(comparison.conflicts):
-            print(f"  ! {f}")
-        print()
-        print("Use --force to overwrite public changes.")
+            emit(f"  ! {f}")
+        emit()
+        emit("Use --force to overwrite public changes.")
         return 1
 
     if not comparison.has_changes and not comparison.has_conflicts:
-        print("No changes to push.")
+        emit("No changes to push.")
         return 0
 
     if args.dry_run:
-        print("\n[DRY RUN] Would sync the following:")
+        emit("\n[DRY RUN] Would sync the following:")
         if comparison.added:
-            print(f"  Add {len(comparison.added)} files")
+            emit(f"  Add {len(comparison.added)} files")
         if comparison.modified:
-            print(f"  Modify {len(comparison.modified)} files")
+            emit(f"  Modify {len(comparison.modified)} files")
         if comparison.deleted:
-            print(f"  Delete {len(comparison.deleted)} files")
+            emit(f"  Delete {len(comparison.deleted)} files")
         if comparison.conflicts:
-            print(f"  Overwrite {len(comparison.conflicts)} conflicted files")
+            emit(f"  Overwrite {len(comparison.conflicts)} conflicted files")
         return 0
 
     # Create target if needed
     if not target.exists():
-        print(f"\nInitializing target repository: {target}")
+        emit(f"\nInitializing target repository: {target}")
         target.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init"], cwd=target, check=True)
 
     # Apply changes
-    print("\nApplying changes...")
+    emit("\nApplying changes...")
 
     # Copy added and modified files
     files_to_copy = comparison.added | comparison.modified
@@ -271,7 +284,7 @@ def cmd_push(args: argparse.Namespace) -> int:
         else:
             shutil.copy2(source_file, target_file)
 
-        print(f"  {'A' if rel_path in comparison.added else 'M'} {rel_path}")
+        emit(f"  {'A' if rel_path in comparison.added else 'M'} {rel_path}")
 
     # Delete removed files
     deleted_files: set[Path] = set()
@@ -280,27 +293,27 @@ def cmd_push(args: argparse.Namespace) -> int:
         if target_file.exists():
             target_file.unlink()
             deleted_files.add(rel_path)
-            print(f"  D {rel_path}")
+            emit(f"  D {rel_path}")
 
     # Stage only the files we modified (not git add -A which could stage unintended files)
     all_changed_files = files_to_copy | deleted_files
-    print(f"\nStaging {len(all_changed_files)} files...")
+    emit(f"\nStaging {len(all_changed_files)} files...")
     if not git_add_files(target, all_changed_files):
-        print("Error: Failed to stage changes")
+        emit("Error: Failed to stage changes")
         return 1
 
     # Commit
     message = args.message or "Sync from private repository"
 
-    print(f"Committing: {message}")
+    emit(f"Committing: {message}")
     if not git_commit(target, message):
-        print("Error: Failed to commit changes")
+        emit("Error: Failed to commit changes")
         return 1
 
-    print("\n✓ Push complete")
-    print("\nNext steps:")
-    print(f"  1. Review: cd {target} && git log -1")
-    print(f"  2. Push: cd {target} && git push origin main")
+    emit("\n✓ Push complete")
+    emit("\nNext steps:")
+    emit(f"  1. Review: cd {target} && git log -1")
+    emit(f"  2. Push: cd {target} && git push origin main")
     return 0
 
 
@@ -310,56 +323,79 @@ def cmd_pull(args: argparse.Namespace) -> int:
     target = args.target.resolve()  # Public repo
 
     if not target.exists():
-        print(f"Error: Public repository not found: {target}")
+        emit(f"Error: Public repository not found: {target}")
         return 1
 
     if not source.exists():
-        print(f"Error: Private repository not found: {source}")
+        emit(f"Error: Private repository not found: {source}")
         return 1
 
     # For pull, we reverse the comparison: public is source, private is target
-    print("\nComparing repositories (pull direction)...")
-    print(f"  Public (source): {target}")
-    print(f"  Private (target): {source}")
-    print()
+    emit("\nComparing repositories (pull direction)...")
+    emit(f"  Public (source): {target}")
+    emit(f"  Private (target): {source}")
+    emit()
 
     # Get files from public that differ from private
     comparison = compare_repos(target, source, check_conflicts=True)
 
-    print(f"Summary: {comparison.summary()}")
-    print()
+    # Optional narrowing: only sync files changed in target revspec
+    if args.revspec:
+        try:
+            changed_in_revspec = git_changed_files(target, args.revspec)
+        except RuntimeError as exc:
+            emit(f"Error: {exc}")
+            return 1
+
+        comparison.added &= changed_in_revspec
+        comparison.modified &= changed_in_revspec
+        comparison.deleted &= changed_in_revspec
+        comparison.conflicts &= changed_in_revspec
+        emit(f"Filtered by revspec '{args.revspec}': {len(changed_in_revspec)} source-changed files")
+        emit()
+
+    emit(f"Summary: {comparison.summary()}")
+    emit()
+
+    total_changes = len(comparison.added) + len(comparison.modified) + len(comparison.deleted)
+    if total_changes > args.max_files and not args.force:
+        emit(
+            f"Error: Pull would modify {total_changes} files (limit: {args.max_files}). "
+            "Use --revspec to narrow scope or --force to proceed."
+        )
+        return 1
 
     if comparison.has_conflicts and not args.force:
-        print("⚠️  Conflicts detected:")
+        emit("⚠️  Conflicts detected:")
         for f in sorted(comparison.conflicts):
-            print(f"  ! {f}")
-        print()
-        print("Use --force to overwrite private changes.")
+            emit(f"  ! {f}")
+        emit()
+        emit("Use --force to overwrite private changes.")
         return 1
 
     if not comparison.has_changes and not comparison.has_conflicts:
-        print("No changes to pull.")
+        emit("No changes to pull.")
         return 0
 
     if args.dry_run:
-        print("\n[DRY RUN] Would sync the following:")
+        emit("\n[DRY RUN] Would sync the following:")
         if comparison.added:
-            print(f"  Add {len(comparison.added)} files")
+            emit(f"  Add {len(comparison.added)} files")
         if comparison.modified:
-            print(f"  Modify {len(comparison.modified)} files")
+            emit(f"  Modify {len(comparison.modified)} files")
         if comparison.deleted:
             if args.delete:
-                print(f"  Delete {len(comparison.deleted)} files")
+                emit(f"  Delete {len(comparison.deleted)} files")
             else:
-                print(f"  Skip {len(comparison.deleted)} deletions (use --delete to remove)")
+                emit(f"  Skip {len(comparison.deleted)} deletions (use --delete to remove)")
         if comparison.conflicts:
-            print(f"  Overwrite {len(comparison.conflicts)} conflicted files")
+            emit(f"  Overwrite {len(comparison.conflicts)} conflicted files")
         return 0
 
     # Apply changes
-    print("\nApplying changes to private repo...")
-    print("Note: Changes are NOT automatically committed. Review and commit manually.")
-    print()
+    emit("\nApplying changes to private repo...")
+    emit("Note: Changes are NOT automatically committed. Review and commit manually.")
+    emit()
 
     # Copy added and modified files
     files_to_copy = comparison.added | comparison.modified
@@ -369,6 +405,11 @@ def cmd_pull(args: argparse.Namespace) -> int:
     for rel_path in sorted(files_to_copy):
         public_file = target / rel_path
         private_file = source / rel_path
+
+        # Preserve private .gitignore on pull; it may contain private-only rules.
+        if rel_path.name == ".gitignore":
+            emit(f"  S {rel_path} (preserved private .gitignore)")
+            continue
 
         # Create parent directories
         private_file.parent.mkdir(parents=True, exist_ok=True)
@@ -381,29 +422,29 @@ def cmd_pull(args: argparse.Namespace) -> int:
         else:
             shutil.copy2(public_file, private_file)
 
-        print(f"  {'A' if rel_path in comparison.added else 'M'} {rel_path}")
+        emit(f"  {'A' if rel_path in comparison.added else 'M'} {rel_path}")
 
     # Handle deleted files
     if comparison.deleted:
         if args.delete:
-            print(f"\nDeleting {len(comparison.deleted)} files not in public repo...")
+            emit(f"\nDeleting {len(comparison.deleted)} files not in public repo...")
             for rel_path in sorted(comparison.deleted):
                 private_file = source / rel_path
                 if private_file.exists():
                     private_file.unlink()
-                    print(f"  D {rel_path}")
+                    emit(f"  D {rel_path}")
         else:
-            print(f"\n⚠️  {len(comparison.deleted)} files exist in private but not in public:")
+            emit(f"\n⚠️  {len(comparison.deleted)} files exist in private but not in public:")
             for f in sorted(comparison.deleted)[:10]:
-                print(f"    {f}")
+                emit(f"    {f}")
             if len(comparison.deleted) > 10:
-                print(f"    ... and {len(comparison.deleted) - 10} more")
-            print("  Use --delete to remove these files.")
+                emit(f"    ... and {len(comparison.deleted) - 10} more")
+            emit("  Use --delete to remove these files.")
 
-    print("\n✓ Pull complete")
-    print("\nNext steps:")
-    print("  1. Review: git status")
-    print("  2. Commit: git add -p && git commit -m 'Merge from public'")
+    emit("\n✓ Pull complete")
+    emit("\nNext steps:")
+    emit("  1. Review: git status")
+    emit("  2. Commit: git add -p && git commit -m 'Merge from public'")
     return 0
 
 
@@ -481,6 +522,18 @@ def main() -> int:
         "-n",
         action="store_true",
         help="Show what would be done without making changes",
+    )
+    pull_parser.add_argument(
+        "--revspec",
+        type=str,
+        default=None,
+        help="Only sync files changed in target repo revision range (e.g., HEAD~1..HEAD)",
+    )
+    pull_parser.add_argument(
+        "--max-files",
+        type=int,
+        default=100,
+        help="Abort pull if more than this many files would change (default: 100)",
     )
     pull_parser.set_defaults(func=cmd_pull)
 

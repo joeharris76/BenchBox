@@ -9,6 +9,7 @@ from typing import Any
 from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.cloud_storage import get_cloud_path_info, is_cloud_path
 from benchbox.utils.file_format import is_tpc_format
+from benchbox.utils.printing import emit
 
 from .query_transformer import ClickHouseQueryTransformer
 
@@ -136,7 +137,7 @@ class ClickHouseWorkloadMixin:
         if is_cloud_path(str(data_dir)):
             path_info = get_cloud_path_info(str(data_dir))
             self.log_verbose(f"Loading data from cloud storage: {path_info['provider']} bucket '{path_info['bucket']}'")
-            print(f"  Loading data from {path_info['provider']} cloud storage")
+            emit(f"  Loading data from {path_info['provider']} cloud storage")
 
         # Create ClickHouse-specific handler factory
         def clickhouse_handler_factory(file_path, adapter, benchmark_instance):
@@ -164,6 +165,7 @@ class ClickHouseWorkloadMixin:
             connection=connection,
             data_dir=data_dir,
             handler_factory=clickhouse_handler_factory,
+            tuning_config=self.unified_tuning_configuration if self.tuning_enabled else None,
         )
         table_stats, loading_time = loader.load()
         # DataLoader doesn't provide per-table timings yet
@@ -181,7 +183,7 @@ class ClickHouseWorkloadMixin:
             List of table names (lowercase for consistency)
         """
         try:
-            if self.mode == "local":
+            if self.deployment_mode == "local":
                 # For local mode (chdb), use SHOW TABLES
                 result = connection.execute("SHOW TABLES")
                 if result:

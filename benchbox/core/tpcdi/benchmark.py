@@ -24,7 +24,6 @@ from typing import (
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
-import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -59,6 +58,7 @@ from benchbox.core.tpcdi.schema import (
 )
 from benchbox.core.tpcdi.validation import DataQualityResult, TPCDIValidator
 from benchbox.utils.clock import elapsed_seconds, mono_time
+from benchbox.utils.printing import emit
 
 
 class TPCDIBenchmark(BaseBenchmark):
@@ -109,7 +109,7 @@ class TPCDIBenchmark(BaseBenchmark):
             enable_parallel: Whether to enable basic parallel processing
             max_workers: Maximum number of workers for parallel processing
             config: Optional TPCDIConfig instance for unified configuration
-            **kwargs: Additional configuration options (for backward compatibility)
+            **kwargs: Additional configuration options passed to integrated components
         """
         # Extract quiet from kwargs to prevent duplicate kwarg error
         kwargs = dict(kwargs)
@@ -415,6 +415,20 @@ class TPCDIBenchmark(BaseBenchmark):
             tables = list(self.tables.keys())
 
         # Create tables first
+        self._execute_schema_sql(connection)
+
+        # Load data from CSV files
+        for table_name in tables:
+            if table_name not in self.tables:
+                continue
+            self._load_single_table(connection, table_name)
+
+        # Commit transaction
+        if hasattr(connection, "commit"):
+            connection.commit()
+
+    def _execute_schema_sql(self, connection: Any) -> None:
+        """Execute CREATE TABLE statements on the given connection."""
         schema_sql = self.get_create_tables_sql()
         if hasattr(connection, "executescript"):
             connection.executescript(schema_sql)
@@ -424,59 +438,45 @@ class TPCDIBenchmark(BaseBenchmark):
                 if statement.strip():
                     cursor.execute(statement)
 
-        # Load data from CSV files
-        for table_name in tables:
-            if table_name not in self.tables:
-                continue
-            _path = self.tables[table_name]
-            table_schema = TABLES[table_name]
+    def _load_single_table(self, connection: Any, table_name: str) -> None:
+        """Load a single table's CSV data into the database."""
+        _path = self.tables[table_name]
+        table_schema = TABLES[table_name]
 
-            # Read CSV and insert data
+        with open(_path) as f:
+            reader = csv.reader(f, delimiter="|")
 
-            with open(_path) as f:
-                reader = csv.reader(f, delimiter="|")
+            columns = [cast(str, col["name"]) for col in cast(list[dict[str, Any]], table_schema["columns"])]
+            placeholders = ",".join(["?" for _ in columns])
+            insert_sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
 
-                # Prepare insert statement
-                columns = [cast(str, col["name"]) for col in cast(list[dict[str, Any]], table_schema["columns"])]
-                placeholders = ",".join(["?" for _ in columns])
-                insert_sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
+            col_types = [cast(str, col["type"]).upper() for col in cast(list[dict[str, Any]], table_schema["columns"])]
+            numeric_prefixes = ("INT", "BIGINT", "SMALLINT", "TINYINT", "DECIMAL", "DOUBLE", "FLOAT", "REAL")
 
-                # Insert data in batches for better performance
-                batch_size = 5000
-                batch = []
+            def _convert_row(values: list[str]) -> list[Any]:
+                converted: list[Any] = []
+                for idx, val in enumerate(values):
+                    if val == "" and col_types[idx].startswith(numeric_prefixes):
+                        converted.append(None)
+                    else:
+                        converted.append(val)
+                return converted
 
-                # Determine simple type categories for conversion
-                col_types = [
-                    cast(str, col["type"]).upper() for col in cast(list[dict[str, Any]], table_schema["columns"])
-                ]
-                numeric_prefixes = ("INT", "BIGINT", "SMALLINT", "TINYINT", "DECIMAL", "DOUBLE", "FLOAT", "REAL")
+            batch_size = 5000
+            batch: list[list[Any]] = []
 
-                def _convert_row(values: list[str]) -> list[Any]:
-                    converted: list[Any] = []
-                    for idx, val in enumerate(values):
-                        # Normalize empty strings for numeric columns to None
-                        if val == "" and col_types[idx].startswith(numeric_prefixes):
-                            converted.append(None)
-                        else:
-                            converted.append(val)
-                    return converted
-
-                if hasattr(connection, "executemany"):
-                    for row in reader:
-                        batch.append(_convert_row(row))
-                        if len(batch) >= batch_size:
-                            connection.executemany(insert_sql, batch)
-                            batch = []
-                    if batch:
+            if hasattr(connection, "executemany"):
+                for row in reader:
+                    batch.append(_convert_row(row))
+                    if len(batch) >= batch_size:
                         connection.executemany(insert_sql, batch)
-                else:
-                    cursor = connection.cursor()
-                    for row in reader:
-                        cursor.execute(insert_sql, _convert_row(row))
-
-        # Commit transaction
-        if hasattr(connection, "commit"):
-            connection.commit()
+                        batch = []
+                if batch:
+                    connection.executemany(insert_sql, batch)
+            else:
+                cursor = connection.cursor()
+                for row in reader:
+                    cursor.execute(insert_sql, _convert_row(row))
 
     def run_benchmark(
         self, connection: Any, queries: Optional[list[str]] = None, iterations: int = 1
@@ -1357,7 +1357,7 @@ class TPCDIBenchmark(BaseBenchmark):
                         result = future.result()
                         self._accumulate_transformation_result(transformation_results, result)
                     except Exception as e:
-                        logging.error(f"Error in parallel transformation: {e}")
+                        emit(f"❌ Error in parallel transformation: {e}")
                         # Continue processing other files
 
         self._materialize_staged_data(transformation_results)
@@ -1590,7 +1590,7 @@ class TPCDIBenchmark(BaseBenchmark):
     def _load_warehouse_data(
         self, connection: Any, transformation_results: dict[str, Any], batch_type: str
     ) -> dict[str, Any]:
-        """Load transformed data into SQL warehouse (compatibility wrapper)."""
+        """Load transformed data into SQL warehouse."""
         backend = self._create_sql_etl_backend(connection=connection)
         return backend.load_dataframes(transformation_results.get("staged_data", {}), batch_type=batch_type)
 
@@ -1611,10 +1611,6 @@ class TPCDIBenchmark(BaseBenchmark):
         #     return 'FactTrade'
         else:
             return None
-
-    def _get_target_table_from_file(self, staging_file: str) -> Optional[str]:
-        """Backward-compatible alias for older call sites."""
-        return self._get_target_table_from_source_name(staging_file)
 
     def validate_etl_results(self, connection: Any) -> dict[str, Any]:
         """Validate ETL results using data quality checks.
@@ -1706,7 +1702,7 @@ class TPCDIBenchmark(BaseBenchmark):
             dialect: Target SQL dialect
         """
         self.schema_manager.create_schema(connection, dialect)
-        logging.info(f"Created TPC-DI schema for {dialect}")
+        emit(f"Created TPC-DI schema for {dialect}")
 
     def run_full_benchmark(self, connection: Any, dialect: str = "duckdb") -> dict[str, Any]:
         """Run the complete TPC-DI benchmark with all phases.
@@ -1722,7 +1718,7 @@ class TPCDIBenchmark(BaseBenchmark):
         Returns:
             Complete benchmark results with all metrics
         """
-        logging.info(f"Starting complete TPC-DI benchmark (scale factor: {self.config.scale_factor})")
+        emit(f"Starting complete TPC-DI benchmark (scale factor: {self.config.scale_factor})")
         start_time = datetime.now()
         start_mono = mono_time()
 
@@ -1731,20 +1727,20 @@ class TPCDIBenchmark(BaseBenchmark):
             self._initialize_connection_dependent_systems(connection, dialect)
 
             # Phase 1: Create schema
-            logging.info("Phase 1: Creating database schema...")
+            emit("Phase 1: Creating database schema...")
             self.create_schema(connection, dialect)
 
             # Phase 2: Run ETL pipeline
-            logging.info("Phase 2: Running ETL pipeline...")
+            emit("Phase 2: Running ETL pipeline...")
             etl_result = self.run_etl_benchmark(connection, dialect)
 
             # Phase 3: Run data validation
-            logging.info("Phase 3: Running data quality validation...")
+            emit("Phase 3: Running data quality validation...")
             validation_result = self.run_data_validation(connection)
 
             # Phase 4: Calculate metrics
             end_time = datetime.now()
-            logging.info("Phase 4: Calculating TPC-DI metrics...")
+            emit("Phase 4: Calculating TPC-DI metrics...")
             metrics = self.metrics_calculator.calculate_detailed_metrics(
                 etl_result, validation_result, start_time, end_time
             )
@@ -1765,7 +1761,7 @@ class TPCDIBenchmark(BaseBenchmark):
             }
 
         except Exception as e:
-            logging.error(f"TPC-DI benchmark failed: {e}")
+            emit(f"❌ TPC-DI benchmark failed: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -1873,7 +1869,7 @@ class TPCDIBenchmark(BaseBenchmark):
         if self.validator is None:
             raise ValueError("Validator not initialized. Call run_full_benchmark or initialize manually.")
 
-        logging.info("Running data quality validation...")
+        emit("Running data quality validation...")
         return self.validator.run_all_validations()
 
     def calculate_official_metrics(
@@ -1905,7 +1901,7 @@ class TPCDIBenchmark(BaseBenchmark):
         if self.data_loader is None:
             raise ValueError("Data loader not initialized")
 
-        logging.info("Optimizing database for TPC-DI performance...")
+        emit("Optimizing database for TPC-DI performance...")
 
         # Create indexes
         index_results = self.data_loader.create_indexes(connection)
@@ -2005,7 +2001,7 @@ class TPCDIBenchmark(BaseBenchmark):
         if enable_parallel_processing is None:
             enable_parallel_processing = self.enable_parallel
 
-        logging.info("Starting enhanced TPC-DI ETL pipeline (Phase 3)")
+        emit("Starting enhanced TPC-DI ETL pipeline (Phase 3)")
         start_time = datetime.now()
         start_mono = mono_time()
 
@@ -2027,7 +2023,7 @@ class TPCDIBenchmark(BaseBenchmark):
 
         try:
             # Phase 1: Enhanced Data Processing with FinWire and Customer Management
-            logging.info("Phase 1: Enhanced data processing...")
+            emit("Phase 1: Enhanced data processing...")
             phase1_start = mono_time()
 
             phase1_results = self._run_enhanced_data_processing()
@@ -2041,7 +2037,7 @@ class TPCDIBenchmark(BaseBenchmark):
             }
 
             # Phase 2: Enhanced SCD Type 2 Processing
-            logging.info("Phase 2: Enhanced SCD Type 2 processing...")
+            emit("Phase 2: Enhanced SCD Type 2 processing...")
             phase2_start = mono_time()
 
             phase2_results = self._run_enhanced_scd_processing(connection)
@@ -2056,7 +2052,7 @@ class TPCDIBenchmark(BaseBenchmark):
 
             # Phase 3: Parallel Batch Processing (if enabled)
             if enable_parallel_processing:
-                logging.info("Phase 3: Parallel batch processing...")
+                emit("Phase 3: Parallel batch processing...")
                 phase3_start = mono_time()
 
                 phase3_results = self._run_parallel_batch_processing()
@@ -2070,7 +2066,7 @@ class TPCDIBenchmark(BaseBenchmark):
                 }
 
             # Phase 4: Incremental Data Loading
-            logging.info("Phase 4: Incremental data loading...")
+            emit("Phase 4: Incremental data loading...")
             phase4_start = mono_time()
 
             phase4_results = self._run_incremental_data_loading(connection)
@@ -2085,7 +2081,7 @@ class TPCDIBenchmark(BaseBenchmark):
 
             # Phase 5: Data Quality Monitoring (if enabled)
             if enable_data_quality_monitoring:
-                logging.info("Phase 5: Data quality monitoring...")
+                emit("Phase 5: Data quality monitoring...")
                 phase5_start = mono_time()
 
                 phase5_results = self._run_data_quality_monitoring(connection)
@@ -2136,13 +2132,11 @@ class TPCDIBenchmark(BaseBenchmark):
             pipeline_results["end_time"] = end_time.isoformat()
             pipeline_results["total_duration"] = elapsed_seconds(start_mono)
 
-            logging.info(
-                f"Enhanced ETL pipeline completed successfully in {pipeline_results['total_duration']:.2f} seconds"
-            )
+            emit(f"✅ Enhanced ETL pipeline completed successfully in {pipeline_results['total_duration']:.2f} seconds")
 
         except Exception as e:
             if enable_error_recovery and self.error_recovery_manager:
-                logging.warning(f"Attempting error recovery for: {str(e)}")
+                emit(f"⚠️ Attempting error recovery for: {str(e)}")
                 recovery_result = self.error_recovery_manager.handle_pipeline_error(str(e), str(type(e)))
                 pipeline_results["error_recovery"] = {
                     "attempted": True,
@@ -2154,7 +2148,7 @@ class TPCDIBenchmark(BaseBenchmark):
             pipeline_results["error"] = str(e)
             pipeline_results["end_time"] = datetime.now().isoformat()
             pipeline_results["total_duration"] = elapsed_seconds(start_mono)
-            logging.error(f"Enhanced ETL pipeline failed: {e}")
+            emit(f"❌ Enhanced ETL pipeline failed: {e}")
             # Don't raise - return the error details for debugging
 
         return pipeline_results
@@ -2206,7 +2200,7 @@ class TPCDIBenchmark(BaseBenchmark):
             ]  # Include required key            # Success is already set to True by default, only changed to False on actual errors
 
         except Exception as e:
-            logging.error(f"Enhanced data processing failed: {e}")
+            emit(f"❌ Enhanced data processing failed: {e}")
             results["error"] = str(e)
             results["success"] = False
 
@@ -2237,7 +2231,7 @@ class TPCDIBenchmark(BaseBenchmark):
                     results["error"] = scd_result.get("error", "SCD processing failed")
 
         except Exception as e:
-            logging.error(f"Enhanced SCD processing failed: {e}")
+            emit(f"❌ Enhanced SCD processing failed: {e}")
             results["error"] = str(e)
 
         return results
@@ -2311,7 +2305,7 @@ class TPCDIBenchmark(BaseBenchmark):
                     results["error"] = f"Failed tasks: {execution_result.get('tasks_failed', 0)}"
 
         except Exception as e:
-            logging.error(f"Parallel batch processing failed: {e}")
+            emit(f"❌ Parallel batch processing failed: {e}")
             results["error"] = str(e)
 
         return results
@@ -2358,7 +2352,7 @@ class TPCDIBenchmark(BaseBenchmark):
                                 results["batches_loaded"] += 1
 
                     except Exception as table_error:
-                        logging.warning(f"Error processing incremental data for {table_name}: {table_error}")
+                        emit(f"⚠️ Error processing incremental data for {table_name}: {table_error}")
                         continue
 
                 results["records_loaded"] = total_records
@@ -2368,7 +2362,7 @@ class TPCDIBenchmark(BaseBenchmark):
                     results["error"] = "No incremental batches were successfully loaded"
 
         except Exception as e:
-            logging.error(f"Incremental data loading failed: {e}")
+            emit(f"❌ Incremental data loading failed: {e}")
             results["error"] = str(e)
 
         return results
@@ -2441,7 +2435,7 @@ class TPCDIBenchmark(BaseBenchmark):
                 results["note"] = f"Quality monitoring completed with {results['quality_score']:.1f}% pass rate"
 
         except Exception as e:
-            logging.warning(f"Data quality monitoring encountered issues: {e}")
+            emit(f"⚠️ Data quality monitoring encountered issues: {e}")
             # Still mark as successful but note the issues
             results["success"] = True
             results["rules_executed"] = 0

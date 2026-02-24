@@ -8,6 +8,7 @@ highlighting differences and displaying plan statistics.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from benchbox.core.query_plans.comparison import OperatorDiff, PlanComparison
 from benchbox.core.results.query_plan_models import (
@@ -27,6 +28,16 @@ class VisualizationOptions:
     show_costs: bool = True
     max_depth: int | None = None
     compact: bool = False
+
+
+def _format_truncated_list(label: str, items: list[str], max_display: int = 3) -> list[str]:
+    """Format a labeled, truncated list for display."""
+    lines = [f"{label}: {len(items)}"]
+    for item in items[:max_display]:
+        lines.append(f"  - {item}")
+    if len(items) > max_display:
+        lines.append(f"  ... and {len(items) - max_display} more")
+    return lines
 
 
 class QueryPlanVisualizer:
@@ -144,12 +155,22 @@ class QueryPlanVisualizer:
         lines.append(f"Right: {comparison.plan_right.query_id} ({comparison.plan_right.platform})")
         lines.append("")
 
-        # Summary
+        # Summary and similarity
         lines.append(comparison.summary)
         lines.append("")
+        self._render_similarity_metrics(comparison.similarity, lines)
+        self._render_operator_counts(comparison.similarity, lines)
 
-        # Similarity metrics
-        sim = comparison.similarity
+        # Detailed differences (if any)
+        if comparison.operator_diffs:
+            self._render_operator_diffs(comparison.operator_diffs, lines)
+
+        lines.append("=" * 80)
+
+        return "\n".join(lines)
+
+    def _render_similarity_metrics(self, sim: Any, lines: list[str]) -> None:
+        """Render similarity metrics section."""
         lines.append("Similarity Metrics:")
         lines.append(f"  Overall:    {sim.overall_similarity:6.1%}")
         lines.append(f"  Structural: {sim.structural_similarity:6.1%}")
@@ -157,7 +178,8 @@ class QueryPlanVisualizer:
         lines.append(f"  Property:   {sim.property_similarity:6.1%}")
         lines.append("")
 
-        # Operator counts
+    def _render_operator_counts(self, sim: Any, lines: list[str]) -> None:
+        """Render operator count comparison."""
         lines.append(f"Operators: {sim.total_operators_left} (left) vs {sim.total_operators_right} (right)")
         lines.append(f"  Matching:   {sim.matching_operators}")
         if sim.type_mismatches > 0:
@@ -168,45 +190,40 @@ class QueryPlanVisualizer:
             lines.append(f"  Structure mismatches: {sim.structure_mismatches}")
         lines.append("")
 
-        # Detailed differences (if any)
-        if comparison.operator_diffs:
-            # Group by diff type
-            type_diffs = [d for d in comparison.operator_diffs if d.diff_type == "type_mismatch"]
-            prop_diffs = [d for d in comparison.operator_diffs if d.diff_type == "property_mismatch"]
-            struct_diffs = [d for d in comparison.operator_diffs if d.diff_type == "structure_mismatch"]
+    def _render_operator_diffs(self, operator_diffs: list[OperatorDiff], lines: list[str]) -> None:
+        """Render detailed operator differences grouped by type."""
+        type_diffs = [d for d in operator_diffs if d.diff_type == "type_mismatch"]
+        prop_diffs = [d for d in operator_diffs if d.diff_type == "property_mismatch"]
+        struct_diffs = [d for d in operator_diffs if d.diff_type == "structure_mismatch"]
 
-            if type_diffs:
-                lines.append(f"Type Mismatches ({len(type_diffs)}):")
-                for diff in type_diffs[:10]:  # Show first 10
-                    left_type = diff.differences.get("left_type", "?")
-                    right_type = diff.differences.get("right_type", "?")
-                    lines.append(f"  • {left_type} ≠ {right_type}")
-                if len(type_diffs) > 10:
-                    lines.append(f"  ... and {len(type_diffs) - 10} more")
-                lines.append("")
+        if type_diffs:
+            lines.append(f"Type Mismatches ({len(type_diffs)}):")
+            for diff in type_diffs[:10]:
+                left_type = diff.differences.get("left_type", "?")
+                right_type = diff.differences.get("right_type", "?")
+                lines.append(f"  • {left_type} ≠ {right_type}")
+            if len(type_diffs) > 10:
+                lines.append(f"  ... and {len(type_diffs) - 10} more")
+            lines.append("")
 
-            if prop_diffs:
-                lines.append(f"Property Differences ({len(prop_diffs)}):")
-                for diff in prop_diffs[:10]:  # Show first 10
-                    details = self._format_property_diff(diff)
-                    if details:
-                        lines.append(f"  • {details}")
-                if len(prop_diffs) > 10:
-                    lines.append(f"  ... and {len(prop_diffs) - 10} more")
-                lines.append("")
+        if prop_diffs:
+            lines.append(f"Property Differences ({len(prop_diffs)}):")
+            for diff in prop_diffs[:10]:
+                details = self._format_property_diff(diff)
+                if details:
+                    lines.append(f"  • {details}")
+            if len(prop_diffs) > 10:
+                lines.append(f"  ... and {len(prop_diffs) - 10} more")
+            lines.append("")
 
-            if struct_diffs:
-                lines.append(f"Structure Mismatches ({len(struct_diffs)}):")
-                for diff in struct_diffs[:10]:
-                    reason = diff.differences.get("reason", "unknown")
-                    lines.append(f"  • {reason}")
-                if len(struct_diffs) > 10:
-                    lines.append(f"  ... and {len(struct_diffs) - 10} more")
-                lines.append("")
-
-        lines.append("=" * 80)
-
-        return "\n".join(lines)
+        if struct_diffs:
+            lines.append(f"Structure Mismatches ({len(struct_diffs)}):")
+            for diff in struct_diffs[:10]:
+                reason = diff.differences.get("reason", "unknown")
+                lines.append(f"  • {reason}")
+            if len(struct_diffs) > 10:
+                lines.append(f"  ... and {len(struct_diffs) - 10} more")
+            lines.append("")
 
     def _render_operator_tree(
         self,
@@ -289,43 +306,30 @@ class QueryPlanVisualizer:
 
     def _format_operator_properties(self, operator: LogicalOperator) -> list[str]:
         """Format operator properties for display."""
-        props = []
+        props: list[str] = []
 
-        # Filter expressions
         if operator.filter_expressions and len(operator.filter_expressions) > 1:
-            props.append(f"Filters: {len(operator.filter_expressions)}")
-            for expr in operator.filter_expressions[:3]:
-                props.append(f"  - {expr}")
-            if len(operator.filter_expressions) > 3:
-                props.append(f"  ... and {len(operator.filter_expressions) - 3} more")
-
-        # Aggregation functions
+            props.extend(_format_truncated_list("Filters", operator.filter_expressions))
         if operator.aggregation_functions and len(operator.aggregation_functions) > 2:
-            props.append(f"Aggregations: {len(operator.aggregation_functions)}")
-            for agg in operator.aggregation_functions[:3]:
-                props.append(f"  - {agg}")
-            if len(operator.aggregation_functions) > 3:
-                props.append(f"  ... and {len(operator.aggregation_functions) - 3} more")
-
-        # Sort keys
+            props.extend(_format_truncated_list("Aggregations", operator.aggregation_functions))
         if operator.sort_keys:
-            props.append(f"Sort Keys: {len(operator.sort_keys)}")
-            for key in operator.sort_keys[:3]:
-                props.append(f"  - {key}")
-            if len(operator.sort_keys) > 3:
-                props.append(f"  ... and {len(operator.sort_keys) - 3} more")
+            props.extend(_format_truncated_list("Sort Keys", operator.sort_keys))
 
-        # Physical operator info
         if self.options.show_physical and operator.physical_operator:
-            phys = operator.physical_operator
-            props.append(f"Physical: {phys.operator_type}")
-            if self.options.show_costs:
-                if phys.properties.get("estimated_cost"):
-                    props.append(f"  Cost: {phys.properties['estimated_cost']}")
-                if phys.properties.get("estimated_rows"):
-                    props.append(f"  Rows: {phys.properties['estimated_rows']:,}")
+            props.extend(self._format_physical_properties(operator.physical_operator))
 
         return props
+
+    def _format_physical_properties(self, phys: Any) -> list[str]:
+        """Format physical operator properties for display."""
+        lines = [f"Physical: {phys.operator_type}"]
+        props = phys.properties if phys.properties is not None else {}
+        if self.options.show_costs:
+            if props.get("estimated_cost"):
+                lines.append(f"  Cost: {props['estimated_cost']}")
+            if props.get("estimated_rows"):
+                lines.append(f"  Rows: {props['estimated_rows']:,}")
+        return lines
 
     def _format_property_diff(self, diff: OperatorDiff) -> str:
         """Format property difference for display."""
@@ -364,6 +368,25 @@ class QueryPlanVisualizer:
             if right_only:
                 parts.append(f"{len(right_only)} aggs only in right")
             return "Aggregations: " + ", ".join(parts)
+
+        # Group by keys (ordered comparison)
+        if "group_by_keys" in diffs:
+            left = diffs["group_by_keys"]["left"] or []
+            right = diffs["group_by_keys"]["right"] or []
+            return f"Group by: [{', '.join(left)}] ≠ [{', '.join(right)}]"
+
+        # Limit/offset
+        if "limit_count" in diffs:
+            return f"Limit: {diffs['limit_count']['left']} ≠ {diffs['limit_count']['right']}"
+
+        if "offset_count" in diffs:
+            return f"Offset: {diffs['offset_count']['left']} ≠ {diffs['offset_count']['right']}"
+
+        # Projection expressions (ordered comparison)
+        if "projection_expressions" in diffs:
+            left = diffs["projection_expressions"]["left"] or []
+            right = diffs["projection_expressions"]["right"] or []
+            return f"Projections: [{', '.join(left[:3])}{'...' if len(left) > 3 else ''}] ≠ [{', '.join(right[:3])}{'...' if len(right) > 3 else ''}]"
 
         # Generic properties
         if "properties" in diffs:

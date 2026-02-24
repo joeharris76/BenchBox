@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig, DryRunResult
 from benchbox.core.dryrun import DryRunExecutor
 from benchbox.core.results.display import print_dry_run_summary
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, DryRunResult
 from benchbox.core.system import SystemProfiler
 
 

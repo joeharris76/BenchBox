@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from benchbox.utils.printing import emit
+
 
 class JoinOrderQueryManager:
     """Manager for Join Order Benchmark queries."""
@@ -61,7 +63,7 @@ class JoinOrderQueryManager:
                         if content:
                             queries[query_id] = content
                 except Exception as e:
-                    print(f"Warning: Could not load query {query_id}: {e}")
+                    emit(f"Warning: Could not load query {query_id}: {e}")
 
         return queries
 

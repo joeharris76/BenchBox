@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "benchbox"
-version = "0.1.2"
+version = "0.1.3"
 description = "Embedded benchmark datasets and queries for database evaluation. Implements TPC-H, TPC-DS, TPC-DI and other industry-standard benchmarks."
 readme = "README.md"
 authors = [{ name = "Joe Harris", email = "joe@benchbox.dev" }]
@@ -36,13 +36,8 @@ dependencies = [
     "jsonschema>=4.25.1",
     # Python 3.10 compatibility (tomllib is stdlib in 3.11+)
     "tomli>=2.0.0; python_version < '3.11'",
-    # Default platform (DuckDB) - always available for ease of use
-    "duckdb>=1.4.0",
     "pyarrow>=21.0.0",
     "numpy>=1.24.0",
-    "polars>=1.36.1",
-    "clickhouse-connect>=0.10.0",
-    "psycopg2-binary>=2.9.11",
 ]
 
 [tool.setuptools]
@@ -63,9 +58,9 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-benchmark>=4.0.0",
     "pytest-xdist>=3.0.0",
-    "duckdb>=1.4.0",
+    "duckdb>=1.0.0",
     "tox>=4.13.0",
-    "pyspark>=3.5.0",  # Aligned with dataframe-pyspark extra
+    "pyspark>=3.5.0",  # Aligned with pyspark extra
 ]
 docs = [
     "sphinx>=7.2.0",
@@ -76,17 +71,19 @@ docs = [
     "pygments>=2.18.0",
     "sphinx-tags>=0.4.0",
     "sphinx-design>=0.6.0",
-    "ablog @ git+https://github.com/sunpy/ablog.git@main ; python_version >= '3.11'",  # Needs unreleased fix for Sphinx 9 (docwriter removal)
+    "ablog>=0.11.13 ; python_version >= '3.11'",  # uv source override pins to git main for unreleased Sphinx 9 fix
 ]
 viz = []
 
 # Meta-groups for common scenarios
 all = [
+    "duckdb>=1.0.0",
+    "clickhouse-connect>=0.10.0",
     "clickhouse-driver>=0.2.0",
     "databricks-sql-connector>=2.0.0",
     "databricks-sdk>=0.20.0",
     "databricks-connect>=14.0.0",  # For DataFrame mode
-    "datafusion>=50.1.0",  # Updated to match dataframe-datafusion
+    "datafusion>=50.1.0",  # Updated to match datafusion extra
     "pyarrow>=10.0.0",  # For DataFusion (also in core with higher version)
     "firebolt-sdk>=1.18.0",
     "google-cloud-bigquery>=3.0.0",
@@ -107,6 +104,7 @@ all = [
     "deltalake>=1.2.1",  # For Delta Lake table format
     "pyiceberg>=0.10.0",  # For Iceberg table format
     "influxdb3-python>=0.10.0",  # For InfluxDB 3.0 time-series
+    "pymysql>=1.1.0",  # For StarRocks and Doris via MySQL protocol
     # DataFrame platforms
     "polars>=1.35.2",
     "dask[distributed]>=2024.1.0",
@@ -129,7 +127,9 @@ cloud = [
 cloudstorage = ["cloudpathlib>=0.15.0"]
 
 # Individual platforms (for minimal installations)
-clickhouse = ["clickhouse-driver>=0.2.0"]
+duckdb = ["duckdb>=1.0.0"]
+clickhouse = ["clickhouse-driver>=0.2.0"]  # TCP binary protocol
+clickhouse-connect = ["clickhouse-connect>=0.10.0"]  # HTTP protocol (ClickHouse Cloud)
 databricks = [
     "databricks-sql-connector>=2.0.0",
     "databricks-sdk>=0.20.0",
@@ -149,6 +149,7 @@ snowflake = ["snowflake-connector-python>=3.0.0", "cloudpathlib>=0.15.0"]
 trino = ["trino>=0.328.0", "cloudpathlib>=0.15.0"]
 presto = ["presto-python-client>=0.8.4", "cloudpathlib>=0.15.0"]
 postgresql = ["psycopg2-binary>=2.9.0"]
+questdb = ["psycopg2-binary>=2.9.0", "requests>=2.28.0"]
 synapse = ["pyodbc>=4.0.0"]
 fabric = [
     "pyodbc>=4.0.0",
@@ -164,10 +165,15 @@ firebolt = [
     "firebolt-sdk>=1.18.0",
     "cloudpathlib>=0.15.0",
 ]
+databend = [
+    "databend-driver>=0.28.0",
+]
+doris = ["pymysql>=1.0.0"]
 influxdb = [
     "influxdb3-python>=0.10.0",
     "pyarrow>=10.0.0",
 ]
+starrocks = ["pymysql>=1.1.0"]
 
 # Individual benchmark extras
 tpcdi = ["pandas>=2.0.0"]
@@ -178,34 +184,45 @@ table-formats = [
 ]
 
 # DataFrame platform extras (for benchbox.platforms.dataframe)
+# Plain-name extras are the preferred install names.
+# dataframe-* variants are kept as backward-compatible aliases.
+
 # Pandas family - string-based column access, eager evaluation
+pandas = ["pandas>=2.0.0"]
 dataframe-pandas = ["pandas>=2.0.0"]
+modin = ["modin[ray]>=0.32.0", "pandas>=2.0.0"]
 dataframe-modin = [
     "modin[ray]>=0.32.0",
     "pandas>=2.0.0",
 ]
+dask = ["dask[distributed]>=2024.1.0", "pandas>=2.0.0"]
 dataframe-dask = [
     "dask[distributed]>=2024.1.0",
     "pandas>=2.0.0",
 ]
-# Note: dataframe-cudf requires NVIDIA GPU with CUDA 12.x
+# Note: cudf requires NVIDIA GPU with CUDA 12.x
 # cuDF is not on PyPI directly - install via RAPIDS:
 #   pip install --extra-index-url=https://pypi.nvidia.com cudf-cu12
 # This extra is a placeholder to document the dependency; actual installation
 # requires the RAPIDS pip index or conda.
+cudf = []
 dataframe-cudf = [
     # Placeholder - actual cudf installation requires NVIDIA pip index
 ]
 
 # Expression family - expression-based API, lazy evaluation
+polars = ["polars>=1.35.2"]
 dataframe-polars = [
     "polars>=1.35.2",
 ]
+pyspark = ["pyspark>=3.5.0"]
+lakesail = ["pyspark>=3.5.0"]
 dataframe-pyspark = [
     "pyspark>=3.5.0",
 ]
 dataframe-datafusion = [
     "datafusion>=50.1.0",
+    "pyarrow>=10.0.0",
 ]
 
 # DataFrame family convenience groups
@@ -302,7 +319,7 @@ spark = [
 
 [project.scripts]
 benchbox = "benchbox.cli:main"
-benchbox-mcp = "benchbox.mcp:run_server"
+benchbox-mcp = "benchbox.mcp.cli:main"
 benchbox-sync = "benchbox.release.sync:main"
 
 [project.urls]
@@ -358,7 +375,7 @@ possibly-missing-attribute = "warn"
 error-on-warning = false
 
 [tool.pytest.ini_options]
-minversion = "0.1.2"
+minversion = "0.1.3"
 testpaths = ["tests"]
 python_files = "test_*.py"
 markers = [
@@ -374,6 +391,7 @@ markers = [
     "duckdb: marks tests that use DuckDB",
     "datafusion: marks tests that use DataFusion",
     "firebolt: marks tests that use Firebolt",
+    "databend: marks tests that use Databend",
     "sqlite: marks tests that require SQLite",
     "tpch: marks TPC-H related tests",
     "tpcds: marks TPC-DS related tests",
@@ -386,6 +404,8 @@ markers = [
     "olap: marks tests for OLAP functionality",
     "advanced_sql: marks tests for advanced SQL features",
     "requires_zstd: marks tests that require zstandard library",
+    "stress: marks heavyweight stress tests (opt-in, excluded from default CI)",
+    "platform_smoke: marks lightweight platform smoke tests",
 ]
 filterwarnings = [
     # TPC-DS intentionally validates minimum scale_factor >= 1.0 per specification
@@ -400,44 +420,32 @@ filterwarnings = [
 dev = [
     "ruff>=0.11.13",
     "ty>=0.0.1a14",
-    # Test framework
-    "pytest>=8.0.0",
+    "duckdb>=1.0.0",
+    "polars>=1.35.2",
+    "clickhouse-connect>=0.10.0",
+    "psycopg2-binary>=2.9.0",
+    "pytest>=8.0.0",                            # Test framework
     "pytest-cov>=6.2.1",
     "pytest-benchmark>=5.1.0",
     "pytest-xdist>=3.8.0",
     "pytest-timeout>=2.4.0",
-    # DataFrame dependencies (needed for many tests)
-    "pandas>=2.0.0",
-    # Table format converters (needed for tests/unit/utils/format_converters/)
-    "pyiceberg[sql-sqlite,pyarrow]>=0.10.0",
+    "pandas>=2.0.0",                            # DataFrame dependencies (needed for many tests)
+    "pyiceberg[sql-sqlite,pyarrow]>=0.10.0",    # Table format converters (needed for tests/unit/utils/format_converters/)
     "deltalake>=1.2.1",
-    # Compression (needed for tests marked @pytest.mark.requires_zstd)
-    "zstandard>=0.20.0",
-    # DataFusion (needed for tests/integration/test_datafusion_integration.py)
-    "datafusion>=40.0.0",
-    # Cloud storage with S3 support (needed for tests/unit/utils/test_cloud_storage.py)
-    "cloudpathlib[s3,gs,azure]>=0.15.0",
-    # ClickHouse local mode (needed for tests/unit/platforms/test_clickhouse_local.py)
-    # Note: chdb is not available on Windows
-    "chdb>=0.10.0; sys_platform != 'win32'",
-    # ClickHouse server mode driver (needed for tests/unit/platforms/test_clickhouse_local.py server tests)
-    "clickhouse-driver>=0.2.0",
-    "trino>=0.336.0",
-    # Firebolt (needed for tests/unit/platforms/test_firebolt_adapter.py)
-    "firebolt-sdk>=1.18.0",
-    # InfluxDB (needed for tests/unit/platforms/test_influxdb_adapter.py)
-    "influxdb3-python>=0.10.0",
-    # Databricks SDK (needed for tests/unit/platforms/test_databricks_copy_into.py UC volumes)
-    "databricks-sdk>=0.20.0",
-    # PySpark (needed for tests/unit/platforms/dataframe/test_pyspark_df.py and related)
-    "pyspark>=3.5.0",
-    # XML parsing (needed for tests/unit/core/tpcdi/test_etl_sources.py)
-    "lxml>=5.0.0",
-    # MCP SDK (needed for tests/unit/mcp/)
+    "zstandard>=0.20.0",                        # Compression (needed for tests marked @pytest.mark.requires_zstd)
+    "datafusion>=40.0.0",                       # DataFusion (needed for tests/integration/test_datafusion_integration.py)
+    "cloudpathlib[s3,gs,azure]>=0.15.0",        # Cloud storage with S3 support (needed for tests/unit/utils/test_cloud_storage.py)
+    "chdb>=0.10.0; sys_platform != 'win32'",    # ClickHouse local (chdb is not available on Windows)
+    "clickhouse-driver>=0.2.0",                 # ClickHouse server (needed for tests/unit/platforms/test_clickhouse_local.py server tests)
+    "trino>=0.336.0",                           # Firebolt (needed for tests/unit/platforms/test_firebolt_adapter.py)
+    "firebolt-sdk>=1.18.0",                     # InfluxDB (needed for tests/unit/platforms/test_influxdb_adapter.py)
+    "influxdb3-python>=0.10.0",                 # Databricks SDK (needed for tests/unit/platforms/test_databricks_copy_into.py UC volumes)
+    "databricks-sdk>=0.20.0",                   # PySpark (needed for tests/unit/platforms/dataframe/test_pyspark_df.py and related)
+    "pyspark>=3.5.0",                           # XML parsing (needed for tests/unit/core/tpcdi/test_etl_sources.py)
+    "lxml>=5.0.0",                              # MCP SDK (needed for tests/unit/mcp/)
     "mcp>=1.2.0",
-    # Documentation
-    "sphinx>=7.4.7",
-    "roman-numerals<4.0", # Sphinx 9 needs roman_numerals module; v4.x broke the import
+    "sphinx>=7.4.7",                            # Documentation
+    "roman-numerals<4.0",                       # Sphinx 9 needs roman_numerals module; v4.x broke the import
     "myst-parser>=3.0.1",
     "sphinx-rtd-theme>=3.1.0",
     "sphinxcontrib-mermaid>=1.2.3",
@@ -445,7 +453,7 @@ dev = [
     "sphinx-design>=0.6.1",
     "sphinx-copybutton>=0.5.2",
     "furo>=2025.9.25",
-    "ablog @ git+https://github.com/sunpy/ablog.git@main ; python_version >= '3.11'", # Needs unreleased fix for Sphinx 9 (docwriter removal)
+    "ablog>=0.11.13 ; python_version >= '3.11'", # version that includes a required Sphinx 9 fix
     "ruamel-yaml>=0.19.1",
 ]
 
@@ -479,6 +487,7 @@ select = [
     "UP",   # pyupgrade
     "B",    # flake8-bugbear
     "C4",   # flake8-comprehensions
+    "C90",  # mccabe complexity
     "PIE",  # flake8-pie
     "SIM",  # flake8-simplify
 ]
@@ -527,11 +536,21 @@ ignore = [
     "N806",   # non-lowercase-variable-in-function (constants, compatibility)
     "N811",   # constant-imported-as-non-constant
     "N818",   # error-suffix-on-exception-name
+    # Complexity - enforced via scripts/check_complexity.py with per-function exclusions.
+    # Remove this ignore once violations are below threshold to enforce via ruff directly.
+    "C901",   # complex-structure (73 pre-existing violations at threshold 20)
 ]
 
 [tool.ruff.lint.isort]
 force-single-line = false
 combine-as-imports = true
+
+[tool.ruff.lint.mccabe]
+# Cyclomatic complexity threshold for C901 rule.
+# Default is 10; set to 20 as the initial baseline to avoid blocking CI
+# while still flagging the most complex functions for refactoring.
+# Goal: ratchet down to 15 over time (see scripts/check_complexity.py).
+max-complexity = 20
 
 [tool.ruff.lint.per-file-ignores]
 # Files that use `from x import *` pattern legitimately
@@ -678,4 +697,363 @@ deferred_files = [
     "benchbox/platforms/bigquery.py",
     "benchbox/core/tpcds/power_test.py",
     "benchbox/platforms/databricks/adapter.py",
+]
+
+[tool.benchbox.coverage.module_check]
+# Explicit allowlist for modules temporarily excluded from per-module
+# coverage floor enforcement. Keep this list small and review regularly.
+exclude_modules = [
+    # Data package is mostly static assets and package markers.
+    "benchbox/data",
+    # Examples are illustrative snippets and are not part of core runtime.
+    "benchbox/examples",
+]
+
+[tool.benchbox.complexity]
+# Cyclomatic complexity check configuration (used by scripts/check_complexity.py).
+# max_complexity: hard ceiling — functions above this are CI failures.
+# warn_complexity: advisory — functions above this are printed as warnings.
+max_complexity = 20
+warn_complexity = 15
+# Modules temporarily excluded from per-module complexity checks.
+exclude_modules = []
+# Individual functions excluded from the check (format: "file:function").
+# Use sparingly — only for genuinely irreducible complexity (e.g., CLI dispatch).
+exclude_functions = [
+    # CLI run() is a Click command with many flags; refactoring underway.
+    "benchbox/cli/commands/run.py:run",
+    # ── Approved ignore_with_rationale entries (2026-02-20) ──
+    # Each maps to a row in _project/analysis/complexity/classification-matrix.yaml
+    # Re-review triggers are documented per-function in the matrix.
+    # --- ASCII visualization renderers (inherent grid/layout complexity) ---
+    "benchbox/core/visualization/ascii/line_chart.py:render",          # 43 — Bresenham line drawing + grid state
+    "benchbox/core/visualization/ascii/box_plot.py:render",            # 30 — three-line-per-series box plot geometry
+    "benchbox/core/visualization/ascii/scatter_plot.py:render",        # 26 — Pareto frontier + grid point placement
+    "benchbox/core/visualization/ascii/bar_chart.py:render",           # 22 — outlier truncation + sub-character blocks
+    "benchbox/core/visualization/ascii/rank_table.py:render",          # 22 — ranking with tie handling
+    "benchbox/core/visualization/ascii/cdf_chart.py:render",           # 21 — grid-based CDF plotting
+    # --- TPC specification implementations (spec-driven branching) ---
+    "benchbox/core/tpcds/power_test.py:run",                           # 33 — TPC-DS power test per spec
+    "benchbox/core/tpcds_obt/query_conversion.py:_post_process",       # 32 — per-query OBT conversion edge cases
+    "benchbox/core/tpcds/c_tools.py:_generate_with_binary",            # 25 — dsqgen binary wrapper
+    "benchbox/core/tpcds/throughput_test.py:_execute_stream",          # 24 — TPC-DS throughput stream execution
+    "benchbox/core/tpcds/benchmark/runner.py:run_throughput_test",     # 22 — TPC-DS throughput test per spec
+    "benchbox/core/tpcds/benchmark/runner.py:run_power_test",          # 22 — TPC-DS power test per spec
+    "benchbox/core/tpcds/dist_parser.py:parse_file",                   # 22 — .dst state-machine parser
+    "benchbox/core/results/display.py:print_dry_run_summary",          # 21 — conditional section display
+    "benchbox/core/tpcds/throughput_test.py:run",                      # 18 — TPC-DS spec; outer loop coordinates concurrent streams
+    "benchbox/core/tpcds_obt/query_conversion.py:_rewrite_select",     # 18 — AST rewrite with dependency ordering (role_map → column → join)
+    "benchbox/core/tpch/maintenance_test.py:_execute_rf1",             # 18 — TPC-H RF1 spec; each SQL step depends on prior result
+    "benchbox/core/tpch/power_test.py:run",                            # 18 — TPC-H power test; spec mandates permutation order
+    "benchbox/core/tpch/throughput_test.py:run",                       # 18 — TPC-H throughput; spec mandates TTT timing from first to last stream
+    "benchbox/core/runner/dataframe_runner.py:_execute_dataframe_queries",  # 18 — TPC power test methodology; warmup + permuted query loop
+    "benchbox/core/tpch/throughput_test.py:_execute_stream",           # 17 — TPC-H single stream; 22 queries in spec permutation order
+    # --- Platform adapters (genuinely distinct platform semantics) ---
+    "benchbox/platforms/base/adapter.py:_summarize_performance_characteristics",  # 34 — well-structured statistical aggregation
+    "benchbox/platforms/dataframe/unified_frame.py:join",              # 33 — multi-platform join dispatch (Polars/PySpark/DataFusion)
+    "benchbox/platforms/base/adapter.py:_collect_resource_utilization", # 24 — cross-platform metric collection with independent try/except
+    "benchbox/platforms/credentials/redshift.py:setup_redshift_credentials",  # 24 — interactive credential wizard
+    "benchbox/platforms/redshift.py:get_platform_info",                # 24 — serverless vs provisioned deployment branching
+    "benchbox/platforms/bigquery.py:get_platform_info",                # 23 — independent INFORMATION_SCHEMA queries
+    "benchbox/platforms/dataframe/unified_frame.py:_datafusion_join_with_exprs",  # 23 — DataFusion join workaround
+    "benchbox/platforms/credentials/redshift.py:validate_redshift_credentials",  # 22 — sequential validation pipeline
+    "benchbox/platforms/clickhouse/metadata.py:get_platform_info",     # 21 — local vs server mode branching
+    "benchbox/platforms/credentials/bigquery.py:validate_bigquery_credentials",  # 21 — multi-service validation
+    "benchbox/platforms/databricks/adapter.py:apply_table_tunings",    # 21 — Liquid Clustering vs Z-ORDER
+    "benchbox/platforms/dataframe/unified_frame.py:_extract_multi_agg_arithmetic",  # 21 — DataFusion AST workaround
+    "benchbox/platforms/dataframe/unified_frame.py:sort",              # 20 — Polars/PySpark/DataFusion each require distinct sort APIs
+    "benchbox/platforms/credentials/athena.py:setup_athena_credentials",  # 20 — interactive credential wizard; auto-detect vs manual with dependent branching
+    "benchbox/platforms/credentials/bigquery.py:setup_bigquery_credentials",  # 20 — interactive credential wizard; file validation + optional Cloud Storage path
+    "benchbox/platforms/dataframe/unified_frame.py:_apply_datafusion_post_ops",  # 19 — literal vs multi-agg arithmetic post-ops have fundamentally different expression semantics
+    "benchbox/platforms/base/adapter.py:capture_query_plan",           # 17 — multi-level filter chain (query ID, iteration count, sampling, EXPLAIN)
+    "benchbox/platforms/credentials/snowflake.py:setup_snowflake_credentials",  # 16 — interactive credential wizard; account normalization + multi-step auth validation
+    # --- MCP tool registration (structural nesting from framework) ---
+    "benchbox/mcp/tools/discovery.py:register_discovery_tools",        # 29 — MCP registration pattern
+    "benchbox/mcp/tools/analytics.py:register_analytics_tools",        # 22 — MCP registration pattern
+    # --- Parallel / concurrency patterns (async coordination is inherent) ---
+    "benchbox/core/tpcdi/etl/batch.py:_execute_parallel_pipeline",     # 20 — thread-pool ETL with future management, timeout, and result collection
+    # --- Thread-safety (single-flight cache; locking protocol cannot be simplified) ---
+    "benchbox/core/expected_results/registry.py:_get_benchmark_results",  # 17 — single-flight cache with cross-thread coordination
+    # --- Query plan parsers (AST node dispatch; each operator has distinct properties) ---
+    "benchbox/core/query_plans/parsers/datafusion.py:_convert_to_logical_operator",  # 17 — AST node → LogicalOperator with operator-specific property extraction
+    # --- Benchmark test setup (spec-required sequential dependency chain) ---
+    "benchbox/core/transaction_primitives/benchmark.py:setup",          # 17 — spec-required: validation → lock → cleanup → staging population in strict order
+    # --- Deferred complexity reduction (architectural redesign needed) ---
+    "benchbox/core/runner/runner.py:run_benchmark_lifecycle",            # 39 — main orchestration with genuinely distinct code paths (data_only, load_only, SQL, DataFrame)
+    "benchbox/cli/orchestrator.py:execute_benchmark",                    # 24 — interleaved output/phase/adapter/credential logic; tightly coupled to CLI UX
+    # --- CLI/release (linear workflows with safety-critical branching) ---
+    "benchbox/cli/commands/compare_plans.py:compare_plans",            # 27 — deprecated, slated for removal
+    "benchbox/cli/commands/export.py:export",                          # 22 — clean CLI with distinct source resolution paths
+    "benchbox/release/sync.py:cmd_pull",                               # 25 — auditable safety-check workflow
+    "benchbox/release/sync.py:cmd_push",                               # 22 — mirror of cmd_pull
+    # --- Interactive shell REPL (user-input dispatch loop is state-machine-inherent) ---
+    "benchbox/cli/commands/shell.py:_launch_sqlite_shell",             # 16 — SQLite REPL; command dispatch + SQL execution loop cannot be flattened
+    "benchbox/cli/commands/shell.py:_launch_duckdb_shell",             # 15 — DuckDB REPL; same pattern as SQLite shell
+    # --- Converters (linear pipelines with resource cleanup) ---
+    "benchbox/utils/format_converters/iceberg_converter.py:convert",   # 24 — Iceberg conversion pipeline
+    # --- Required complexity at CC=14 (2026-02-21 evaluation, batch w15) ---
+    # These sit at CC=14 (below warn=15) but are documented for completeness.
+    "benchbox/cli/commands/show_plan.py:show_plan",                    # 14 — 4 except branches + 3-way format dispatch; irreducible for CLI command
+    "benchbox/cli/commands/tuning_group.py:_display_config_settings_table",  # 14 — one guard per config field; proportional to field count
+    "benchbox/core/query_plans/parsers/base.py:_harmonize_operator_type",  # 14 — 12-way keyword→enum mapping; 1:1 with enum members
+    "benchbox/core/concurrency/analyzer.py:analyze_contention",        # 14 — mutually-exclusive classification decision tree
+    "benchbox/core/metadata_primitives/complexity.py:__post_init__",   # 14 — N independent field validation guards; inherent to dataclass
+]
+
+[tool.benchbox.duplicates]
+# Duplicate code detection configuration (scripts/check_duplicate_code.py).
+# Uses AST structural hashing to find Type-2 clones (same structure, different
+# identifiers). The threshold is a ceiling on total duplicated lines; raise it
+# only when intentional duplication is added and lower it as clones are removed.
+#
+# Re-baseline protocol: when `make duplicate-check-verbose` reports actual
+# duplicated lines consistently above the threshold, re-run the classification
+# triage (see _project/DONE/core-functionality/active/
+# duplicate-code-followup-triage-centralization.yaml for methodology) and set
+# threshold = ceil(actual * 1.10).  Last re-baseline: 2026-02-22, 9,349 actual.
+source_root = "benchbox"
+min_lines = 10                   # minimum function body size to analyse
+threshold = 10284                # max duplicated lines before the check fails
+exclude_patterns = [
+    "tests/",                    # test files often have intentional boilerplate
+    "__pycache__",
+]
+ignore_function_names = [
+    # Structural clone patterns that differ by benchmark domain content
+    "_load_queries",
+    "_generate_default_params",
+    # Facade chains / thin delegations
+    "get_all_variants",
+]
+ignore_rules = [
+    # Platform adapter interface boilerplate — intentionally repeated per-adapter.
+    # Lists explicit adapter files (excludes benchbox/platforms/base/ utilities).
+    { function_names = ["from_config", "apply_constraint_configuration", "apply_unified_tuning", "supports_tuning_type", "apply_tuning_configuration"], path_contains = [
+        "benchbox/platforms/athena.py", "benchbox/platforms/azure_synapse.py",
+        "benchbox/platforms/bigquery.py", "benchbox/platforms/clickhouse_cloud.py",
+        "benchbox/platforms/cudf.py", "benchbox/platforms/datafusion.py",
+        "benchbox/platforms/doris.py", "benchbox/platforms/duckdb.py",
+        "benchbox/platforms/fabric_lakehouse.py", "benchbox/platforms/fabric_warehouse.py",
+        "benchbox/platforms/firebolt.py", "benchbox/platforms/lakesail.py",
+        "benchbox/platforms/motherduck.py", "benchbox/platforms/pg_duckdb.py",
+        "benchbox/platforms/pg_mooncake.py", "benchbox/platforms/polars_platform.py",
+        "benchbox/platforms/postgresql.py", "benchbox/platforms/presto.py",
+        "benchbox/platforms/questdb.py", "benchbox/platforms/redshift.py",
+        "benchbox/platforms/snowflake.py", "benchbox/platforms/spark.py",
+        "benchbox/platforms/sqlite.py", "benchbox/platforms/starburst.py",
+        "benchbox/platforms/timescaledb.py", "benchbox/platforms/trino.py",
+        "benchbox/platforms/snowpark_connect.py",
+        "benchbox/platforms/aws/athena_spark_adapter.py",
+        "benchbox/platforms/aws/emr_serverless_adapter.py",
+        "benchbox/platforms/aws/glue_adapter.py",
+        "benchbox/platforms/azure/fabric_spark_adapter.py",
+        "benchbox/platforms/azure/synapse_spark_adapter.py",
+        "benchbox/platforms/gcp/dataproc_adapter.py",
+        "benchbox/platforms/gcp/dataproc_serverless_adapter.py",
+        "benchbox/platforms/databricks/adapter.py",
+        "benchbox/platforms/databricks/dataframe_adapter.py",
+        "benchbox/platforms/databend/adapter.py",
+        "benchbox/platforms/influxdb/adapter.py",
+        "benchbox/platforms/onehouse/quanton_adapter.py",
+        "benchbox/platforms/clickhouse/tuning.py",
+        "benchbox/platforms/clickhouse/metadata.py",
+        "benchbox/platforms/starrocks/tuning.py",
+        "benchbox/platforms/starrocks/metadata.py",
+        "benchbox/platforms/influxdb/metadata.py",
+        "benchbox/platforms/dataframe/pandas_df.py",
+        "benchbox/platforms/dataframe/polars_df.py",
+        "benchbox/platforms/dataframe/datafusion_df.py",
+        "benchbox/platforms/dataframe/cudf_df.py",
+        "benchbox/platforms/dataframe/modin_df.py",
+        "benchbox/platforms/dataframe/dask_df.py",
+        "benchbox/platforms/dataframe/pyspark_df.py",
+    ] },
+    # DataFrame adapter/protocol casting boilerplate
+    { function_names = ["cast_date", "cast_string"], path_contains = ["benchbox/platforms/dataframe/", "benchbox/core/dataframe/protocols.py"] },
+    # UnifiedFrame per-operation wrappers are intentional API surface methods
+    { function_names = ["__call__", "count", "cum_sum", "cum_max", "cum_min", "cum_prod"], path_contains = ["benchbox/platforms/dataframe/unified_frame.py"] },
+    # Protocol method signatures are intentionally repeated contracts
+    { function_names = ["agg", "group_by", "first", "max", "min", "mean", "sum"], path_contains = ["benchbox/core/dataframe/protocols.py"] },
+    # Top-level benchmark facade wrappers are intentional public API surface
+    { function_names = ["get_query", "get_queries", "get_create_tables_sql"], path_contains = [
+        "benchbox/amplab.py", "benchbox/clickbench.py", "benchbox/coffeeshop.py",
+        "benchbox/datavault.py", "benchbox/h2odb.py", "benchbox/joinorder.py",
+        "benchbox/metadata_primitives.py", "benchbox/nyctaxi.py", "benchbox/read_primitives.py",
+        "benchbox/ssb.py", "benchbox/tpcdi.py", "benchbox/tpcds.py", "benchbox/tpcds_obt.py",
+        "benchbox/tpch.py", "benchbox/tpch_skew.py", "benchbox/tpchavoc.py",
+        "benchbox/transaction_primitives.py", "benchbox/tsbs_devops.py",
+        "benchbox/write_primitives.py",
+    ] },
+    # Cloud/Spark adapter platform-info accessors are intentionally provider-specific
+    { function_names = ["get_platform_info"], path_contains = [
+        "benchbox/platforms/aws/athena_spark_adapter.py",
+        "benchbox/platforms/aws/emr_serverless_adapter.py",
+        "benchbox/platforms/aws/glue_adapter.py",
+        "benchbox/platforms/azure/fabric_spark_adapter.py",
+        "benchbox/platforms/azure/synapse_spark_adapter.py",
+        "benchbox/platforms/gcp/dataproc_adapter.py",
+        "benchbox/platforms/gcp/dataproc_serverless_adapter.py",
+        "benchbox/platforms/databricks/adapter.py",
+        "benchbox/platforms/databricks/dataframe_adapter.py",
+        "benchbox/platforms/onehouse/quanton_adapter.py",
+        "benchbox/platforms/snowpark_connect.py",
+    ] },
+    # CLI tuning defaults display commands are intentionally duplicated UX pathways
+    { function_names = ["show_defaults"], path_contains = ["benchbox/cli/commands/df_tuning.py", "benchbox/cli/commands/tuning_group.py"] },
+
+    # --- Boilerplate ignore rules added 2026-02-21 (groups G1-G28 from duplicate-check triage) ---
+
+    # G8,G9,G11,G22: Protocol/ABC abstract method stubs across dataframe type hierarchy
+    { function_names = ["col", "filter", "limit", "scalar_to_df", "can_provide", "create_schema", "date_add", "date_sub", "get_table", "table_exists", "lit", "list_tables", "concat", "cast_timestamp", "when"], path_contains = [
+        "benchbox/core/dataframe/context.py",
+        "benchbox/core/dataframe/protocols.py",
+        "benchbox/core/operations/base.py",
+        "benchbox/core/tpcdi/etl/sources.py",
+        "benchbox/platforms/base/adapter.py",
+        "benchbox/platforms/base/data_loading.py",
+        "benchbox/utils/format_converters/base.py",
+    ] },
+    { function_names = ["_do_delete", "delete_rows", "generate_tuning_clauses"], path_contains = [
+        "benchbox/core/dataframe/maintenance_interface.py",
+        "benchbox/core/tuning/ddl_generator.py",
+        "benchbox/platforms/dataframe/expression_family.py",
+    ] },
+
+    # G3,G10: DataFrame platform adapter thin wrappers (col/lit/from_pandas/detect_format/read_*)
+    { function_names = ["_detect_format", "get_dataframe_operations", "from_pandas", "lit", "read_parquet", "to_datetime", "read_csv", "concat"], path_contains = [
+        "benchbox/platforms/dataframe/cudf_df.py",
+        "benchbox/platforms/dataframe/dask_df.py",
+        "benchbox/platforms/dataframe/datafusion_df.py",
+        "benchbox/platforms/dataframe/modin_df.py",
+        "benchbox/platforms/dataframe/pandas_df.py",
+        "benchbox/platforms/dataframe/polars_df.py",
+        "benchbox/platforms/dataframe/expression_family.py",
+        "benchbox/core/write_primitives/benchmark.py",
+    ] },
+
+    # G14: Cloud platform apply_platform_optimizations stubs (intentional per-platform future hooks)
+    { function_names = ["apply_platform_optimizations"], path_contains = [
+        "benchbox/platforms/bigquery.py",
+        "benchbox/platforms/databricks/adapter.py",
+        "benchbox/platforms/fabric_warehouse.py",
+        "benchbox/platforms/firebolt.py",
+        "benchbox/platforms/presto.py",
+        "benchbox/platforms/redshift.py",
+        "benchbox/platforms/snowflake.py",
+        "benchbox/platforms/trino.py",
+    ] },
+
+    # G2,G5: Benchmark facade delegation methods (get_queries_by_category, get_query_info, etc.)
+    { function_names = ["get_queries_by_category", "get_query_info", "get_operations_by_category", "supports_operation", "is_setup", "run_data_validation", "sql", "get_data_source_benchmark", "get_tunings", "get_available_tables"], path_contains = [
+        "benchbox/core/ai_primitives/benchmark.py",
+        "benchbox/core/joinorder/benchmark.py",
+        "benchbox/core/metadata_primitives/benchmark.py",
+        "benchbox/core/nyctaxi/benchmark.py",
+        "benchbox/core/read_primitives/benchmark.py",
+        "benchbox/core/transaction_primitives/benchmark.py",
+        "benchbox/core/tsbs_devops/benchmark.py",
+        "benchbox/core/tuning/interface.py",
+        "benchbox/core/write_primitives/benchmark.py",
+        "benchbox/nyctaxi.py",
+        "benchbox/tpcdi.py",
+        "benchbox/tpcds.py",
+        "benchbox/tpch.py",
+        "benchbox/tsbs_devops.py",
+        "benchbox/write_primitives.py",
+    ] },
+    { function_names = ["execute_rule", "get_operation", "get_table_row_count"], path_contains = [
+        "benchbox/core/ai_primitives/dataframe_operations.py",
+        "benchbox/core/joinorder/benchmark.py",
+        "benchbox/core/metadata_primitives/dataframe_operations.py",
+        "benchbox/core/tpcdi/etl/data_quality_monitor.py",
+        "benchbox/core/transaction_primitives/benchmark.py",
+        "benchbox/core/transaction_primitives/dataframe_operations.py",
+        "benchbox/core/write_primitives/benchmark.py",
+        "benchbox/core/write_primitives/dataframe_operations.py",
+        "benchbox/platforms/dataframe/datafusion_df.py",
+        "benchbox/platforms/dataframe/pyspark_df.py",
+        "benchbox/tpcdi.py",
+        "benchbox/transaction_primitives.py",
+        "benchbox/write_primitives.py",
+    ] },
+
+    # G16: Benchmark interface conformance (get_schema, get_csv_loading_config)
+    { function_names = ["get_schema", "get_csv_loading_config"], path_contains = [
+        "benchbox/core/amplab/benchmark.py",
+        "benchbox/core/clickbench/benchmark.py",
+        "benchbox/core/h2odb/benchmark.py",
+        "benchbox/core/read_primitives/benchmark.py",
+        "benchbox/core/ssb/benchmark.py",
+        "benchbox/core/transaction_primitives/benchmark.py",
+        "benchbox/platforms/base/cloud_spark/mixins.py",
+    ] },
+
+    # G15: Benchmark base empty_results and table name accessors
+    { function_names = ["_empty_results", "_get_incremental_tables", "_known_table_names"], path_contains = [
+        "benchbox/base.py",
+        "benchbox/core/base_benchmark.py",
+        "benchbox/core/joinorder/schema.py",
+        "benchbox/core/metadata_primitives/benchmark.py",
+        "benchbox/core/tpc_patterns.py",
+        "benchbox/core/tpcdi/etl/incremental_loader.py",
+        "benchbox/core/tpcds/benchmark/runner.py",
+        "benchbox/core/tpcds/c_tools.py",
+        "benchbox/core/tpcds/generator/manager.py",
+    ] },
+
+    # G1: TPC-DS OBT channel-dispatch configuration tables (same structure, different domain data)
+    { function_names = ["_fact_map", "_income_band_aliases", "_role_aliases"], path_contains = ["benchbox/core/tpcds_obt/etl/transformer.py"] },
+
+    # G6,G7: TPC-DI query catalog builders and selector methods
+    { function_names = ["_load_base_queries", "_load_etl_queries", "get_queries_by_complexity", "get_queries_by_frequency", "get_queries_by_severity", "_load_base_query_metadata", "_load_etl_metadata"], path_contains = [
+        "benchbox/core/tpcdi/queries.py",
+        "benchbox/core/tpcdi/query_etl.py",
+        "benchbox/core/tpcdi/query_analytics.py",
+        "benchbox/core/tpcdi/query_validation.py",
+    ] },
+
+    # G26,G28: TPC-DS spec-mandated query families (Q33/Q60 three-channel pattern)
+    { function_names = ["q33_expression_impl", "q60_expression_impl", "q33_pandas_impl", "q60_pandas_impl"], path_contains = ["benchbox/core/tpcds/dataframe_queries/queries.py"] },
+
+    # Top-level benchmark module __init__ and execute_query boilerplate
+    { function_names = ["__init__", "execute_query"], path_contains = [
+        "benchbox/amplab.py", "benchbox/clickbench.py", "benchbox/coffeeshop.py",
+        "benchbox/h2odb.py", "benchbox/ssb.py",
+        "benchbox/core/amplab/benchmark.py",
+        "benchbox/core/clickbench/benchmark.py",
+        "benchbox/core/ssb/benchmark.py",
+    ] },
+
+    # Schema model get_create_table_sql — different DDL per benchmark, same structural pattern
+    { function_names = ["get_create_table_sql"], path_contains = [
+        "benchbox/core/datavault/schema.py",
+        "benchbox/core/tpcds/schema/models.py",
+        "benchbox/core/tpch/schema.py",
+    ] },
+
+    # Spark/Starburst config builders — platform-specific configuration, same structural pattern
+    { function_names = ["_build_spark_config", "_build_starburst_config"], path_contains = [
+        "benchbox/platforms/spark.py",
+        "benchbox/platforms/starburst.py",
+    ] },
+
+    # G18: UnifiedFrame multi-backend dispatch methods
+    { function_names = ["first", "floor", "last", "abs_", "round_", "ceil", "sqrt", "log", "quantile"], path_contains = ["benchbox/platforms/dataframe/unified_frame.py"] },
+
+    # G20: ExpressionFamily multi-backend aggregation dispatch and interface methods
+    { function_names = ["max_", "std", "var", "date_sub", "date_add", "calculate_official_metrics"], path_contains = [
+        "benchbox/platforms/dataframe/expression_family.py",
+        "benchbox/core/tpcds/dataframe_queries/parameters.py",
+        "benchbox/core/tpchavoc/benchmark.py",
+    ] },
+
+    # Data loader column name accessors (TPC-H/TPC-DS spec-defined column lists)
+    { function_names = ["get_tpcds_column_names", "get_tpch_column_names"], path_contains = ["benchbox/core/dataframe/data_loader.py"] },
+
+    # Query catalog/generator init boilerplate (different domain data, same dict-building structure)
+    { function_names = ["_initialize_variant_generators", "get_query_categories", "get_file_format_info"], path_contains = [
+        "benchbox/core/clickbench/queries.py",
+        "benchbox/core/tpcdi/source_generators.py",
+        "benchbox/core/tpchavoc/queries.py",
+    ] },
 ]

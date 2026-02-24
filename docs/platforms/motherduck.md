@@ -60,6 +60,22 @@ benchbox run --platform motherduck --benchmark tpch --scale 0.1 \
 | `token` | `MOTHERDUCK_TOKEN` | - | Authentication token (required) |
 | `database` | - | `benchbox` | MotherDuck database name |
 | `memory_limit` | - | `4GB` | Local memory limit for hybrid queries |
+| `driver_version` | - | (latest) | Pin the duckdb package version (e.g. `1.4.3`) |
+| `driver_auto_install` | - | false | Auto-install the requested driver version via uv if missing |
+
+### Testing a Specific DuckDB Version with MotherDuck
+
+MotherDuck uses the `duckdb` package as its driver. To pin a specific version:
+
+```bash
+benchbox run --platform motherduck --benchmark tpch \
+  --platform-option driver_version=1.4.3 \
+  --platform-option driver_auto_install=true \
+  --platform-option token=your-motherduck-token
+```
+
+See {ref}`driver-version-management` for the full guide, including why `uv run` may
+revert a manually-installed version and how to work around it.
 
 ## Usage Examples
 

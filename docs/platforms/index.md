@@ -30,6 +30,7 @@ BenchBox supports benchmarking DataFrame libraries using their native APIs inste
 | **Dask** | `dask-df` | Pandas | Production-ready | [Dask DataFrame](dask-dataframe.md) |
 | **cuDF** | `cudf-df` | Pandas | Production-ready | [cuDF DataFrame](cudf.md) |
 | **PySpark** | `pyspark-df` | Expression | Production-ready | [PySpark DataFrame](pyspark-dataframe.md) |
+| **LakeSail** | `lakesail-df` | Expression | Production-ready | [LakeSail DataFrame](lakesail.md) |
 | **DataFusion** | `datafusion-df` | Expression | Production-ready | [DataFusion DataFrame](datafusion-dataframe.md) |
 
 ```bash
@@ -40,6 +41,7 @@ benchbox run --platform modin-df --benchmark tpch --scale 0.1     # Parallel Pan
 benchbox run --platform dask-df --benchmark tpch --scale 0.1      # Distributed
 benchbox run --platform cudf-df --benchmark tpch --scale 0.1      # GPU (Linux only)
 benchbox run --platform pyspark-df --benchmark tpch --scale 0.1   # Spark ecosystem
+benchbox run --platform lakesail-df --benchmark tpch --scale 0.1  # Sail (fast Spark)
 benchbox run --platform datafusion-df --benchmark tpch --scale 0.1
 
 # Compare SQL vs DataFrame on same workload
@@ -66,11 +68,18 @@ These platforms are included in the base BenchBox installation with no additiona
 
 - [PostgreSQL](postgresql.md) - Open-source relational database with TimescaleDB support
 
+### Self-Hosted OLAP Databases
+
+- [StarRocks](starrocks.md) - MPP columnar OLAP database (MySQL protocol + Stream Load)
+- [Apache Doris](doris.md) - MPP real-time analytical database (MySQL protocol + Stream Load)
+- [QuestDB](questdb.md) - Time-series database (PostgreSQL wire protocol + REST API)
+
 ### Distributed SQL Engines
 
 - [PrestoDB](presto.md) - Distributed SQL query engine (Facebook fork)
 - [Trino](trino.md) - Distributed SQL query engine (community fork, formerly PrestoSQL)
 - [Apache Spark](spark.md) - Unified analytics engine for large-scale data processing
+- [LakeSail Sail](lakesail.md) - High-performance Spark-compatible engine (Spark Connect)
 
 ### Cloud Data Warehouses
 
@@ -82,10 +91,12 @@ These platforms are included in the base BenchBox installation with no additiona
 - [**Amazon Redshift**](redshift.md) - Columnar data warehouse
 - [**MotherDuck**](motherduck.md) - Serverless DuckDB cloud (inherits DuckDB dialect)
 - [**Starburst**](starburst.md) - Managed Trino / Starburst Galaxy (inherits Trino dialect)
-- [AWS Athena](athena.md) - Serverless query service for S3
+- [Amazon Athena](athena.md) - Serverless query service for S3
 - [Firebolt](firebolt.md) - High-performance cloud analytics (Core + Cloud modes)
+- [Databend](databend.md) - Cloud-native OLAP warehouse (Snowflake-compatible SQL, S3/MinIO storage)
 - [Azure Synapse Analytics](azure-platforms.md) - Microsoft cloud analytics platform
 - [Microsoft Fabric](microsoft-fabric.md) - Microsoft unified analytics platform
+- [TimescaleDB / TigerData](timescaledb.md) - TimescaleDB with managed TigerData cloud mode (`timescaledb:cloud`)
 
 ### GPU-Accelerated Platforms
 
@@ -102,10 +113,10 @@ These platforms are included in the base BenchBox installation with no additiona
 - DataFusion, Polars, PostgreSQL, ClickHouse
 
 **Cloud SDK Required** (authentication setup needed):
-- Databricks, BigQuery, Redshift, Snowflake, Athena, Firebolt, Azure Synapse
+- Databricks SQL, Databend, BigQuery, Redshift, Snowflake, Amazon Athena, Firebolt, Azure Synapse Analytics
 
 **Infrastructure Required** (external cluster needed):
-- Trino, Presto, Spark, ClickHouse (server mode)
+- Trino, Presto, Spark, LakeSail, StarRocks, Doris, QuestDB, ClickHouse (server mode)
 
 ### By Use Case
 
@@ -116,7 +127,7 @@ These platforms are included in the base BenchBox installation with no additiona
 - Databricks, Snowflake, BigQuery, Redshift
 
 **Self-Hosted Analytics:**
-- ClickHouse, PostgreSQL, Trino, Presto, Spark
+- ClickHouse, StarRocks, Doris, QuestDB, PostgreSQL, Trino, Presto, Spark, LakeSail
 
 **GPU Workloads:**
 - CUDF (NVIDIA GPUs required)
@@ -174,6 +185,11 @@ cudf
 pyspark-dataframe
 datafusion-dataframe
 spark
+lakesail
+starrocks
+doris
+questdb
+databend
 clickhouse-local-mode
 clickhouse-cloud
 postgresql

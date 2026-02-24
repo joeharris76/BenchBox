@@ -93,123 +93,167 @@ class ASCIISummaryBox(ASCIIChartBase):
         box = self.options.get_box_chars()
         width = self.options.get_effective_width()
 
-        # Inner width (minus left and right borders + padding)
-        inner = width - 4  # "│ " + content + " │"
-        if inner < 20:
-            inner = 20
-
+        inner = max(20, width - 4)
         two_col = self.stats.environment and inner >= self._MIN_TWO_COL_INNER
 
         lines: list[str] = []
 
-        # Top border
+        # Top border + title
         lines.append(f"{box['tl']}{box['h'] * (inner + 2)}{box['tr']}")
-
-        # Title
-        title_text = self.stats.title
-        title_centered = title_text.center(inner)
-        bold_title = colors.bold() + title_centered + colors.reset()
+        title_text = self._truncate_label(self.stats.title, inner)
+        bold_title = colors.bold() + title_text.center(inner) + colors.reset()
         lines.append(f"{box['v']} {bold_title} {box['v']}")
 
-        # Aggregate metrics (with optional environment column)
+        # Metrics section
         if two_col:
-            assert self.stats.environment is not None
-            left_width = inner * 5 // 9  # ~55% for metrics
-            right_width = inner - left_width - 1  # -1 for divider
-
-            # Separator with column divider
-            lines.append(
-                f"{box['lm']}{box['h'] * (left_width + 1)}{box['tm']}{box['h'] * (right_width + 1)}{box['rm']}"
-            )
-
-            if self.stats.is_comparison:
-                metric_lines = self._build_metric_texts_comparison(colors)
-            else:
-                metric_lines = self._build_metric_texts_single()
-            env_lines = self._build_env_lines(colors)
-            env_lines_visible = self._build_env_lines_visible()
-
-            # Pad to equal length
-            row_count = max(len(metric_lines), len(env_lines))
-            while len(metric_lines) < row_count:
-                metric_lines.append("")
-            while len(env_lines) < row_count:
-                env_lines.append("")
-                env_lines_visible.append("")
-
-            for left_text, right_text, right_visible_text in zip(metric_lines, env_lines, env_lines_visible):
-                left_visible = len(left_text)
-                left_pad = max(0, left_width - left_visible)
-                right_visible = len(right_visible_text)
-                right_pad = max(0, right_width - right_visible)
-                lines.append(
-                    f"{box['v']} {left_text}{' ' * left_pad}{box['v']} {right_text}{' ' * right_pad}{box['v']}"
-                )
-
-            # Separator closing the two-column section
-            lines.append(
-                f"{box['lm']}{box['h'] * (left_width + 1)}{box['bm']}{box['h'] * (right_width + 1)}{box['rm']}"
-            )
+            lines.extend(self._render_two_col_metrics(box, colors, inner))
         else:
-            # Separator
             lines.append(f"{box['lm']}{box['h'] * (inner + 2)}{box['rm']}")
-
             if self.stats.is_comparison:
                 lines.extend(self._render_comparison_metrics(box, colors, inner))
             else:
                 lines.extend(self._render_single_metrics(box, colors, inner))
 
-        # Separator before counts (comparison mode only)
+        # Comparison counts
         if self.stats.is_comparison and self.stats.num_queries > 0:
-            if not two_col:
-                lines.append(f"{box['lm']}{box['h'] * (inner + 2)}{box['rm']}")
-            # Counts row
-            improved = colors.colorize(f"{self.stats.num_improved} improved", fg_color="#66a61e")
-            regressed = colors.colorize(f"{self.stats.num_regressed} regressed", fg_color="#d95f02")
-            counts_text = f"{improved}  {self.stats.num_stable} stable  {regressed}"
-            visible_len = (
-                len(f"{self.stats.num_improved} improved")
-                + 2
-                + len(f"{self.stats.num_stable} stable")
-                + 2
-                + len(f"{self.stats.num_regressed} regressed")
-            )
-            padding = max(0, inner - visible_len)
-            lines.append(f"{box['v']} {counts_text}{' ' * padding} {box['v']}")
+            lines.extend(self._render_counts_row(box, colors, inner, two_col))
 
         # Best/worst queries
-        if self.stats.best_queries or self.stats.worst_queries:
-            if not (two_col and not self.stats.is_comparison):
-                lines.append(f"{box['lm']}{box['h'] * (inner + 2)}{box['rm']}")
-
-            if self.stats.best_queries:
-                best_items = ", ".join(
-                    f"{q} ({v:+.1f}%)" if self.stats.is_comparison else f"{q} ({self._format_time(v)})"
-                    for q, v in self.stats.best_queries[:3]
-                )
-                best_label = "Best: "
-                best_line = f"{best_label}{best_items}"
-                best_colored = colors.colorize(best_label, fg_color="#66a61e") + best_items
-                visible_len = len(best_line)
-                padding = max(0, inner - visible_len)
-                lines.append(f"{box['v']} {best_colored}{' ' * padding} {box['v']}")
-
-            if self.stats.worst_queries:
-                worst_items = ", ".join(
-                    f"{q} ({v:+.1f}%)" if self.stats.is_comparison else f"{q} ({self._format_time(v)})"
-                    for q, v in self.stats.worst_queries[:3]
-                )
-                worst_label = "Worst: "
-                worst_line = f"{worst_label}{worst_items}"
-                worst_colored = colors.colorize(worst_label, fg_color="#d95f02") + worst_items
-                visible_len = len(worst_line)
-                padding = max(0, inner - visible_len)
-                lines.append(f"{box['v']} {worst_colored}{' ' * padding} {box['v']}")
+        lines.extend(self._render_best_worst(box, colors, inner, two_col))
 
         # Bottom border
         lines.append(f"{box['bl']}{box['h'] * (inner + 2)}{box['br']}")
 
         return "\n".join(lines)
+
+    def _render_two_col_metrics(self, box: dict[str, str], colors: TerminalColors, inner: int) -> list[str]:
+        """Render metrics in a two-column layout with environment info."""
+        assert self.stats.environment is not None
+        lines: list[str] = []
+        left_width = inner * 5 // 9
+        right_width = inner - left_width - 1
+
+        lines.append(f"{box['lm']}{box['h'] * (left_width + 1)}{box['tm']}{box['h'] * (right_width + 1)}{box['rm']}")
+
+        if self.stats.is_comparison:
+            metric_lines = self._build_metric_texts_comparison(colors)
+        else:
+            metric_lines = self._build_metric_texts_single()
+        env_lines = self._build_env_lines(colors)
+        env_lines_visible = self._build_env_lines_visible()
+
+        row_count = max(len(metric_lines), len(env_lines))
+        while len(metric_lines) < row_count:
+            metric_lines.append("")
+        while len(env_lines) < row_count:
+            env_lines.append("")
+            env_lines_visible.append("")
+
+        for left_text, right_text, right_visible_text in zip(metric_lines, env_lines, env_lines_visible):
+            left_visible_text = self._sanitize_text(left_text)
+            if len(left_visible_text) > left_width:
+                left_visible_text = self._truncate_label(left_visible_text, left_width)
+                left_text = left_visible_text
+            if len(right_visible_text) > right_width:
+                right_visible_text = self._truncate_label(right_visible_text, right_width)
+                right_text = right_visible_text
+            left_pad = max(0, left_width - len(left_visible_text))
+            right_pad = max(0, right_width - len(right_visible_text))
+            lines.append(f"{box['v']} {left_text}{' ' * left_pad}{box['v']} {right_text}{' ' * right_pad}{box['v']}")
+
+        lines.append(f"{box['lm']}{box['h'] * (left_width + 1)}{box['bm']}{box['h'] * (right_width + 1)}{box['rm']}")
+        return lines
+
+    def _render_counts_row(self, box: dict[str, str], colors: TerminalColors, inner: int, two_col: bool) -> list[str]:
+        """Render the improved/stable/regressed counts row."""
+        lines: list[str] = []
+        no_color = not self.options.use_color
+        if not two_col:
+            lines.append(f"{box['lm']}{box['h'] * (inner + 2)}{box['rm']}")
+
+        down_arrow = "\u2193" if self.options.use_unicode else "v"
+        up_arrow = "\u2191" if self.options.use_unicode else "^"
+        improved_text = f"{self.stats.num_improved} improved"
+        regressed_text = f"{self.stats.num_regressed} regressed"
+        if no_color:
+            improved_text = f"{down_arrow}{improved_text}"
+            regressed_text = f"{up_arrow}{regressed_text}"
+        improved = colors.colorize(improved_text, fg_color="#66a61e")
+        regressed = colors.colorize(regressed_text, fg_color="#d95f02")
+        counts_text = f"{improved}  {self.stats.num_stable} stable  {regressed}"
+        visible_len = len(improved_text) + 2 + len(f"{self.stats.num_stable} stable") + 2 + len(regressed_text)
+        padding = max(0, inner - visible_len)
+        lines.append(f"{box['v']} {counts_text}{' ' * padding} {box['v']}")
+        return lines
+
+    def _render_best_worst(self, box: dict[str, str], colors: TerminalColors, inner: int, two_col: bool) -> list[str]:
+        """Render the best and worst query rows."""
+        if not self.stats.best_queries and not self.stats.worst_queries:
+            return []
+
+        lines: list[str] = []
+        no_color = not self.options.use_color
+
+        if not (two_col and not self.stats.is_comparison):
+            lines.append(f"{box['lm']}{box['h'] * (inner + 2)}{box['rm']}")
+
+        if self.stats.best_queries:
+            lines.append(
+                self._render_query_line(
+                    self.stats.best_queries,
+                    "Best",
+                    "#66a61e",
+                    box,
+                    colors,
+                    inner,
+                    no_color,
+                    is_down=True,
+                )
+            )
+
+        if self.stats.worst_queries:
+            lines.append(
+                self._render_query_line(
+                    self.stats.worst_queries,
+                    "Worst",
+                    "#d95f02",
+                    box,
+                    colors,
+                    inner,
+                    no_color,
+                    is_down=False,
+                )
+            )
+
+        return lines
+
+    def _render_query_line(
+        self,
+        queries: list[tuple[str, float]],
+        label_text: str,
+        color: str,
+        box: dict[str, str],
+        colors: TerminalColors,
+        inner: int,
+        no_color: bool,
+        *,
+        is_down: bool,
+    ) -> str:
+        """Render a single best/worst query line."""
+        items = ", ".join(
+            f"{q} ({v:+.1f}%)" if self.stats.is_comparison else f"{q} ({self._format_time(v)})" for q, v in queries[:3]
+        )
+        arrow = (
+            ("\u2193" if self.options.use_unicode else "v")
+            if is_down
+            else ("\u2191" if self.options.use_unicode else "^")
+        )
+        label = f"{arrow}{label_text}: " if no_color else f"{label_text}: "
+        items = self._truncate_label(items, max(0, inner - len(label)))
+        visible_len = len(label) + len(items)
+        padding = max(0, inner - visible_len)
+        colored_label = colors.colorize(label, fg_color=color) + items
+        return f"{box['v']} {colored_label}{' ' * padding} {box['v']}"
 
     def _render_comparison_metrics(
         self,
@@ -227,7 +271,7 @@ class ASCIISummaryBox(ASCIIChartBase):
             arrow = "\u2192" if self.options.use_unicode else "->"
             metric_text = f"Geo Mean:  {self._format_value(b_val)}ms {arrow} {self._format_value(c_val)}ms"
             pct_text = self._format_pct_colored(pct, colors)
-            visible_len = len(metric_text) + len(f"{pct:+.1f}%")
+            visible_len = len(metric_text) + len(self._format_pct_visible(pct))
             padding = max(0, inner - visible_len)
             leader = self._dot_leader(padding, colors)
             lines.append(f"{box['v']} {metric_text}{leader}{pct_text} {box['v']}")
@@ -241,7 +285,7 @@ class ASCIISummaryBox(ASCIIChartBase):
             c_str = self._format_time(c_val)
             metric_text = f"Total:     {b_str} {arrow} {c_str}"
             pct_text = self._format_pct_colored(pct, colors)
-            visible_len = len(metric_text) + len(f"{pct:+.1f}%")
+            visible_len = len(metric_text) + len(self._format_pct_visible(pct))
             padding = max(0, inner - visible_len)
             leader = self._dot_leader(padding, colors)
             lines.append(f"{box['v']} {metric_text}{leader}{pct_text} {box['v']}")
@@ -303,11 +347,15 @@ class ASCIISummaryBox(ASCIIChartBase):
         arrow = "\u2192" if self.options.use_unicode else "->"
         if self.stats.geo_mean_baseline_ms is not None and self.stats.geo_mean_comparison_ms is not None:
             b, c = self.stats.geo_mean_baseline_ms, self.stats.geo_mean_comparison_ms
-            texts.append(f"Geo Mean:  {self._format_value(b)}ms {arrow} {self._format_value(c)}ms")
+            pct = ((c - b) / b * 100) if b != 0 else 0.0
+            pct_text = self._format_pct_colored(pct, colors)
+            texts.append(f"Geo Mean:  {self._format_value(b)}ms {arrow} {self._format_value(c)}ms {pct_text}")
         if self.stats.total_time_baseline_ms is not None and self.stats.total_time_comparison_ms is not None:
             b, c = self.stats.total_time_baseline_ms, self.stats.total_time_comparison_ms
             b_str, c_str = self._format_time(b), self._format_time(c)
-            texts.append(f"Total:     {b_str} {arrow} {c_str}")
+            pct = ((c - b) / b * 100) if b != 0 else 0.0
+            pct_text = self._format_pct_colored(pct, colors)
+            texts.append(f"Total:     {b_str} {arrow} {c_str} {pct_text}")
         if self.stats.num_queries > 0:
             texts.append(f"Queries:   {self.stats.num_queries}")
         return texts
@@ -341,12 +389,30 @@ class ASCIISummaryBox(ASCIIChartBase):
         leader = f" {dots} "
         return colors.colorize(leader, fg_color="#666666")
 
-    def _format_pct_colored(self, pct: float, colors: TerminalColors) -> str:
-        """Format a percentage with color (green for improvement, red for regression)."""
+    def _format_pct_visible(self, pct: float) -> str:
+        """Format a percentage for visible-width calculations."""
         text = f"{pct:+.1f}%"
+        no_color = not self.options.use_color
         if pct < -2:
+            if no_color:
+                arrow = "\u2193" if self.options.use_unicode else "v"
+                return f"{text}{arrow}"
+        elif pct > 2 and no_color:
+            arrow = "\u2191" if self.options.use_unicode else "^"
+            return f"{text}{arrow}"
+        return text
+
+    def _format_pct_colored(self, pct: float, colors: TerminalColors) -> str:
+        """Format a percentage with color or structural arrows (green for improvement, red for regression)."""
+        text = self._format_pct_visible(pct)
+        no_color = not self.options.use_color
+        if pct < -2:
+            if no_color:
+                return text
             return colors.colorize(text, fg_color="#66a61e")
         elif pct > 2:
+            if no_color:
+                return text
             return colors.colorize(text, fg_color="#d95f02")
         return text
 

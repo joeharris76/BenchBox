@@ -23,6 +23,8 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
+from benchbox.utils.printing import emit
+
 # Default file locations relative to the repository root
 _PYPROJECT_PATH = Path("pyproject.toml")
 _UV_LOCK_PATH = Path("uv.lock")
@@ -147,21 +149,21 @@ def _print_matrix(summary: Mapping[str, object]) -> None:
     markers: list[str] = list(summary.get("resolution_markers", []))  # type: ignore[arg-type]
     optional = summary.get("optional_dependencies", {})
 
-    print("Python compatibility")
-    print(f"  Supported range: {python_range}")
+    emit("Python compatibility")
+    emit(f"  Supported range: {python_range}")
     if markers:
-        print("  Solver markers:")
+        emit("  Solver markers:")
         for marker in markers:
-            print(f"    - {marker}")
-    print()
+            emit(f"    - {marker}")
+    emit()
 
     if optional:
-        print("Optional dependency groups")
+        emit("Optional dependency groups")
         for extra, deps in optional.items():
             printable = ", ".join(deps)
-            print(f"  * {extra}: {printable}")
+            emit(f"  * {extra}: {printable}")
     else:
-        print("No optional dependencies declared.")
+        emit("No optional dependencies declared.")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -192,7 +194,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     problems = validate_dependency_versions(pyproject_data, lock_data)
     if problems:
         for problem in problems:
-            print(problem, file=sys.stderr)
+            sys.stderr.write(f"{problem}\n")
         return 1
 
     if args.matrix:

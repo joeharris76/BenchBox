@@ -5,7 +5,7 @@
 ```{tags} intermediate, guide, fabric, cloud-platform
 ```
 
-BenchBox supports Microsoft Fabric Warehouse for SQL-based analytical benchmarking with Entra ID authentication and OneLake integration.
+BenchBox supports Microsoft Fabric Warehouse for read/write SQL benchmarking, plus separate Fabric Spark and Fabric Lakehouse SQL adapters for Lakehouse workflows.
 
 ## Overview
 
@@ -17,18 +17,18 @@ BenchBox supports Microsoft Fabric Warehouse for SQL-based analytical benchmarki
 | **Data Loading** | COPY INTO via OneLake staging |
 | **Status** | Production-ready for Warehouse items |
 
-### Important Limitations
+### Important Limitations (Warehouse Adapter)
 
-This adapter **ONLY supports Fabric Warehouse items**:
+This adapter **ONLY supports Microsoft Fabric Warehouse items**:
 
 | Fabric Item | Support Status | Reason |
 |-------------|----------------|--------|
 | **Warehouse** | Supported | Full T-SQL DDL/DML support |
-| **Lakehouse** | Not Supported | SQL Analytics Endpoint is READ-ONLY |
+| **Lakehouse** | Supported via `fabric-lakehouse` | SQL Analytics Endpoint is READ-ONLY |
 | **KQL Database** | Not Supported | Kusto Query Language, not T-SQL |
 | **Mirrored Database** | Not Supported | Different architecture |
 
-For Lakehouse benchmarking, you would need Spark integration via Livy API, which is not currently implemented.
+For Lakehouse benchmarking, use Spark for load (`fabric-spark`) and SQL endpoint for query-only phases (`fabric-lakehouse`).
 
 ## Installation
 
@@ -185,7 +185,7 @@ Opens browser for Entra ID login.
 
 ## OneLake Data Staging
 
-Fabric Warehouse uses OneLake for data staging during bulk loads:
+Microsoft Fabric Warehouse uses OneLake for data staging during bulk loads:
 
 ```
 https://onelake.dfs.fabric.microsoft.com/{workspace}/{warehouse}.Warehouse/Files/benchbox-staging/
@@ -326,10 +326,10 @@ az fabric workspace list
 - Check file format matches data
 - Ensure column count matches table schema
 
-## Differences from Azure Synapse
+## Differences from Azure Synapse Analytics
 
-| Feature | Fabric Warehouse | Azure Synapse |
-|---------|------------------|---------------|
+| Feature | Microsoft Fabric Warehouse | Azure Synapse Analytics |
+|---------|----------------------------|-------------------------|
 | Authentication | Entra ID only | SQL + Entra ID |
 | Storage | OneLake | Azure Blob/ADLS |
 | Distribution | Automatic | User-specified |

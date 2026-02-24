@@ -111,7 +111,7 @@ def generate_post_run_summary(
     title = f"{result.benchmark_name} on {result.platform} (SF {result.scale_factor})"
 
     # Extract system environment info from result if available
-    environment = _extract_environment(result.system_profile)
+    environment = _extract_environment(result.system_profile, platform_info=result.platform_info)
 
     stats = SummaryStats(
         title=title,
@@ -209,7 +209,10 @@ def _render_horizontal_bars(
     return chart.render()
 
 
-def _extract_environment(system_profile: dict | None) -> dict[str, str] | None:
+def _extract_environment(
+    system_profile: dict | None,
+    platform_info: dict | None = None,
+) -> dict[str, str] | None:
     """Build an ordered environment dict from a system_profile dict.
 
     Accepts both SystemProfile keys (os_name, cpu_cores_logical, memory_total_gb)
@@ -218,31 +221,46 @@ def _extract_environment(system_profile: dict | None) -> dict[str, str] | None:
 
     Returns None if the profile is missing or has no usable fields.
     """
-    if not system_profile:
+    if not system_profile and not platform_info:
         return None
 
     env: dict[str, str] = {}
 
-    os_name = system_profile.get("os_name") or system_profile.get("os_type", "")
-    os_version = system_profile.get("os_version") or system_profile.get("os_release", "")
-    if os_name:
-        env["OS"] = f"{os_name} {os_version}".strip()
+    if system_profile:
+        os_name = system_profile.get("os_name") or system_profile.get("os_type", "")
+        os_version = system_profile.get("os_version") or system_profile.get("os_release", "")
+        if os_name:
+            env["OS"] = f"{os_name} {os_version}".strip()
 
-    python_version = system_profile.get("python_version", "")
-    if python_version:
-        env["Python"] = python_version
+        python_version = system_profile.get("python_version", "")
+        if python_version:
+            env["Python"] = python_version
 
-    cpus = system_profile.get("cpu_cores_logical") or system_profile.get("cpu_cores") or system_profile.get("cpu_count")
-    arch = system_profile.get("architecture", "")
-    if cpus:
-        env["CPUs"] = f"{cpus} ({arch})" if arch else str(cpus)
+        cpus = (
+            system_profile.get("cpu_cores_logical")
+            or system_profile.get("cpu_cores")
+            or system_profile.get("cpu_count")
+        )
+        arch = system_profile.get("architecture", "")
+        if cpus:
+            env["CPUs"] = f"{cpus} ({arch})" if arch else str(cpus)
 
-    mem_gb = (
-        system_profile.get("memory_total_gb")
-        or system_profile.get("total_memory_gb")
-        or system_profile.get("memory_gb")
-    )
-    if mem_gb is not None:
-        env["Memory"] = f"{mem_gb:.0f} GB"
+        mem_gb = (
+            system_profile.get("memory_total_gb")
+            or system_profile.get("total_memory_gb")
+            or system_profile.get("memory_gb")
+        )
+        if mem_gb is not None:
+            env["Memory"] = f"{mem_gb:.0f} GB"
+
+    if platform_info and isinstance(platform_info, dict):
+        version = (
+            platform_info.get("platform_version")
+            or platform_info.get("version")
+            or platform_info.get("driver_version_actual")
+        )
+        if version:
+            platform_name = platform_info.get("platform_name") or platform_info.get("name", "")
+            env["Driver"] = f"{platform_name} {version}".strip() if platform_name else str(version)
 
     return env if env else None

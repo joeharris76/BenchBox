@@ -48,6 +48,9 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as e:
@@ -76,7 +79,13 @@ __all__ = [
 ]
 
 
-def create_server() -> FastMCP:
+def create_server(
+    *,
+    results_dir: str | Path | None = None,
+    charts_dir: str | Path | None = None,
+    log_level: str | int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> FastMCP:
     """Create and configure the BenchBox MCP server.
 
     Returns:
@@ -84,17 +93,33 @@ def create_server() -> FastMCP:
     """
     from benchbox.mcp.server import create_benchbox_server
 
-    return create_benchbox_server()
+    return create_benchbox_server(
+        results_dir=results_dir,
+        charts_dir=charts_dir,
+        log_level=log_level,
+        env=env,
+    )
 
 
-def run_server() -> None:
+def run_server(
+    *,
+    results_dir: str | Path | None = None,
+    charts_dir: str | Path | None = None,
+    log_level: str | int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> None:
     """Run the BenchBox MCP server.
 
     This is the main entry point for the MCP server, typically invoked via:
     - `benchbox-mcp` CLI command
     - `python -m benchbox.mcp`
     """
-    server = create_server()
+    server = create_server(
+        results_dir=results_dir,
+        charts_dir=charts_dir,
+        log_level=log_level,
+        env=env,
+    )
     server.run()
 
 

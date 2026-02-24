@@ -87,3 +87,58 @@ release/archive/
 # Release build directories (versioned release trees created by automate_release.py)
 # These should be created outside the repo via --target ../BenchBox-public
 /benchbox-*/
+
+# Include pre-compiled TPC binaries for distribution
+!_binaries/
+!_binaries/tpc-h/
+!_binaries/tpc-h/**/
+!_binaries/tpc-h/**/*.exe
+!_binaries/tpc-h/**/*gen
+!_binaries/tpc-h/**/dists.dss
+!_binaries/tpc-h/**/*.md5
+!_binaries/tpc-ds/
+!_binaries/tpc-ds/**/
+!_binaries/tpc-ds/**/*.exe
+!_binaries/tpc-ds/**/*gen
+!_binaries/tpc-ds/**/tpcds.dst
+!_binaries/tpc-ds/**/*.md5
+
+# Include TPC compilation infrastructure
+!_sources/compilation/
+!_sources/compilation/**
+!_sources/tpc-ds/query_templates/
+!_sources/tpc-ds/query_templates/**
+
+uv.lock
+*.tbl
+*.dat
+
+# TPC source build artifacts (compiled locally, not for distribution)
+_sources/tpc-ds/tools/*.o
+_sources/tpc-ds/tools/dsqgen
+_sources/tpc-ds/tools/dsdgen
+_sources/tpc-ds/tools/distcomp
+_sources/tpc-ds/tools/mkheader
+_sources/tpc-ds/tools/*.c
+_sources/tpc-ds/tools/*.h
+_sources/tpc-ds/tools/y.*
+_sources/tpc-ds/tools/tpcds.idx*
+_sources/tpc-ds/tools/.ctags*
+_sources/tpc-h/dbgen/dbgen_x86_64
+
+# TODO system infrastructure (added for distributed TODO structure)
+!_project/TODO/
+!_project/DONE/
+!_project/scripts/
+!_project/TODO_SCHEMA.yaml
+!_project/PROJECT_TODO.md
+!_project/PROJECT_TODO.yaml
+!_project/PROJECT_DONE.md
+!_project/PROJECT_DONE.yaml
+!_project/TODO_ENTRY_TEMPLATE.yaml
+
+# Claude Code configuration (share skills/commands, exclude local settings)
+.claude/settings.local.json
+
+ci-log.txt
+/site/

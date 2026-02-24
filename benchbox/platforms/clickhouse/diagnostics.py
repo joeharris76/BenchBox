@@ -17,12 +17,12 @@ class ClickHouseDiagnosticsMixin:
         platform_info = {
             "platform_type": "clickhouse",
             "platform_name": "ClickHouse",
-            "connection_mode": self.mode,
+            "connection_mode": self.deployment_mode,
             "configuration": {},
         }
 
         # Include mode-specific configuration
-        if self.mode == "server":
+        if self.deployment_mode == "server":
             platform_info.update(
                 {
                     "host": getattr(self, "host", None),
@@ -58,7 +58,7 @@ class ClickHouseDiagnosticsMixin:
             else:
                 platform_info["platform_version"] = None
 
-        elif self.mode == "local":
+        elif self.deployment_mode == "local":
             platform_info["configuration"].update(
                 {
                     "data_path": getattr(self, "data_path", None),
@@ -83,14 +83,14 @@ class ClickHouseDiagnosticsMixin:
         """Get ClickHouse-specific metadata and system information."""
         metadata = {
             "platform": self.platform_name,
-            "mode": self.mode,
+            "mode": self.deployment_mode,
             "result_cache_enabled": not getattr(self, "disable_result_cache", True),
         }
 
         # Include mode-specific metadata
-        if self.mode == "server":
+        if self.deployment_mode == "server":
             metadata.update({"host": self.host, "port": self.port, "database": self.database})
-        elif self.mode == "local":
+        elif self.deployment_mode == "local":
             metadata.update({"data_path": getattr(self, "data_path", None)})
 
         try:
@@ -132,7 +132,7 @@ class ClickHouseDiagnosticsMixin:
     def check_server_database_exists(self, **connection_config) -> bool:
         """Check if database exists on ClickHouse server."""
         # In local mode, check if persistent database directory exists
-        if self.mode == "local":
+        if self.deployment_mode == "local":
             db_path = self.get_database_path(**connection_config)
             if db_path:
                 return Path(db_path).exists()
@@ -154,7 +154,7 @@ class ClickHouseDiagnosticsMixin:
     def drop_database(self, **connection_config) -> None:
         """Drop database on ClickHouse server."""
         # In local mode, there's no separate database server to drop from
-        if self.mode == "local":
+        if self.deployment_mode == "local":
             return
 
         try:

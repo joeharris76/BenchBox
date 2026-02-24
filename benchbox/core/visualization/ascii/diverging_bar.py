@@ -72,29 +72,16 @@ class ASCIIDivergingBar(ASCIIChartBase):
         width = self.options.get_effective_width()
         box = self.options.get_box_chars()
 
-        # Sort by magnitude (largest absolute change first)
-        # Group improvements (negative) first, then regressions (positive)
-        improvements = sorted(
-            [d for d in self.data if d.pct_change < 0],
-            key=lambda d: d.pct_change,  # most negative first
-        )
-        regressions = sorted(
-            [d for d in self.data if d.pct_change >= 0],
-            key=lambda d: d.pct_change,  # least positive first (near zero first)
-        )
-        sorted_data = improvements + regressions
-
+        sorted_data = self._sort_by_direction()
         if not sorted_data:
             return "No data to display"
 
-        # Layout: label + " " + left_bar + "|" + right_bar + " " + annotation
+        # Layout calculation
         max_label_len = min(30, max((len(d.label) for d in sorted_data), default=2))
-        annotation_width = 10  # " +1234.5%"
-        # Split remaining space evenly for left and right bars
-        bar_area = width - max_label_len - 1 - 1 - 1 - annotation_width  # label + spaces + center + annotation
+        annotation_width = 10
+        bar_area = width - max_label_len - 1 - 1 - 1 - annotation_width
         half_bar = max(5, bar_area // 2)
 
-        # Find max absolute percentage for scaling (clipped)
         max_abs_pct = max(
             (min(abs(d.pct_change), self.clip_pct) for d in sorted_data),
             default=1.0,
@@ -112,92 +99,120 @@ class ASCIIDivergingBar(ASCIIChartBase):
         lines.append(self._render_horizontal_line(width))
 
         # Header showing direction
-        faster_label = "Faster"
-        slower_label = "Slower"
-        header_left = faster_label.rjust(max_label_len + 1 + half_bar)
-        header_right = f"  {slower_label}"
-        lines.append(f"{header_left}{box['v']}{header_right}")
+        header_left = "Faster".rjust(max_label_len + 1 + half_bar)
+        lines.append(f"{header_left}{box['v']}  Slower")
 
         # Determine bar fill characters
         intensity = self.options.get_intensity_chars()
-        # Use different intensities based on magnitude
-        strong_char = intensity[-1] if len(intensity) > 1 else "#"  # █ (strong change)
-        medium_char = intensity[-2] if len(intensity) > 2 else "="  # ▓ (medium change)
-        weak_char = intensity[1] if len(intensity) > 1 else "."  # ░ (small change)
+        fill_chars = self._select_fill_chars(intensity)
 
         # Render bars
         for d in sorted_data:
-            label = self._truncate_label(d.label, max_label_len).ljust(max_label_len)
-            abs_pct = abs(d.pct_change)
-
-            # Choose fill character based on magnitude
-            if abs_pct > 50:
-                fill = strong_char
-            elif abs_pct > 15:
-                fill = medium_char
-            else:
-                fill = weak_char
-
-            # Calculate bar length
-            clipped = abs_pct > self.clip_pct
-            display_pct = min(abs_pct, self.clip_pct)
-            bar_len = max(0, int((display_pct / max_abs_pct) * half_bar))
-
-            # Build bar with potential overflow arrow
-            if d.pct_change < 0:
-                # Improvement: bar extends left from center
-                bar_str = fill * bar_len
-                if clipped:
-                    arrow = self._overflow_arrow_left()
-                    if len(arrow) < bar_len:
-                        bar_str = arrow + fill * (bar_len - len(arrow))
-                    else:
-                        bar_str = arrow[:bar_len] if bar_len > 0 else ""
-                left_side = bar_str.rjust(half_bar)
-                right_side = " " * half_bar
-            else:
-                # Regression: bar extends right from center
-                bar_str = fill * bar_len
-                if clipped:
-                    arrow = self._overflow_arrow_right()
-                    if len(arrow) < bar_len:
-                        bar_str = fill * (bar_len - len(arrow)) + arrow
-                    else:
-                        bar_str = arrow[:bar_len] if bar_len > 0 else ""
-                left_side = " " * half_bar
-                right_side = bar_str.ljust(half_bar)
-
-            # Color the bar
-            if d.pct_change < 0:
-                colored_left = colors.colorize(left_side, fg_color="#66a61e")
-                colored_right = right_side
-            elif d.pct_change > 0:
-                colored_left = left_side
-                colored_right = colors.colorize(right_side, fg_color="#d95f02")
-            else:
-                colored_left = left_side
-                colored_right = right_side
-
-            # Format annotation
-            if d.pct_change > 0:
-                annotation = f"+{d.pct_change:.1f}%"
-            else:
-                annotation = f"{d.pct_change:.1f}%"
-            annotation = annotation.rjust(annotation_width)
-
-            lines.append(f"{label} {colored_left}{box['v']}{colored_right} {annotation}")
+            line = self._render_bar_row(
+                d, max_label_len, half_bar, max_abs_pct, annotation_width, fill_chars, colors, box
+            )
+            lines.append(line)
 
         lines.append(self._render_horizontal_line(width))
+        lines.append(self._render_summary_counts(colors))
 
-        # Summary counts
+        return "\n".join(lines)
+
+    def _sort_by_direction(self) -> list[DivergingBarData]:
+        """Sort data: improvements (negative) first, then regressions (positive)."""
+        improvements = sorted(
+            [d for d in self.data if d.pct_change < 0],
+            key=lambda d: d.pct_change,
+        )
+        regressions = sorted(
+            [d for d in self.data if d.pct_change >= 0],
+            key=lambda d: d.pct_change,
+        )
+        return improvements + regressions
+
+    def _select_fill_chars(self, intensity: list[str]) -> tuple[str, str, str]:
+        """Select strong, medium, and weak fill characters from intensity scale."""
+        strong = intensity[-1] if len(intensity) > 1 else "#"
+        medium = intensity[-2] if len(intensity) > 2 else "="
+        weak = intensity[1] if len(intensity) > 1 else "."
+        return strong, medium, weak
+
+    def _render_bar_row(
+        self,
+        d: DivergingBarData,
+        max_label_len: int,
+        half_bar: int,
+        max_abs_pct: float,
+        annotation_width: int,
+        fill_chars: tuple[str, str, str],
+        colors: object,
+        box: dict[str, str],
+    ) -> str:
+        """Render a single bar row for an improvement or regression."""
+        label = self._truncate_label(d.label, max_label_len).ljust(max_label_len)
+        abs_pct = abs(d.pct_change)
+        strong, medium, weak = fill_chars
+
+        fill = strong if abs_pct > 50 else (medium if abs_pct > 15 else weak)
+
+        clipped = abs_pct > self.clip_pct
+        display_pct = min(abs_pct, self.clip_pct)
+        bar_len = max(0, int((display_pct / max_abs_pct) * half_bar))
+
+        left_side, right_side = self._build_bar_sides(d.pct_change, fill, bar_len, half_bar, clipped)
+        colored_left, colored_right = self._colorize_sides(d.pct_change, left_side, right_side, colors)
+
+        annotation = f"+{d.pct_change:.1f}%" if d.pct_change > 0 else f"{d.pct_change:.1f}%"
+        annotation = annotation.rjust(annotation_width)
+
+        return f"{label} {colored_left}{box['v']}{colored_right} {annotation}"
+
+    def _build_bar_sides(
+        self, pct_change: float, fill: str, bar_len: int, half_bar: int, clipped: bool
+    ) -> tuple[str, str]:
+        """Build left and right bar strings based on change direction."""
+        bar_str = fill * bar_len
+        if pct_change < 0:
+            if clipped:
+                bar_str = self._apply_overflow_arrow(bar_str, bar_len, self._overflow_arrow_left(), left=True)
+            return bar_str.rjust(half_bar), " " * half_bar
+
+        if clipped:
+            bar_str = self._apply_overflow_arrow(bar_str, bar_len, self._overflow_arrow_right(), left=False)
+        return " " * half_bar, bar_str.ljust(half_bar)
+
+    def _apply_overflow_arrow(self, bar_str: str, bar_len: int, arrow: str, *, left: bool) -> str:
+        """Apply an overflow arrow to a bar string."""
+        if len(arrow) < bar_len:
+            fill = bar_str[0] if bar_str else " "
+            if left:
+                return arrow + fill * (bar_len - len(arrow))
+            return fill * (bar_len - len(arrow)) + arrow
+        return arrow[:bar_len] if bar_len > 0 else ""
+
+    def _colorize_sides(self, pct_change: float, left_side: str, right_side: str, colors: object) -> tuple[str, str]:
+        """Colorize left and right bar sides based on change direction."""
+        if pct_change < 0:
+            return colors.colorize(left_side, fg_color="#66a61e"), right_side
+        if pct_change > 0:
+            return left_side, colors.colorize(right_side, fg_color="#d95f02")
+        return left_side, right_side
+
+    def _render_summary_counts(self, colors: object) -> str:
+        """Render the summary counts line (improved/stable/regressed)."""
         n_improved = sum(1 for d in self.data if d.pct_change < -self._stable_threshold())
         n_regressed = sum(1 for d in self.data if d.pct_change > self._stable_threshold())
         n_stable = len(self.data) - n_improved - n_regressed
-        improved_text = colors.colorize(f"{n_improved} improved", fg_color="#66a61e")
-        regressed_text = colors.colorize(f"{n_regressed} regressed", fg_color="#d95f02")
-        lines.append(f"  {improved_text}  {n_stable} stable  {regressed_text}")
-
-        return "\n".join(lines)
+        no_color = not self.options.use_color
+        if no_color:
+            down = "\u2193" if self.options.use_unicode else "v"
+            up = "\u2191" if self.options.use_unicode else "^"
+            improved_text = f"{down}{n_improved} improved"
+            regressed_text = f"{up}{n_regressed} regressed"
+        else:
+            improved_text = colors.colorize(f"{n_improved} improved", fg_color="#66a61e")
+            regressed_text = colors.colorize(f"{n_regressed} regressed", fg_color="#d95f02")
+        return f"  {improved_text}  {n_stable} stable  {regressed_text}"
 
     def _overflow_arrow_left(self) -> str:
         """Left-pointing overflow arrow for clipped improvements."""

@@ -65,6 +65,14 @@ ASCII_BOX_CHARS = {
 INTENSITY_CHARS = " ░▒▓█"
 ASCII_INTENSITY_CHARS = " .-=#"
 
+# Per-series fill characters for no-color bar differentiation (8 entries to match DEFAULT_PALETTE)
+FILL_PATTERNS: tuple[str, ...] = ("█", "▓", "▒", "░", "▚", "▞", "▐", "▌")
+ASCII_FILL_PATTERNS: tuple[str, ...] = ("#", "=", "-", ".", "+", "x", "o", "*")
+
+# Per-series legend markers for no-color differentiation (8 entries to match DEFAULT_PALETTE)
+SERIES_MARKERS: tuple[str, ...] = ("■", "◆", "▲", "●", "◇", "▽", "○", "□")
+ASCII_SERIES_MARKERS: tuple[str, ...] = ("#", "*", "+", "o", "x", "^", "~", "=")
+
 
 class ColorMode(Enum):
     """Terminal color capability levels."""
@@ -325,6 +333,32 @@ class ASCIIChartOptions:
             return TerminalColors(color_mode=self._capabilities.color_mode)
         return TerminalColors(color_mode=ColorMode.EXTENDED)
 
+    def _has_unicode(self) -> bool:
+        """Check if unicode is available."""
+        return self.use_unicode and (self._capabilities is None or self._capabilities.unicode_support)
+
+    def get_series_fill(self, index: int) -> str:
+        """Get fill character for a series by index.
+
+        When color is available, returns '█' (color differentiates series).
+        When color is off, returns a unique fill character per series.
+        """
+        if self.use_color:
+            return "█" if self._has_unicode() else "#"
+        patterns = FILL_PATTERNS if self._has_unicode() else ASCII_FILL_PATTERNS
+        return patterns[index % len(patterns)]
+
+    def get_series_marker(self, index: int) -> str:
+        """Get legend marker character for a series by index.
+
+        When color is available, returns '■' (color differentiates series).
+        When color is off, returns a unique marker character per series.
+        """
+        if self.use_color:
+            return "■" if self._has_unicode() else "#"
+        markers = SERIES_MARKERS if self._has_unicode() else ASCII_SERIES_MARKERS
+        return markers[index % len(markers)]
+
 
 class ASCIIChartBase(ABC):
     """Abstract base class for ASCII chart renderers."""
@@ -471,10 +505,11 @@ class ASCIIChartBase(ABC):
         width = self.options.get_effective_width()
         segments: list[str] = []
         visible_lengths: list[int] = []
-        for label, color in items:
-            marker = colors.colorize("■", fg_color=color)
+        for i, (label, color) in enumerate(items):
+            marker_char = self.options.get_series_marker(i)
+            marker = colors.colorize(marker_char, fg_color=color)
             segments.append(f"{marker} {label}")
-            visible_lengths.append(2 + len(label))  # "■ " + label
+            visible_lengths.append(2 + len(label))  # marker + " " + label
 
         # Pack into lines, wrapping when exceeding width
         lines: list[str] = [""]

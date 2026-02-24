@@ -271,7 +271,7 @@ class TestCLIParameterConsistency:
     def test_orchestrator_phase_integration(self, mock_dependencies):
         """Test that orchestrator correctly handles phases_to_run parameter."""
         from benchbox.cli.orchestrator import BenchmarkOrchestrator
-        from benchbox.core.config import BenchmarkConfig
+        from benchbox.core.schemas import BenchmarkConfig
 
         orchestrator = BenchmarkOrchestrator()
 
@@ -389,3 +389,78 @@ class TestPhaseValidationLogic:
         phases = ["power", "throughput", "maintenance"]
         has_all_query = all(p in phases for p in ["power", "throughput", "maintenance"])
         assert has_all_query
+
+
+@pytest.mark.skipif(not IMPORTS_AVAILABLE, reason=skip_reason or "CLI modules not available")
+@pytest.mark.skipif(
+    not PYTHON_311_PLUS,
+    reason="Click command mock.patch requires Python 3.11+ for attribute access",
+)
+class TestGlobalCacheCLIFlag:
+    """Tests for --global-cache flag wiring through the CLI."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    @pytest.fixture
+    def captured_config(self):
+        """Capture the BenchmarkConfig passed to the orchestrator."""
+        from unittest.mock import MagicMock, patch
+
+        captured: dict = {}
+        mock_result = MagicMock()
+        mock_result.validation_status = "SUCCESS"
+        mock_result.execution_id = "test-123"
+
+        with (
+            patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_orch,
+            patch("benchbox.cli.commands.run.DatabaseManager"),
+            patch("benchbox.cli.commands.run.BenchmarkManager") as mock_bench,
+            patch("benchbox.cli.commands.run.SystemProfiler"),
+            patch("benchbox.cli.commands.run.get_platform_manager"),
+            patch("benchbox.cli.main.ResultExporter"),
+        ):
+            mock_bench_instance = MagicMock()
+            mock_bench_instance.benchmarks = {"tpch": {"display_name": "TPC-H", "estimated_time_range": "1-5min"}}
+            mock_bench.return_value = mock_bench_instance
+
+            mock_orch_instance = MagicMock()
+            mock_orch_instance.execute_benchmark.return_value = mock_result
+
+            def capture_call(*args, **kwargs):
+                captured["benchmark_config"] = args[0]
+                return mock_result
+
+            mock_orch_instance.execute_benchmark.side_effect = capture_call
+            mock_orch.return_value = mock_orch_instance
+
+            yield captured
+
+    def test_global_cache_flag_sets_cache_dir_in_options(self, runner, captured_config):
+        """--global-cache injects cache_dir pointing to ~/.benchbox/datagen/ in options."""
+        from pathlib import Path
+
+        result = runner.invoke(
+            cli,
+            ["run", "--platform", "duckdb", "--benchmark", "tpch", "--scale", "0.01", "--global-cache"],
+        )
+
+        assert result.exit_code == 0, result.output
+        config = captured_config.get("benchmark_config")
+        assert config is not None
+        assert "cache_dir" in config.options
+        expected = str(Path.home() / ".benchbox" / "datagen")
+        assert config.options["cache_dir"] == expected
+
+    def test_no_global_cache_flag_omits_cache_dir(self, runner, captured_config):
+        """Without --global-cache, cache_dir is not set in options (project-local default applies)."""
+        result = runner.invoke(
+            cli,
+            ["run", "--platform", "duckdb", "--benchmark", "tpch", "--scale", "0.01"],
+        )
+
+        assert result.exit_code == 0, result.output
+        config = captured_config.get("benchmark_config")
+        assert config is not None
+        assert "cache_dir" not in config.options

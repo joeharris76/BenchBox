@@ -37,6 +37,7 @@ class TuningType(Enum):
 
     # Platform-specific optimizations
     Z_ORDERING = "z_ordering"  # Databricks Delta Lake
+    LIQUID_CLUSTERING = "liquid_clustering"  # Databricks Delta Lake
     AUTO_OPTIMIZE = "auto_optimize"  # Databricks
     AUTO_COMPACT = "auto_compact"  # Databricks
     BLOOM_FILTERS = "bloom_filters"  # Various platforms
@@ -128,6 +129,7 @@ class TuningType(Enum):
                 self.UNIQUE_CONSTRAINTS,
                 self.CHECK_CONSTRAINTS,
                 self.Z_ORDERING,
+                self.LIQUID_CLUSTERING,
                 self.AUTO_OPTIMIZE,
                 self.AUTO_COMPACT,
                 self.BLOOM_FILTERS,
@@ -187,7 +189,7 @@ class TuningColumn:
     type: str  # SQL data type (e.g., 'DATE', 'INTEGER', 'VARCHAR(255)')
     order: int
 
-    # Optional fields with defaults for backward compatibility
+    # Optional fields with defaults
     sort_order: SortOrderType = "ASC"
     nulls_position: NullsPositionType = "DEFAULT"
     compression: Optional[str] = None
@@ -253,7 +255,7 @@ class TuningColumn:
         """Convert the tuning column to a dictionary for serialization.
 
         Only includes non-default values for optional fields to keep
-        YAML files clean and support backward compatibility.
+        YAML files clean.
 
         Returns:
             Dictionary representation of the tuning column
@@ -306,6 +308,9 @@ class TuningColumn:
 PartitionStrategyType = Literal["RANGE", "LIST", "HASH", "DATE"]
 PartitionGranularityType = Literal["HOURLY", "DAILY", "MONTHLY", "YEARLY"]
 SortKeyStyleType = Literal["COMPOUND", "INTERLEAVED", "AUTO"]
+SortedIngestionModeType = Literal["off", "auto", "force"]
+SortedIngestionMethodType = Literal["auto", "ctas", "z_order", "liquid_clustering", "vacuum_sort"]
+DatabricksClusteringStrategyType = Literal["z_order", "liquid_clustering", "none"]
 
 
 @dataclass
@@ -379,11 +384,6 @@ class PartitioningConfig:
             range_boundaries=data.get("range_boundaries"),
         )
 
-    @classmethod
-    def from_column_list(cls, columns: list[TuningColumn]) -> "PartitioningConfig":
-        """Create from simple column list for backward compatibility."""
-        return cls(columns=columns)
-
 
 @dataclass
 class SortKeyConfig:
@@ -433,11 +433,6 @@ class SortKeyConfig:
             style=data.get("style", "COMPOUND"),
         )
 
-    @classmethod
-    def from_column_list(cls, columns: list[TuningColumn]) -> "SortKeyConfig":
-        """Create from simple column list for backward compatibility."""
-        return cls(columns=columns)
-
 
 @dataclass
 class ClusteringConfig:
@@ -477,11 +472,6 @@ class ClusteringConfig:
             columns=columns,
             bucket_count=data.get("bucket_count"),
         )
-
-    @classmethod
-    def from_column_list(cls, columns: list[TuningColumn]) -> "ClusteringConfig":
-        """Create from simple column list for backward compatibility."""
-        return cls(columns=columns)
 
 
 @dataclass
@@ -898,7 +888,7 @@ class BenchmarkTunings:
         if "benchmark_name" not in data:
             raise ValueError("Missing required field: benchmark_name")
 
-        # Extract constraint settings with defaults for backward compatibility
+        # Extract constraint settings with defaults
         enable_primary_keys = data.get("enable_primary_keys", True)
         enable_foreign_keys = data.get("enable_foreign_keys", True)
 
@@ -1047,17 +1037,57 @@ class PlatformOptimizationConfiguration:
 
     z_ordering_enabled: bool = False
     z_ordering_columns: list[str] = field(default_factory=list)
+    liquid_clustering_enabled: bool = False
+    liquid_clustering_columns: list[str] = field(default_factory=list)
+    databricks_clustering_strategy: DatabricksClusteringStrategyType = "z_order"
+    sorted_ingestion_mode: SortedIngestionModeType = "off"
+    sorted_ingestion_method: SortedIngestionMethodType = "auto"
     auto_optimize_enabled: bool = False
     auto_compact_enabled: bool = False
     bloom_filters_enabled: bool = False
     bloom_filter_columns: list[str] = field(default_factory=list)
     materialized_views_enabled: bool = False
 
+    def __post_init__(self) -> None:
+        """Validate strategy fields for deterministic tuning behavior."""
+        valid_modes = {"off", "auto", "force"}
+        valid_methods = {"auto", "ctas", "z_order", "liquid_clustering", "vacuum_sort"}
+        valid_dbx_strategies = {"z_order", "liquid_clustering", "none"}
+
+        if self.sorted_ingestion_mode not in valid_modes:
+            raise ValueError(
+                f"Invalid sorted_ingestion_mode: '{self.sorted_ingestion_mode}'. Must be one of {sorted(valid_modes)}."
+            )
+        if self.sorted_ingestion_method not in valid_methods:
+            raise ValueError(
+                f"Invalid sorted_ingestion_method: '{self.sorted_ingestion_method}'. "
+                f"Must be one of {sorted(valid_methods)}."
+            )
+        if self.databricks_clustering_strategy not in valid_dbx_strategies:
+            raise ValueError(
+                f"Invalid databricks_clustering_strategy: '{self.databricks_clustering_strategy}'. "
+                f"Must be one of {sorted(valid_dbx_strategies)}."
+            )
+
+        if self.sorted_ingestion_mode == "off" and self.sorted_ingestion_method != "auto":
+            raise ValueError("sorted_ingestion_method must be 'auto' when sorted_ingestion_mode is 'off'")
+
+        if self.liquid_clustering_columns and not self.liquid_clustering_enabled:
+            raise ValueError("liquid_clustering_columns requires liquid_clustering_enabled=true")
+
+        if self.databricks_clustering_strategy == "none" and self.liquid_clustering_enabled:
+            raise ValueError("liquid_clustering_enabled cannot be true when databricks_clustering_strategy is 'none'")
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "z_ordering_enabled": self.z_ordering_enabled,
             "z_ordering_columns": self.z_ordering_columns,
+            "liquid_clustering_enabled": self.liquid_clustering_enabled,
+            "liquid_clustering_columns": self.liquid_clustering_columns,
+            "databricks_clustering_strategy": self.databricks_clustering_strategy,
+            "sorted_ingestion_mode": self.sorted_ingestion_mode,
+            "sorted_ingestion_method": self.sorted_ingestion_method,
             "auto_optimize_enabled": self.auto_optimize_enabled,
             "auto_compact_enabled": self.auto_compact_enabled,
             "bloom_filters_enabled": self.bloom_filters_enabled,
@@ -1068,9 +1098,16 @@ class PlatformOptimizationConfiguration:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PlatformOptimizationConfiguration":
         """Create from dictionary."""
+        sorted_ingestion_mode = data.get("sorted_ingestion_mode", data.get("deep_sort_mode", "off"))
+        sorted_ingestion_method = data.get("sorted_ingestion_method", data.get("deep_sort_method", "auto"))
         return cls(
             z_ordering_enabled=data.get("z_ordering_enabled", False),
             z_ordering_columns=data.get("z_ordering_columns", []),
+            liquid_clustering_enabled=data.get("liquid_clustering_enabled", False),
+            liquid_clustering_columns=data.get("liquid_clustering_columns", []),
+            databricks_clustering_strategy=data.get("databricks_clustering_strategy", "z_order"),
+            sorted_ingestion_mode=sorted_ingestion_mode,
+            sorted_ingestion_method=sorted_ingestion_method,
             auto_optimize_enabled=data.get("auto_optimize_enabled", False),
             auto_compact_enabled=data.get("auto_compact_enabled", False),
             bloom_filters_enabled=data.get("bloom_filters_enabled", False),
@@ -1098,7 +1135,7 @@ class UnifiedTuningConfiguration:
     # Platform-specific optimizations
     platform_optimizations: PlatformOptimizationConfiguration = field(default_factory=PlatformOptimizationConfiguration)
 
-    # Legacy table tunings (maintained for backward compatibility)
+    # Table tunings
     table_tunings: dict[str, TableTuning] = field(default_factory=dict)
 
     def enable_all_constraints(self) -> None:
@@ -1142,6 +1179,11 @@ class UnifiedTuningConfiguration:
             self.platform_optimizations.z_ordering_enabled = True
             if "columns" in kwargs:
                 self.platform_optimizations.z_ordering_columns = kwargs["columns"]
+        elif optimization_type == TuningType.LIQUID_CLUSTERING:
+            self.platform_optimizations.liquid_clustering_enabled = True
+            self.platform_optimizations.databricks_clustering_strategy = "liquid_clustering"
+            if "columns" in kwargs:
+                self.platform_optimizations.liquid_clustering_columns = kwargs["columns"]
         elif optimization_type == TuningType.AUTO_OPTIMIZE:
             self.platform_optimizations.auto_optimize_enabled = True
         elif optimization_type == TuningType.AUTO_COMPACT:
@@ -1161,6 +1203,8 @@ class UnifiedTuningConfiguration:
         """
         if optimization_type == TuningType.Z_ORDERING:
             self.platform_optimizations.z_ordering_enabled = False
+        elif optimization_type == TuningType.LIQUID_CLUSTERING:
+            self.platform_optimizations.liquid_clustering_enabled = False
         elif optimization_type == TuningType.AUTO_OPTIMIZE:
             self.platform_optimizations.auto_optimize_enabled = False
         elif optimization_type == TuningType.AUTO_COMPACT:
@@ -1170,46 +1214,45 @@ class UnifiedTuningConfiguration:
         elif optimization_type == TuningType.MATERIALIZED_VIEWS:
             self.platform_optimizations.materialized_views_enabled = False
 
+    _CONSTRAINT_CHECKS = [
+        ("primary_keys", TuningType.PRIMARY_KEYS),
+        ("foreign_keys", TuningType.FOREIGN_KEYS),
+        ("unique_constraints", TuningType.UNIQUE_CONSTRAINTS),
+        ("check_constraints", TuningType.CHECK_CONSTRAINTS),
+    ]
+    _OPT_CHECKS = [
+        ("z_ordering_enabled", TuningType.Z_ORDERING),
+        ("liquid_clustering_enabled", TuningType.LIQUID_CLUSTERING),
+        ("auto_optimize_enabled", TuningType.AUTO_OPTIMIZE),
+        ("auto_compact_enabled", TuningType.AUTO_COMPACT),
+        ("bloom_filters_enabled", TuningType.BLOOM_FILTERS),
+        ("materialized_views_enabled", TuningType.MATERIALIZED_VIEWS),
+    ]
+    _TABLE_TUNING_CHECKS = [
+        ("partitioning", TuningType.PARTITIONING),
+        ("clustering", TuningType.CLUSTERING),
+        ("distribution", TuningType.DISTRIBUTION),
+        ("sorting", TuningType.SORTING),
+    ]
+
     def get_enabled_tuning_types(self) -> set[TuningType]:
         """Get all currently enabled tuning types.
 
         Returns:
             Set of enabled TuningType values
         """
-        enabled_types = set()
+        enabled_types: set[TuningType] = set()
 
-        # Check constraints
-        if self.primary_keys.enabled:
-            enabled_types.add(TuningType.PRIMARY_KEYS)
-        if self.foreign_keys.enabled:
-            enabled_types.add(TuningType.FOREIGN_KEYS)
-        if self.unique_constraints.enabled:
-            enabled_types.add(TuningType.UNIQUE_CONSTRAINTS)
-        if self.check_constraints.enabled:
-            enabled_types.add(TuningType.CHECK_CONSTRAINTS)
-
-        # Check platform optimizations
-        if self.platform_optimizations.z_ordering_enabled:
-            enabled_types.add(TuningType.Z_ORDERING)
-        if self.platform_optimizations.auto_optimize_enabled:
-            enabled_types.add(TuningType.AUTO_OPTIMIZE)
-        if self.platform_optimizations.auto_compact_enabled:
-            enabled_types.add(TuningType.AUTO_COMPACT)
-        if self.platform_optimizations.bloom_filters_enabled:
-            enabled_types.add(TuningType.BLOOM_FILTERS)
-        if self.platform_optimizations.materialized_views_enabled:
-            enabled_types.add(TuningType.MATERIALIZED_VIEWS)
-
-        # Check table tunings
+        for attr, tt in self._CONSTRAINT_CHECKS:
+            if getattr(self, attr).enabled:
+                enabled_types.add(tt)
+        for attr, tt in self._OPT_CHECKS:
+            if getattr(self.platform_optimizations, attr):
+                enabled_types.add(tt)
         for table_tuning in self.table_tunings.values():
-            if table_tuning.partitioning:
-                enabled_types.add(TuningType.PARTITIONING)
-            if table_tuning.clustering:
-                enabled_types.add(TuningType.CLUSTERING)
-            if table_tuning.distribution:
-                enabled_types.add(TuningType.DISTRIBUTION)
-            if table_tuning.sorting:
-                enabled_types.add(TuningType.SORTING)
+            for attr, tt in self._TABLE_TUNING_CHECKS:
+                if getattr(table_tuning, attr):
+                    enabled_types.add(tt)
 
         return enabled_types
 
@@ -1278,33 +1321,3 @@ class UnifiedTuningConfiguration:
                 instance.table_tunings[table_name] = TableTuning.from_dict(table_data)
 
         return instance
-
-    def merge_with_legacy_config(self, benchmark_tunings: BenchmarkTunings) -> None:
-        """Merge with legacy BenchmarkTunings configuration.
-
-        Args:
-            benchmark_tunings: Legacy configuration to merge
-        """
-        # Merge constraint settings
-        self.primary_keys.enabled = benchmark_tunings.enable_primary_keys
-        self.foreign_keys.enabled = benchmark_tunings.enable_foreign_keys
-
-        # Merge table tunings
-        self.table_tunings.update(benchmark_tunings.table_tunings)
-
-    def to_legacy_config(self, benchmark_name: str) -> BenchmarkTunings:
-        """Convert to legacy BenchmarkTunings format for backward compatibility.
-
-        Args:
-            benchmark_name: Name of the benchmark
-
-        Returns:
-            BenchmarkTunings instance
-        """
-        legacy_config = BenchmarkTunings(
-            benchmark_name=benchmark_name,
-            enable_primary_keys=self.primary_keys.enabled,
-            enable_foreign_keys=self.foreign_keys.enabled,
-            table_tunings=self.table_tunings.copy(),
-        )
-        return legacy_config

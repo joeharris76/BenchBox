@@ -7,9 +7,20 @@ import importlib
 import pytest
 from click.testing import CliRunner
 
+from benchbox.utils.printing import set_quiet
+
 pytestmark = pytest.mark.fast
 
 visualize_module = importlib.import_module("benchbox.cli.commands.visualize")
+
+
+@pytest.fixture(autouse=True)
+def _ensure_quiet_off():
+    """Ensure quiet mode is off so console.print() output reaches CliRunner."""
+    set_quiet(False)
+    yield
+    set_quiet(False)
+
 
 # Helper to generate valid result JSON
 SAMPLE_RESULT_JSON = """{
@@ -146,3 +157,33 @@ def test_visualize_cli_chart_type_all(tmp_path):
     )
 
     assert result.exit_code == 0
+
+
+def test_visualize_cli_invalid_chart_type_fails(tmp_path):
+    """Unknown --chart-type values should fail with a validation error."""
+    result_file = tmp_path / "test_result.json"
+    result_file.write_text(SAMPLE_RESULT_JSON)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        visualize_module.visualize,
+        [str(result_file), "--chart-type", "not_a_chart"],
+    )
+
+    assert result.exit_code != 0
+    assert "Unknown chart type" in result.output
+
+
+def test_visualize_cli_comparison_chart_requires_two_results(tmp_path):
+    """Pairwise comparison charts should require exactly two results."""
+    result_file = tmp_path / "test_result.json"
+    result_file.write_text(SAMPLE_RESULT_JSON)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        visualize_module.visualize,
+        [str(result_file), "--chart-type", "comparison_bar"],
+    )
+
+    assert result.exit_code != 0
+    assert "require exactly 2 results" in result.output

@@ -22,7 +22,7 @@ Example:
     >>>
     >>> # Check which settings are enabled
     >>> enabled = config.get_enabled_settings()
-    >>> print([t.value for t in enabled])
+    >>> emit([t.value for t in enabled])
     ['thread_count', 'streaming_mode']
 
 Copyright 2026 Joe Harris / BenchBox Project

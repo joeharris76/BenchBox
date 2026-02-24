@@ -14,7 +14,7 @@ from benchbox.cli.benchmarks import BenchmarkConfig
 from benchbox.cli.main import cli
 from benchbox.cli.orchestrator import BenchmarkOrchestrator
 from benchbox.cli.system import SystemProfile
-from benchbox.core.config import DatabaseConfig
+from benchbox.core.schemas import DatabaseConfig
 
 pytestmark = pytest.mark.slow  # CLI tests spawn subprocesses (~10-15s)
 

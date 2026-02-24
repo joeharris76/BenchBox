@@ -11,7 +11,7 @@ import pytest
 from rich.console import Console
 
 from benchbox.cli.execution import BenchmarkExecutor
-from benchbox.core.config import BenchmarkConfig, QueryResult
+from benchbox.core.schemas import BenchmarkConfig, QueryResult
 from benchbox.utils.printing import quiet_console
 from tests.conftest import make_benchmark_results
 
@@ -635,7 +635,7 @@ class TestBenchmarkExecutorResultCreation:
         executor.engine = Mock(spec=[])
 
         # Use a real benchmark config object
-        from benchbox.core.config import BenchmarkConfig
+        from benchbox.core.schemas import BenchmarkConfig
 
         config = BenchmarkConfig(name="tpch", display_name="TPC-H", scale_factor=0.01)
 

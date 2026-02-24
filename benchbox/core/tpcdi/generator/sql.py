@@ -72,6 +72,49 @@ class TPCDISQLGenerator:
             self.temp_connection.close()
             self.temp_connection = None
 
+    def _generate_table(
+        self,
+        conn: Any,
+        table_name: str,
+        insert_sql: str,
+        num_records: int | None = None,
+    ) -> int:
+        """Shared scaffolding for dimension/fact table generation.
+
+        Args:
+            conn: DuckDB connection.
+            table_name: Target table name (used for logging and stats).
+            insert_sql: Complete INSERT SQL statement to execute.
+            num_records: Pre-computed record count. When None, the count is
+                extracted via ``SELECT COUNT(*) FROM <table_name>`` after insert.
+
+        Returns:
+            Number of records generated.
+        """
+        if self.enable_progress:
+            if num_records is not None:
+                self.logger.info(f"Generating {num_records:,} {table_name} records...")
+            else:
+                self.logger.info(f"Generating {table_name}...")
+
+        start_time = mono_time()
+        conn.execute(insert_sql)
+
+        if num_records is None:
+            result = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+            num_records = result[0] if result else 0
+
+        generation_time = elapsed_seconds(start_time)
+        self.generation_stats["records_generated"] += num_records
+        self.generation_stats["tables_generated"] += 1
+        self.generation_stats["generation_times"][table_name] = generation_time
+        self.generation_stats["sql_operations"] += 1
+
+        if self.enable_progress:
+            self.logger.info(f"✅ Generated {num_records:,} {table_name} records in {generation_time:.3f}s")
+
+        return num_records
+
     def _setup_lookup_tables(self, conn: Any) -> None:
         """Create lookup tables for random data selection."""
         if self.enable_progress:
@@ -160,13 +203,7 @@ class TPCDISQLGenerator:
 
     def generate_date_dimension(self, conn: Any, start_year: int = 2020, end_year: int = 2024) -> int:
         """Generate date dimension using SQL."""
-        if self.enable_progress:
-            self.logger.info(f"Generating date dimension ({start_year}-{end_year})...")
-
-        start_time = mono_time()
-
-        # Generate all dates in range using SQL
-        conn.execute(f"""
+        insert_sql = f"""
             INSERT INTO DimDate
             SELECT
                 row_number() OVER (ORDER BY date_val) as SK_DateID,
@@ -192,32 +229,12 @@ class TPCDISQLGenerator:
                 FROM generate_series(0, {(end_year - start_year + 1) * 365 + 10}) s  -- Add extra days for leap years
             ) dates
             WHERE date_val <= DATE '{end_year}-12-31'
-        """)
-
-        # Get count of inserted records
-        result = conn.execute("SELECT COUNT(*) FROM DimDate").fetchone()
-        records_generated = result[0] if result else 0
-
-        generation_time = elapsed_seconds(start_time)
-        self.generation_stats["records_generated"] += records_generated
-        self.generation_stats["tables_generated"] += 1
-        self.generation_stats["generation_times"]["DimDate"] = generation_time
-        self.generation_stats["sql_operations"] += 1
-
-        if self.enable_progress:
-            self.logger.info(f"✅ Generated {records_generated:,} date records in {generation_time:.3f}s")
-
-        return records_generated
+        """
+        return self._generate_table(conn, "DimDate", insert_sql)
 
     def generate_time_dimension(self, conn: Any) -> int:
         """Generate time dimension using SQL."""
-        if self.enable_progress:
-            self.logger.info("Generating time dimension...")
-
-        start_time = mono_time()
-
-        # Generate times at 5-minute intervals using SQL
-        conn.execute("""
+        insert_sql = """
             INSERT INTO DimTime
             SELECT
                 row_number() OVER () as SK_TimeID,
@@ -243,33 +260,14 @@ class TPCDISQLGenerator:
                     (SELECT generate_series * 5 as minute_val FROM generate_series(0, 11)) m
             ) times
             ORDER BY hour_val, minute_val
-        """)
-
-        # Get count of inserted records
-        result = conn.execute("SELECT COUNT(*) FROM DimTime").fetchone()
-        records_generated = result[0] if result else 0
-
-        generation_time = elapsed_seconds(start_time)
-        self.generation_stats["records_generated"] += records_generated
-        self.generation_stats["tables_generated"] += 1
-        self.generation_stats["generation_times"]["DimTime"] = generation_time
-        self.generation_stats["sql_operations"] += 1
-
-        if self.enable_progress:
-            self.logger.info(f"✅ Generated {records_generated:,} time records in {generation_time:.3f}s")
-
-        return records_generated
+        """
+        return self._generate_table(conn, "DimTime", insert_sql)
 
     def generate_company_dimension(self, conn: Any) -> int:
         """Generate company dimension using SQL."""
         num_companies = int(self.base_companies * self.scale_factor)
 
-        if self.enable_progress:
-            self.logger.info(f"Generating {num_companies:,} company records...")
-
-        start_time = mono_time()
-
-        conn.execute(f"""
+        insert_sql = f"""
             INSERT INTO DimCompany
             SELECT
                 s.generate_series as SK_CompanyID,
@@ -299,29 +297,14 @@ class TPCDISQLGenerator:
                 CROSS JOIN (SELECT industry FROM lookup_industries ORDER BY random() LIMIT 1) ind
                 CROSS JOIN (SELECT rating FROM lookup_sp_ratings ORDER BY random() LIMIT 1) rating
                 CROSS JOIN (SELECT state FROM lookup_us_states ORDER BY random() LIMIT 1) state
-        """)
-
-        generation_time = elapsed_seconds(start_time)
-        self.generation_stats["records_generated"] += num_companies
-        self.generation_stats["tables_generated"] += 1
-        self.generation_stats["generation_times"]["DimCompany"] = generation_time
-        self.generation_stats["sql_operations"] += 1
-
-        if self.enable_progress:
-            self.logger.info(f"✅ Generated {num_companies:,} company records in {generation_time:.3f}s")
-
-        return num_companies
+        """
+        return self._generate_table(conn, "DimCompany", insert_sql, num_records=num_companies)
 
     def generate_security_dimension(self, conn: Any) -> int:
         """Generate security dimension using SQL."""
         num_securities = int(self.base_securities * self.scale_factor)
 
-        if self.enable_progress:
-            self.logger.info(f"Generating {num_securities:,} security records...")
-
-        start_time = mono_time()
-
-        conn.execute(f"""
+        insert_sql = f"""
             INSERT INTO DimSecurity
             SELECT
                 s as SK_SecurityID,
@@ -343,29 +326,14 @@ class TPCDISQLGenerator:
                 generate_series(1, {num_securities}) s
                 CROSS JOIN (SELECT status FROM lookup_statuses ORDER BY random() LIMIT 1) st
                 CROSS JOIN (SELECT unnest(['NYSE', 'NASDAQ', 'AMEX']) as exchange_id ORDER BY random() LIMIT 1) exchange
-        """)
-
-        generation_time = elapsed_seconds(start_time)
-        self.generation_stats["records_generated"] += num_securities
-        self.generation_stats["tables_generated"] += 1
-        self.generation_stats["generation_times"]["DimSecurity"] = generation_time
-        self.generation_stats["sql_operations"] += 1
-
-        if self.enable_progress:
-            self.logger.info(f"✅ Generated {num_securities:,} security records in {generation_time:.3f}s")
-
-        return num_securities
+        """
+        return self._generate_table(conn, "DimSecurity", insert_sql, num_records=num_securities)
 
     def generate_customer_dimension(self, conn: Any) -> int:
         """Generate customer dimension using SQL."""
         num_customers = int(self.base_customers * self.scale_factor)
 
-        if self.enable_progress:
-            self.logger.info(f"Generating {num_customers:,} customer records...")
-
-        start_time = mono_time()
-
-        conn.execute(f"""
+        insert_sql = f"""
             INSERT INTO DimCustomer
             SELECT
                 s as SK_CustomerID,
@@ -411,30 +379,15 @@ class TPCDISQLGenerator:
                 CROSS JOIN (SELECT name FROM lookup_first_names ORDER BY random() LIMIT 1) fn
                 CROSS JOIN (SELECT name FROM lookup_last_names ORDER BY random() LIMIT 1) ln
                 CROSS JOIN (SELECT state FROM lookup_us_states ORDER BY random() LIMIT 1) state
-        """)
-
-        generation_time = elapsed_seconds(start_time)
-        self.generation_stats["records_generated"] += num_customers
-        self.generation_stats["tables_generated"] += 1
-        self.generation_stats["generation_times"]["DimCustomer"] = generation_time
-        self.generation_stats["sql_operations"] += 1
-
-        if self.enable_progress:
-            self.logger.info(f"✅ Generated {num_customers:,} customer records in {generation_time:.3f}s")
-
-        return num_customers
+        """
+        return self._generate_table(conn, "DimCustomer", insert_sql, num_records=num_customers)
 
     def generate_account_dimension(self, conn: Any) -> int:
         """Generate account dimension using SQL."""
         num_customers = int(self.base_customers * self.scale_factor)
         num_accounts = int(num_customers * 1.5)  # 1.5 accounts per customer average
 
-        if self.enable_progress:
-            self.logger.info(f"Generating {num_accounts:,} account records...")
-
-        start_time = mono_time()
-
-        conn.execute(f"""
+        insert_sql = f"""
             INSERT INTO DimAccount
             SELECT
                 s as SK_AccountID,
@@ -451,29 +404,14 @@ class TPCDISQLGenerator:
             FROM
                 generate_series(1, {num_accounts}) s
                 CROSS JOIN (SELECT status FROM lookup_statuses ORDER BY random() LIMIT 1) st
-        """)
-
-        generation_time = elapsed_seconds(start_time)
-        self.generation_stats["records_generated"] += num_accounts
-        self.generation_stats["tables_generated"] += 1
-        self.generation_stats["generation_times"]["DimAccount"] = generation_time
-        self.generation_stats["sql_operations"] += 1
-
-        if self.enable_progress:
-            self.logger.info(f"✅ Generated {num_accounts:,} account records in {generation_time:.3f}s")
-
-        return num_accounts
+        """
+        return self._generate_table(conn, "DimAccount", insert_sql, num_records=num_accounts)
 
     def generate_trade_facts(self, conn: Any) -> int:
         """Generate trade fact table using SQL."""
         num_trades = int(self.base_trades * self.scale_factor)
 
-        if self.enable_progress:
-            self.logger.info(f"Generating {num_trades:,} trade records...")
-
-        start_time = mono_time()
-
-        conn.execute(f"""
+        insert_sql = f"""
             INSERT INTO FactTrade
             SELECT
                 s as TradeID,
@@ -510,18 +448,8 @@ class TPCDISQLGenerator:
             FROM
                 generate_series(1, {num_trades}) s
                 CROSS JOIN (SELECT type FROM lookup_trade_types ORDER BY random() LIMIT 1) tt
-        """)
-
-        generation_time = elapsed_seconds(start_time)
-        self.generation_stats["records_generated"] += num_trades
-        self.generation_stats["tables_generated"] += 1
-        self.generation_stats["generation_times"]["FactTrade"] = generation_time
-        self.generation_stats["sql_operations"] += 1
-
-        if self.enable_progress:
-            self.logger.info(f"✅ Generated {num_trades:,} trade records in {generation_time:.3f}s")
-
-        return num_trades
+        """
+        return self._generate_table(conn, "FactTrade", insert_sql, num_records=num_trades)
 
     def generate_all_tables(self, conn: Any, tables: list[str] | None = None) -> dict[str, int]:
         """Generate all TPC-DI tables using SQL."""

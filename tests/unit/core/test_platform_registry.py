@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from benchbox.core.config import LibraryInfo
 from benchbox.core.platform_registry import PlatformRegistry
+from benchbox.core.schemas import LibraryInfo
 
 pytestmark = pytest.mark.fast
 
@@ -463,3 +463,79 @@ class TestPlatformRegistryBoundaries:
             for lib_spec in platform_spec["libraries"]:
                 assert "name" in lib_spec
                 assert "required" in lib_spec
+
+
+class TestPlatformDisplayNames:
+    """Verify platform display names are correct and consistent."""
+
+    def test_all_display_names_are_non_empty(self):
+        """All registered platforms must have a non-empty display_name."""
+        metadata = PlatformRegistry.get_all_platform_metadata()
+        empty = [k for k, v in metadata.items() if not v.get("display_name")]
+        assert not empty, f"Platforms with empty display_name: {empty}"
+
+    def test_fabric_dw_display_name_includes_microsoft(self):
+        """Microsoft Fabric Warehouse display name must include 'Microsoft' prefix."""
+        registry = PlatformRegistry()
+        info = registry.get_platform_info("fabric_dw")
+        assert info.display_name == "Microsoft Fabric Warehouse"
+
+    def test_athena_display_name_uses_amazon_not_aws(self):
+        """Amazon Athena display name must use 'Amazon', not 'AWS'."""
+        registry = PlatformRegistry()
+        info = registry.get_platform_info("athena")
+        assert info.display_name == "Amazon Athena"
+        assert not info.display_name.startswith("AWS")
+
+    def test_dataproc_display_names_use_google_cloud(self):
+        """Google Cloud Dataproc display names must use 'Google Cloud', not 'GCP'."""
+        registry = PlatformRegistry()
+        for key in ("dataproc", "dataproc-serverless"):
+            info = registry.get_platform_info(key)
+            assert "Google Cloud" in info.display_name, f"{key}: expected 'Google Cloud' in '{info.display_name}'"
+            assert "GCP" not in info.display_name, f"{key}: unexpected 'GCP' in '{info.display_name}'"
+
+    def test_synapse_display_names_include_analytics(self):
+        """Azure Synapse display names must include full 'Analytics' suffix."""
+        registry = PlatformRegistry()
+        for key in ("synapse", "synapse-spark"):
+            info = registry.get_platform_info(key)
+            assert "Analytics" in info.display_name, f"{key}: expected 'Analytics' in '{info.display_name}'"
+
+    def test_databricks_sql_display_name_disambiguates_from_dataframe(self):
+        """Databricks SQL display name must be distinct from Databricks DataFrame."""
+        registry = PlatformRegistry()
+        sql_name = registry.get_platform_info("databricks").display_name
+        df_name = registry.get_platform_info("databricks-df").display_name
+        assert sql_name != df_name, "databricks and databricks-df should have different display names"
+        assert "SQL" in sql_name, f"databricks display_name should contain 'SQL', got '{sql_name}'"
+
+
+class TestPlatformAliases:
+    """Verify platform alias resolution works for renamed CLI keys."""
+
+    def test_fabric_dw_hyphen_alias_resolves_via_cli_normalizer(self):
+        """fabric-dw (hyphen form) must resolve to fabric_dw canonical key via CLI layer."""
+        from benchbox.cli.platform import normalize_platform_name
+
+        assert normalize_platform_name("fabric-dw") == "fabric_dw"
+
+    def test_fabric_dw_underscore_still_resolves(self):
+        """Legacy fabric_dw underscore form must still resolve (backward compat)."""
+        from benchbox.cli.platform import normalize_platform_name
+
+        assert normalize_platform_name("fabric_dw") == "fabric_dw"
+
+    def test_fabric_dw_hyphen_resolves_via_registry(self):
+        """fabric-dw must resolve to a valid platform via the registry alias layer."""
+        registry = PlatformRegistry()
+        info = registry.get_platform_info("fabric-dw")
+        assert info is not None
+        assert info.display_name == "Microsoft Fabric Warehouse"
+
+    def test_fabric_dw_and_fabric_hyphen_dw_return_same_platform(self):
+        """fabric_dw and fabric-dw must return the same platform info."""
+        registry = PlatformRegistry()
+        info_underscore = registry.get_platform_info("fabric_dw")
+        info_hyphen = registry.get_platform_info("fabric-dw")
+        assert info_underscore.display_name == info_hyphen.display_name

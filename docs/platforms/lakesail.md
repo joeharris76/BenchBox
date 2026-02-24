@@ -1,0 +1,336 @@
+<!-- Copyright 2026 Joe Harris / BenchBox Project. Licensed under the MIT License. -->
+
+# LakeSail Sail Platform
+
+```{tags} intermediate, guide, lakesail, sql-platform, dataframe-platform, spark-compatible, local
+```
+
+LakeSail Sail is a Rust-based, drop-in replacement for Apache Spark built on DataFusion. It delivers 4x faster execution with 94% lower hardware costs compared to Apache Spark (TPC-H SF100). BenchBox supports LakeSail in both SQL mode (`lakesail`) and DataFrame mode (`lakesail-df`), connecting via the standard Spark Connect protocol for zero-rewrite migration from PySpark.
+
+## Features
+
+- **4x faster than Spark** - Rust-based DataFusion engine with significant performance gains at lower cost
+- **Zero-rewrite migration** - Uses standard PySpark client via Spark Connect protocol
+- **Dual execution modes** - SQL benchmarking (`lakesail`) and DataFrame benchmarking (`lakesail-df`)
+- **Spark SQL dialect** - SQLGlot `spark` dialect for query translation
+- **Local and distributed** - Multi-threaded single-host or distributed cluster deployment
+- **Parquet and ORC** - Native support for columnar table formats
+- **Adaptive Query Execution** - AQE support for runtime query optimization
+- **Full PySpark API** - DataFrame, Column expression, and Window function compatibility
+
+## Quick Start
+
+```bash
+# Install PySpark client (LakeSail uses the standard PySpark package)
+uv add pyspark pyarrow
+
+# Start your LakeSail Sail server (see LakeSail documentation)
+# Default endpoint: sc://localhost:50051
+
+# Run SQL benchmark
+benchbox run --platform lakesail --benchmark tpch --scale 1.0
+
+# Run DataFrame benchmark
+benchbox run --platform lakesail-df --benchmark tpch --scale 1.0
+```
+
+## Configuration
+
+LakeSail Sail connects to a running Sail server via the Spark Connect protocol. No additional authentication is required for local deployments.
+
+### Configuration Methods
+
+**CLI Options:**
+
+```bash
+benchbox run --platform lakesail --benchmark tpch --scale 1.0 \
+    --lakesail-endpoint sc://localhost:50051 \
+    --lakesail-mode local \
+    --driver-memory 8g \
+    --shuffle-partitions 16
+```
+
+**Environment Variables:**
+
+```bash
+# Store credentials for reuse
+benchbox credentials set lakesail \
+    --option endpoint=sc://my-sail-server:50051 \
+    --option sail_mode=distributed \
+    --option sail_workers=4
+
+benchbox run --platform lakesail --benchmark tpch --scale 1.0
+```
+
+### Configuration Options
+
+| Option | CLI Flag | Default | Description |
+|--------|----------|---------|-------------|
+| `endpoint` | `--lakesail-endpoint` | `sc://localhost:50051` | Sail server Spark Connect URL |
+| `sail_mode` | `--lakesail-mode` | `local` | Deployment mode: `local` or `distributed` |
+| `sail_workers` | `--lakesail-workers` | - | Worker count for distributed mode |
+| `app_name` | `--app-name` | `BenchBox-LakeSail` | Application name for the session |
+| `driver_memory` | `--driver-memory` | `4g` | Driver memory allocation (e.g., `4g`, `8g`) |
+| `shuffle_partitions` | `--shuffle-partitions` | `200` | Number of shuffle partitions |
+| `table_format` | `--table-format` | `parquet` | Table format: `parquet` or `orc` |
+| `adaptive_enabled` | `--adaptive-enabled` | `true` | Enable Adaptive Query Execution (AQE) |
+| `disable_cache` | - | `true` | Disable result caching for accurate benchmarking |
+| `spark_config` | - | `{}` | Additional Spark configuration properties (dict) |
+
+## Usage Examples
+
+### SQL Mode
+
+```bash
+# TPC-H at scale factor 1
+benchbox run --platform lakesail --benchmark tpch --scale 1.0
+
+# TPC-DS at scale factor 10 with tuned settings
+benchbox run --platform lakesail --benchmark tpcds --scale 10.0 \
+    --driver-memory 16g \
+    --shuffle-partitions 32
+
+# Specific queries only
+benchbox run --platform lakesail --benchmark tpch --scale 1.0 --queries Q1,Q6,Q17
+
+# Dry run to preview execution
+benchbox run --dry-run ./preview --platform lakesail --benchmark tpch
+```
+
+### DataFrame Mode
+
+```bash
+# TPC-H DataFrame benchmark
+benchbox run --platform lakesail-df --benchmark tpch --scale 1.0
+
+# With custom endpoint and memory
+benchbox run --platform lakesail-df --benchmark tpch --scale 1.0 \
+    --lakesail-endpoint sc://sail-server:50051 \
+    --driver-memory 8g
+```
+
+### Comparison with Apache Spark
+
+Run the same benchmark on both platforms to compare performance:
+
+```bash
+# LakeSail Sail
+benchbox run --platform lakesail --benchmark tpch --scale 10.0
+
+# Apache Spark (for comparison)
+benchbox run --platform spark --benchmark tpch --scale 10.0
+
+# Compare results
+benchbox results compare lakesail_tpch_sf10.json spark_tpch_sf10.json
+```
+
+## Python API
+
+### SQL Mode
+
+```python
+from benchbox import TPCH
+from benchbox.platforms.lakesail import LakeSailAdapter
+
+adapter = LakeSailAdapter(
+    endpoint="sc://localhost:50051",
+    sail_mode="local",
+    driver_memory="8g",
+    shuffle_partitions=16,
+    table_format="parquet",
+)
+
+benchmark = TPCH(scale_factor=1.0)
+benchmark.generate_data()
+adapter.load_benchmark(benchmark)
+results = adapter.run_benchmark(benchmark)
+```
+
+### DataFrame Mode
+
+```python
+from benchbox.platforms.dataframe.lakesail_df import LakeSailDataFrameAdapter
+
+adapter = LakeSailDataFrameAdapter(
+    endpoint="sc://localhost:50051",
+    driver_memory="8g",
+    shuffle_partitions=16,
+    enable_aqe=True,
+)
+
+# Use as context manager for automatic cleanup
+with adapter as ctx:
+    df = ctx.read_parquet(Path("lineitem.parquet"))
+    result = df.filter(df["l_quantity"] > 25).groupBy("l_returnflag").count()
+    rows = ctx.collect(result)
+```
+
+## Architecture
+
+LakeSail Sail replaces the Spark execution engine with a Rust-based runtime built on Apache DataFusion, while maintaining full compatibility with the Spark Connect protocol.
+
+### Spark Connect Integration
+
+```
+┌──────────────────┐     Spark Connect     ┌──────────────────────┐
+│  PySpark Client   │ ──── Protocol ────>  │   LakeSail Sail       │
+│  (standard API)   │     (gRPC)           │   Server              │
+└──────────────────┘                       ├──────────────────────┤
+                                           │  Query Optimizer      │
+                                           │  (DataFusion)         │
+                                           ├──────────────────────┤
+                                           │  Rust Execution       │
+                                           │  Workers              │
+                                           └──────────────────────┘
+```
+
+Key architectural points:
+
+- **Client**: Standard PySpark library -- no custom client needed
+- **Protocol**: Spark Connect (gRPC) for client-server communication
+- **SQL Dialect**: Spark SQL, translated via SQLGlot `spark` dialect
+- **Optimizer**: DataFusion query optimizer with cost-based optimization
+- **Execution**: Rust-based workers for vectorized query processing
+- **Constraints**: Primary and foreign keys are informational only (not enforced), matching Spark behavior
+
+### Tuning Support
+
+LakeSail supports the following tuning types:
+
+| Tuning Type | Supported | Notes |
+|-------------|-----------|-------|
+| Partitioning | Yes | `PARTITIONED BY` clause on table creation |
+| Sorting | Yes | Sort-based optimizations |
+| Primary Keys | Informational | Not enforced, used for optimizer hints |
+| Foreign Keys | Informational | Not enforced, used for optimizer hints |
+
+## Deployment Modes
+
+### Local Mode
+
+Single-node, multi-threaded execution. Best for development, testing, and small-to-medium scale benchmarks.
+
+```bash
+benchbox run --platform lakesail --benchmark tpch --scale 1.0 \
+    --lakesail-mode local \
+    --driver-memory 8g
+```
+
+- Sail server runs on a single machine
+- Multi-threaded query execution via Rust workers
+- No cluster coordination overhead
+- Default endpoint: `sc://localhost:50051`
+
+### Distributed Mode
+
+Multi-node cluster execution for large-scale benchmarks.
+
+```bash
+benchbox run --platform lakesail --benchmark tpch --scale 100.0 \
+    --lakesail-mode distributed \
+    --lakesail-workers 4 \
+    --driver-memory 16g \
+    --shuffle-partitions 200
+```
+
+- Multiple Rust worker nodes coordinated by a Sail server
+- Horizontal scaling for large datasets
+- Requires cluster infrastructure setup (see LakeSail documentation)
+
+## Comparison: LakeSail vs Apache Spark
+
+| Feature | LakeSail Sail | Apache Spark |
+|---------|---------------|--------------|
+| Language | Rust (DataFusion) | Scala/Java (JVM) |
+| Performance | ~4x faster (TPC-H SF100) | Baseline |
+| Hardware Cost | ~94% lower | Baseline |
+| API Compatibility | Full PySpark API | Native |
+| SQL Dialect | Spark SQL | Spark SQL |
+| Connection Protocol | Spark Connect | Native / Spark Connect |
+| Migration Effort | Zero rewrites | N/A |
+| Local Mode | Multi-threaded Rust | JVM-based |
+| Distributed Mode | Rust workers | JVM executors |
+| DataFrame API | Full PySpark compatibility | Native |
+| Table Formats | Parquet, ORC | Parquet, ORC, Delta, Iceberg |
+| Maturity | Newer | Battle-tested |
+
+### When to Use LakeSail
+
+**Use LakeSail when:**
+- You want Spark compatibility with native execution performance (avoiding JVM overhead)
+- Migrating from an existing PySpark/Spark SQL workload with no code changes
+- Running OLAP and analytics benchmarks where execution speed matters
+- Hardware cost reduction is a priority
+- You need both SQL and DataFrame benchmarking on the same engine
+
+**Use Apache Spark instead when:**
+- You need the broadest ecosystem of connectors and integrations
+- You require Delta Lake or Iceberg table format support
+- You depend on Spark-specific plugins or UDFs not yet supported by Sail
+- You need a battle-tested production platform with long-term support history
+
+## Troubleshooting
+
+### Connection Refused
+
+```
+Failed to connect to LakeSail Sail: Connection refused
+```
+
+**Solutions:**
+1. Verify the Sail server is running and accepting connections
+2. Check the endpoint URL format: `sc://host:port` (default: `sc://localhost:50051`)
+3. Verify the port is not blocked by a firewall
+4. Check server logs for startup errors
+
+### PySpark Not Installed
+
+```
+PySpark not installed. Install with: pip install pyspark pyarrow
+```
+
+**Solutions:**
+1. Install the PySpark client: `uv add pyspark pyarrow`
+2. LakeSail uses the standard PySpark package -- no special client needed
+
+### Database Creation Failed
+
+```
+Failed to create database: ...
+```
+
+**Solutions:**
+1. Verify the Sail server has write permissions
+2. Check that the database name uses only alphanumeric characters and underscores
+3. Try connecting with a simpler database name: `--platform-option database=test`
+
+### Query Execution Timeout
+
+```
+Query execution timed out
+```
+
+**Solutions:**
+1. Increase driver memory: `--driver-memory 16g`
+2. Adjust shuffle partitions: `--shuffle-partitions 32`
+3. For large-scale benchmarks, use distributed mode: `--lakesail-mode distributed`
+4. Check Sail server resource availability
+
+### Table Already Exists
+
+```
+Table 'lineitem' already exists
+```
+
+**Solutions:**
+1. The adapter handles this automatically by dropping and recreating tables
+2. Force data regeneration: `benchbox run --force all --platform lakesail ...`
+3. Manually drop the database: connect to the Sail server and run `DROP DATABASE <name> CASCADE`
+
+## See Also
+
+- [Spark Platform](spark.md) - Apache Spark benchmarking (for comparison)
+- [Deployment Modes Guide](deployment-modes.md) - Platform deployment architecture
+- [Platform Selection Guide](platform-selection-guide.md) - Choose the right platform
+- [Getting Started](../usage/getting-started.md) - Quick start guide
+- [LakeSail Documentation](https://lakesail.com/docs) - Official LakeSail Sail documentation

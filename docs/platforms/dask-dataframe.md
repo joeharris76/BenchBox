@@ -60,10 +60,10 @@ Dask partitions DataFrames into chunks and builds a task graph for lazy executio
 
 ```bash
 # Install Dask DataFrame support
-uv add benchbox --extra dataframe-dask
+uv add benchbox --extra dask
 
 # Or with pip
-pip install "benchbox[dataframe-dask]"
+pip install "benchbox[dask]"
 
 # For distributed execution
 pip install "dask[distributed]"

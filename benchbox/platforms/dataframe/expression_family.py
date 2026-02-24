@@ -823,6 +823,17 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
         """Return the DataFrame family name."""
         return "expression"
 
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[Any]) -> None:
+        """DataFrame platforms do not use post-load CTAS table rewrites for sorting.
+
+        Physical sort ordering for expression-family platforms is applied during
+        Parquet cache generation via ``DataFrameWriteConfiguration.sort_by``, which
+        instructs ``FormatConverter._apply_write_config`` to sort the PyArrow table
+        before writing to disk. This produces pre-sorted Parquet files that are read
+        directly by the adapter, requiring no further rewrite after loading.
+        """
+        return None
+
     # =========================================================================
     # Abstract Methods - Must be implemented by subclasses
     # =========================================================================
@@ -1376,9 +1387,9 @@ class ExpressionFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, 
 
         Example:
             result, profile = adapter.execute_query_profiled(ctx, query)
-            print(f"Planning time: {profile.planning_time_ms}ms")
-            print(f"Collect time: {profile.collect_time_ms}ms")
-            print(f"Peak memory: {profile.peak_memory_mb}MB")
+            emit(f"Planning time: {profile.planning_time_ms}ms")
+            emit(f"Collect time: {profile.collect_time_ms}ms")
+            emit(f"Peak memory: {profile.peak_memory_mb}MB")
         """
         qid = query_id or query.query_id
         self._log_verbose(f"Executing query {qid} with profiling: {query.query_name}")

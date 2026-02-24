@@ -11,15 +11,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from benchbox.base import BaseBenchmark
+from benchbox.core.benchmark_mixins import DataGenerationMixin
 from benchbox.core.clickbench.generator import ClickBenchDataGenerator
 from benchbox.core.clickbench.queries import ClickBenchQueryManager
 from benchbox.core.clickbench.schema import TABLES, get_create_table_sql
+from benchbox.core.simple_benchmark_mixin import SimpleBenchmarkMixin
+from benchbox.core.utils.tuning import extract_constraint_flags
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import UnifiedTuningConfiguration
 
 
-class ClickBenchBenchmark(BaseBenchmark):
+class ClickBenchBenchmark(SimpleBenchmarkMixin, DataGenerationMixin, BaseBenchmark):
     """ClickBench (ClickHouse Analytics Benchmark) implementation.
 
     Tests analytical database performance using web analytics data.
@@ -35,6 +38,9 @@ class ClickBenchBenchmark(BaseBenchmark):
         query_manager: ClickBench query manager
         data_generator: ClickBench data generator
     """
+
+    _benchmark_label = "ClickBench"
+    _table_load_order = ["hits"]
 
     def __init__(
         self,
@@ -66,32 +72,9 @@ class ClickBenchBenchmark(BaseBenchmark):
         # Data files mapping
         self.tables = {}
 
-    def generate_data(self, tables: Optional[list[str]] = None, output_format: str = "csv") -> dict[str, Any]:
-        """Generate ClickBench data.
-
-        Args:
-            tables: Optional list of tables to generate. If None, generates all.
-            output_format: Format for output data (only "csv" supported currently)
-
-        Returns:
-            Dictionary mapping table names to file paths
-
-        Raises:
-            ValueError: If output_format is not supported
-        """
-        if output_format != "csv":
-            raise ValueError(f"Unsupported output format: {output_format}")
-
-        if tables is None:
-            tables = list(TABLES.keys())
-
-        # Validate table names
-        invalid_tables = set(tables) - set(TABLES.keys())
-        if invalid_tables:
-            raise ValueError(f"Invalid table names: {invalid_tables}")
-
-        self.tables = self.data_generator.generate_data(tables)
-        return self.tables
+    def _get_table_schema(self) -> dict[str, dict]:
+        """Provide schema mapping for shared data generation/loading mixin."""
+        return TABLES
 
     def get_queries(self, dialect: Optional[str] = None) -> dict[str, str]:
         """Get all available ClickBench queries.
@@ -215,148 +198,8 @@ class ClickBenchBenchmark(BaseBenchmark):
         Returns:
             Complete SQL schema creation script
         """
-        # Extract constraint settings from tuning configuration
-        enable_primary_keys = tuning_config.primary_keys.enabled if tuning_config else False
-        enable_foreign_keys = tuning_config.foreign_keys.enabled if tuning_config else False
-
+        enable_primary_keys, enable_foreign_keys = extract_constraint_flags(tuning_config)
         return get_create_table_sql(dialect, enable_primary_keys, enable_foreign_keys)
-
-    def load_data_to_database(self, connection: Any, tables: Optional[list[str]] = None) -> None:
-        """Load generated data into a database.
-
-        Args:
-            connection: Database connection
-            tables: Optional list of tables to load. If None, loads all.
-
-        Raises:
-            ValueError: If data hasn't been generated yet
-        """
-        if not self.tables:
-            raise ValueError("No data generated. Call generate_data() first.")
-
-        if tables is None:
-            tables = list(self.tables.keys())
-
-        # Create tables first
-        schema_sql = self.get_create_tables_sql()
-        if hasattr(connection, "executescript"):
-            connection.executescript(schema_sql)
-        else:
-            cursor = connection.cursor()
-            for statement in schema_sql.split(";"):
-                if statement.strip():
-                    cursor.execute(statement)
-
-        # Load data from CSV files
-        for table_name in tables:
-            if table_name not in self.tables:
-                continue
-
-            file_path = self.tables[table_name]
-            table_schema = TABLES[table_name]
-
-            # Read CSV and insert data
-            import csv
-
-            with open(file_path) as f:
-                reader = csv.reader(f, delimiter="|")
-
-                # Prepare insert statement
-                columns = [col["name"] for col in table_schema["columns"]]
-                placeholders = ",".join(["?" for _ in columns])
-                insert_sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
-
-                # Insert data
-                if hasattr(connection, "executemany"):
-                    rows = list(reader)
-                    connection.executemany(insert_sql, rows)
-                else:
-                    cursor = connection.cursor()
-                    for row in reader:
-                        cursor.execute(insert_sql, row)
-
-        # Commit transaction
-        if hasattr(connection, "commit"):
-            connection.commit()
-
-    def run_benchmark(
-        self, connection: Any, queries: Optional[list[str]] = None, iterations: int = 1
-    ) -> dict[str, Any]:
-        """Run the complete ClickBench benchmark.
-
-        Args:
-            connection: Database connection to use
-            queries: Optional list of query IDs to run. If None, runs all.
-            iterations: Number of times to run each query
-
-        Returns:
-            Dictionary containing benchmark results
-        """
-        import time
-
-        if queries is None:
-            queries = list(self.query_manager.get_all_queries().keys())
-
-        results = {
-            "benchmark": "ClickBench",
-            "scale_factor": self.scale_factor,
-            "iterations": iterations,
-            "queries": {},
-        }
-
-        for query_id in queries:
-            query_results = {
-                "query_id": query_id,
-                "iterations": [],
-                "avg_time": 0,
-                "min_time": float("inf"),
-                "max_time": 0,
-                "sql_text": self.get_query(query_id),  # Add actual SQL text
-            }
-
-            for i in range(iterations):
-                start_time = time.time()
-                try:
-                    result = self.execute_query(query_id, connection)
-                    end_time = time.time()
-                    execution_time = end_time - start_time
-
-                    query_results["iterations"].append(
-                        {
-                            "iteration": i + 1,
-                            "time": execution_time,
-                            "rows": len(result) if result else 0,
-                            "success": True,
-                        }
-                    )
-
-                    query_results["min_time"] = min(query_results["min_time"], execution_time)
-                    query_results["max_time"] = max(query_results["max_time"], execution_time)
-
-                except Exception as e:
-                    query_results["iterations"].append(
-                        {
-                            "iteration": i + 1,
-                            "time": 0,
-                            "error": str(e),
-                            "success": False,
-                        }
-                    )
-
-            # Calculate average time for successful iterations
-            iterations_list: list[dict[str, Any]] = query_results["iterations"]  # type: ignore[assignment]
-            successful_iterations = [iter_result for iter_result in iterations_list if iter_result["success"]]
-            if successful_iterations:
-                successful_times = [iter_result["time"] for iter_result in successful_iterations]
-                successful_rows = [iter_result.get("rows", 0) for iter_result in successful_iterations]
-                query_results["avg_time"] = sum(successful_times) / len(successful_times)
-                query_results["rows_returned"] = (
-                    int(sum(successful_rows) / len(successful_rows)) if successful_rows else 0
-                )
-
-            results["queries"][query_id] = query_results
-
-        return results
 
     def get_query_categories(self) -> dict[str, list[str]]:
         """Get ClickBench queries organized by category.

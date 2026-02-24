@@ -23,7 +23,7 @@ Usage:
     # Create session and run query
     with manager.session() as spark:
         result = spark.sql("SELECT * FROM lineitem LIMIT 10")
-        print(result.collect())
+        emit(result.collect())
 
 Copyright 2026 Joe Harris / BenchBox Project
 

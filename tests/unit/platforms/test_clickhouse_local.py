@@ -29,8 +29,8 @@ class TestClickHouseEmbeddedMode:
     def test_local_mode_initialization(self):
         """Test local mode initializes correctly with chDB available."""
         # Test with actual chDB since we have it installed
-        adapter = ClickHouseAdapter(mode="local")
-        assert adapter.mode == "local"
+        adapter = ClickHouseAdapter(deployment_mode="local")
+        assert adapter.deployment_mode == "local"
         assert adapter.platform_name == "ClickHouse (Local)"
         assert adapter.host is None
         assert adapter.port is None
@@ -41,7 +41,7 @@ class TestClickHouseEmbeddedMode:
         try:
             adapter = ClickHouseAdapter(deployment_mode="server", host="test.com", port=9999)
             assert adapter.deployment_mode == "server"
-            assert adapter.mode == "server"  # Backward compat
+            assert adapter.deployment_mode == "server"  # Backward compat
             assert adapter.platform_name == "ClickHouse (Server)"
             assert adapter.host == "test.com"
             assert adapter.port == 9999
@@ -159,7 +159,7 @@ class TestClickHouseEmbeddedConnection:
 
     def test_create_local_connection(self):
         """Test creating local mode connection."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
         # Avoid persistent session to prevent filesystem locking
         with patch.object(ClickHouseAdapter, "get_database_path", return_value=None):
             # Patch local client to a simple fake to avoid real chDB usage
@@ -181,7 +181,7 @@ class TestClickHouseEmbeddedConnection:
 
     def test_database_operations_local_mode(self):
         """Test database operations don't fail in local mode."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
 
         tmpdir = tempfile.mkdtemp()
         db_path = str(Path(tmpdir) / "clickhouse_local.chdb")
@@ -196,7 +196,7 @@ class TestClickHouseEmbeddedConnection:
 
     def test_local_metadata_collection(self):
         """Test metadata collection in local mode."""
-        adapter = ClickHouseAdapter(mode="local", data_path="/tmp/test")
+        adapter = ClickHouseAdapter(deployment_mode="local", data_path="/tmp/test")
         # Use in-memory connection with fake client
         with patch.object(ClickHouseAdapter, "get_database_path", return_value=None):
 
@@ -228,7 +228,7 @@ class TestClickHouseEmbeddedIntegration:
 
     def test_query_execution_integration(self):
         """Test query execution integration."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
         with patch.object(ClickHouseAdapter, "get_database_path", return_value=None):
 
             class _FakeClient:
@@ -255,7 +255,7 @@ class TestClickHouseEmbeddedIntegration:
 
     def test_query_execution_error_handling(self):
         """Test query execution error handling."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
         with patch.object(ClickHouseAdapter, "get_database_path", return_value=None):
 
             class _FakeClient:
@@ -284,7 +284,7 @@ class TestClickHouseEmbeddedIntegration:
 
     def test_basic_table_operations(self):
         """Test basic table creation and query operations."""
-        adapter = ClickHouseAdapter(mode="local")
+        adapter = ClickHouseAdapter(deployment_mode="local")
         with patch.object(ClickHouseAdapter, "get_database_path", return_value=None):
 
             class _FakeClient:

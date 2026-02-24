@@ -60,6 +60,24 @@ COMMAND_EXAMPLES: dict[str, dict[str, list[str]]] = {
             "benchbox run --platform sqlite --benchmark ssb --scale 1",
             "benchbox run --platform duckdb --benchmark tpcds --scale 10",
         ],
+        "Driver & Version Management": [
+            "# BenchBox uses whatever driver version is installed in the current environment.",
+            "# When invoked via 'uv run', uv syncs your env to uv.lock first — a version you",
+            "# installed manually (e.g. uv pip install duckdb==1.5.0) may be silently reverted.",
+            "# Use driver_auto_install to reliably switch versions without touching the lock file:",
+            "benchbox run --platform duckdb --benchmark tpch \\",
+            "  --platform-option driver_version=1.5.0 \\",
+            "  --platform-option driver_auto_install=true",
+            "# Or override inline without modifying the lock file:",
+            'uv run --with "duckdb==1.5.0" benchbox run --platform duckdb --benchmark tpch',
+            "# Pin driver for any platform (not just DuckDB):",
+            "benchbox run --platform snowflake --benchmark tpch \\",
+            "  --platform-option driver_version=3.12.0 \\",
+            "  --platform-option driver_auto_install=true \\",
+            "  --output s3://my-bucket/results/",
+            "# Verify which version actually ran: check result JSON field execution.driver_version_actual",
+            "# or watch the 'Running ... [driver X.Y.Z]' line in CLI output.",
+        ],
         # === Platform-Specific Examples ===
         "Snowflake": [
             "benchbox run --platform snowflake --benchmark tpch --output s3://bucket/benchbox/",
@@ -136,6 +154,11 @@ COMMAND_EXAMPLES: dict[str, dict[str, list[str]]] = {
             "  --platform-option workgroup=benchbox-workgroup",
             "benchbox run --platform athena --benchmark tpch \\",
             "  --platform-option database=benchbox_tpch  # Use existing database",
+            "# Athena Spark: select Spark engine version",
+            "benchbox run --platform athena --benchmark tpch \\",
+            "  --platform-option workgroup=my-spark-workgroup \\",
+            "  --platform-option s3_staging_dir=s3://my-bucket/staging/ \\",
+            '  --platform-option "engine_version=PySpark engine version 3"',
         ],
         "Azure Synapse": [
             "benchbox run --platform azure_synapse --benchmark tpch \\",
@@ -216,7 +239,7 @@ COMMAND_EXAMPLES: dict[str, dict[str, list[str]]] = {
             "benchbox run --platform duckdb --benchmark tpch --format json,csv,html",
             "benchbox run --platform duckdb --benchmark tpch \\",
             "  --output ./analysis/ --format json,csv  # Custom output location",
-            "# Results can be loaded: python -c \"import json; print(json.load(open('result.json')))\"",
+            "# Results can be loaded: python -c \"import json; data = json.load(open('result.json'))\"",
         ],
         # === Standard Configuration ===
         "Query Selection": [

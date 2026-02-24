@@ -359,28 +359,17 @@ class CuDFDataFrameAdapter(PandasFamilyAdapter[CuDFDF]):
 
         return info
 
-    def merge(
+    def _merge_frames(
         self,
         left: CuDFDF,
         right: CuDFDF,
-        on: str | list[str] | None = None,
-        left_on: str | list[str] | None = None,
-        right_on: str | list[str] | None = None,
-        how: str = "inner",
+        *,
+        on: str | list[str] | None,
+        left_on: str | list[str] | None,
+        right_on: str | list[str] | None,
+        how: str,
     ) -> CuDFDF:
-        """Merge two DataFrames.
-
-        Args:
-            left: Left DataFrame
-            right: Right DataFrame
-            on: Column name(s) to join on (when same in both)
-            left_on: Column name(s) in left DataFrame
-            right_on: Column name(s) in right DataFrame
-            how: Join type ('inner', 'left', 'right', 'outer')
-
-        Returns:
-            Merged DataFrame
-        """
+        """Use cuDF's merge implementation."""
         return cudf.merge(
             left,
             right,
@@ -389,36 +378,6 @@ class CuDFDataFrameAdapter(PandasFamilyAdapter[CuDFDF]):
             right_on=right_on,
             how=how,
         )
-
-    def groupby_agg(
-        self,
-        df: CuDFDF,
-        by: str | list[str],
-        agg_spec: dict[str, Any],
-        as_index: bool = False,
-    ) -> CuDFDF:
-        """Perform grouped aggregation.
-
-        Args:
-            df: Input DataFrame
-            by: Column(s) to group by
-            agg_spec: Aggregation specification. Supports:
-                - Named aggs: {"sum_qty": ("qty", "sum"), "avg_price": ("price", "mean")}
-                - Direct aggs: {"qty": "sum", "price": "mean"}
-            as_index: Whether to use group columns as index (default False)
-
-        Returns:
-            Aggregated DataFrame
-        """
-        # Check if this is named aggregation (tuples) or direct dict-style
-        # Named: {"sum_qty": ("qty", "sum")} -> use **agg_spec
-        # Direct: {"qty": "sum"} -> use agg_spec directly
-        is_named_agg = any(isinstance(v, tuple) for v in agg_spec.values())
-
-        if is_named_agg:
-            return df.groupby(by, as_index=as_index).agg(**agg_spec)
-        else:
-            return df.groupby(by, as_index=as_index).agg(agg_spec)
 
     def to_pandas(self, df: CuDFDF) -> Any:
         """Convert cuDF DataFrame to Pandas DataFrame.

@@ -323,9 +323,9 @@ class TestTPCDSOfficialBenchmark:
 
     def test_benchmark_phases_enum(self):
         """Test BenchmarkPhase enum."""
-        assert BenchmarkPhase.POWER_TEST == "power_test"
-        assert BenchmarkPhase.THROUGHPUT_TEST == "throughput_test"
-        assert BenchmarkPhase.MAINTENANCE_TEST == "maintenance_test"
+        assert BenchmarkPhase.POWER == "power"
+        assert BenchmarkPhase.THROUGHPUT == "throughput"
+        assert BenchmarkPhase.MAINTENANCE == "maintenance"
 
 
 # Integration test with actual components

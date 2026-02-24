@@ -14,10 +14,9 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from benchbox.core.config import BenchmarkConfig, DatabaseConfig, DryRunResult
-
 # Import DryRunExecutor from core module
 from benchbox.core.dryrun import DryRunExecutor as CoreDryRunExecutor
+from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, DryRunResult
 from benchbox.utils.printing import quiet_console
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -70,48 +69,37 @@ def generate_cli_command(
         Complete CLI command string
     """
     parts = ["benchbox run"]
-
     parts.append(f"--platform {platform}")
     parts.append(f"--benchmark {benchmark}")
 
-    if scale != 0.01:  # Only include if not default
+    if scale != 0.01:
         parts.append(f"--scale {scale}")
 
+    # List-value flags (join with comma)
     if phases and phases != ["power"]:
         parts.append(f"--phases {','.join(phases)}")
-
     if queries:
         parts.append(f"--queries {','.join(queries)}")
 
-    if tuning and tuning != "notuning":
-        parts.append(f"--tuning {tuning}")
+    # Simple value flags: (value, flag, skip_value)
+    _VALUE_PARAMS = [
+        (tuning, "--tuning", "notuning"),
+        (seed, "--seed", None),
+        (output, "--output", None),
+        (convert_format, "--convert", None),
+        (compression, "--compression", None),
+        (mode, "--mode", None),
+        (force, "--force", None),
+        (validation, "--validation", None),
+    ]
+    for value, flag, skip in _VALUE_PARAMS:
+        if value is not None and value != skip:
+            parts.append(f"{flag} {value}")
 
-    if seed is not None:
-        parts.append(f"--seed {seed}")
-
-    if output:
-        parts.append(f"--output {output}")
-
-    if convert_format:
-        parts.append(f"--convert {convert_format}")
-
-    if compression:
-        parts.append(f"--compression {compression}")
-
-    if mode:
-        parts.append(f"--mode {mode}")
-
-    if force:
-        parts.append(f"--force {force}")
-
-    if official:
-        parts.append("--official")
-
-    if capture_plans:
-        parts.append("--capture-plans")
-
-    if validation:
-        parts.append(f"--validation {validation}")
+    # Boolean flags
+    for flag_value, flag in [(official, "--official"), (capture_plans, "--capture-plans")]:
+        if flag_value:
+            parts.append(flag)
 
     if verbose == 1:
         parts.append("-v")
@@ -414,147 +402,142 @@ class DryRunDisplay:
             return
 
         if tuning_config.get("constraints"):
-            constraints_table = Table(show_header=True, header_style="bold blue")
-            constraints_table.add_column("Constraint Type", style="cyan")
-            constraints_table.add_column("Enabled", style="white")
-            constraints_table.add_column("Configuration", style="yellow")
+            self._display_constraints_table(tuning_config["constraints"])
 
-            constraints = tuning_config["constraints"]
-            if constraints.get("primary_keys"):
-                pk_config = constraints["primary_keys"]
-                config_str = f"Uniqueness: {pk_config.get('enforce_uniqueness', 'N/A')}, Nullable: {pk_config.get('nullable', 'N/A')}"
-                constraints_table.add_row("Primary Keys", str(pk_config.get("enabled", False)), config_str)
-
-            if constraints.get("foreign_keys"):
-                fk_config = constraints["foreign_keys"]
-                config_str = f"Referential Integrity: {fk_config.get('enforce_referential_integrity', 'N/A')}"
-                constraints_table.add_row("Foreign Keys", str(fk_config.get("enabled", False)), config_str)
-
-            self.console.print(constraints_table)
-
-        table_tunings = tuning_config.get("table_tunings")
-        if table_tunings:
-            self.console.print("\n[bold]Table Organization Tunings[/bold]")
-
-            tuning_table = Table(show_header=True, header_style="bold blue")
-            tuning_table.add_column("Table", style="cyan")
-            tuning_table.add_column("Tuning Type", style="white")
-            tuning_table.add_column("Columns", style="yellow")
-
-            for table_name, table_config in table_tunings.items():
-                first_row = True
-                for tuning_type in [
-                    "partitioning",
-                    "sorting",
-                    "clustering",
-                    "distribution",
-                ]:
-                    columns = table_config.get(tuning_type)
-                    if columns:
-                        column_names = [f"{col['name']} ({col['type']})" for col in columns]
-                        column_str = ", ".join(column_names)
-
-                        if first_row:
-                            tuning_table.add_row(table_name, tuning_type.title(), column_str)
-                            first_row = False
-                        else:
-                            tuning_table.add_row("", tuning_type.title(), column_str)
-
-            self.console.print(tuning_table)
+        if tuning_config.get("table_tunings"):
+            self._display_table_tunings(tuning_config["table_tunings"])
 
         platform_opts = tuning_config.get("platform_optimizations")
         if platform_opts and any(platform_opts.values()):
-            self.console.print("\n[bold]Platform Optimizations[/bold]")
+            self._display_platform_optimizations(platform_opts)
 
-            platform_table = Table(show_header=True, header_style="bold blue")
-            platform_table.add_column("Optimization", style="cyan")
-            platform_table.add_column("Enabled", style="white")
-
-            for opt_name, opt_value in platform_opts.items():
-                if opt_value:
-                    platform_table.add_row(opt_name.replace("_", " ").title(), str(opt_value))
-
-            if platform_table.row_count > 0:
-                self.console.print(platform_table)
-
-        # Display DataFrame tuning configuration
         df_tuning = tuning_config.get("dataframe_tuning")
         if df_tuning:
-            self.console.print("\n[bold]DataFrame Tuning Configuration[/bold]")
-
-            df_table = Table(show_header=True, header_style="bold blue")
-            df_table.add_column("Category", style="cyan")
-            df_table.add_column("Setting", style="white")
-            df_table.add_column("Value", style="yellow")
-
-            # Runtime settings
-            if df_tuning.get("parallelism"):
-                parallelism = df_tuning["parallelism"]
-                first_row = True
-                for key, value in parallelism.items():
-                    category = "Parallelism" if first_row else ""
-                    df_table.add_row(category, key.replace("_", " ").title(), str(value))
-                    first_row = False
-
-            if df_tuning.get("memory"):
-                memory = df_tuning["memory"]
-                first_row = True
-                for key, value in memory.items():
-                    category = "Memory" if first_row else ""
-                    df_table.add_row(category, key.replace("_", " ").title(), str(value))
-                    first_row = False
-
-            if df_tuning.get("execution"):
-                execution = df_tuning["execution"]
-                first_row = True
-                for key, value in execution.items():
-                    category = "Execution" if first_row else ""
-                    df_table.add_row(category, key.replace("_", " ").title(), str(value))
-                    first_row = False
-
-            # Write-time physical layout settings
-            if df_tuning.get("write"):
-                write = df_tuning["write"]
-                first_row = True
-
-                if write.get("sort_by"):
-                    sort_cols = [f"{col['name']} ({col['order']})" for col in write["sort_by"]]
-                    df_table.add_row("Write Layout", "Sort By", ", ".join(sort_cols))
-                    first_row = False
-
-                if write.get("partition_by"):
-                    part_cols = [f"{col['name']} ({col['strategy']})" for col in write["partition_by"]]
-                    category = "Write Layout" if first_row else ""
-                    df_table.add_row(category, "Partition By", ", ".join(part_cols))
-                    first_row = False
-
-                if write.get("row_group_size"):
-                    category = "Write Layout" if first_row else ""
-                    df_table.add_row(category, "Row Group Size", f"{write['row_group_size']:,}")
-                    first_row = False
-
-                if write.get("repartition_count"):
-                    category = "Write Layout" if first_row else ""
-                    df_table.add_row(category, "Repartition Count", str(write["repartition_count"]))
-                    first_row = False
-
-                if write.get("compression"):
-                    category = "Write Layout" if first_row else ""
-                    comp_str = write["compression"]
-                    if write.get("compression_level"):
-                        comp_str += f":{write['compression_level']}"
-                    df_table.add_row(category, "Compression", comp_str)
-                    first_row = False
-
-                if write.get("dictionary_columns"):
-                    category = "Write Layout" if first_row else ""
-                    df_table.add_row(category, "Dictionary Columns", ", ".join(write["dictionary_columns"]))
-
-            if df_table.row_count > 0:
-                self.console.print(df_table)
+            self._display_dataframe_tuning(df_tuning)
 
         if not tuning_config.get("table_tunings") and not tuning_config.get("constraints") and not df_tuning:
             self.console.print("[dim]No detailed tuning configuration available[/dim]")
+
+    def _display_constraints_table(self, constraints: dict[str, Any]) -> None:
+        """Display constraints configuration table."""
+        constraints_table = Table(show_header=True, header_style="bold blue")
+        constraints_table.add_column("Constraint Type", style="cyan")
+        constraints_table.add_column("Enabled", style="white")
+        constraints_table.add_column("Configuration", style="yellow")
+
+        if constraints.get("primary_keys"):
+            pk_config = constraints["primary_keys"]
+            config_str = f"Uniqueness: {pk_config.get('enforce_uniqueness', 'N/A')}, Nullable: {pk_config.get('nullable', 'N/A')}"
+            constraints_table.add_row("Primary Keys", str(pk_config.get("enabled", False)), config_str)
+
+        if constraints.get("foreign_keys"):
+            fk_config = constraints["foreign_keys"]
+            config_str = f"Referential Integrity: {fk_config.get('enforce_referential_integrity', 'N/A')}"
+            constraints_table.add_row("Foreign Keys", str(fk_config.get("enabled", False)), config_str)
+
+        self.console.print(constraints_table)
+
+    def _display_table_tunings(self, table_tunings: dict[str, Any]) -> None:
+        """Display table organization tunings."""
+        self.console.print("\n[bold]Table Organization Tunings[/bold]")
+
+        tuning_table = Table(show_header=True, header_style="bold blue")
+        tuning_table.add_column("Table", style="cyan")
+        tuning_table.add_column("Tuning Type", style="white")
+        tuning_table.add_column("Columns", style="yellow")
+
+        for table_name, table_config in table_tunings.items():
+            first_row = True
+            for tuning_type in ["partitioning", "sorting", "clustering", "distribution"]:
+                columns = table_config.get(tuning_type)
+                if columns:
+                    column_names = [f"{col['name']} ({col['type']})" for col in columns]
+                    column_str = ", ".join(column_names)
+                    tuning_table.add_row(table_name if first_row else "", tuning_type.title(), column_str)
+                    first_row = False
+
+        self.console.print(tuning_table)
+
+    def _display_platform_optimizations(self, platform_opts: dict[str, Any]) -> None:
+        """Display platform optimization settings."""
+        self.console.print("\n[bold]Platform Optimizations[/bold]")
+
+        platform_table = Table(show_header=True, header_style="bold blue")
+        platform_table.add_column("Optimization", style="cyan")
+        platform_table.add_column("Enabled", style="white")
+
+        for opt_name, opt_value in platform_opts.items():
+            if opt_value:
+                platform_table.add_row(opt_name.replace("_", " ").title(), str(opt_value))
+
+        if platform_table.row_count > 0:
+            self.console.print(platform_table)
+
+    def _display_dataframe_tuning(self, df_tuning: dict[str, Any]) -> None:
+        """Display DataFrame tuning configuration."""
+        self.console.print("\n[bold]DataFrame Tuning Configuration[/bold]")
+
+        df_table = Table(show_header=True, header_style="bold blue")
+        df_table.add_column("Category", style="cyan")
+        df_table.add_column("Setting", style="white")
+        df_table.add_column("Value", style="yellow")
+
+        for section_key, category_name in [
+            ("parallelism", "Parallelism"),
+            ("memory", "Memory"),
+            ("execution", "Execution"),
+        ]:
+            section = df_tuning.get(section_key)
+            if section:
+                self._add_df_tuning_section(df_table, category_name, section)
+
+        if df_tuning.get("write"):
+            self._add_df_write_layout(df_table, df_tuning["write"])
+
+        if df_table.row_count > 0:
+            self.console.print(df_table)
+
+    def _add_df_tuning_section(self, df_table: Table, category_name: str, section: dict[str, Any]) -> None:
+        """Add a runtime tuning section to the DataFrame table."""
+        first_row = True
+        for key, value in section.items():
+            category = category_name if first_row else ""
+            df_table.add_row(category, key.replace("_", " ").title(), str(value))
+            first_row = False
+
+    def _add_df_write_layout(self, df_table: Table, write: dict[str, Any]) -> None:
+        """Add write layout settings to the DataFrame table."""
+        first_row = True
+
+        if write.get("sort_by"):
+            sort_cols = [f"{col['name']} ({col['order']})" for col in write["sort_by"]]
+            df_table.add_row("Write Layout", "Sort By", ", ".join(sort_cols))
+            first_row = False
+
+        if write.get("partition_by"):
+            part_cols = [f"{col['name']} ({col['strategy']})" for col in write["partition_by"]]
+            df_table.add_row("Write Layout" if first_row else "", "Partition By", ", ".join(part_cols))
+            first_row = False
+
+        if write.get("row_group_size"):
+            df_table.add_row("Write Layout" if first_row else "", "Row Group Size", f"{write['row_group_size']:,}")
+            first_row = False
+
+        if write.get("repartition_count"):
+            df_table.add_row("Write Layout" if first_row else "", "Repartition Count", str(write["repartition_count"]))
+            first_row = False
+
+        if write.get("compression"):
+            comp_str = write["compression"]
+            if write.get("compression_level"):
+                comp_str += f":{write['compression_level']}"
+            df_table.add_row("Write Layout" if first_row else "", "Compression", comp_str)
+            first_row = False
+
+        if write.get("dictionary_columns"):
+            df_table.add_row(
+                "Write Layout" if first_row else "", "Dictionary Columns", ", ".join(write["dictionary_columns"])
+            )
 
     def _display_ddl_preview(self, ddl_preview: dict[str, dict[str, Any]]):
         """Display DDL preview with tuning clauses per table."""

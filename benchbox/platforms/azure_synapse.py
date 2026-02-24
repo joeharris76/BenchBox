@@ -23,12 +23,13 @@ if TYPE_CHECKING:
         ForeignKeyConfiguration,
         PlatformOptimizationConfiguration,
         PrimaryKeyConfiguration,
+        TuningColumn,
         UnifiedTuningConfiguration,
     )
 
 from ..utils.dependencies import check_platform_dependencies, get_dependency_error_message
 from ..utils.file_format import get_delimiter_for_file
-from .base import PlatformAdapter
+from .base import DriverIsolationCapability, PlatformAdapter
 
 # Azure Synapse uses T-SQL dialect (compatible with SQL Server)
 SYNAPSE_DIALECT = "tsql"
@@ -41,6 +42,8 @@ except ImportError:
 
 class AzureSynapseAdapter(PlatformAdapter):
     """Azure Synapse Analytics platform adapter with cloud data warehouse optimizations."""
+
+    driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -148,6 +151,22 @@ class AzureSynapseAdapter(PlatformAdapter):
     @property
     def platform_name(self) -> str:
         return "Azure Synapse"
+
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
+        """Build opt-in sorted-ingestion SQL for Azure Synapse."""
+        mode, method = self.resolve_sorted_ingestion_strategy()
+        if mode == "off":
+            return None
+
+        if method != "ctas":
+            raise ValueError(f"Sorted ingestion method '{method}' is not supported for Azure Synapse.")
+
+        order_by = ", ".join(column.name for column in sort_columns)
+        temp_table = f"{table_name}__ctas_sort"
+        return (
+            f"CREATE TABLE [{self.schema}].[{temp_table}] WITH (DISTRIBUTION = ROUND_ROBIN, HEAP) AS "
+            f"SELECT * FROM [{self.schema}].[{table_name}] ORDER BY {order_by}"
+        )
 
     def get_target_dialect(self) -> str:
         """Return the target SQL dialect for Azure Synapse (T-SQL)."""
@@ -519,6 +538,7 @@ class AzureSynapseAdapter(PlatformAdapter):
     def _load_data_via_blob(self, cursor: Any, data_files: dict[str, Any], data_dir: Path) -> dict[str, int]:
         """Load data via Azure Blob Storage using COPY INTO."""
         table_stats = {}
+        effective_tuning = self.get_effective_tuning_configuration()
 
         # Set up external data source if not exists
         self._setup_external_data_source(cursor)
@@ -576,6 +596,10 @@ class AzureSynapseAdapter(PlatformAdapter):
                 row_count = cursor.fetchone()[0]
                 table_stats[table_name] = row_count
 
+                if effective_tuning is not None:
+                    ctas_connection = getattr(cursor, "connection", cursor)
+                    self.apply_ctas_sort(table_name, effective_tuning, ctas_connection)
+
                 load_time = elapsed_seconds(load_start)
                 self.logger.info(f"Loaded {row_count:,} rows into {table_name} in {load_time:.2f}s")
 
@@ -588,6 +612,7 @@ class AzureSynapseAdapter(PlatformAdapter):
     def _load_data_direct(self, cursor: Any, data_files: dict[str, Any], data_dir: Path) -> dict[str, int]:
         """Load data directly via INSERT statements (fallback method)."""
         table_stats = {}
+        effective_tuning = self.get_effective_tuning_configuration()
 
         for table_name, file_paths in data_files.items():
             if not isinstance(file_paths, list):
@@ -634,6 +659,10 @@ class AzureSynapseAdapter(PlatformAdapter):
                             total_rows += len(batch_data)
 
                 table_stats[table_name] = total_rows
+
+                if effective_tuning is not None:
+                    ctas_connection = getattr(cursor, "connection", cursor)
+                    self.apply_ctas_sort(table_name, effective_tuning, ctas_connection)
 
                 load_time = elapsed_seconds(load_start)
                 self.logger.info(f"Loaded {total_rows:,} rows into {table_name} in {load_time:.2f}s")
@@ -1042,7 +1071,7 @@ def _build_synapse_config(
     info: Any,
 ) -> Any:
     """Build Azure Synapse database configuration with credential loading."""
-    from benchbox.core.config import DatabaseConfig
+    from benchbox.core.schemas import DatabaseConfig
     from benchbox.security.credentials import CredentialManager
 
     cred_manager = CredentialManager()

@@ -15,14 +15,77 @@ from typing import Any, Optional
 
 import yaml
 
-from benchbox.core.config import (
+from benchbox.core.results.builder import normalize_benchmark_id
+from benchbox.core.schemas import (
     BenchmarkConfig,
     DatabaseConfig,
     DryRunResult,
     SystemProfile,
 )
-from benchbox.core.results.builder import normalize_benchmark_id
 from benchbox.platforms import get_platform_adapter
+
+
+def _extract_df_write_tuning(write_config: Any) -> dict[str, Any]:
+    """Extract write-time physical layout configuration from DataFrame tuning."""
+    write_dict: dict[str, Any] = {}
+
+    if write_config.sort_by:
+        write_dict["sort_by"] = [{"name": col.name, "order": col.order} for col in write_config.sort_by]
+
+    if write_config.partition_by:
+        write_dict["partition_by"] = [
+            {"name": col.name, "strategy": col.strategy.value} for col in write_config.partition_by
+        ]
+
+    if write_config.row_group_size is not None:
+        write_dict["row_group_size"] = write_config.row_group_size
+
+    if write_config.repartition_count is not None:
+        write_dict["repartition_count"] = write_config.repartition_count
+
+    if write_config.compression != "zstd":
+        write_dict["compression"] = write_config.compression
+
+    if write_config.compression_level is not None:
+        write_dict["compression_level"] = write_config.compression_level
+
+    if write_config.dictionary_columns:
+        write_dict["dictionary_columns"] = write_config.dictionary_columns
+
+    return write_dict
+
+
+def _build_table_ddl_entry(tuning_clauses: Any) -> dict[str, Any]:
+    """Build DDL preview entry with tuning summary and clauses for a single table."""
+    tuning_summary: dict[str, Any] = {}
+    _clause_fields = [
+        ("sort_by", "sort_by"),
+        ("partition_by", "partition_by"),
+        ("cluster_by", "cluster_by"),
+        ("distribution_key", "distribution_key"),
+        ("distribution_style", "distribution_style"),
+    ]
+    for attr, key in _clause_fields:
+        value = getattr(tuning_clauses, attr, None)
+        if value:
+            tuning_summary[key] = value
+
+    ddl_parts = []
+    if tuning_clauses.sort_by:
+        ddl_parts.append(f"ORDER BY ({tuning_clauses.sort_by})")
+    if tuning_clauses.partition_by:
+        ddl_parts.append(f"PARTITION BY ({tuning_clauses.partition_by})")
+    if tuning_clauses.cluster_by:
+        ddl_parts.append(f"CLUSTER BY ({tuning_clauses.cluster_by})")
+    if tuning_clauses.distribution_style:
+        ddl_parts.append(f"DISTSTYLE {tuning_clauses.distribution_style}")
+    if tuning_clauses.distribution_key:
+        ddl_parts.append(f"DISTKEY ({tuning_clauses.distribution_key})")
+
+    return {
+        "ddl_clauses": "\n".join(ddl_parts) if ddl_parts else None,
+        "tuning_summary": tuning_summary,
+    }
 
 
 class DryRunExecutor:
@@ -51,25 +114,7 @@ class DryRunExecutor:
         database_config: Optional[DatabaseConfig],
     ) -> DryRunResult:
         """Execute a detailed dry run of the benchmark."""
-        # Resolve execution mode from database config or platform default
-        from benchbox.core.platform_registry import PlatformRegistry
-        from benchbox.core.runner.dataframe_runner import get_execution_mode
-
-        execution_mode = "sql"  # default
-        if database_config:
-            # First check explicit execution_mode on config
-            execution_mode = getattr(database_config, "execution_mode", None)
-            if execution_mode is None:
-                # Use naming convention check (platform-df = dataframe mode)
-                execution_mode = get_execution_mode(database_config)
-                # Fall back to registry if not determined by naming convention
-                if execution_mode == "sql":
-                    try:
-                        registry_mode = PlatformRegistry.get_default_mode(database_config.type)
-                        if registry_mode == "dataframe":
-                            execution_mode = "dataframe"
-                    except Exception:
-                        pass  # Keep sql default
+        execution_mode = self._resolve_execution_mode(database_config)
 
         result = DryRunResult(
             benchmark_config=self._serialize_config(benchmark_config),
@@ -142,56 +187,90 @@ class DryRunExecutor:
 
         return result
 
+    @staticmethod
+    def _resolve_execution_mode(database_config: Optional[DatabaseConfig]) -> str:
+        """Resolve execution mode from database config or platform default."""
+        from benchbox.core.platform_registry import PlatformRegistry
+        from benchbox.core.runner.dataframe_runner import get_execution_mode
+
+        if not database_config:
+            return "sql"
+
+        explicit_mode = getattr(database_config, "execution_mode", None)
+        if explicit_mode is not None:
+            return explicit_mode
+
+        mode = get_execution_mode(database_config)
+        if mode != "sql":
+            return mode
+
+        try:
+            registry_mode = PlatformRegistry.get_default_mode(database_config.type)
+            if registry_mode == "dataframe":
+                return "dataframe"
+        except Exception:
+            pass
+
+        return "sql"
+
     def save_dry_run_results(self, result: DryRunResult, filename_prefix: str = "dryrun") -> dict[str, Path]:
         """Save dry run results to files."""
         if not self.output_dir:
             return {}
 
-        saved_files = {}
+        saved_files: dict[str, Path] = {}
         timestamp = result.timestamp.strftime("%Y%m%d_%H%M%S")
 
-        json_path = self.output_dir / f"{filename_prefix}_{timestamp}.json"
+        self._save_json_and_yaml(result, filename_prefix, timestamp, saved_files)
+        self._save_queries(result, filename_prefix, timestamp, saved_files)
+        self._save_ddl_and_post_load(result, filename_prefix, timestamp, saved_files)
+        self._save_schema(result, filename_prefix, timestamp, saved_files)
+
+        return saved_files
+
+    def _save_json_and_yaml(
+        self, result: DryRunResult, prefix: str, timestamp: str, saved_files: dict[str, Path]
+    ) -> None:
+        """Save JSON and YAML representations of the dry run result."""
+        json_path = self.output_dir / f"{prefix}_{timestamp}.json"
         with open(json_path, "w") as f:
             json.dump(result.model_dump(), f, indent=2, default=str)
         saved_files["json"] = json_path
 
-        yaml_path = self.output_dir / f"{filename_prefix}_{timestamp}.yaml"
+        yaml_path = self.output_dir / f"{prefix}_{timestamp}.yaml"
         result_dict = result.model_dump()
         result_dict["timestamp"] = str(result_dict["timestamp"])
         with open(yaml_path, "w") as f:
             yaml.dump(result_dict, f, default_flow_style=False)
         saved_files["yaml"] = yaml_path
 
-        # Save queries with appropriate format based on execution mode
-        if result.execution_mode == "dataframe":
-            queries_dir = self.output_dir / f"{filename_prefix}_dataframe_queries_{timestamp}"
-            queries_dir.mkdir(exist_ok=True)
+    def _save_queries(self, result: DryRunResult, prefix: str, timestamp: str, saved_files: dict[str, Path]) -> None:
+        """Save query files with appropriate format based on execution mode."""
+        is_dataframe = result.execution_mode == "dataframe"
+        suffix = "dataframe_queries" if is_dataframe else "queries"
+        ext = ".py" if is_dataframe else ".sql"
 
-            for query_id, query_source in result.queries.items():
-                # Skip error entries
-                if query_id.startswith("_"):
-                    continue
-                query_file = queries_dir / f"query_{query_id}.py"
-                with open(query_file, "w") as f:
-                    f.write(query_source)
-        else:
-            queries_dir = self.output_dir / f"{filename_prefix}_queries_{timestamp}"
-            queries_dir.mkdir(exist_ok=True)
+        queries_dir = self.output_dir / f"{prefix}_{suffix}_{timestamp}"
+        queries_dir.mkdir(exist_ok=True)
 
-            for query_id, query_sql in result.queries.items():
-                query_file = queries_dir / f"query_{query_id}.sql"
-                with open(query_file, "w") as f:
-                    f.write(query_sql)
+        for query_id, query_content in result.queries.items():
+            if query_id.startswith("_"):
+                continue
+            query_file = queries_dir / f"query_{query_id}{ext}"
+            with open(query_file, "w") as f:
+                f.write(query_content)
 
         saved_files["queries_dir"] = queries_dir
 
-        # Save DDL preview with tuning clauses
+    def _save_ddl_and_post_load(
+        self, result: DryRunResult, prefix: str, timestamp: str, saved_files: dict[str, Path]
+    ) -> None:
+        """Save DDL preview and post-load statements."""
         if result.ddl_preview:
-            ddl_path = self.output_dir / f"{filename_prefix}_ddl_{timestamp}.sql"
+            ddl_path = self.output_dir / f"{prefix}_ddl_{timestamp}.sql"
             with open(ddl_path, "w") as f:
                 f.write("-- DDL Preview with Tuning Clauses\n")
                 f.write(f"-- Generated by BenchBox dry run at {result.timestamp}\n\n")
-
                 for table_name, table_info in result.ddl_preview.items():
                     f.write(f"-- Table: {table_name}\n")
                     tuning_summary = table_info.get("tuning_summary", {})
@@ -201,38 +280,33 @@ class DryRunExecutor:
                     if ddl_clauses:
                         f.write(ddl_clauses)
                         f.write("\n\n")
-
             saved_files["ddl"] = ddl_path
 
-        # Save post-load statements
         if result.post_load_statements:
-            post_load_path = self.output_dir / f"{filename_prefix}_post_load_{timestamp}.sql"
+            post_load_path = self.output_dir / f"{prefix}_post_load_{timestamp}.sql"
             with open(post_load_path, "w") as f:
                 f.write("-- Post-Load Operations\n")
                 f.write(f"-- Generated by BenchBox dry run at {result.timestamp}\n\n")
-
                 for table_name, statements in result.post_load_statements.items():
                     f.write(f"-- Table: {table_name}\n")
                     for stmt in statements:
                         f.write(stmt)
                         f.write(";\n")
                     f.write("\n")
-
             saved_files["post_load"] = post_load_path
 
-        # Save schema with appropriate format based on execution mode
+    def _save_schema(self, result: DryRunResult, prefix: str, timestamp: str, saved_files: dict[str, Path]) -> None:
+        """Save schema with appropriate format based on execution mode."""
         if result.execution_mode == "dataframe" and result.dataframe_schema:
-            schema_path = self.output_dir / f"{filename_prefix}_schema_{timestamp}.py"
+            schema_path = self.output_dir / f"{prefix}_schema_{timestamp}.py"
             with open(schema_path, "w") as f:
                 f.write(result.dataframe_schema)
             saved_files["schema"] = schema_path
         elif result.schema_sql:
-            schema_path = self.output_dir / f"{filename_prefix}_schema_{timestamp}.sql"
+            schema_path = self.output_dir / f"{prefix}_schema_{timestamp}.sql"
             with open(schema_path, "w") as f:
                 f.write(result.schema_sql)
             saved_files["schema"] = schema_path
-
-        return saved_files
 
     def _serialize_config(self, obj: Any) -> dict[str, Any]:
         if hasattr(obj, "__dict__"):
@@ -773,116 +847,12 @@ class DryRunExecutor:
             # Extract unified SQL tuning configuration
             unified_config = config.options.get("unified_tuning_configuration")
             if unified_config:
-                tuning_dict = {
-                    "constraints": {
-                        "primary_keys": {
-                            "enabled": unified_config.primary_keys.enabled,
-                            "enforce_uniqueness": unified_config.primary_keys.enforce_uniqueness,
-                            "nullable": unified_config.primary_keys.nullable,
-                        },
-                        "foreign_keys": {
-                            "enabled": unified_config.foreign_keys.enabled,
-                            "enforce_referential_integrity": unified_config.foreign_keys.enforce_referential_integrity,
-                            "on_delete_action": unified_config.foreign_keys.on_delete_action,
-                            "on_update_action": unified_config.foreign_keys.on_update_action,
-                        },
-                    },
-                    "platform_optimizations": {
-                        "z_ordering": unified_config.platform_optimizations.z_ordering_enabled,
-                        "auto_optimize": unified_config.platform_optimizations.auto_optimize_enabled,
-                        "bloom_filters": unified_config.platform_optimizations.bloom_filters_enabled,
-                        "materialized_views": unified_config.platform_optimizations.materialized_views_enabled,
-                    },
-                }
-
-                if unified_config.table_tunings:
-                    tuning_dict["table_tunings"] = {}
-                    for (
-                        table_name,
-                        table_tuning,
-                    ) in unified_config.table_tunings.items():
-                        table_dict = {"table_name": table_tuning.table_name}
-                        if table_tuning.partitioning:
-                            table_dict["partitioning"] = [
-                                {"name": col.name, "type": col.type, "order": col.order}
-                                for col in table_tuning.partitioning
-                            ]
-                        if table_tuning.sorting:
-                            table_dict["sorting"] = [
-                                {"name": col.name, "type": col.type, "order": col.order} for col in table_tuning.sorting
-                            ]
-                        if table_tuning.clustering:
-                            table_dict["clustering"] = [
-                                {"name": col.name, "type": col.type, "order": col.order}
-                                for col in table_tuning.clustering
-                            ]
-                        if table_tuning.distribution:
-                            table_dict["distribution"] = [
-                                {"name": col.name, "type": col.type, "order": col.order}
-                                for col in table_tuning.distribution
-                            ]
-                        tuning_dict["table_tunings"][table_name] = table_dict
+                tuning_dict = self._extract_unified_tuning(unified_config)
 
             # Extract DataFrame tuning configuration (runtime + write)
             df_tuning_config = config.options.get("df_tuning_config")
             if df_tuning_config:
-                df_tuning_dict: dict[str, Any] = {}
-
-                # Runtime configuration
-                if hasattr(df_tuning_config, "parallelism") and not df_tuning_config.parallelism.is_default():
-                    df_tuning_dict["parallelism"] = {}
-                    if df_tuning_config.parallelism.thread_count is not None:
-                        df_tuning_dict["parallelism"]["thread_count"] = df_tuning_config.parallelism.thread_count
-                    if df_tuning_config.parallelism.worker_count is not None:
-                        df_tuning_dict["parallelism"]["worker_count"] = df_tuning_config.parallelism.worker_count
-
-                if hasattr(df_tuning_config, "memory") and not df_tuning_config.memory.is_default():
-                    df_tuning_dict["memory"] = {}
-                    if df_tuning_config.memory.memory_limit is not None:
-                        df_tuning_dict["memory"]["memory_limit"] = df_tuning_config.memory.memory_limit
-                    if df_tuning_config.memory.chunk_size is not None:
-                        df_tuning_dict["memory"]["chunk_size"] = df_tuning_config.memory.chunk_size
-                    if df_tuning_config.memory.spill_to_disk:
-                        df_tuning_dict["memory"]["spill_to_disk"] = True
-
-                if hasattr(df_tuning_config, "execution") and not df_tuning_config.execution.is_default():
-                    df_tuning_dict["execution"] = {}
-                    if df_tuning_config.execution.streaming_mode:
-                        df_tuning_dict["execution"]["streaming_mode"] = True
-                    if df_tuning_config.execution.engine_affinity is not None:
-                        df_tuning_dict["execution"]["engine_affinity"] = df_tuning_config.execution.engine_affinity
-
-                # Write-time physical layout configuration
-                if hasattr(df_tuning_config, "write") and not df_tuning_config.write.is_default():
-                    write_config = df_tuning_config.write
-                    write_dict: dict[str, Any] = {}
-
-                    if write_config.sort_by:
-                        write_dict["sort_by"] = [{"name": col.name, "order": col.order} for col in write_config.sort_by]
-
-                    if write_config.partition_by:
-                        write_dict["partition_by"] = [
-                            {"name": col.name, "strategy": col.strategy.value} for col in write_config.partition_by
-                        ]
-
-                    if write_config.row_group_size is not None:
-                        write_dict["row_group_size"] = write_config.row_group_size
-
-                    if write_config.repartition_count is not None:
-                        write_dict["repartition_count"] = write_config.repartition_count
-
-                    if write_config.compression != "zstd":
-                        write_dict["compression"] = write_config.compression
-
-                    if write_config.compression_level is not None:
-                        write_dict["compression_level"] = write_config.compression_level
-
-                    if write_config.dictionary_columns:
-                        write_dict["dictionary_columns"] = write_config.dictionary_columns
-
-                    if write_dict:
-                        df_tuning_dict["write"] = write_dict
-
+                df_tuning_dict = self._extract_df_tuning(df_tuning_config)
                 if df_tuning_dict:
                     tuning_dict["dataframe_tuning"] = df_tuning_dict
 
@@ -896,6 +866,75 @@ class DryRunExecutor:
             return None
         except Exception:
             return None
+
+    @staticmethod
+    def _extract_unified_tuning(unified_config: Any) -> dict[str, Any]:
+        """Extract constraints, platform optimizations, and table tunings from unified config."""
+        tuning_dict: dict[str, Any] = {
+            "constraints": {
+                "primary_keys": {
+                    "enabled": unified_config.primary_keys.enabled,
+                    "enforce_uniqueness": unified_config.primary_keys.enforce_uniqueness,
+                    "nullable": unified_config.primary_keys.nullable,
+                },
+                "foreign_keys": {
+                    "enabled": unified_config.foreign_keys.enabled,
+                    "enforce_referential_integrity": unified_config.foreign_keys.enforce_referential_integrity,
+                    "on_delete_action": unified_config.foreign_keys.on_delete_action,
+                    "on_update_action": unified_config.foreign_keys.on_update_action,
+                },
+            },
+            "platform_optimizations": {
+                "z_ordering": unified_config.platform_optimizations.z_ordering_enabled,
+                "auto_optimize": unified_config.platform_optimizations.auto_optimize_enabled,
+                "bloom_filters": unified_config.platform_optimizations.bloom_filters_enabled,
+                "materialized_views": unified_config.platform_optimizations.materialized_views_enabled,
+            },
+        }
+
+        if unified_config.table_tunings:
+            tuning_dict["table_tunings"] = {}
+            for table_name, table_tuning in unified_config.table_tunings.items():
+                table_dict: dict[str, Any] = {"table_name": table_tuning.table_name}
+                for attr in ("partitioning", "sorting", "clustering", "distribution"):
+                    columns = getattr(table_tuning, attr, None)
+                    if columns:
+                        table_dict[attr] = [{"name": col.name, "type": col.type, "order": col.order} for col in columns]
+                tuning_dict["table_tunings"][table_name] = table_dict
+
+        return tuning_dict
+
+    @staticmethod
+    def _extract_df_tuning(df_tuning_config: Any) -> dict[str, Any]:
+        """Extract DataFrame tuning configuration (parallelism, memory, execution, write)."""
+        df_tuning_dict: dict[str, Any] = {}
+
+        # (section_attr, [(field_attr, include_if_not_none)]) — truthy fields emit True.
+        _SECTIONS: list[tuple[str, list[tuple[str, bool]]]] = [
+            ("parallelism", [("thread_count", True), ("worker_count", True)]),
+            ("memory", [("memory_limit", True), ("chunk_size", True), ("spill_to_disk", False)]),
+            ("execution", [("streaming_mode", False), ("engine_affinity", True)]),
+        ]
+        for section_attr, fields in _SECTIONS:
+            section = getattr(df_tuning_config, section_attr, None)
+            if section is None or section.is_default():
+                continue
+            section_dict: dict[str, Any] = {}
+            for field_attr, use_value in fields:
+                value = getattr(section, field_attr, None)
+                if use_value and value is not None:
+                    section_dict[field_attr] = value
+                elif not use_value and value:
+                    section_dict[field_attr] = True
+            if section_dict:
+                df_tuning_dict[section_attr] = section_dict
+
+        if hasattr(df_tuning_config, "write") and not df_tuning_config.write.is_default():
+            write_dict = _extract_df_write_tuning(df_tuning_config.write)
+            if write_dict:
+                df_tuning_dict["write"] = write_dict
+
+        return df_tuning_dict
 
     def _extract_constraint_config(self, config: BenchmarkConfig) -> dict[str, Any]:
         tuning_enabled = config.options.get("tuning_enabled", False)
@@ -972,21 +1011,16 @@ class DryRunExecutor:
         ddl_preview: dict[str, dict[str, Any]] = {}
         post_load_statements: dict[str, list[str]] = {}
 
-        platform_type = database_config.type
-
         # Get the DDL generator for this platform
         try:
-            generator = get_ddl_generator(platform_type)
+            generator = get_ddl_generator(database_config.type)
         except Exception:
-            # Platform may not have a DDL generator
             return ddl_preview, post_load_statements
 
-        # Get unified tuning configuration if available
         unified_config = config.options.get("unified_tuning_configuration")
         if not unified_config:
             return ddl_preview, post_load_statements
 
-        # Get table schema from benchmark
         if not hasattr(benchmark, "get_tables"):
             return ddl_preview, post_load_statements
 
@@ -997,43 +1031,12 @@ class DryRunExecutor:
             if not table_tuning:
                 continue
 
-            # Generate tuning clauses
             tuning_clauses = generator.generate_tuning_clauses(table_tuning)
             if tuning_clauses.is_empty():
                 continue
 
-            # Build tuning summary
-            tuning_summary: dict[str, Any] = {}
-            if tuning_clauses.sort_by:
-                tuning_summary["sort_by"] = tuning_clauses.sort_by
-            if tuning_clauses.partition_by:
-                tuning_summary["partition_by"] = tuning_clauses.partition_by
-            if tuning_clauses.cluster_by:
-                tuning_summary["cluster_by"] = tuning_clauses.cluster_by
-            if tuning_clauses.distribution_key:
-                tuning_summary["distribution_key"] = tuning_clauses.distribution_key
-            if tuning_clauses.distribution_style:
-                tuning_summary["distribution_style"] = tuning_clauses.distribution_style
+            ddl_preview[table_name] = _build_table_ddl_entry(tuning_clauses)
 
-            # Generate example DDL (without columns, just the tuning clauses)
-            ddl_clauses = []
-            if tuning_clauses.sort_by:
-                ddl_clauses.append(f"ORDER BY ({tuning_clauses.sort_by})")
-            if tuning_clauses.partition_by:
-                ddl_clauses.append(f"PARTITION BY ({tuning_clauses.partition_by})")
-            if tuning_clauses.cluster_by:
-                ddl_clauses.append(f"CLUSTER BY ({tuning_clauses.cluster_by})")
-            if tuning_clauses.distribution_style:
-                ddl_clauses.append(f"DISTSTYLE {tuning_clauses.distribution_style}")
-            if tuning_clauses.distribution_key:
-                ddl_clauses.append(f"DISTKEY ({tuning_clauses.distribution_key})")
-
-            ddl_preview[table_name] = {
-                "ddl_clauses": "\n".join(ddl_clauses) if ddl_clauses else None,
-                "tuning_summary": tuning_summary,
-            }
-
-            # Get post-load statements
             post_load = generator.get_post_load_statements(table_name, tuning_clauses)
             if post_load:
                 post_load_statements[table_name] = post_load

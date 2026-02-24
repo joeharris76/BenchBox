@@ -253,21 +253,21 @@ class TestTPCDIQueryManager:
 
     def test_query_manager_initialization(self):
         """Test comprehensive query manager initialization."""
-        # Should have all original + extended queries
+        # Should have all base + extended queries
         all_queries = self.query_manager.get_all_queries()
         assert len(all_queries) == 38  # 8 original + 30 extended (exceeds target)
 
         # Check query statistics
         stats = self.query_manager.get_query_statistics()
         assert stats["total_queries"] == 38
-        assert stats["original_queries"] == 8
+        assert stats["base_queries"] == 8
         assert stats["extended_validation_queries"] == 12
         assert stats["extended_analytical_queries"] == 10
         assert stats["etl_validation_queries"] == 8
         assert stats["query_expansion_factor"] == 4.75  # 38/8
 
-    def test_original_query_compatibility(self):
-        """Test backward compatibility with original queries."""
+    def test_base_query_support(self):
+        """Test base query support."""
         # Original validation queries
         v1 = self.query_manager.get_query("V1")
         assert "total_customers" in v1
@@ -339,7 +339,7 @@ class TestTPCDIQueryManager:
 
     def test_query_metadata_access(self):
         """Test comprehensive query metadata access."""
-        # Test original query metadata
+        # Test base query metadata
         v1_metadata = self.query_manager.get_query_metadata("V1")
         assert v1_metadata["query_type"] == "validation"
 
@@ -438,7 +438,7 @@ class TestQueryParameterValidation:
             "limit_rows": 50,
         }
 
-        # Test original analytical query
+        # Test base analytical query
         a2_with_params = self.query_manager.get_query("A2", params)
         assert "100" in a2_with_params
         assert "LIMIT 50" in a2_with_params
@@ -508,12 +508,12 @@ class TestPhase2Integration:
                 pytest.fail(f"Failed to retrieve query {query_id}: {e}")
 
         # Verify query expansion factor
-        expansion_factor = actual_total / stats["original_queries"]
+        expansion_factor = actual_total / stats["base_queries"]
         assert expansion_factor >= 3.75  # At least 3.75x expansion
 
         print("✅ TPC-DI Phase 2: Query Suite Development - COMPLETE")
         print(f"   - Total queries: {actual_total} ({expansion_factor:.1f}x expansion)")
-        print(f"   - Original queries: {stats['original_queries']}")
+        print(f"   - Base queries: {stats['base_queries']}")
         print(f"   - Validation queries: {len(validation_queries)} (VQ1-VQ12)")
         print(f"   - Analytical queries: {len(analytical_queries)} (AQ1-AQ10)")
         print(f"   - ETL validation queries: {len(etl_queries)} (EQ1-EQ8)")

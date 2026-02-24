@@ -262,7 +262,7 @@ class CostOptimizer:
         >>>
         >>> # Get prioritized recommendations
         >>> for rec in report.recommendations:
-        ...     print(f"{rec.title}: Save ${rec.savings.amount}/year")
+        ...     emit(f"{rec.title}: Save ${rec.savings.amount}/year")
         >>>
         >>> # Get quick wins
         >>> quick_wins = report.get_quick_wins()

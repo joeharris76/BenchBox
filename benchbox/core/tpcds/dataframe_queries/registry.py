@@ -43,15 +43,7 @@ def list_tpcds_queries(
     Returns:
         List of matching DataFrameQuery objects
     """
-    queries = TPCDS_DATAFRAME_QUERIES.get_all_queries()
-
-    if family:
-        queries = [q for q in queries if TPCDS_DATAFRAME_QUERIES.has_implementation(q.query_id, family)]
-
-    if category:
-        queries = [q for q in queries if category in q.categories]
-
-    return queries
+    return TPCDS_DATAFRAME_QUERIES.list_queries(family=family, category=category)
 
 
 def register_query(query: DataFrameQuery) -> None:

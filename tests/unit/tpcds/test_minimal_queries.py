@@ -39,7 +39,7 @@ def fake_dsqgen(monkeypatch):
 
 
 # Mark all tests in this file as unit tests and skip if TPC-DS binaries unavailable
-pytestmark = [pytest.mark.unit, pytest.mark.medium, pytest.mark.fast]
+pytestmark = [pytest.mark.unit, pytest.mark.fast]
 
 
 class TestTPCDSQueryManagerMinimal:

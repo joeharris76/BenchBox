@@ -16,8 +16,8 @@ from rich.prompt import Confirm, InvalidResponse, Prompt
 from rich.table import Table
 from rich.text import Text
 
-from benchbox.core.config import LibraryInfo, PlatformInfo
 from benchbox.core.platform_registry import PlatformRegistry
+from benchbox.core.schemas import LibraryInfo, PlatformInfo
 from benchbox.utils.printing import quiet_console
 
 console = quiet_console
@@ -49,6 +49,8 @@ PLATFORM_ALIASES: dict[str, str] = {
     # Azure Synapse
     "azure-synapse": "synapse",
     "azuresynapse": "synapse",
+    # Microsoft Fabric Warehouse (hyphen form is preferred; underscore form is legacy)
+    "fabric-dw": "fabric_dw",
 }
 
 
@@ -197,51 +199,54 @@ def numbered_platform_select(
     """
     _console = console_instance or console
 
-    # Filter platforms if filter function provided
     filtered = {name: info for name, info in platforms.items() if filter_func(info)} if filter_func else platforms
 
     if not filtered:
         _console.print("[yellow]No platforms match the criteria.[/yellow]")
         return None
 
-    # Build options list, optionally grouped by status
+    options = _build_platform_options(filtered, group_by_status, _console)
+
+    _console.print()
+    return _prompt_platform_selection(prompt, options, filtered, _console)
+
+
+def _build_platform_options(
+    filtered: dict[str, "PlatformInfo"], group_by_status: bool, _console: Any
+) -> list[tuple[str, str]]:
+    """Build numbered options list from platforms, optionally grouped by status."""
     options: list[tuple[str, str]] = []
 
     if group_by_status:
-        enabled = [(n, i) for n, i in filtered.items() if i.enabled]
-        available = [(n, i) for n, i in filtered.items() if i.available and not i.enabled]
-        missing = [(n, i) for n, i in filtered.items() if not i.available]
-
-        if enabled:
-            _console.print("\n[bold green]Enabled:[/bold green]")
-            for name, info in sorted(enabled, key=lambda x: x[1].display_name):
-                num = len(options) + 1
-                _console.print(f"  [cyan]{num}.[/cyan] {info.display_name} [dim]({name})[/dim]")
-                options.append((name, info.display_name))
-
-        if available:
-            _console.print("\n[bold yellow]Available (not enabled):[/bold yellow]")
-            for name, info in sorted(available, key=lambda x: x[1].display_name):
-                num = len(options) + 1
-                _console.print(f"  [cyan]{num}.[/cyan] {info.display_name} [dim]({name})[/dim]")
-                options.append((name, info.display_name))
-
-        if missing:
-            _console.print("\n[bold red]Missing dependencies:[/bold red]")
-            for name, info in sorted(missing, key=lambda x: x[1].display_name):
-                num = len(options) + 1
-                _console.print(f"  [cyan]{num}.[/cyan] {info.display_name} [dim]({name})[/dim]")
-                options.append((name, info.display_name))
+        groups = [
+            ("Enabled", "bold green", [(n, i) for n, i in filtered.items() if i.enabled]),
+            (
+                "Available (not enabled)",
+                "bold yellow",
+                [(n, i) for n, i in filtered.items() if i.available and not i.enabled],
+            ),
+            ("Missing dependencies", "bold red", [(n, i) for n, i in filtered.items() if not i.available]),
+        ]
+        for label, style, members in groups:
+            if members:
+                _console.print(f"\n[{style}]{label}:[/{style}]")
+                for name, info in sorted(members, key=lambda x: x[1].display_name):
+                    num = len(options) + 1
+                    _console.print(f"  [cyan]{num}.[/cyan] {info.display_name} [dim]({name})[/dim]")
+                    options.append((name, info.display_name))
     else:
-        # Simple alphabetical list
         for name, info in sorted(filtered.items(), key=lambda x: x[1].display_name):
             num = len(options) + 1
             _console.print(f"  [cyan]{num}.[/cyan] {info.display_name} [dim]({name})[/dim]")
             options.append((name, info.display_name))
 
-    _console.print()
+    return options
 
-    # Build prompt with range hint
+
+def _prompt_platform_selection(
+    prompt: str, options: list[tuple[str, str]], filtered: dict[str, Any], _console: Any
+) -> str | None:
+    """Prompt user to select a platform by number or name."""
     prompt_text = f"{prompt} [1-{len(options)}]"
 
     while True:
@@ -251,7 +256,6 @@ def numbered_platform_select(
         if not response:
             return None
 
-        # Try as number
         try:
             num = int(response)
             if 1 <= num <= len(options):
@@ -261,7 +265,6 @@ def numbered_platform_select(
         except ValueError:
             pass
 
-        # Try as platform name (case-insensitive, supports aliases)
         normalized = normalize_platform_name(response)
         if normalized in filtered:
             return normalized

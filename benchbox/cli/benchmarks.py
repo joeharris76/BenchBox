@@ -5,6 +5,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import logging
 from typing import Any, Optional
 
 from rich.panel import Panel
@@ -23,10 +24,11 @@ from benchbox.core.benchmark_registry import (
     get_all_benchmarks,
     validate_scale_factor as core_validate_scale_factor,
 )
-from benchbox.core.config import BenchmarkConfig
+from benchbox.core.schemas import BenchmarkConfig
 from benchbox.utils.printing import quiet_console
 from benchbox.utils.verbosity import VerbositySettings
 
+logger = logging.getLogger(__name__)
 console = quiet_console
 
 
@@ -934,47 +936,54 @@ def prompt_phases(default_phases: list[str] | None = None) -> list[str]:
         return selected_phases
 
     # Custom selection
-    console.print("\n[bold]Available phases:[/bold]")
     valid_phases = ["generate", "load", "warmup", "power", "throughput", "maintenance"]
+    unique_phases = _prompt_custom_phases(valid_phases)
+
+    console.print(f"[green]✓ Selected phases: {', '.join(unique_phases)}[/green]")
+    return unique_phases
+
+
+def _prompt_custom_phases(valid_phases: list[str]) -> list[str]:
+    """Display phase menu and parse user input (numbers or names) into deduplicated phase list."""
+    console.print("\n[bold]Available phases:[/bold]")
+    descriptions = {
+        "generate": "Generate benchmark data files",
+        "load": "Load data into the database",
+        "warmup": "Warm up the database cache",
+        "power": "Execute power test (single stream)",
+        "throughput": "Execute throughput test (concurrent streams)",
+        "maintenance": "Execute maintenance operations",
+    }
     for i, phase in enumerate(valid_phases, 1):
-        descriptions = {
-            "generate": "Generate benchmark data files",
-            "load": "Load data into the database",
-            "warmup": "Warm up the database cache",
-            "power": "Execute power test (single stream)",
-            "throughput": "Execute throughput test (concurrent streams)",
-            "maintenance": "Execute maintenance operations",
-        }
         console.print(f"  {i}. {phase} - {descriptions[phase]}")
 
     console.print("\n[dim]Enter comma-separated numbers or phase names (e.g., '1,2,4' or 'generate,load,power')[/dim]")
     custom_input = Prompt.ask("Phases", default="1,2,4")
 
-    # Parse input - could be numbers or phase names
-    selected = []
-    for item in custom_input.split(","):
+    selected = _parse_phase_input(custom_input, valid_phases)
+    if not selected:
+        console.print("[yellow]No valid phases selected, defaulting to 'power'[/yellow]")
+        return ["power"]
+    return selected
+
+
+def _parse_phase_input(raw: str, valid_phases: list[str]) -> list[str]:
+    """Parse comma-separated phase input (numeric indices or names) into a deduplicated list."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in raw.split(","):
         item = item.strip().lower()
+        phase: str | None = None
         if item.isdigit():
             idx = int(item) - 1
             if 0 <= idx < len(valid_phases):
-                selected.append(valid_phases[idx])
+                phase = valid_phases[idx]
         elif item in valid_phases:
-            selected.append(item)
-
-    if not selected:
-        console.print("[yellow]No valid phases selected, defaulting to 'power'[/yellow]")
-        selected = ["power"]
-
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_phases = []
-    for p in selected:
-        if p not in seen:
-            unique_phases.append(p)
-            seen.add(p)
-
-    console.print(f"[green]✓ Selected phases: {', '.join(unique_phases)}[/green]")
-    return unique_phases
+            phase = item
+        if phase and phase not in seen:
+            seen.add(phase)
+            result.append(phase)
+    return result
 
 
 def prompt_force_regeneration() -> str | None:
@@ -1258,7 +1267,7 @@ def prompt_data_format(platform: str) -> tuple[str | None, str | None]:
 
     Returns:
         Tuple of (format or None for CSV, compression or None)
-        Format can be: 'parquet', 'delta', 'iceberg', or None for CSV
+        Format can be: 'parquet', 'vortex', 'delta', 'iceberg', or None for CSV
     """
     from rich.prompt import Confirm, Prompt
 
@@ -1280,11 +1289,12 @@ def prompt_data_format(platform: str) -> tuple[str | None, str | None]:
     console.print("\nAvailable formats:")
     console.print("  1. CSV (default) - Simple, universal compatibility")
     console.print("  2. Parquet - Columnar, compressed, excellent query performance")
-    console.print("  3. Delta Lake - ACID transactions, time travel, schema evolution")
-    console.print("  4. Apache Iceberg - Open standard, multi-engine support")
+    console.print("  3. Vortex - Columnar format with high compression and fast scans")
+    console.print("  4. Delta Lake - ACID transactions, time travel, schema evolution")
+    console.print("  5. Apache Iceberg - Open standard, multi-engine support")
 
     # Show platform recommendation
-    format_display = {"parquet": "Parquet", "delta": "Delta Lake", "iceberg": "Iceberg"}
+    format_display = {"parquet": "Parquet", "vortex": "Vortex", "delta": "Delta Lake", "iceberg": "Iceberg"}
     if recommended_format:
         display_name = format_display.get(recommended_format, recommended_format)
         console.print(f"\n[green]💡 Recommended for {platform.title()}: {display_name}[/green]")
@@ -1294,34 +1304,37 @@ def prompt_data_format(platform: str) -> tuple[str | None, str | None]:
     default_choice = "1"  # CSV default
     if recommended_format == "parquet":
         default_choice = "2"
-    elif recommended_format == "delta":
+    elif recommended_format == "vortex":
         default_choice = "3"
-    elif recommended_format == "iceberg":
+    elif recommended_format == "delta":
         default_choice = "4"
+    elif recommended_format == "iceberg":
+        default_choice = "5"
 
-    choice = Prompt.ask("Select format", choices=["1", "2", "3", "4"], default=default_choice)
+    choice = Prompt.ask("Select format", choices=["1", "2", "3", "4", "5"], default=default_choice)
 
-    format_map = {"1": None, "2": "parquet", "3": "delta", "4": "iceberg"}
+    format_map = {"1": None, "2": "parquet", "3": "vortex", "4": "delta", "5": "iceberg"}
     selected_format = format_map[choice]
 
     if selected_format is None:
         console.print("[green]✓ Using CSV format[/green]")
         return None, None
 
-    # Prompt for compression (for Parquet, Delta, Iceberg)
+    # Prompt for compression (for Parquet, Vortex, Delta, Iceberg)
     compression = None
-    if selected_format in {"parquet", "delta", "iceberg"}:
+    if selected_format in {"parquet", "vortex", "delta", "iceberg"}:
         console.print("\n[bold cyan]Compression[/bold cyan]")
         console.print("[dim]Compression reduces file size and improves query performance.[/dim]")
 
         compression_options = {
             "parquet": ["snappy", "zstd", "gzip", "none"],
+            "vortex": ["zstd", "lz4", "none"],
             "delta": ["snappy", "zstd", "none"],
             "iceberg": ["zstd", "snappy", "gzip", "none"],
         }
 
         # Default compression by format
-        default_compression = {"parquet": "snappy", "delta": "snappy", "iceberg": "zstd"}
+        default_compression = {"parquet": "snappy", "vortex": "zstd", "delta": "snappy", "iceberg": "zstd"}
 
         options = compression_options.get(selected_format, ["snappy", "zstd", "none"])
         default = default_compression.get(selected_format, "snappy")
@@ -1380,6 +1393,67 @@ def prompt_verbose_output() -> int:
     return level
 
 
+_SENTINEL = object()
+
+
+def _prompt_single_option(name: str, spec: Any) -> Any:
+    """Prompt the user for a single platform option value based on its type.
+
+    Returns the parsed value, or ``_SENTINEL`` if no value was provided.
+    """
+    from rich.prompt import Confirm, Prompt
+
+    description = spec.help or f"Configure {name}"
+    default_display = f" [default: {spec.default}]" if spec.default is not None else ""
+    console.print(f"\n[cyan]{name}[/cyan]: {description}{default_display}")
+
+    if spec.choices:
+        choice_str = ", ".join(spec.choices)
+        console.print(f"[dim]Options: {choice_str}[/dim]")
+        default_str = str(spec.default) if spec.default is not None else None
+        if default_str is not None and default_str not in spec.choices:
+            logger.warning(
+                "Option %r default %r not in choices %r, falling back to %r",
+                name,
+                default_str,
+                spec.choices,
+                spec.choices[0],
+            )
+        value = Prompt.ask(
+            f"Enter {name}",
+            choices=spec.choices,
+            default=default_str if default_str is not None and default_str in spec.choices else spec.choices[0],
+        )
+        return spec.parse(value)
+
+    if isinstance(spec.default, bool):
+        return Confirm.ask(f"Enable {name}?", default=spec.default)
+
+    if isinstance(spec.default, int):
+        from rich.prompt import IntPrompt
+
+        return IntPrompt.ask(f"Enter {name}", default=spec.default)
+
+    if spec.default is None and name in {"threads", "port"}:
+        value_str = Prompt.ask(f"Enter {name} (leave empty for auto)", default="")
+        if value_str.strip():
+            try:
+                return int(value_str)
+            except ValueError:
+                console.print(f"[yellow]Invalid integer '{value_str}', using auto[/yellow]")
+                return None
+        return None
+
+    # String option (default)
+    default_str = str(spec.default) if spec.default is not None else ""
+    value = Prompt.ask(f"Enter {name}", default=default_str)
+    if value.strip():
+        return spec.parse(value)
+    if spec.default is not None:
+        return spec.default
+    return _SENTINEL
+
+
 def prompt_platform_options(platform: str) -> dict[str, Any]:
     """Prompt for platform-specific configuration options.
 
@@ -1391,7 +1465,7 @@ def prompt_platform_options(platform: str) -> dict[str, Any]:
     Returns:
         Dictionary of configured platform options
     """
-    from rich.prompt import Confirm, Prompt
+    from rich.prompt import Confirm
 
     from benchbox.cli.platform_hooks import PlatformHookRegistry
 
@@ -1416,52 +1490,9 @@ def prompt_platform_options(platform: str) -> dict[str, Any]:
     options: dict[str, Any] = {}
 
     for name, spec in sorted(configurable_specs.items()):
-        # Build description
-        description = spec.help or f"Configure {name}"
-        default_display = f" [default: {spec.default}]" if spec.default is not None else ""
-
-        console.print(f"\n[cyan]{name}[/cyan]: {description}{default_display}")
-
-        # Handle different option types
-        if spec.choices:
-            # Multiple choice option
-            choice_str = ", ".join(spec.choices)
-            console.print(f"[dim]Options: {choice_str}[/dim]")
-            value = Prompt.ask(
-                f"Enter {name}",
-                choices=spec.choices,
-                default=str(spec.default) if spec.default else spec.choices[0],
-            )
-            options[name] = spec.parse(value)
-        elif isinstance(spec.default, bool):
-            # Boolean option
-            value = Confirm.ask(f"Enable {name}?", default=spec.default)
-            options[name] = value
-        elif isinstance(spec.default, int):
-            # Integer option with known default
-            from rich.prompt import IntPrompt
-
-            value = IntPrompt.ask(f"Enter {name}", default=spec.default)
-            options[name] = value
-        elif spec.default is None and name in {"threads", "port"}:
-            # Integer option with None default (auto-detection)
-            value_str = Prompt.ask(f"Enter {name} (leave empty for auto)", default="")
-            if value_str.strip():
-                try:
-                    options[name] = int(value_str)
-                except ValueError:
-                    console.print(f"[yellow]Invalid integer '{value_str}', using auto[/yellow]")
-                    options[name] = None
-            else:
-                options[name] = None
-        else:
-            # String option (default)
-            default_str = str(spec.default) if spec.default is not None else ""
-            value = Prompt.ask(f"Enter {name}", default=default_str)
-            if value.strip():
-                options[name] = spec.parse(value)
-            elif spec.default is not None:
-                options[name] = spec.default
+        result = _prompt_single_option(name, spec)
+        if result is not _SENTINEL:
+            options[name] = result
 
     # Show configured options
     if options:

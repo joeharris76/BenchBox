@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from benchbox.utils.file_format import COMPRESSION_EXTENSIONS, detect_compression, strip_compression_suffix
+from benchbox.utils.printing import emit
 from benchbox.utils.scale_factor import format_scale_factor
 from benchbox.utils.stale_artifact_pruning import TableArtifactPattern, prune_stale_table_artifacts
 
@@ -212,11 +213,11 @@ class FileArtifactMixin:
                 extension = self.get_compressor().get_file_extension()
                 compressed_files = list(target_dir.glob(f"*.dat{extension}"))
                 valid_compressed = [f for f in compressed_files if self._is_valid_data_file(f)]
-                print(f"✓ File format validation passed: {len(valid_compressed)} compressed files, 0 raw .dat files")
+                emit(f"✓ File format validation passed: {len(valid_compressed)} compressed files, 0 raw .dat files")
             else:
                 dat_files = list(target_dir.glob("*.dat"))
                 valid_dat = [f for f in dat_files if self._is_valid_data_file(f)]
-                print(f"✓ File format validation passed: {len(valid_dat)} .dat files, 0 compressed files")
+                emit(f"✓ File format validation passed: {len(valid_dat)} .dat files, 0 compressed files")
 
     def _write_manifest(self, output_dir: Path, table_paths: dict[str, list[Path]]) -> None:
         """Write a manifest describing generated files with sizes and row counts.

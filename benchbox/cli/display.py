@@ -15,14 +15,14 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from benchbox.core.config import (
+from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.schemas import (
     BenchmarkConfig,
     DatabaseConfig,
     DryRunResult,
     QueryResult,
     SystemProfile,
 )
-from benchbox.core.results.models import BenchmarkResults
 from benchbox.utils.printing import quiet_console
 
 

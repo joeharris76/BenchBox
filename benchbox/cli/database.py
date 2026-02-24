@@ -14,9 +14,9 @@ from typing import Any, Literal
 from rich.prompt import Prompt
 from rich.table import Table
 
-from benchbox.core.config import DatabaseConfig, SystemProfile
 from benchbox.core.databases.manager import check_connection as core_check_connection
 from benchbox.core.platform_registry import PlatformRegistry
+from benchbox.core.schemas import DatabaseConfig, SystemProfile
 from benchbox.utils.printing import quiet_console
 from benchbox.utils.runtime_env import ensure_driver_version
 from benchbox.utils.verbosity import VerbositySettings
@@ -426,6 +426,10 @@ class DatabaseManager:
             )
             config.driver_version = resolution.requested or driver_version
             config.driver_version_resolved = resolution.resolved
+            config.driver_version_actual = resolution.actual
+            config.driver_runtime_strategy = resolution.runtime_strategy
+            config.driver_runtime_path = resolution.runtime_path
+            config.driver_runtime_python_executable = resolution.runtime_python_executable
             config.driver_auto_install = auto_install or resolution.auto_install_used
 
             # Defensive: ensure options is not None before subscript access (Pydantic v2 can set to None if explicitly passed)
@@ -437,10 +441,20 @@ class DatabaseManager:
                 config.options["driver_version"] = config.driver_version
             if config.driver_version_resolved:
                 config.options["driver_version_resolved"] = config.driver_version_resolved
+            if config.driver_version_actual:
+                config.options["driver_version_actual"] = config.driver_version_actual
+            if config.driver_runtime_strategy:
+                config.options["driver_runtime_strategy"] = config.driver_runtime_strategy
+            if config.driver_runtime_path:
+                config.options["driver_runtime_path"] = config.driver_runtime_path
+            if config.driver_runtime_python_executable:
+                config.options["driver_runtime_python_executable"] = config.driver_runtime_python_executable
             config.options["driver_auto_install"] = config.driver_auto_install
             if platform_info:
                 platform_info.driver_version_requested = config.driver_version
                 platform_info.driver_version_resolved = config.driver_version_resolved
+                platform_info.driver_version_actual = config.driver_version_actual
+                platform_info.driver_runtime_strategy = config.driver_runtime_strategy
         else:
             config.driver_version_resolved = config.driver_version
 

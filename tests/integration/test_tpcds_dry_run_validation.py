@@ -69,7 +69,7 @@ class TestTPCDSDryRunValidation:
         # Verify dry-run result format
         assert result["dry_run"] is True, "Result should indicate dry-run mode"
         assert result["status"] == "DRY_RUN", "Status should be DRY_RUN"
-        assert result["execution_time"] == 0.0, "Execution time should be 0 for dry-run"
+        assert result["execution_time_seconds"] == 0.0, "Execution time should be 0 for dry-run"
 
     def test_dry_run_create_schema_sql_capture(self):
         """Test that schema creation is captured in dry-run mode."""

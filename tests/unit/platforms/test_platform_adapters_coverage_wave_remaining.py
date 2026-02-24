@@ -444,26 +444,6 @@ class TestBenchmarkImplTablesSource:
         assert src.can_provide(benchmark, Path("/data")) is False
 
 
-class TestLegacyGetTablesSource:
-    def test_can_provide(self):
-        from benchbox.platforms.base.data_loading import LegacyGetTablesSource
-
-        src = LegacyGetTablesSource()
-        benchmark = MagicMock()
-        benchmark.get_tables.return_value = {"orders": []}
-        assert src.can_provide(benchmark, Path("/data")) is True
-
-    def test_get_data_source(self):
-        from benchbox.platforms.base.data_loading import LegacyGetTablesSource
-
-        src = LegacyGetTablesSource()
-        benchmark = MagicMock()
-        benchmark.get_tables.return_value = {"orders": [Path("/data/orders.csv")]}
-        result = src.get_data_source(benchmark, Path("/data"))
-        assert result is not None
-        assert result.source_type == "legacy_get_tables"
-
-
 class TestManifestFileSource:
     def test_can_provide_no_manifest(self, tmp_path):
         from benchbox.platforms.base.data_loading import ManifestFileSource
@@ -1042,6 +1022,7 @@ class TestAthenaAdditionalCoverage:
         with (
             patch("benchbox.platforms.athena.boto3", MagicMock()),
             patch("benchbox.platforms.athena.athena_connect", MagicMock()),
+            patch.object(AthenaAdapter, "_validate_configuration"),
         ):
             adapter = AthenaAdapter.from_config(
                 {"benchmark": "tpch", "scale_factor": 1, "s3_bucket": "benchbox-bucket"}

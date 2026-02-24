@@ -14,7 +14,7 @@ from unittest.mock import Mock
 import pytest
 
 from benchbox.cli.orchestrator import BenchmarkOrchestrator
-from benchbox.core.config import BenchmarkConfig
+from benchbox.core.schemas import BenchmarkConfig
 from benchbox.utils.scale_factor import format_scale_factor
 
 pytestmark = pytest.mark.fast

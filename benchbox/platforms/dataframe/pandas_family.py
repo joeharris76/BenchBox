@@ -495,6 +495,17 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
         """Return the DataFrame family name."""
         return "pandas"
 
+    def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[Any]) -> None:
+        """DataFrame platforms do not use post-load CTAS table rewrites for sorting.
+
+        Physical sort ordering for pandas-family platforms is applied during
+        Parquet cache generation via ``DataFrameWriteConfiguration.sort_by``, which
+        instructs ``FormatConverter._apply_write_config`` to sort the PyArrow table
+        before writing to disk. This produces pre-sorted Parquet files that are read
+        directly by the adapter, requiring no further rewrite after loading.
+        """
+        return None
+
     # =========================================================================
     # Abstract Methods - Must be implemented by subclasses
     # =========================================================================
@@ -770,6 +781,55 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
         """
         return df.rename(columns=mapping)  # type: ignore[attr-defined]
 
+    def merge(
+        self,
+        left: DF,
+        right: DF,
+        on: str | list[str] | None = None,
+        left_on: str | list[str] | None = None,
+        right_on: str | list[str] | None = None,
+        how: str = "inner",
+    ) -> DF:
+        """Merge two DataFrames using the shared pandas-style API.
+
+        The wrapper keeps join semantics centralized while allowing subclasses
+        to override merge backend selection via ``_merge_frames`` where needed
+        (for example, module-level merge helpers in distributed/GPU adapters).
+        """
+        return self._merge_frames(
+            left,
+            right,
+            on=on,
+            left_on=left_on,
+            right_on=right_on,
+            how=how,
+        )
+
+    def _merge_frames(
+        self,
+        left: DF,
+        right: DF,
+        *,
+        on: str | list[str] | None,
+        left_on: str | list[str] | None,
+        right_on: str | list[str] | None,
+        how: str,
+    ) -> DF:
+        """Default merge implementation using DataFrame.merge.
+
+        Subclasses may override to use module-level merge functions (e.g.
+        cudf.merge, dask.dataframe.merge) instead of the instance method.
+        """
+        if not hasattr(left, "merge"):
+            raise TypeError(f"{self.platform_name} merge requires DataFrame-like inputs, got {type(left).__name__}")
+        return left.merge(
+            right,
+            on=on,
+            left_on=left_on,
+            right_on=right_on,
+            how=how,
+        )  # type: ignore[return-value]
+
     def scalar(self, df: DF, column: str | None = None) -> Any:
         """Extract a single scalar value from a DataFrame.
 
@@ -927,6 +987,7 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
         table_name: str,
         file_paths: list[Path],
         column_names: list[str] | None = None,
+        delimiter: str | None = None,
     ) -> int:
         """Load a table from data files.
 
@@ -955,11 +1016,11 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
             df = self._load_parquet_files(file_paths)
         else:
             # CSV or TBL
-            delimiter = "|" if format_type == "tbl" else ","
+            actual_delimiter = delimiter if delimiter is not None else ("|" if format_type == "tbl" else ",")
             has_header = format_type == "csv"
             df = self._load_csv_files(
                 file_paths,
-                delimiter=delimiter,
+                delimiter=actual_delimiter,
                 has_header=has_header,
                 column_names=column_names,
             )
@@ -1121,8 +1182,8 @@ class PandasFamilyAdapter(BenchmarkExecutionMixin, TuningConfigurableMixin, ABC,
 
         Example:
             result, profile = adapter.execute_query_profiled(ctx, query)
-            print(f"Execution time: {profile.execution_time_ms}ms")
-            print(f"Peak memory: {profile.peak_memory_mb}MB")
+            emit(f"Execution time: {profile.execution_time_ms}ms")
+            emit(f"Peak memory: {profile.peak_memory_mb}MB")
         """
         qid = query_id or query.query_id
         self._log_verbose(f"Executing query {qid} with profiling: {query.query_name}")
