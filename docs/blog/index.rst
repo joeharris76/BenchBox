@@ -22,12 +22,17 @@ Archives
 
 Browse by:
 
-* `Date <archive.html>`_ - Posts organized by year
-* `Tags <tag.html>`_ - Posts organized by topic
-* `Authors <author.html>`_ - Posts organized by author
+* :doc:`/blog/archive` - Posts organized by year
+* :doc:`/blog/tag` - Posts organized by topic
+* :doc:`/blog/author` - Posts organized by author
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
-   2025-01-22-welcome
+   2026-01-22-welcome
+   2026-02-15-v0-1-2-release-summary
+   2026-02-15-why-we-deleted-plotly
+   2026-02-23-v0-1-3-release-summary
+   2026-03-03-v0-1-4-release-summary
+   2026-03-03-duckdb-tpch-extension-vs-benchbox

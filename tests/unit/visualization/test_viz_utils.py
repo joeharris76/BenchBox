@@ -2,21 +2,12 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from benchbox.core.visualization.utils import extract_chart_metadata, slugify
+from tests.fixtures.result_dict_fixtures import make_normalized_result
 
 pytestmark = pytest.mark.fast
-
-
-def _make_result(platform: str, version: str | None = None, benchmark: str = "tpch", sf: float = 1.0):
-    """Build a minimal NormalizedResult-like object for metadata extraction tests."""
-    raw: dict = {}
-    if version is not None:
-        raw["platform"] = {"name": platform, "version": version}
-    return SimpleNamespace(platform=platform, benchmark=benchmark, scale_factor=sf, raw=raw)
 
 
 class TestExtractChartMetadata:
@@ -24,34 +15,34 @@ class TestExtractChartMetadata:
         assert extract_chart_metadata([]) == {}
 
     def test_basic_fields_extracted(self):
-        r = _make_result("DuckDB", version="1.4.3")
+        r = make_normalized_result(platform="DuckDB", platform_version="1.4.3")
         meta = extract_chart_metadata([r])
         assert meta["benchmark"] == "tpch"
         assert meta["scale_factor"] == 1.0
 
     def test_version_appended_to_platform_name(self):
         """When version is not in platform label, it gets appended."""
-        r = _make_result("DuckDB", version="1.4.3")
+        r = make_normalized_result(platform="DuckDB", platform_version="1.4.3")
         meta = extract_chart_metadata([r])
         assert meta["platform_version"] == "DuckDB 1.4.3"
 
     def test_no_duplicate_when_version_already_in_label(self):
-        """After version disambiguation, platform label already contains version — no duplication."""
-        r = _make_result("DuckDB 1.4.3", version="1.4.3")
+        """After version disambiguation, platform label already contains version -- no duplication."""
+        r = make_normalized_result(platform="DuckDB 1.4.3", platform_version="1.4.3")
         meta = extract_chart_metadata([r])
         assert meta["platform_version"] == "DuckDB 1.4.3"
         assert "DuckDB 1.4.3 1.4.3" not in meta.get("platform_version", "")
 
     def test_no_platform_version_when_no_raw_version(self):
-        """No raw version → no platform_version key."""
-        r = _make_result("DuckDB", version=None)
+        """No raw version -- no platform_version key."""
+        r = make_normalized_result(platform="DuckDB")
         meta = extract_chart_metadata([r])
         assert "platform_version" not in meta
 
     def test_uses_first_result_for_metadata(self):
         """Metadata is extracted from results[0]."""
-        r1 = _make_result("DuckDB", version="1.0.0", benchmark="tpch", sf=1.0)
-        r2 = _make_result("Polars", version="0.19.0", benchmark="tpcds", sf=10.0)
+        r1 = make_normalized_result(platform="DuckDB", platform_version="1.0.0", scale_factor=1.0)
+        r2 = make_normalized_result(platform="Polars", platform_version="0.19.0", benchmark="tpcds", scale_factor=10.0)
         meta = extract_chart_metadata([r1, r2])
         assert meta["benchmark"] == "tpch"
         assert "DuckDB" in meta.get("platform_version", "")

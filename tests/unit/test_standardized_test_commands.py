@@ -22,12 +22,14 @@ class TestStandardizedTestCommands:
     def test_pytest_marker_system_works(self):
         """Test that pytest marker system is properly configured."""
         # Run a simple pytest command to verify markers work
+        env = {**subprocess.os.environ, "BENCHBOX_SKIP_TEST_LOCK": "1"}
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "--collect-only", "-q"],
             cwd=Path.cwd(),
             capture_output=True,
             text=True,
             timeout=120,
+            env=env,
         )
 
         # Should succeed (0) or have warnings (2) but collect tests
@@ -38,12 +40,14 @@ class TestStandardizedTestCommands:
 
     def test_fast_marker_functionality(self):
         """Test that fast marker selects appropriate tests."""
+        env = {**subprocess.os.environ, "BENCHBOX_SKIP_TEST_LOCK": "1"}
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "-m", "fast", "--collect-only", "-q"],
             cwd=Path.cwd(),
             capture_output=True,
             text=True,
             timeout=120,
+            env=env,
         )
 
         # Should succeed (0) or have warnings (2)
@@ -54,12 +58,14 @@ class TestStandardizedTestCommands:
 
     def test_unit_marker_functionality(self):
         """Test that unit marker selects appropriate tests."""
+        env = {**subprocess.os.environ, "BENCHBOX_SKIP_TEST_LOCK": "1"}
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "-m", "unit", "--collect-only", "-q"],
             cwd=Path.cwd(),
             capture_output=True,
             text=True,
             timeout=120,
+            env=env,
         )
 
         # Should succeed (0) or have warnings (2)

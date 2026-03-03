@@ -1,0 +1,29 @@
+# External URLs that are known to be flaky, rate-limited, or login-gated.
+# Keep this list focused and prune entries when upstream stability improves.
+
+# Local examples in docs (not reachable in CI)
+http://localhost(:\d+)?/.*
+
+# TPC pages are frequently unavailable to automated checks
+http://www\.tpc\.org/.*
+https://www\.tpc\.org/.*
+
+# Newsletter/archive host intermittently blocks bots
+https://buttondown\.com/.*
+
+# Login-protected or interactive portals
+https://app\.motherduck\.com/.*
+https://cloud2\.influxdata\.com/.*
+https://api\.onehouse\.ai/.*
+
+# Package index endpoint can reject crawler requests
+https://pypi\.nvidia\.com/.*
+
+# ISO standards pages may block automated requests
+https://www\.iso\.org/standard/.*
+
+# SIGMOD intermittently refuses automated link checks
+https://sigmod\.org/.*
+
+# SelectDB portal intermittently drops connections
+https://selectdb\.com

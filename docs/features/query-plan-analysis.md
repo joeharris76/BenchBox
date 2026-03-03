@@ -55,21 +55,28 @@ This captures the logical query plan for each query executed during the benchmar
 
 Currently supported platforms for query plan capture:
 
-| Platform    | Parser Status | EXPLAIN Format | Notes                           |
-|-------------|---------------|----------------|---------------------------------|
-| DuckDB      | ✓ Stable      | Text (box)     | Unicode box-drawing characters  |
-| SQLite      | ✓ Stable      | Text (tree)    | Simple tree format              |
-| PostgreSQL  | ✓ Stable      | JSON           | Requires `EXPLAIN (FORMAT JSON)` |
-| Redshift    | ✓ Beta        | Text           | Supports XN prefixed operators  |
-| DataFusion  | ✓ Beta        | Text (indent)  | Physical plan operators         |
+| Platform    | Parser Status | EXPLAIN Format                          | Notes                                                    |
+|-------------|---------------|-----------------------------------------|----------------------------------------------------------|
+| DuckDB      | ✓ Stable      | JSON (`EXPLAIN (ANALYZE, FORMAT JSON)`) | Actual per-operator timing; ~1× query cost overhead      |
+| SQLite      | ✓ Stable      | Text (tree)                             | Simple tree format                                       |
+| PostgreSQL  | ✓ Stable      | JSON                                    | Requires `EXPLAIN (FORMAT JSON)`                         |
+| Redshift    | ✓ Beta        | Text                                    | Supports XN prefixed operators                           |
+| DataFusion  | ✓ Beta        | Text (indent)                           | Physical plan operators                                  |
 
 Plans are captured using platform-specific `EXPLAIN` commands and parsed into a unified logical representation.
 
 ### Performance Impact
 
-Plan capture has minimal performance impact:
-- Adds ~10-50ms per query
-- Does not affect benchmark timing measurements
+Plan capture overhead depends on the platform:
+
+- **DuckDB** (default): uses `EXPLAIN (ANALYZE, FORMAT JSON)`, which re-executes the query to collect
+  actual per-operator timing and cardinality. Overhead is approximately **1× query cost** per captured
+  plan - a 2-second query costs ~2 extra seconds. Disable re-execution with
+  `--platform-option analyze_plans=false` to use estimated plans only (~10-50 ms overhead).
+- **Other platforms**: estimated plans only, adds ~10-50 ms per query.
+
+In all cases:
+- Benchmark timing measurements are unaffected (plan capture runs after the timed execution)
 - Failed plan captures are logged but don't halt execution
 
 ## Viewing Plans
@@ -401,12 +408,17 @@ benchbox platforms
 
 **Symptom**: Benchmark runs noticeably slower with `--capture-plans`
 
-**Expected Impact**: 10-50ms overhead per query (negligible for most workloads)
+**Expected Impact**:
+- DuckDB (default): ~1× query cost per plan (re-executes via `EXPLAIN (ANALYZE, FORMAT JSON)`)
+- Other platforms: 10-50 ms per query
 
-**If overhead exceeds 100ms per query**:
+**If DuckDB overhead is too high**:
+1. Use `--platform-option analyze_plans=false` to switch to estimated plans (~10-50 ms, no re-execution)
+2. Use `--queries` to capture plans for a subset of queries during development
+
+**If overhead exceeds 100ms per query on non-DuckDB platforms**:
 1. Check if disk I/O is bottleneck (plan serialization)
 2. Verify platform EXPLAIN performance
-3. Consider capturing plans for subset of queries during development
 
 ### Memory Usage
 
@@ -499,10 +511,12 @@ The comparison engine uses:
 ### Platform-Specific Notes
 
 **DuckDB**:
-- Uses `EXPLAIN` output (text format with box-drawing characters)
-- Captures logical and physical operators
-- Fast EXPLAIN execution (<1ms typically)
-- Requires UTF-8 terminal for proper display
+- Uses `EXPLAIN (ANALYZE, FORMAT JSON)` by default - machine-readable JSON with actual per-operator
+  timing (`operator_timing`) and cardinality (`operator_cardinality`) from real execution
+- Captures logical and physical operators; parser handles both ANALYZE and estimated-plan schemas
+- Re-executes the query at capture time (~1× query cost); use
+  `--platform-option analyze_plans=false` to opt out and capture estimated plans only
+- Fingerprints exclude timing/cardinality - structural comparisons are unaffected by this setting
 
 **SQLite**:
 - Uses `EXPLAIN QUERY PLAN` (text format)

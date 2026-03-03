@@ -170,6 +170,8 @@ class TestQueriesFlagValidation:
             "Q1",
             "q1-variant",
             "q1_v2",
+            "Q1.1",  # SSB-style dot-notation
+            "Q3.4",  # SSB-style dot-notation
         ]
 
         for valid_query in valid_cases:

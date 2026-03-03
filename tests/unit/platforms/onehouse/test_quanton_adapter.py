@@ -21,8 +21,6 @@ class TestQuantonAdapterInitialization:
         """Test error when api_key is not provided."""
         with (
             patch.dict("os.environ", {}, clear=True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
         ):
             from benchbox.platforms.onehouse import QuantonAdapter
 
@@ -33,36 +31,26 @@ class TestQuantonAdapterInitialization:
 
     def test_missing_s3_staging_dir_raises_error(self):
         """Test error when s3_staging_dir is not provided."""
-        with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.onehouse import QuantonAdapter
+        from benchbox.platforms.onehouse import QuantonAdapter
 
-            with pytest.raises(ConfigurationError, match="s3_staging_dir"):
-                QuantonAdapter(
-                    api_key="test-api-key",
-                )
+        with pytest.raises(ConfigurationError, match="s3_staging_dir"):
+            QuantonAdapter(
+                api_key="test-api-key",
+            )
 
     def test_invalid_s3_path_raises_error(self):
         """Test error when s3_staging_dir has invalid format."""
-        with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.onehouse import QuantonAdapter
+        from benchbox.platforms.onehouse import QuantonAdapter
 
-            with pytest.raises(ConfigurationError, match="Invalid S3"):
-                QuantonAdapter(
-                    api_key="test-api-key",
-                    s3_staging_dir="/local/path",
-                )
+        with pytest.raises(ConfigurationError, match="Invalid S3"):
+            QuantonAdapter(
+                api_key="test-api-key",
+                s3_staging_dir="/local/path",
+            )
 
     def test_invalid_table_format_raises_error(self):
         """Test error when invalid table format is provided."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -79,8 +67,6 @@ class TestQuantonAdapterInitialization:
     def test_valid_configuration(self):
         """Test valid configuration creates adapter correctly."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -107,8 +93,6 @@ class TestQuantonAdapterInitialization:
         """Test api_key can be read from environment variable."""
         with (
             patch.dict("os.environ", {"ONEHOUSE_API_KEY": "env-api-key"}, clear=False),
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -124,8 +108,6 @@ class TestQuantonAdapterInitialization:
     def test_default_values(self):
         """Test default configuration values."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -150,8 +132,6 @@ class TestQuantonAdapterPlatformInfo:
     def test_get_platform_info(self):
         """Test get_platform_info returns correct metadata."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -182,8 +162,6 @@ class TestQuantonAdapterPlatformInfo:
     def test_get_dialect(self):
         """Test get_target_dialect returns spark."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -204,8 +182,6 @@ class TestQuantonAdapterConnection:
     def test_create_connection_success(self):
         """Test successful connection to Quanton API."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -230,8 +206,6 @@ class TestQuantonAdapterConnection:
     def test_create_connection_failure(self):
         """Test connection failure raises error."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -260,8 +234,6 @@ class TestQuantonAdapterDataLoading:
         source_dir.mkdir()
 
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging_instance = MagicMock()
@@ -316,8 +288,6 @@ class TestQuantonAdapterTuning:
     def test_apply_platform_optimizations(self):
         """Test apply_platform_optimizations returns empty list."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -335,8 +305,6 @@ class TestQuantonAdapterTuning:
     def test_apply_primary_keys(self):
         """Test apply_primary_keys returns empty list (Spark doesn't enforce PKs)."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -356,8 +324,6 @@ class TestQuantonAdapterTuning:
     def test_configure_for_benchmark(self):
         """Test configure_for_benchmark sets benchmark type."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer") as mock_optimizer,
         ):
@@ -400,8 +366,6 @@ class TestQuantonAdapterFromConfig:
     def test_from_config_basic(self):
         """Test from_config creates adapter with basic config."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -431,8 +395,6 @@ class TestQuantonAdapterTableFormats:
     def test_iceberg_format(self):
         """Test Iceberg table format configuration."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -450,8 +412,6 @@ class TestQuantonAdapterTableFormats:
     def test_hudi_format(self):
         """Test Hudi table format configuration."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -469,8 +429,6 @@ class TestQuantonAdapterTableFormats:
     def test_delta_format(self):
         """Test Delta table format configuration."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -492,8 +450,6 @@ class TestQuantonAdapterClose:
     def test_close_logs_metrics(self):
         """Test close logs resource usage metrics."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.logger") as mock_logger,
         ):
@@ -515,8 +471,6 @@ class TestQuantonAdapterClose:
     def test_close_handles_client_error(self):
         """Test close handles client errors gracefully."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -542,8 +496,6 @@ class TestQuantonAdapterTestConnection:
     def test_test_connection_success(self):
         """Test test_connection returns True on success."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -564,8 +516,6 @@ class TestQuantonAdapterTestConnection:
     def test_test_connection_failure(self):
         """Test test_connection returns False on failure."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -590,8 +540,6 @@ class TestQuantonAdapterCreateSchema:
     def test_create_schema_success(self):
         """Test create_schema creates database successfully."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -615,8 +563,6 @@ class TestQuantonAdapterCreateSchema:
     def test_create_schema_uses_default_database(self):
         """Test create_schema uses default database when none specified."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -640,8 +586,6 @@ class TestQuantonAdapterCreateSchema:
     def test_create_schema_already_exists(self):
         """Test create_schema handles existing database gracefully."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -663,8 +607,6 @@ class TestQuantonAdapterCreateSchema:
     def test_create_schema_other_error(self):
         """Test create_schema logs warning on other errors."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
             patch("benchbox.platforms.onehouse.quanton_adapter.logger") as mock_logger,
@@ -693,8 +635,6 @@ class TestQuantonAdapterDDLGeneration:
     def test_generate_iceberg_ddl(self):
         """Test Iceberg table DDL generation."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -716,8 +656,6 @@ class TestQuantonAdapterDDLGeneration:
     def test_generate_hudi_ddl_with_record_key(self):
         """Test Hudi table DDL generation with record key."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -744,8 +682,6 @@ class TestQuantonAdapterDDLGeneration:
     def test_generate_hudi_ddl_without_record_key(self):
         """Test Hudi table DDL generation without record key uses fallback."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.logger") as mock_logger,
         ):
@@ -768,8 +704,6 @@ class TestQuantonAdapterDDLGeneration:
     def test_generate_delta_ddl(self):
         """Test Delta table DDL generation."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -794,8 +728,6 @@ class TestQuantonAdapterExecuteQuery:
     def test_execute_query_success(self):
         """Test execute_query returns results."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -827,7 +759,6 @@ class TestQuantonAdapterExecuteQuery:
     def test_execute_query_falls_back_to_s3(self):
         """Test execute_query falls back to S3 when API fails."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.onehouse.quanton_adapter.boto3") as mock_boto3,
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
@@ -873,8 +804,6 @@ class TestQuantonAdapterLoadDataFull:
         (source_dir / "lineitem.parquet").write_bytes(b"fake parquet")
 
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
         ):
@@ -906,8 +835,6 @@ class TestQuantonAdapterLoadDataFull:
     def test_load_data_source_not_found(self, tmp_path):
         """Test load_data raises error when source not found."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -931,8 +858,6 @@ class TestQuantonAdapterLoadDataFull:
         source_dir.mkdir()
 
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.OnehouseClient") as mock_client_class,
             patch("benchbox.platforms.onehouse.quanton_adapter.logger") as mock_logger,
@@ -968,8 +893,6 @@ class TestQuantonAdapterApplyTuning:
     def test_apply_tuning_with_scale_factor(self):
         """Test apply_tuning_configuration sets scale factor."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -994,8 +917,6 @@ class TestQuantonAdapterApplyTuning:
     def test_apply_tuning_with_all_options(self):
         """Test apply_tuning_configuration with all options."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -1026,8 +947,6 @@ class TestQuantonAdapterFromConfigExtended:
     def test_from_config_with_hudi_options(self):
         """Test from_config with Hudi-specific options."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -1055,8 +974,6 @@ class TestQuantonAdapterFromConfigExtended:
     def test_from_config_with_onehouse_api_key(self):
         """Test from_config with onehouse_api_key alias."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -1079,8 +996,6 @@ class TestQuantonAdapterStagingInitialization:
     def test_staging_initialization_failure_warning(self):
         """Test that staging initialization failure is logged as warning."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.onehouse.quanton_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.onehouse.quanton_adapter.logger") as mock_logger,
         ):
@@ -1104,7 +1019,6 @@ class TestQuantonAdapterS3Client:
     def test_get_s3_client_creates_client(self):
         """Test _get_s3_client creates boto3 client."""
         with (
-            patch("benchbox.platforms.onehouse.quanton_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.onehouse.quanton_adapter.boto3") as mock_boto3,
             patch("benchbox.platforms.onehouse.quanton_adapter.CloudSparkStaging") as mock_staging,
         ):

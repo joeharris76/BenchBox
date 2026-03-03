@@ -306,6 +306,17 @@ class TestCalculateUtilization:
 class TestEnhancedResourceProfiler:
     """Tests for EnhancedResourceProfiler class."""
 
+    @staticmethod
+    def _wait_for_sample(
+        profiler: EnhancedResourceProfiler,
+        *,
+        timeout_seconds: float = 0.2,
+    ) -> None:
+        """Wait for at least one sample without fixed long sleeps."""
+        deadline = time.time() + timeout_seconds
+        while profiler.get_timeline().sample_count < 1 and time.time() < deadline:
+            time.sleep(0.01)
+
     def test_basic_creation(self):
         """Should create profiler with defaults."""
         profiler = EnhancedResourceProfiler()
@@ -351,9 +362,7 @@ class TestEnhancedResourceProfiler:
         """Should start and stop profiler."""
         profiler = EnhancedResourceProfiler(sample_interval=0.1)
         profiler.start()
-
-        # Wait for a few samples
-        time.sleep(0.3)
+        self._wait_for_sample(profiler)
 
         assert profiler.is_running() is True
 
@@ -369,7 +378,7 @@ class TestEnhancedResourceProfiler:
         """Should collect CPU and memory metrics."""
         profiler = EnhancedResourceProfiler(sample_interval=0.1)
         profiler.start()
-        time.sleep(0.3)
+        self._wait_for_sample(profiler)
         profiler.stop()
 
         timeline = profiler.get_timeline()
@@ -386,7 +395,7 @@ class TestEnhancedResourceProfiler:
         profiler = EnhancedResourceProfiler(monitor=monitor, sample_interval=0.1)
 
         profiler.start()
-        time.sleep(0.3)
+        self._wait_for_sample(profiler)
         profiler.stop()
 
         snapshot = monitor.snapshot()

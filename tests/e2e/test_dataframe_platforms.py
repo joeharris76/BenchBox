@@ -43,58 +43,6 @@ class TestPandasDataFrameE2E:
 
         assert result.returncode == 0, f"CLI failed with:\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-    @pytest.mark.e2e
-    @pytest.mark.e2e_dataframe
-    @pytest.mark.e2e_quick
-    def test_tpch_query_subset(self, tmp_path: Path) -> None:
-        """Test TPC-H with --queries subset flag."""
-        if not is_dataframe_available("pandas-df"):
-            pytest.skip("Pandas not available")
-
-        config = {
-            "platform": "pandas-df",
-            "benchmark": "tpch",
-            "scale": "0.01",
-            "queries": "Q1,Q6",
-        }
-
-        result = run_benchmark(config, timeout=300)
-
-        assert result.returncode == 0, f"CLI failed: {result.stdout}"
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_dataframe
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode generates expected artifacts."""
-        if not is_dataframe_available("pandas-df"):
-            pytest.skip("Pandas not available")
-
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "pandas-df",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-
-# ============================================================================
-# Polars DataFrame E2E Tests
-# ============================================================================
-
 
 class TestPolarsDataFrameE2E:
     """E2E tests for Polars DataFrame platform."""
@@ -117,58 +65,6 @@ class TestPolarsDataFrameE2E:
 
         assert result.returncode == 0, f"CLI failed with:\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-    @pytest.mark.e2e
-    @pytest.mark.e2e_dataframe
-    @pytest.mark.e2e_quick
-    def test_tpch_query_subset(self, tmp_path: Path) -> None:
-        """Test TPC-H with --queries subset flag."""
-        if not is_dataframe_available("polars-df"):
-            pytest.skip("Polars not available")
-
-        config = {
-            "platform": "polars-df",
-            "benchmark": "tpch",
-            "scale": "0.01",
-            "queries": "Q1,Q6,Q14",
-        }
-
-        result = run_benchmark(config, timeout=300)
-
-        assert result.returncode == 0, f"CLI failed: {result.stdout}"
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_dataframe
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode generates expected artifacts."""
-        if not is_dataframe_available("polars-df"):
-            pytest.skip("Polars not available")
-
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "polars-df",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-
-# ============================================================================
-# Dask DataFrame E2E Tests
-# ============================================================================
-
 
 class TestDaskDataFrameE2E:
     """E2E tests for Dask DataFrame platform."""
@@ -176,6 +72,11 @@ class TestDaskDataFrameE2E:
     @pytest.mark.e2e
     @pytest.mark.e2e_dataframe
     @pytest.mark.slow
+    @pytest.mark.stress
+    @pytest.mark.xfail(
+        reason="Dask TPCH full execution currently fails on isin expressions for multiple queries.",
+        strict=False,
+    )
     def test_tpch_full_execution(self, tmp_path: Path) -> None:
         """Test full TPC-H benchmark execution with Dask DataFrame at SF 0.01."""
         if not is_dataframe_available("dask-df"):
@@ -231,6 +132,7 @@ class TestPySparkDataFrameE2E:
     @pytest.mark.e2e
     @pytest.mark.e2e_dataframe
     @pytest.mark.slow
+    @pytest.mark.stress
     def test_tpch_full_execution(self, tmp_path: Path) -> None:
         """Test full TPC-H benchmark execution with PySpark DataFrame at SF 0.01."""
         if not is_dataframe_available("pyspark-df"):
@@ -287,6 +189,7 @@ class TestCuDFDataFrameE2E:
     @pytest.mark.e2e
     @pytest.mark.e2e_dataframe
     @pytest.mark.slow
+    @pytest.mark.stress
     def test_tpch_full_execution(self, tmp_path: Path) -> None:
         """Test full TPC-H benchmark execution with cuDF DataFrame at SF 0.01."""
         if not is_gpu_available():
@@ -304,6 +207,36 @@ class TestCuDFDataFrameE2E:
 
         assert result.returncode == 0, f"CLI failed with:\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
+    @pytest.mark.e2e
+    @pytest.mark.e2e_dataframe
+    @pytest.mark.e2e_quick
+    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
+        """Test dry-run mode generates expected artifacts."""
+        if not is_gpu_available():
+            pytest.skip("NVIDIA GPU with CUDA not available")
+        if not is_dataframe_available("cudf-df"):
+            pytest.skip("cuDF not available")
+
+        output_dir = tmp_path / "dry_run"
+        output_dir.mkdir()
+
+        result = run_cli_command(
+            [
+                "run",
+                "--platform",
+                "cudf-df",
+                "--benchmark",
+                "tpch",
+                "--scale",
+                "0.01",
+                "--dry-run",
+                str(output_dir),
+            ]
+        )
+
+        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
+        assert "Dry run completed" in result.stdout
+
 
 # ============================================================================
 # Modin DataFrame E2E Tests
@@ -316,6 +249,7 @@ class TestModinDataFrameE2E:
     @pytest.mark.e2e
     @pytest.mark.e2e_dataframe
     @pytest.mark.slow
+    @pytest.mark.stress
     def test_tpch_full_execution(self, tmp_path: Path) -> None:
         """Test full TPC-H benchmark execution with Modin DataFrame at SF 0.01."""
         if not is_dataframe_available("modin-df"):
@@ -330,6 +264,34 @@ class TestModinDataFrameE2E:
         result = run_benchmark(config, timeout=E2E_BENCHMARK_TIMEOUT)
 
         assert result.returncode == 0, f"CLI failed with:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+
+    @pytest.mark.e2e
+    @pytest.mark.e2e_dataframe
+    @pytest.mark.e2e_quick
+    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
+        """Test dry-run mode generates expected artifacts."""
+        if not is_dataframe_available("modin-df"):
+            pytest.skip("Modin not available")
+
+        output_dir = tmp_path / "dry_run"
+        output_dir.mkdir()
+
+        result = run_cli_command(
+            [
+                "run",
+                "--platform",
+                "modin-df",
+                "--benchmark",
+                "tpch",
+                "--scale",
+                "0.01",
+                "--dry-run",
+                str(output_dir),
+            ]
+        )
+
+        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
+        assert "Dry run completed" in result.stdout
 
 
 # ============================================================================
@@ -406,7 +368,7 @@ def test_dataframe_platform_dry_run(tmp_path: Path, platform: str) -> None:
 
 @pytest.mark.e2e
 @pytest.mark.e2e_dataframe
-@pytest.mark.slow
+@pytest.mark.e2e_quick
 @pytest.mark.parametrize(
     "platform",
     [

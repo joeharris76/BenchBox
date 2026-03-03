@@ -532,7 +532,7 @@ class TestNYCTaxiBenchmark:
     def test_init_validation(self, tmp_path: Path):
         from benchbox.core.nyctaxi.benchmark import NYCTaxiBenchmark
 
-        with pytest.raises(ValueError, match="scale_factor must be positive"):
+        with pytest.raises(ValueError, match="[Ss]cale.factor must be positive"):
             NYCTaxiBenchmark(scale_factor=-1, output_dir=tmp_path)
         with pytest.raises(ValueError, match="year must be"):
             NYCTaxiBenchmark(scale_factor=0.01, output_dir=tmp_path, year=1999)

@@ -19,66 +19,48 @@ class TestEMRServerlessAdapterInitialization:
 
     def test_missing_s3_staging_dir_raises_error(self):
         """Test error when s3_staging_dir is not provided."""
-        with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.aws import EMRServerlessAdapter
+        from benchbox.platforms.aws import EMRServerlessAdapter
 
-            with pytest.raises(ConfigurationError, match="s3_staging_dir"):
-                EMRServerlessAdapter(
-                    application_id="00f123",
-                    execution_role_arn="arn:aws:iam::123456789012:role/EMRRole",
-                )
+        with pytest.raises(ConfigurationError, match="s3_staging_dir"):
+            EMRServerlessAdapter(
+                application_id="00f123",
+                execution_role_arn="arn:aws:iam::123456789012:role/EMRRole",
+            )
 
     def test_missing_execution_role_raises_error(self):
         """Test error when execution_role_arn is not provided."""
-        with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.aws import EMRServerlessAdapter
+        from benchbox.platforms.aws import EMRServerlessAdapter
 
-            with pytest.raises(ConfigurationError, match="execution_role_arn"):
-                EMRServerlessAdapter(
-                    application_id="00f123",
-                    s3_staging_dir="s3://my-bucket/benchbox-data",
-                )
+        with pytest.raises(ConfigurationError, match="execution_role_arn"):
+            EMRServerlessAdapter(
+                application_id="00f123",
+                s3_staging_dir="s3://my-bucket/benchbox-data",
+            )
 
     def test_missing_application_id_without_create_raises_error(self):
         """Test error when application_id not provided and create_application=False."""
-        with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.aws import EMRServerlessAdapter
+        from benchbox.platforms.aws import EMRServerlessAdapter
 
-            with pytest.raises(ConfigurationError, match="application_id"):
-                EMRServerlessAdapter(
-                    s3_staging_dir="s3://my-bucket/benchbox-data",
-                    execution_role_arn="arn:aws:iam::123456789012:role/EMRRole",
-                )
+        with pytest.raises(ConfigurationError, match="application_id"):
+            EMRServerlessAdapter(
+                s3_staging_dir="s3://my-bucket/benchbox-data",
+                execution_role_arn="arn:aws:iam::123456789012:role/EMRRole",
+            )
 
     def test_invalid_s3_path_raises_error(self):
         """Test error when s3_staging_dir has invalid format."""
-        with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.aws import EMRServerlessAdapter
+        from benchbox.platforms.aws import EMRServerlessAdapter
 
-            with pytest.raises(ConfigurationError, match="Invalid S3"):
-                EMRServerlessAdapter(
-                    application_id="00f123",
-                    s3_staging_dir="/local/path",
-                    execution_role_arn="arn:aws:iam::123456789012:role/EMRRole",
-                )
+        with pytest.raises(ConfigurationError, match="Invalid S3"):
+            EMRServerlessAdapter(
+                application_id="00f123",
+                s3_staging_dir="/local/path",
+                execution_role_arn="arn:aws:iam::123456789012:role/EMRRole",
+            )
 
     def test_valid_configuration_with_application_id(self):
         """Test valid configuration with existing application ID."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -102,8 +84,6 @@ class TestEMRServerlessAdapterInitialization:
     def test_valid_configuration_with_create_application(self):
         """Test valid configuration with create_application=True."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -124,8 +104,6 @@ class TestEMRServerlessAdapterInitialization:
     def test_default_values(self):
         """Test default configuration values."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -151,8 +129,6 @@ class TestEMRServerlessAdapterPlatformInfo:
     def test_get_platform_info(self):
         """Test get_platform_info returns correct metadata."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -180,8 +156,6 @@ class TestEMRServerlessAdapterPlatformInfo:
     def test_get_dialect(self):
         """Test get_target_dialect returns spark."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -203,7 +177,6 @@ class TestEMRServerlessAdapterConnection:
     def test_create_connection_success(self):
         """Test successful connection to existing application."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.emr_serverless_adapter.boto3") as mock_boto3,
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
@@ -245,8 +218,6 @@ class TestEMRServerlessAdapterDataLoading:
         source_dir.mkdir()
 
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging_instance = MagicMock()
@@ -317,8 +288,6 @@ class TestEMRServerlessAdapterTuning:
     def test_apply_platform_optimizations(self):
         """Test apply_platform_optimizations returns empty list."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -337,8 +306,6 @@ class TestEMRServerlessAdapterTuning:
     def test_apply_primary_keys(self):
         """Test apply_primary_keys returns empty list."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -359,8 +326,6 @@ class TestEMRServerlessAdapterTuning:
     def test_configure_for_benchmark(self):
         """Test configure_for_benchmark sets benchmark type."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
             # SparkConfigOptimizer is now used from the mixin module
             patch("benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer") as mock_optimizer,
@@ -405,8 +370,6 @@ class TestEMRServerlessAdapterFromConfig:
     def test_from_config_basic(self):
         """Test from_config creates adapter with basic config."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -434,8 +397,6 @@ class TestEMRServerlessAdapterClose:
     def test_close_logs_metrics(self):
         """Test close logs resource usage metrics."""
         with (
-            patch("benchbox.platforms.aws.emr_serverless_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.emr_serverless_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.emr_serverless_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.aws.emr_serverless_adapter.logger") as mock_logger,
         ):

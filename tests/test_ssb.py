@@ -7,7 +7,6 @@ This implementation is derived from TPC Benchmark™ H (TPC-H) - Copyright © Tr
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -15,6 +14,8 @@ import pytest
 
 from benchbox import SSB
 from benchbox.core.ssb.benchmark import SSBBenchmark
+
+from .fixtures.benchmark_test_mixin import BenchmarkTestMixin
 
 
 @pytest.mark.ssb
@@ -122,7 +123,7 @@ class TestSSB:
         with pytest.raises(ValueError):
             ssb.get_query("Q1.4")  # Flight 1 only has 3 queries
 
-    def test_get_query(self, ssb: SSB) -> None:
+    def test_get_query_with_params(self, ssb: SSB) -> None:
         """Test that parameterized queries can be retrieved."""
         # Test with default random parameters
         param_query = ssb.get_query("Q1.1")
@@ -245,8 +246,15 @@ class TestSSB:
 
 
 @pytest.mark.ssb
-class TestSSBBenchmarkCoverage:
+class TestSSBBenchmarkCoverage(BenchmarkTestMixin):
     """Test SSBBenchmark class for better coverage of key methods."""
+
+    benchmark_class = SSBBenchmark
+    sample_query_id = "Q1.1"
+    sample_table = "lineorder"
+    sample_sql = "SELECT COUNT(*) FROM lineorder"
+    sample_csv_filename = "lineorder.csv"
+    sample_csv_content = "1|1|1|1|19920101|1|10|20|30|40|50|60|70|80|90|100\n"
 
     @pytest.fixture
     def ssb_benchmark(self, small_scale_factor: float, temp_dir: Path) -> SSBBenchmark:
@@ -259,41 +267,10 @@ class TestSSBBenchmarkCoverage:
             compression_type="none",
         )
 
-    def test_execute_query_coverage(self, ssb_benchmark: SSBBenchmark) -> None:
-        """Test execute_query method variations."""
-        mock_connection = Mock()
-        mock_cursor = Mock()
-        mock_cursor.fetchall.return_value = [("result1",), ("result2",)]
-        mock_connection.execute.return_value = mock_cursor
-
-        with patch.object(ssb_benchmark, "get_query") as mock_get_query:
-            mock_get_query.return_value = "SELECT COUNT(*) FROM lineorder"
-
-            result = ssb_benchmark.execute_query("Q1.1", mock_connection)
-
-            assert result == [("result1",), ("result2",)]
-            mock_connection.execute.assert_called_once()
-
-    def test_load_data_to_database_coverage(self, ssb_benchmark: SSBBenchmark) -> None:
-        """Test load_data_to_database with mock data."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            csv_file = Path(temp_dir) / "lineorder.csv"
-            csv_file.write_text("1|1|1|1|19920101|1|10|20|30|40|50|60|70|80|90|100\n")
-
-            ssb_benchmark.tables = {"lineorder": str(csv_file)}
-
-            mock_connection = Mock()
-            mock_connection.executescript = Mock()
-            mock_connection.executemany = Mock()
-            mock_connection.commit = Mock()
-
-            with patch.object(ssb_benchmark, "get_create_tables_sql") as mock_get_sql:
-                mock_get_sql.return_value = "CREATE TABLE lineorder (...);"
-
-                ssb_benchmark.load_data_to_database(mock_connection)
-
-                mock_connection.executescript.assert_called_once()
-                mock_connection.executemany.assert_called()
+    @pytest.fixture
+    def benchmark_instance(self, ssb_benchmark: SSBBenchmark) -> SSBBenchmark:
+        """Alias for the mixin's benchmark_instance fixture."""
+        return ssb_benchmark
 
     def test_run_benchmark_coverage(self, ssb_benchmark: SSBBenchmark) -> None:
         """Test run_benchmark with timing and error handling."""
@@ -309,21 +286,3 @@ class TestSSBBenchmarkCoverage:
                 assert result["benchmark"] == "Star Schema Benchmark"
                 # SSB returns query_results as a list, not queries as a dict
                 assert any(q["query_id"] == "Q1.1" for q in result["query_results"])
-
-    def test_error_handling_paths(self, ssb_benchmark: SSBBenchmark) -> None:
-        """Test error handling in key methods."""
-        # Test load_data_to_database without data
-        mock_connection = Mock()
-        with pytest.raises(ValueError, match="No data generated"):
-            ssb_benchmark.load_data_to_database(mock_connection)
-
-        # Test unsupported connection type in execute_query
-        mock_connection = Mock()
-        delattr(mock_connection, "execute")
-        delattr(mock_connection, "cursor")
-
-        with patch.object(ssb_benchmark, "get_query") as mock_get_query:
-            mock_get_query.return_value = "SELECT COUNT(*) FROM lineorder"
-
-            with pytest.raises(ValueError, match="Unsupported connection type"):
-                ssb_benchmark.execute_query("Q1.1", mock_connection)

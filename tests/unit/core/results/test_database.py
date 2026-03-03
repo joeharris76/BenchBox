@@ -25,6 +25,8 @@ from benchbox.core.results.models import (
     QueryExecution,
     SetupPhase,
 )
+from tests.conftest import make_benchmark_results
+from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 
 pytestmark = pytest.mark.fast
 
@@ -42,7 +44,7 @@ def create_test_result(
     platform_version: str | None = "1.0.0",
     total_cost: float | None = None,
 ) -> BenchmarkResults:
-    """Create a test BenchmarkResults object."""
+    """Result-database test defaults delegating to shared factory."""
     ts = timestamp or datetime.now(timezone.utc)
 
     execution_phases = None
@@ -84,19 +86,18 @@ def create_test_result(
     platform_info = {"platform_version": platform_version} if platform_version else {}
     cost_summary = {"total_cost": total_cost} if total_cost is not None else None
 
-    return BenchmarkResults(
+    return make_benchmark_results(
         benchmark_name=benchmark,
         platform=platform,
         scale_factor=scale_factor,
         execution_id=execution_id,
         timestamp=ts,
         duration_seconds=10.0,
-        total_queries=22 if include_queries else 22,
+        total_queries=22,
         successful_queries=22,
-        failed_queries=0,
+        validation_status=validation_status,
         geometric_mean_execution_time=geometric_mean_ms / 1000.0,
         power_at_size=power_at_size,
-        validation_status=validation_status,
         platform_info=platform_info,
         cost_summary=cost_summary,
         execution_phases=execution_phases,
@@ -748,23 +749,17 @@ class TestImportResults:
         results_dir.mkdir()
 
         # Create test result file (v2.0 schema)
-        result_data = {
-            "version": "2.0",
-            "run": {
-                "id": "import-test",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 800,
-            },
-            "benchmark": {"id": "tpc_h", "name": "TPC-H Benchmark", "scale_factor": 1.0},
-            "platform": {"name": "DuckDB"},
-            "summary": {
-                "queries": {"total": 22, "passed": 22, "failed": 0},
-                "timing": {"total_ms": 1000, "avg_ms": 50, "min_ms": 20, "max_ms": 100},
-                "tpc_metrics": {"geometric_mean_ms": 100.0, "power_at_size": 1000.0},
-            },
-            "queries": [{"id": "1", "ms": 50.0, "rows": 4}],
-        }
+        result_data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="tpc_h",
+            benchmark_name="TPC-H Benchmark",
+            platform="DuckDB",
+            execution_id="import-test",
+            timestamp="2025-01-01T10:00:00",
+            query_time_ms=800,
+            scale_factor=1.0,
+            queries=[{"id": "1", "ms": 50.0, "rows": 4}],
+        )
 
         with open(results_dir / "result1.json", "w") as f:
             json.dump(result_data, f)
@@ -786,22 +781,18 @@ class TestImportResults:
         results_dir.mkdir()
 
         # Create test result file (v2.0 schema)
-        result_data = {
-            "version": "2.0",
-            "run": {
-                "id": "duplicate-test",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 800,
-            },
-            "benchmark": {"id": "tpc_h", "name": "TPC-H", "scale_factor": 1.0},
-            "platform": {"name": "DuckDB"},
-            "summary": {
-                "queries": {"total": 22, "passed": 22, "failed": 0},
-                "timing": {"total_ms": 800, "avg_ms": 36.4, "min_ms": 10, "max_ms": 100},
-            },
-            "queries": [{"id": "1", "ms": 50.0, "rows": 4}],
-        }
+        result_data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="tpc_h",
+            benchmark_name="TPC-H",
+            platform="DuckDB",
+            execution_id="duplicate-test",
+            timestamp="2025-01-01T10:00:00",
+            query_time_ms=800,
+            scale_factor=1.0,
+            total_ms=800,
+            queries=[{"id": "1", "ms": 50.0, "rows": 4}],
+        )
 
         with open(results_dir / "result1.json", "w") as f:
             json.dump(result_data, f)

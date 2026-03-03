@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from benchbox.core.results.models import BenchmarkResults
 from benchbox.monitoring import (
     PerformanceHistory,
     PerformanceMonitor,
     PerformanceTracker,
     attach_snapshot_to_result,
 )
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
@@ -35,17 +35,15 @@ def temp_history_path() -> Generator[Path, None, None]:
             temp_path.unlink()
 
 
-def _make_result() -> BenchmarkResults:
-    return BenchmarkResults(
+def _make_result():
+    return make_benchmark_results(
         benchmark_name="dummy",
         platform="test",
         scale_factor=1.0,
         execution_id="exec-1",
-        timestamp=datetime.now(timezone.utc),
         duration_seconds=0.1,
         total_queries=1,
         successful_queries=1,
-        failed_queries=0,
     )
 
 

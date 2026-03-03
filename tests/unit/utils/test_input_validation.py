@@ -112,6 +112,9 @@ class TestValidateQueryId:
         assert validate_query_id("query-1") == "query-1"
         assert validate_query_id("query_1") == "query_1"
         assert validate_query_id(1) == "1"  # Integer conversion
+        # SSB uses dot-notation query IDs (Q1.1, Q3.4, etc.)
+        assert validate_query_id("Q1.1") == "Q1.1"
+        assert validate_query_id("Q3.4") == "Q3.4"
 
     def test_empty_query_id_raises(self):
         """Empty query IDs should raise ValidationError."""

@@ -70,6 +70,27 @@ class TestNormalizeQueryId:
         assert normalize_query_id("Q1.sql") == "1"
         assert normalize_query_id("query_12.txt") == "12"
 
+    def test_normalize_preserves_ssb_dot_notation(self) -> None:
+        """SSB query IDs use dot notation (Q1.1, Q3.4) and must not be truncated.
+
+        Bug: the old code did split(".", 1)[0] which collapsed Q3.1/Q3.2/Q3.3/Q3.4
+        all to "3", causing plan capture to only keep the last query's plan.
+        """
+        assert normalize_query_id("Q1.1") == "1.1"
+        assert normalize_query_id("Q1.2") == "1.2"
+        assert normalize_query_id("Q1.3") == "1.3"
+        assert normalize_query_id("Q2.1") == "2.1"
+        assert normalize_query_id("Q3.1") == "3.1"
+        assert normalize_query_id("Q3.2") == "3.2"
+        assert normalize_query_id("Q3.3") == "3.3"
+        assert normalize_query_id("Q3.4") == "3.4"
+        assert normalize_query_id("Q4.1") == "4.1"
+        assert normalize_query_id("Q4.2") == "4.2"
+        assert normalize_query_id("Q4.3") == "4.3"
+        # File extensions must still be stripped (alpha suffix only)
+        assert normalize_query_id("Q1.sql") == "1"
+        assert normalize_query_id("3.1.sql") == "3.1"
+
     def test_normalize_preserves_variant_suffix(self) -> None:
         """TPC-DS/TPC-H variant suffixes should remain distinct."""
         assert normalize_query_id("14a") == "14a"

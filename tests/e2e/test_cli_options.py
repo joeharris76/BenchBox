@@ -5,11 +5,31 @@ Tests validate that CLI options work correctly across different configurations.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from click.testing import CliRunner
 
-from tests.integration._cli_e2e_utils import run_cli_command
+from benchbox.cli.main import cli
+from tests.integration._cli_e2e_utils import run_cli_command as run_cli_subprocess_command
+
+_CLI_RUNNER = CliRunner()
+
+
+def run_cli_command(args: Sequence[str], *, use_subprocess: bool = False) -> SimpleNamespace:
+    """Run CLI in-process by default to avoid subprocess startup overhead.
+
+    Keep optional subprocess mode for parity checks when needed.
+    """
+    if use_subprocess:
+        result = run_cli_subprocess_command(list(args))
+        return SimpleNamespace(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+
+    result = _CLI_RUNNER.invoke(cli, list(args), env={"BENCHBOX_NON_INTERACTIVE": "true"})
+    return SimpleNamespace(returncode=result.exit_code, stdout=result.output, stderr="")
+
 
 # ============================================================================
 # Benchmark Selection Tests
@@ -432,14 +452,8 @@ class TestCompression:
 
     @pytest.mark.e2e
     @pytest.mark.e2e_quick
-    @pytest.mark.requires_zstd
     def test_compression_zstd(self, tmp_path: Path) -> None:
         """Test --compression zstd option."""
-        try:
-            import zstandard  # noqa: F401
-        except ImportError:
-            pytest.skip("zstandard not installed")
-
         output_dir = tmp_path / "dry_run"
         output_dir.mkdir()
 

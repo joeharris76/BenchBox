@@ -33,7 +33,6 @@ class TestCompressionMixin:
         assert generator.compression_type == "none"  # Default is "none"
         assert generator.compression_level is None
 
-    @pytest.mark.requires_zstd
     def test_init_compression_enabled(self):
         """Test initialization with compression enabled auto-defaults to zstd."""
         generator = MockDataGenerator(compress_data=True)
@@ -84,7 +83,6 @@ class TestCompressionMixin:
         generator = MockDataGenerator(compress_data=True, compression_type="gzip")
         assert generator.get_compressed_filename("test.txt") == "test.txt.gz"
 
-    @pytest.mark.requires_zstd
     def test_should_use_compression(self):
         """Test compression check method."""
         # Default is no compression

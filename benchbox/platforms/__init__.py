@@ -374,6 +374,7 @@ def get_platform_adapter(platform_name: str, **config) -> PlatformAdapter:
     driver_version_resolved = config.pop("driver_version_resolved", None)
     driver_version_actual = config.pop("driver_version_actual", None)
     driver_auto_install = bool(config.pop("driver_auto_install", False))
+    driver_auto_install_used = bool(config.pop("driver_auto_install_used", False))
 
     # Get platform info for driver metadata (already resolved to canonical name)
     platform_info = PlatformRegistry.get_platform_info(canonical_name)
@@ -389,7 +390,7 @@ def get_platform_adapter(platform_name: str, **config) -> PlatformAdapter:
             requested=explicit_requested_version,
             resolved=driver_version_resolved,
             actual=driver_version_actual,
-            auto_install_used=driver_auto_install,
+            auto_install_used=driver_auto_install_used,
             runtime_strategy=config.get("driver_runtime_strategy"),
             runtime_path=config.get("driver_runtime_path"),
             runtime_python_executable=config.get("driver_runtime_python_executable"),
@@ -418,6 +419,7 @@ def get_platform_adapter(platform_name: str, **config) -> PlatformAdapter:
     config.setdefault("driver_runtime_path", resolution.runtime_path)
     config.setdefault("driver_runtime_python_executable", resolution.runtime_python_executable)
     config.setdefault("driver_auto_install", resolution.auto_install_used or driver_auto_install)
+    config.setdefault("driver_auto_install_used", resolution.auto_install_used)
 
     # Use from_config() if adapter supports config-aware initialization (e.g., Databricks, Snowflake)
     # This enables proper schema naming based on benchmark/scale/tuning configuration
@@ -435,7 +437,7 @@ def get_platform_adapter(platform_name: str, **config) -> PlatformAdapter:
     adapter_instance.driver_runtime_strategy = resolution.runtime_strategy
     adapter_instance.driver_runtime_path = resolution.runtime_path
     adapter_instance.driver_runtime_python_executable = resolution.runtime_python_executable
-    adapter_instance.driver_auto_install_used = resolution.auto_install_used or driver_auto_install
+    adapter_instance.driver_auto_install_used = resolution.auto_install_used
 
     return adapter_instance
 

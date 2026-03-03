@@ -7,33 +7,32 @@ from unittest.mock import patch
 
 import pytest
 
-from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.visualization.post_run_summary import (
     PostRunSummary,
     _extract_environment,
     _should_use_horizontal,
     generate_post_run_summary,
 )
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
 
-def _make_result(query_results: list | None = None, **kwargs) -> BenchmarkResults:
-    """Create a minimal BenchmarkResults for testing."""
+def _make_result(query_results: list | None = None, **kwargs):
+    """Post-run summary test defaults delegating to shared factory."""
+    qr = query_results or []
     defaults = {
         "benchmark_name": "TPC-H",
         "platform": "duckdb",
-        "scale_factor": 0.01,
         "execution_id": "test123",
         "timestamp": datetime(2026, 1, 1),
         "duration_seconds": 10.0,
-        "total_queries": len(query_results) if query_results else 0,
-        "successful_queries": len([q for q in (query_results or []) if q.get("status") == "SUCCESS"]),
-        "failed_queries": 0,
-        "query_results": query_results or [],
+        "total_queries": len(qr),
+        "successful_queries": len([q for q in qr if q.get("status") == "SUCCESS"]),
+        "query_results": qr,
     }
     defaults.update(kwargs)
-    return BenchmarkResults(**defaults)
+    return make_benchmark_results(**defaults)
 
 
 def _make_query(query_id: str, time_ms: float, status: str = "SUCCESS") -> dict:

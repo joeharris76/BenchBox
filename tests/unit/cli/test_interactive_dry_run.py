@@ -8,6 +8,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from io import StringIO
 from unittest.mock import patch
 
+import pytest
 from rich.console import Console
 
 from benchbox.cli.benchmarks import (
@@ -424,68 +425,25 @@ class TestDisplayInteractivePreview:
 class TestPromptPhases:
     """Tests for prompt_phases function."""
 
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_quick_test_preset(self, mock_ask):
-        """Test selecting Quick Test preset."""
-        mock_ask.return_value = "1"
-        phases = prompt_phases()
-        assert phases == ["power"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_full_benchmark_preset(self, mock_ask):
-        """Test selecting Full Benchmark preset."""
-        mock_ask.return_value = "2"
-        phases = prompt_phases()
-        assert phases == ["generate", "load", "power"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_data_generation_only_preset(self, mock_ask):
-        """Test selecting Data Generation Only preset."""
-        mock_ask.return_value = "3"
-        phases = prompt_phases()
-        assert phases == ["generate"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_load_only_preset(self, mock_ask):
-        """Test selecting Load Only preset."""
-        mock_ask.return_value = "4"
-        phases = prompt_phases()
-        assert phases == ["load"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_all_phases_preset(self, mock_ask):
-        """Test selecting All Phases preset."""
-        mock_ask.return_value = "5"
-        phases = prompt_phases()
-        assert phases == ["generate", "load", "warmup", "power", "throughput", "maintenance"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_custom_selection_with_numbers(self, mock_ask):
-        """Test custom selection using numbers."""
-        mock_ask.side_effect = ["6", "1,2,4"]  # Custom, then selection
-        phases = prompt_phases()
-        assert phases == ["generate", "load", "power"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_custom_selection_with_names(self, mock_ask):
-        """Test custom selection using phase names."""
-        mock_ask.side_effect = ["6", "generate,power,throughput"]
-        phases = prompt_phases()
-        assert phases == ["generate", "power", "throughput"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_custom_selection_removes_duplicates(self, mock_ask):
-        """Test that duplicate phases are removed."""
-        mock_ask.side_effect = ["6", "power,power,load,power"]
-        phases = prompt_phases()
-        assert phases == ["power", "load"]
-
-    @patch("benchbox.cli.benchmarks.Prompt.ask")
-    def test_empty_custom_selection_defaults_to_power(self, mock_ask):
-        """Test that empty custom selection defaults to power."""
-        mock_ask.side_effect = ["6", ""]
-        phases = prompt_phases()
-        assert phases == ["power"]
+    @pytest.mark.parametrize(
+        ("responses", "expected"),
+        [
+            (["1"], ["power"]),
+            (["2"], ["generate", "load", "power"]),
+            (["3"], ["generate"]),
+            (["4"], ["load"]),
+            (["5"], ["generate", "load", "warmup", "power", "throughput", "maintenance"]),
+            (["6", "1,2,4"], ["generate", "load", "power"]),
+            (["6", "generate,power,throughput"], ["generate", "power", "throughput"]),
+            (["6", "power,power,load,power"], ["power", "load"]),
+            (["6", ""], ["power"]),
+        ],
+    )
+    def test_prompt_phases_mappings(self, monkeypatch, responses, expected):
+        """Test preset and custom phase mappings."""
+        response_iter = iter(responses)
+        monkeypatch.setattr("benchbox.cli.benchmarks.Prompt.ask", lambda *_args, **_kwargs: next(response_iter))
+        assert prompt_phases() == expected
 
 
 class TestPromptQuerySubset:

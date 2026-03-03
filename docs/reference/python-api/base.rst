@@ -18,6 +18,26 @@ Every benchmark in BenchBox extends :class:`BaseBenchmark`, which provides a sta
 
 This abstraction ensures consistent behavior across all benchmark implementations (TPC-H, TPC-DS, ClickBench, etc.).
 
+Runtime Contract Notes
+----------------------
+
+The lifecycle runner expects loader-resolved benchmarks to provide a shared runtime contract:
+
+- ``generate_data``
+- ``get_queries`` / ``get_query``
+- ``create_enhanced_benchmark_result``
+- ``create_minimal_benchmark_result``
+- ``validate_preflight`` / ``validate_manifest`` / ``validate_loaded_data``
+
+Compatibility boundaries:
+
+- Public benchmark implementations should inherit ``benchbox.base.BaseBenchmark``.
+- ``benchbox.core.base_benchmark.BaseBenchmark`` remains temporarily for internal compatibility and delegates result
+  construction through the same shared factory path.
+- ``create_enhanced_benchmark_result()`` preserves compatibility with legacy kwargs such as
+  ``table_statistics`` and ``data_loading_time`` while exporting canonical per-table load timing as
+  ``table_statistics.<table>.load_time_ms`` when available.
+
 Quick Example
 -------------
 

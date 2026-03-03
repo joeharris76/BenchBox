@@ -66,10 +66,13 @@ jobs:
           fail_ci_if_error: false  # Don't fail CI if Codecov upload fails (token may not be configured)
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  # Security audit - non-blocking due to false positives
+  # Security audit
   security:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    env:
+      # Comma-separated GHSA/CVE IDs for temporarily accepted false positives.
+      # Keep empty unless triage is documented in the TODO item.
+      PIP_AUDIT_IGNORE_VULNS: ""
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -88,8 +91,12 @@ jobs:
 
       - name: Run security audit
         run: |
-          uv tool install pip-audit
-          uvx pip-audit
+          if [ -n "${PIP_AUDIT_IGNORE_VULNS}" ]; then
+            IGNORE_ARGS=$(printf '%s' "${PIP_AUDIT_IGNORE_VULNS}" | tr ',' '\n' | sed '/^$/d;s/^/--ignore-vuln /' | tr '\n' ' ')
+            uvx pip-audit ${IGNORE_ARGS}
+          else
+            uvx pip-audit
+          fi
 
   # Quick integration smoke tests - runs on ALL PRs
   integration-smoke:
@@ -115,6 +122,31 @@ jobs:
           # Run platform smoke tests and fast integration tests (~46 tests)
           # These don't require external credentials and catch common issues
           uv run -- python -m pytest tests/integration -m "platform_smoke or (integration and fast)" --tb=short
+
+  # Required lane for optional table-format dependencies.
+  # Without this, delta/iceberg integration assertions can be silently skipped.
+  integration-table-formats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv sync --group dev
+
+      - name: Run table-format integration tests
+        run: |
+          uv run -- python -m pytest -q tests/integration/core/data_organization/test_presorted_generation.py -m "requires_table_formats" --tb=short
 
   # Full integration test suite - runs on push to main or with label
   integration:

@@ -19,6 +19,7 @@ from benchbox.core.constants import (
 from benchbox.core.results.driver_metadata import apply_driver_metadata
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, RunConfig, SystemProfile
+from benchbox.utils.clock import elapsed_seconds, mono_time
 from benchbox.utils.printing import quiet_console
 
 # NOTE:
@@ -222,27 +223,29 @@ class BenchmarkExecutionStage(ExecutionStage):
         if context.benchmark_instance is None:
             raise RuntimeError("Benchmark instance is required for data-only execution")
 
+        datagen_start = mono_time()
         data_artifacts = context.benchmark_instance.generate_data()
+        datagen_duration = elapsed_seconds(datagen_start)
         artifact_list = self._normalize_artifacts(data_artifacts)
-
-        phases = {
-            "data_generation": {
-                "status": "COMPLETED",
-                "artifacts_generated": len(artifact_list),
-            }
+        datagen_phase = {
+            "status": "COMPLETED",
+            "duration_ms": int(datagen_duration * 1000),
+            "artifacts_generated": len(artifact_list),
         }
+
+        phases = {"data_generation": datagen_phase}
 
         execution_metadata = {
             "mode": "datagen",
             "generated_artifacts": artifact_list,
             "benchmark_id": context.benchmark_config.name,
-            "phase_status": {"data_generation": {"status": "COMPLETED"}},
+            "phase_status": {"data_generation": dict(datagen_phase)},
         }
 
         result = context.benchmark_instance.create_enhanced_benchmark_result(
             platform="data_only",
             query_results=[],
-            duration_seconds=0.0,
+            duration_seconds=datagen_duration,
             phases=phases,
             execution_metadata=execution_metadata,
             validation_status="PASSED",

@@ -29,7 +29,6 @@ def _make_system_profile() -> SystemProfile:
     )
 
 
-@pytest.mark.requires_zstd
 def test_joinorder_benchmark_propagates_compression(tmp_path) -> None:
     """JoinOrderBenchmark should respect compression kwargs and pass them to the generator."""
 
@@ -72,7 +71,6 @@ def test_joinorder_benchmark_propagates_compression_gzip(tmp_path) -> None:
     assert generator.compression_level == 6
 
 
-@pytest.mark.requires_zstd
 def test_get_benchmark_instance_handles_joinorder_compression() -> None:
     """Loader should instantiate JoinOrderBenchmark with compression and force_regenerate options."""
 

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     import sqlglot
 
     from benchbox.core.results.models import BenchmarkResults
+    from benchbox.core.validation import ValidationResult
 else:
     try:
         import sqlglot
@@ -593,6 +594,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
         phases: Optional[dict[str, dict[str, Any]]] = None,
         resource_utilization: Optional[dict[str, Any]] = None,
         performance_characteristics: Optional[dict[str, Any]] = None,
+        duration_seconds: Optional[float] = None,
         **kwargs: Any,
     ) -> "BenchmarkResults":
         """Create a BenchmarkResults object with standardized fields.
@@ -607,6 +609,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
             phases: Optional phase tracking information
             resource_utilization: Optional resource usage metrics
             performance_characteristics: Optional performance analysis
+            duration_seconds: Optional explicit total duration override in seconds
             **kwargs: Additional fields to override defaults
 
         Returns:
@@ -621,34 +624,139 @@ class BaseBenchmark(VerbosityMixin, ABC):
                 phases=phases,
                 resource_utilization=resource_utilization,
                 performance_characteristics=performance_characteristics,
+                duration_seconds=duration_seconds,
                 **kwargs,
             )
 
-        # Fallback implementation for wrapper class
-        from benchbox.core.results.builder import (
-            normalize_benchmark_id,
+        # Fallback implementation for wrapper class delegates to shared result factory.
+        from benchbox.core.results.result_factory import build_enhanced_benchmark_result
+
+        result = build_enhanced_benchmark_result(
+            benchmark=self,
+            platform=platform,
+            query_results=query_results,
+            execution_metadata=execution_metadata,
+            phases=phases,
+            resource_utilization=resource_utilization,
+            performance_characteristics=performance_characteristics,
+            duration_seconds=duration_seconds,
+            **kwargs,
         )
-        from benchbox.core.results.models import ExecutionPhases
-        from benchbox.core.results.query_normalizer import normalize_query_result
-
-        execution_metadata = execution_metadata or {}
-        builder = self._create_result_builder(platform, execution_metadata, normalize_benchmark_id, **kwargs)
-
-        self._populate_builder(builder, execution_metadata, query_results, normalize_query_result, **kwargs)
-
-        self._apply_phases_to_builder(builder, phases, ExecutionPhases)
-
-        if performance_characteristics is not None:
-            builder.add_execution_metadata("performance_characteristics", performance_characteristics)
-
-        if resource_utilization is not None:
-            builder.add_execution_metadata("resource_utilization", resource_utilization)
-
-        result = builder.build()
-
         self._attach_performance_snapshot(result, performance_characteristics, **kwargs)
-
         return result
+
+    def create_minimal_benchmark_result(
+        self,
+        *,
+        validation_status: str,
+        validation_details: Optional[dict[str, Any]] = None,
+        duration_seconds: float = 0.0,
+        platform: str = "unknown",
+        execution_metadata: Optional[dict[str, Any]] = None,
+        system_profile: Optional[dict[str, Any]] = None,
+        phases: Optional[dict[str, dict[str, Any]]] = None,
+        **overrides: Any,
+    ) -> "BenchmarkResults":
+        """Create a minimal BenchmarkResults instance for error and interrupt paths."""
+
+        metadata: dict[str, Any] = {
+            "result_type": "minimal",
+            "status": validation_status,
+        }
+        base_identifier = str(getattr(self, "name", self.benchmark_name))
+        metadata.setdefault(
+            "benchmark_id",
+            base_identifier.lower().replace(" ", "_").replace("-", "_"),
+        )
+        if execution_metadata:
+            metadata.update(execution_metadata)
+
+        result = self.create_enhanced_benchmark_result(
+            platform=platform,
+            query_results=[],
+            execution_metadata=metadata,
+            phases=phases,
+            duration_seconds=duration_seconds,
+            validation_status=validation_status,
+            validation_details=validation_details or {},
+            system_profile=system_profile or {},
+            **overrides,
+        )
+        result._benchmark_id_override = metadata["benchmark_id"]
+        return result
+
+    # ------------------------------------------------------------------
+    # Validation helpers (core-facing)
+    # ------------------------------------------------------------------
+
+    def _resolve_output_dir(self, output_dir: Optional[Union[str, Path]] = None) -> Union[Path, Any]:
+        """Resolve and cache the benchmark output directory handler."""
+
+        candidate = output_dir if output_dir is not None else getattr(self, "output_dir", None)
+        if candidate is None:
+            raise RuntimeError(
+                "Benchmark output directory is not configured. Set 'benchmark.output_dir' or pass output_root to the lifecycle runner."
+            )
+
+        handler = create_path_handler(candidate)
+        self.output_dir = handler
+        return handler
+
+    def validate_preflight(
+        self,
+        *,
+        output_dir: Optional[Union[str, Path]] = None,
+        benchmark_name: Optional[str] = None,
+    ) -> "ValidationResult":
+        """Run preflight validation for this benchmark."""
+
+        from benchbox.core.validation import DataValidationEngine
+
+        resolved_dir = self._resolve_output_dir(output_dir)
+        engine = DataValidationEngine()
+        benchmark_id = (benchmark_name or self._get_benchmark_name()).lower()
+        return engine.validate_preflight_conditions(benchmark_id, self.scale_factor, resolved_dir)
+
+    def validate_manifest(
+        self,
+        *,
+        manifest_path: Optional[Union[str, Path]] = None,
+        benchmark_name: Optional[str] = None,
+    ) -> "ValidationResult":
+        """Validate generated manifest for this benchmark."""
+
+        from benchbox.core.validation import DataValidationEngine, ValidationResult as CoreValidationResult
+
+        resolved_dir = self._resolve_output_dir()
+        manifest_candidate = manifest_path
+        if manifest_candidate is None and hasattr(resolved_dir, "joinpath"):
+            manifest_candidate = resolved_dir.joinpath("_datagen_manifest.json")
+
+        if manifest_candidate is None:
+            return CoreValidationResult(
+                is_valid=False,
+                errors=["Manifest path is not available"],
+                warnings=[],
+                details={"benchmark": (benchmark_name or self._get_benchmark_name())},
+            )
+
+        engine = DataValidationEngine()
+        manifest_path_obj = Path(manifest_candidate) if isinstance(manifest_candidate, str) else manifest_candidate
+        return engine.validate_generated_data(manifest_path_obj)
+
+    def validate_loaded_data(
+        self,
+        connection: Any,
+        *,
+        benchmark_name: Optional[str] = None,
+    ) -> "ValidationResult":
+        """Validate post-load database state for this benchmark."""
+
+        from benchbox.core.validation import DatabaseValidationEngine
+
+        engine = DatabaseValidationEngine()
+        benchmark_id = (benchmark_name or self._get_benchmark_name()).lower()
+        return engine.validate_loaded_data(connection, benchmark_id, self.scale_factor)
 
     def _create_result_builder(
         self,
@@ -716,6 +824,7 @@ class BaseBenchmark(VerbosityMixin, ABC):
         execution_metadata: dict[str, Any],
         query_results: list[dict[str, Any]],
         normalize_query_result: Any,
+        duration_seconds: Optional[float] = None,
         **kwargs: Any,
     ) -> None:
         """Populate builder with query results, metadata, and ancillary config."""
@@ -728,6 +837,8 @@ class BaseBenchmark(VerbosityMixin, ABC):
 
         if kwargs.get("data_loading_time"):
             builder.set_loading_time(float(kwargs.get("data_loading_time", 0.0)) * 1000)
+        if duration_seconds is not None:
+            builder.set_total_duration(duration_seconds)
 
         builder.set_execution_metadata(execution_metadata)
         builder.set_validation_status(kwargs.get("validation_status", "UNKNOWN"), kwargs.get("validation_details", {}))
@@ -751,10 +862,12 @@ class BaseBenchmark(VerbosityMixin, ABC):
         if isinstance(phases, dict):
             for phase_name, phase_data in phases.items():
                 if isinstance(phase_data, dict):
+                    extra = {k: v for k, v in phase_data.items() if k not in ("status", "duration_ms")}
                     builder.set_phase_status(
                         phase_name,
                         phase_data.get("status", "NOT_RUN"),
                         phase_data.get("duration_ms"),
+                        **extra,
                     )
 
     def _attach_performance_snapshot(

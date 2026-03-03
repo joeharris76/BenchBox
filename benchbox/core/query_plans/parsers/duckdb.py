@@ -178,14 +178,22 @@ class DuckDBQueryPlanParser(QueryPlanParser):
         # Parse the tree recursively
         logical_root = self._parse_json_node(root_node)
 
-        # Extract cost estimates from timing info
+        # Extract cost estimates from timing info.
+        # EXPLAIN (FORMAT JSON) uses 'timing'/'cardinality'; EXPLAIN (ANALYZE, FORMAT JSON) uses 'latency'/'rows_returned'.
         estimated_cost = None
         estimated_rows = None
         if "timing" in data:
             estimated_cost = data["timing"]
+        elif data.get("latency"):
+            estimated_cost = data["latency"]
         if "cardinality" in data:
             try:
                 estimated_rows = int(data["cardinality"])
+            except (ValueError, TypeError):
+                pass
+        elif "rows_returned" in data:
+            try:
+                estimated_rows = int(data["rows_returned"])
             except (ValueError, TypeError):
                 pass
 
@@ -205,19 +213,25 @@ class DuckDBQueryPlanParser(QueryPlanParser):
         - Direct operator: {"name": "SEQ_SCAN", ...}
         - Wrapped in QUERY_PLAN: {"name": "QUERY_PLAN", "children": [...]}
         - Nested structure: {"children": [{"name": "QUERY_PLAN", ...}]}
+        - EXPLAIN (ANALYZE, FORMAT JSON): {"operator_type": "EXPLAIN_ANALYZE", "children": [...]}
         """
-        wrapper_names = ("QUERY_PLAN", "RESULT", "EXPLAIN", "QUERY")
+        # Wrapper nodes to skip through (not real operators).
+        # EXPLAIN_ANALYZE is the root wrapper injected by EXPLAIN (ANALYZE, FORMAT JSON).
+        wrapper_names = ("QUERY_PLAN", "RESULT", "EXPLAIN", "QUERY", "EXPLAIN_ANALYZE")
 
-        # If this node has a name that's a real operator (not wrapper), use it
-        if "name" in data:
-            name = data["name"].upper()
+        # Support both EXPLAIN FORMAT JSON ('name' key) and EXPLAIN (ANALYZE, FORMAT JSON) ('operator_type' key)
+        node_name = data.get("name") or data.get("operator_type", "")
+
+        if node_name:
+            name = node_name.upper().strip()
             if name not in wrapper_names:
+                # This is an actual operator node
                 return data
-            # This is a wrapper node, look at its children
+            # This is a wrapper node, descend into its first child
             if "children" in data and data["children"]:
                 return self._find_plan_root_in_json(data["children"][0])
 
-        # No name field but has children - look at children
+        # No name/operator_type field (e.g. root stats object) — look at children
         if "children" in data and data["children"]:
             return self._find_plan_root_in_json(data["children"][0])
 
@@ -234,7 +248,11 @@ class DuckDBQueryPlanParser(QueryPlanParser):
         Returns:
             LogicalOperator instance
         """
-        operator_name = node.get("name", "UNKNOWN")
+        # EXPLAIN (ANALYZE, FORMAT JSON) uses operator_name/operator_type; EXPLAIN (FORMAT JSON) uses name.
+        # operator_name (e.g. "SEQ_SCAN ") is preferred over operator_type (e.g. "TABLE_SCAN") for
+        # harmonization because it matches the physical operator names expected by _harmonize_duckdb_operator.
+        raw_name = node.get("operator_name") or node.get("name") or node.get("operator_type", "UNKNOWN")
+        operator_name = raw_name.strip()
         operator_type = self._harmonize_duckdb_operator(operator_name)
 
         # Parse children recursively
@@ -244,7 +262,9 @@ class DuckDBQueryPlanParser(QueryPlanParser):
 
         # Extract operator-specific information
         kwargs: dict[str, Any] = {}
-        extra_info = node.get("extra_info", "")
+        raw_extra = node.get("extra_info", "")
+        # DuckDB returns extra_info as a dict in FORMAT JSON responses; normalise to string
+        extra_info = raw_extra if isinstance(raw_extra, str) else json.dumps(raw_extra)
 
         if operator_type == LogicalOperatorType.SCAN:
             # Try to extract table name from extra_info
@@ -269,12 +289,18 @@ class DuckDBQueryPlanParser(QueryPlanParser):
             if extra_info:
                 kwargs["sort_keys"] = [{"expr": extra_info, "direction": "ASC"}]
 
-        # Create physical operator with DuckDB-specific details
+        # Create physical operator with DuckDB-specific details.
+        # EXPLAIN (ANALYZE, FORMAT JSON) uses operator_timing/operator_cardinality;
+        # EXPLAIN (FORMAT JSON) uses timing/cardinality.
+        # Use explicit None-check (not falsy `or`) so that 0.0 timing and 0-row
+        # cardinality are preserved rather than silently replaced by None.
+        _timing = node.get("timing")
+        _cardinality = node.get("cardinality")
         physical_op = self._create_physical_operator(
             operator_name,
             properties={
-                "timing": node.get("timing"),
-                "cardinality": node.get("cardinality"),
+                "timing": _timing if _timing is not None else node.get("operator_timing"),
+                "cardinality": _cardinality if _cardinality is not None else node.get("operator_cardinality"),
             },
             platform_metadata={"extra_info": extra_info} if extra_info else {},
         )
@@ -287,14 +313,25 @@ class DuckDBQueryPlanParser(QueryPlanParser):
         )
 
     def _extract_table_from_extra_info(self, extra_info: str) -> str | None:
-        """Extract table name from extra_info field."""
+        """Extract table name from extra_info field.
+
+        Handles both string format (EXPLAIN FORMAT JSON) and JSON-encoded dict format
+        (EXPLAIN (ANALYZE, FORMAT JSON) uses {"Table": "tablename", ...}).
+        """
         if not extra_info:
             return None
-        # Table name is often the first line or a simple identifier
+        # EXPLAIN (ANALYZE, FORMAT JSON) encodes extra_info as a JSON dict with a "Table" key
+        if extra_info.startswith("{"):
+            try:
+                parsed = json.loads(extra_info)
+                if isinstance(parsed, dict) and "Table" in parsed:
+                    return str(parsed["Table"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # EXPLAIN (FORMAT JSON): table name is typically the first bare identifier line
         lines = extra_info.strip().split("\n")
         for line in lines:
             line = line.strip()
-            # Match table name pattern
             if line and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", line):
                 return line
         return None

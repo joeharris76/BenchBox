@@ -165,6 +165,25 @@ def test_force_regenerate_ignores_manifest(tmp_path: Path, benchmark_config: Ben
     dummy.generate_data.assert_called_once()
 
 
+def test_force_regenerate_overrides_populated_tables(tmp_path: Path, benchmark_config: BenchmarkConfig):
+    """force_regenerate should regenerate even when benchmark.tables is already populated."""
+    _write_manifest(tmp_path, table_names=["customer"])
+    benchmark_config.options = {"force_regenerate": True}
+
+    class DummyBenchmark:
+        def __init__(self) -> None:
+            self.output_dir = tmp_path
+            self.tables = {"customer": ["customer.dat"]}  # Pre-populated
+            self.generate_data = Mock()
+
+    dummy = DummyBenchmark()
+
+    result = _ensure_data_generated(dummy, benchmark_config)
+
+    assert result is True, "Expected True when force regenerating with pre-populated tables"
+    dummy.generate_data.assert_called_once()
+
+
 def test_invalid_manifest_regenerates(tmp_path: Path, benchmark_config: BenchmarkConfig):
     manifest = _write_manifest(tmp_path, table_names=["orders"])
     # Corrupt manifest by altering file size expectation

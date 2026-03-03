@@ -79,6 +79,7 @@ DRIVER_METADATA_KEYS = (
     "driver_runtime_strategy",
     "driver_runtime_path",
     "driver_runtime_python_executable",
+    "driver_auto_install_used",
 )
 ENGINE_VERSION_KEYS = (
     "engine_version",

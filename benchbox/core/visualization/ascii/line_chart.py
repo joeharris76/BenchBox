@@ -9,7 +9,14 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions, ColorMode
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    TRUNCATION_MARKER,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    ColorMode,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -68,6 +75,7 @@ class ASCIILineChart(ASCIIChartBase):
         self.x_label = x_label
         self.y_label = y_label
         self.show_trend = show_trend
+        self._y_capped = False
 
     def render(self) -> str:
         """Render the line chart as a string."""
@@ -100,6 +108,13 @@ class ASCIILineChart(ASCIIChartBase):
         # Find data bounds
         all_y = [p.y for p in self.points]
         y_min, y_max = min(all_y), max(all_y)
+
+        # Cap y_max at P95×2 so one spike doesn't compress all series
+        if len(all_y) >= 5:
+            p95_y = robust_p95(all_y)
+            if p95_y > 0 and y_max > p95_y * 3:
+                y_max = p95_y * 2
+                self._y_capped = True
 
         if is_numeric_x:
             all_x = [float(p.x) for p in self.points]  # type: ignore
@@ -280,6 +295,9 @@ class ASCIILineChart(ASCIIChartBase):
                 else:
                     marker_colored = f"─{marker}─"
                 lines.append(f"  {marker_colored} {series_name}")
+
+        if self._y_capped:
+            lines.append(f"  {TRUNCATION_MARKER} Y-axis capped (outlier values clipped to top)")
 
         return "\n".join(lines)
 

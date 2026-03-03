@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pytest
 
-from benchbox.core.results.models import BenchmarkResults, QueryExecution
+from benchbox.core.results.models import QueryExecution
 from benchbox.core.results.query_plan_models import (
     JoinType,
     LogicalOperator,
@@ -22,6 +22,7 @@ from benchbox.core.results.query_plan_models import (
     QueryPlanDAG,
 )
 from benchbox.core.results.schema import build_plans_payload, build_result_payload
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
@@ -111,16 +112,14 @@ class TestQueryPlanInBenchmarkResults:
 
     def test_benchmark_results_without_plans(self) -> None:
         """Test BenchmarkResults without plans (backward compat)."""
-        results = BenchmarkResults(
+        results = make_benchmark_results(
             benchmark_name="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_001",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
         )
 
         assert results.query_plans_captured == 0
@@ -128,16 +127,14 @@ class TestQueryPlanInBenchmarkResults:
 
     def test_benchmark_results_with_plan_statistics(self) -> None:
         """Test BenchmarkResults with plan capture statistics."""
-        results = BenchmarkResults(
+        results = make_benchmark_results(
             benchmark_name="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_002",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=22,
             successful_queries=22,
-            failed_queries=0,
             query_plans_captured=15,  # Captured plans for 15 queries
         )
 
@@ -145,16 +142,14 @@ class TestQueryPlanInBenchmarkResults:
 
     def test_benchmark_results_with_comparison_summary(self) -> None:
         """Test BenchmarkResults with plan comparison summary."""
-        results = BenchmarkResults(
+        results = make_benchmark_results(
             benchmark_name="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_003",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=22,
             successful_queries=22,
-            failed_queries=0,
             query_plans_captured=22,
             plan_comparison_summary={
                 "baseline_run": "run_001",
@@ -181,9 +176,9 @@ class TestSchemaV2ExportWithPlans:
 
     def test_schema_v2_export_without_plans(self) -> None:
         """Test schema v2.0 export with no query plans."""
-        results = BenchmarkResults(
+        results = make_benchmark_results(
+            benchmark_id="tpch",
             benchmark_name="tpch",
-            _benchmark_id_override="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_004",
@@ -191,7 +186,6 @@ class TestSchemaV2ExportWithPlans:
             duration_seconds=10.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
             query_results=[
                 {
                     "query_id": "q01",
@@ -212,9 +206,9 @@ class TestSchemaV2ExportWithPlans:
 
     def test_schema_v2_plans_companion_none_when_no_plans(self) -> None:
         """Test that plans companion file returns None when no plans captured."""
-        results = BenchmarkResults(
+        results = make_benchmark_results(
+            benchmark_id="tpch",
             benchmark_name="tpch",
-            _benchmark_id_override="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_005",
@@ -222,8 +216,6 @@ class TestSchemaV2ExportWithPlans:
             duration_seconds=10.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
-            query_results=[],
         )
 
         plans_payload = build_plans_payload(results)
@@ -246,9 +238,9 @@ class TestSchemaV2ExportWithPlans:
             estimated_cost=100.0,
         )
 
-        results = BenchmarkResults(
+        results = make_benchmark_results(
+            benchmark_id="tpch",
             benchmark_name="tpch",
-            _benchmark_id_override="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_006",
@@ -256,7 +248,6 @@ class TestSchemaV2ExportWithPlans:
             duration_seconds=10.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
             query_plans_captured=1,
             query_results=[
                 {
@@ -313,9 +304,9 @@ class TestSchemaV2ExportWithPlans:
             estimated_rows=10000,
         )
 
-        results = BenchmarkResults(
+        results = make_benchmark_results(
+            benchmark_id="tpch",
             benchmark_name="tpch",
-            _benchmark_id_override="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_008",
@@ -323,7 +314,6 @@ class TestSchemaV2ExportWithPlans:
             duration_seconds=10.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
             query_plans_captured=1,
             query_results=[
                 {
@@ -379,9 +369,9 @@ class TestBackwardCompatibility:
     def test_schema_v2_with_and_without_plans(self) -> None:
         """Test that schema v2.0 works with and without plans."""
         # Without plans
-        results_no_plans = BenchmarkResults(
+        results_no_plans = make_benchmark_results(
+            benchmark_id="tpch",
             benchmark_name="tpch",
-            _benchmark_id_override="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_009",
@@ -389,7 +379,6 @@ class TestBackwardCompatibility:
             duration_seconds=10.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
             query_results=[
                 {"query_id": "1", "execution_time_ms": 100, "status": "SUCCESS", "rows_returned": 4},
             ],
@@ -408,9 +397,9 @@ class TestBackwardCompatibility:
         )
         plan = QueryPlanDAG(query_id="q01", platform="duckdb", logical_root=root)
 
-        results_with_plans = BenchmarkResults(
+        results_with_plans = make_benchmark_results(
+            benchmark_id="tpch",
             benchmark_name="tpch",
-            _benchmark_id_override="tpch",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="test_010",
@@ -418,7 +407,6 @@ class TestBackwardCompatibility:
             duration_seconds=10.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
             query_plans_captured=1,
             query_results=[
                 {
@@ -548,18 +536,14 @@ class TestSchemaV2Validation:
 
     def test_empty_query_list_handled(self) -> None:
         """Test that empty query results are handled correctly."""
-        results = BenchmarkResults(
+        results = make_benchmark_results(
+            benchmark_id="empty_test",
             benchmark_name="Empty Test",
-            _benchmark_id_override="empty_test",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="empty-001",
             timestamp=datetime(2025, 1, 1, 12, 0, 0),
             duration_seconds=1.0,
-            total_queries=0,
-            successful_queries=0,
-            failed_queries=0,
-            query_results=[],
         )
 
         payload = build_result_payload(results)
@@ -574,9 +558,9 @@ class TestSchemaV2Validation:
 
     def test_driver_metadata_exported(self) -> None:
         """Test that driver metadata is included in platform block."""
-        results = BenchmarkResults(
+        results = make_benchmark_results(
+            benchmark_id="driver_test",
             benchmark_name="Driver Test",
-            _benchmark_id_override="driver_test",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="driver-001",
@@ -584,7 +568,6 @@ class TestSchemaV2Validation:
             duration_seconds=1.0,
             total_queries=1,
             successful_queries=1,
-            failed_queries=0,
             query_results=[{"query_id": "1", "execution_time_ms": 100, "rows_returned": 4, "status": "SUCCESS"}],
             driver_package="duckdb",
             driver_version_requested="1.0.0",
@@ -615,9 +598,9 @@ class TestSchemaV2Validation:
         This is the 'single source of truth' principle - timing comes from queries,
         not from separate fields that could be inconsistent.
         """
-        results = BenchmarkResults(
+        results = make_benchmark_results(
+            benchmark_id="timing_test",
             benchmark_name="Timing Test",
-            _benchmark_id_override="timing_test",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="timing-001",
@@ -625,7 +608,6 @@ class TestSchemaV2Validation:
             duration_seconds=10.0,
             total_queries=3,
             successful_queries=3,
-            failed_queries=0,
             # These old fields should be IGNORED - timing comes from queries
             total_execution_time=999.0,  # Wrong value - should be ignored
             average_query_time=333.0,  # Wrong value - should be ignored

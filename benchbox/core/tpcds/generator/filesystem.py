@@ -75,7 +75,11 @@ class FileArtifactMixin:
         """
         return list(self.output_dir.glob("*.dat"))
 
-    def _gather_existing_table_files(self, target_dir: Path) -> dict[str, list[Path]]:
+    def _gather_existing_table_files(
+        self,
+        target_dir: Path,
+        use_compression: bool | None = None,
+    ) -> dict[str, list[Path]]:
         """Map known tables to existing data files under the target directory.
 
         Returns all chunk files per table to support multi-chunk loading.
@@ -84,9 +88,10 @@ class FileArtifactMixin:
             Dictionary mapping table names to lists of file paths (one or more per table)
         """
 
+        use_compression = self.should_use_compression() if use_compression is None else use_compression
         table_paths: dict[str, list[Path]] = {}
         for table_name in self._known_table_names():
-            if self.should_use_compression():
+            if use_compression:
                 expected_filename = f"{table_name}.dat"
                 compressed_filename = self.get_compressed_filename(expected_filename)
                 compressed_file = target_dir / compressed_filename

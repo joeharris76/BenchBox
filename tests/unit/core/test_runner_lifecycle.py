@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -9,11 +10,14 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from benchbox.base import BaseBenchmark
+from benchbox.core.nyctaxi.benchmark import NYCTaxiBenchmark
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.runner import LifecyclePhases, ValidationOptions, run_benchmark_lifecycle
 from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, SystemProfile
+from benchbox.core.tsbs_devops.benchmark import TSBSDevOpsBenchmark
 from benchbox.core.validation import ValidationResult
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
@@ -42,20 +46,11 @@ def test_data_only_mode_returns_result_without_adapter():
     bench.output_dir = None
     bench.tables = None
 
-    expected = BenchmarkResults(
+    expected = make_benchmark_results(
         benchmark_name="TPC-H",
         platform="data_only",
-        scale_factor=cfg.scale_factor,
         execution_id="eid",
-        timestamp=datetime.now(),
-        duration_seconds=0.0,
         query_definitions={},
-        total_queries=0,
-        successful_queries=0,
-        failed_queries=0,
-        total_execution_time=0.0,
-        average_query_time=0.0,
-        execution_phases=None,
         test_execution_type="data_only",
     )
 
@@ -79,6 +74,49 @@ def test_data_only_mode_returns_result_without_adapter():
 
 
 @pytest.mark.unit
+def test_data_only_mode_propagates_duration_seconds():
+    cfg = BenchmarkConfig(name="tpch", display_name="TPC-H", test_execution_type="data_only")
+
+    class StubBenchmark(BaseBenchmark):
+        def __init__(self):
+            super().__init__(scale_factor=cfg.scale_factor)
+            self._name = "TPC-H"
+            self._version = "1.0"
+            self._description = "Stub benchmark"
+            self.tables = None
+            self.output_dir = None
+
+        def generate_data(self):
+            self.tables = {"lineitem": Path("lineitem.tbl")}
+            return [Path("lineitem.tbl")]
+
+        def get_queries(self):
+            return {}
+
+        def get_query(self, query_id, *, params=None):
+            raise ValueError(f"Query {query_id} not found")
+
+    bench = StubBenchmark()
+
+    def _slow_ensure_data_generated(*_args, **_kwargs):
+        time.sleep(0.02)
+        return False
+
+    with patch("benchbox.core.runner.runner._ensure_data_generated", side_effect=_slow_ensure_data_generated):
+        res = run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=None,
+            system_profile=_mk_system_profile(),
+            output_root=None,
+            benchmark_instance=bench,
+        )
+
+    assert isinstance(res, BenchmarkResults)
+    assert res.platform == "data_only"
+    assert res.duration_seconds > 0.0
+
+
+@pytest.mark.unit
 def test_load_only_mode_invokes_adapter_load(tmp_path):
     cfg = BenchmarkConfig(name="tpch", display_name="TPC-H", test_execution_type="load_only")
     db = DatabaseConfig(type="duckdb", name="test")
@@ -87,19 +125,15 @@ def test_load_only_mode_invokes_adapter_load(tmp_path):
     bench.tables = None
 
     def _create_enhanced(platform, query_results, **kwargs):
-        return BenchmarkResults(
+        dur = kwargs.get("duration_seconds", 0.0)
+        return make_benchmark_results(
             benchmark_name="TPC-H",
             platform=platform,
-            scale_factor=cfg.scale_factor,
             execution_id="eid",
-            timestamp=datetime.now(),
-            duration_seconds=kwargs.get("duration_seconds", 0.0),
-            query_definitions={},
+            duration_seconds=dur,
             total_queries=len(query_results),
-            successful_queries=0,
-            failed_queries=0,
-            total_execution_time=kwargs.get("duration_seconds", 0.0),
-            average_query_time=0.0,
+            query_definitions={},
+            total_execution_time=dur,
             execution_phases=kwargs.get("phases"),
             test_execution_type="load_only",
         )
@@ -156,21 +190,11 @@ def test_load_only_mode_uses_dataframe_adapter_path(tmp_path):
     bench.output_dir = tmp_path
     bench.tables = None
 
-    expected = BenchmarkResults(
+    expected = make_benchmark_results(
         benchmark_name="TPC-H",
         platform="DataFusion (DataFrame)",
-        scale_factor=cfg.scale_factor,
         execution_id="eid",
-        timestamp=datetime.now(),
-        duration_seconds=0.0,
         query_definitions={},
-        total_queries=0,
-        successful_queries=0,
-        failed_queries=0,
-        total_execution_time=0.0,
-        average_query_time=0.0,
-        execution_phases=None,
-        test_execution_type="standard",
     )
 
     class DataFrameAdapter:
@@ -209,21 +233,16 @@ def test_standard_mode_delegates_to_adapter_run_benchmark():
     bench.output_dir = None
     bench.tables = None
 
-    expected = BenchmarkResults(
+    expected = make_benchmark_results(
         benchmark_name="TPC-H",
         platform="duckdb",
-        scale_factor=cfg.scale_factor,
         execution_id="eid",
-        timestamp=datetime.now(),
         duration_seconds=1.0,
-        query_definitions={},
         total_queries=1,
         successful_queries=1,
-        failed_queries=0,
+        query_definitions={},
         total_execution_time=1.0,
         average_query_time=1.0,
-        execution_phases=None,
-        test_execution_type="standard",
     )
 
     mock_adapter = MagicMock()
@@ -265,21 +284,16 @@ def test_standard_mode_enriches_driver_runtime_metadata():
     bench.tables = None
     bench.generate_data = MagicMock()
 
-    expected = BenchmarkResults(
+    expected = make_benchmark_results(
         benchmark_name="TPC-H",
         platform="duckdb",
-        scale_factor=cfg.scale_factor,
         execution_id="driver-meta-001",
-        timestamp=datetime.now(),
         duration_seconds=1.0,
-        query_definitions={},
         total_queries=1,
         successful_queries=1,
-        failed_queries=0,
+        query_definitions={},
         total_execution_time=1.0,
         average_query_time=1.0,
-        execution_phases=None,
-        test_execution_type="standard",
         execution_metadata={"mode": "sql"},
         platform_info={
             "platform_version": "1.2.2",
@@ -355,19 +369,12 @@ def test_preflight_and_manifest_validation(tmp_path):
     bench.validate_preflight.return_value = ValidationResult(True, [], [])
     bench.validate_manifest.return_value = ValidationResult(True, [], [])
 
-    expected = BenchmarkResults(
+    expected = make_benchmark_results(
         benchmark_name="TPC-H",
         platform="unknown",
-        scale_factor=cfg.scale_factor,
+        scale_factor=1.0,
         execution_id="eid",
-        timestamp=datetime.now(),
-        duration_seconds=0.0,
         query_definitions={},
-        total_queries=0,
-        successful_queries=0,
-        failed_queries=0,
-        total_execution_time=0.0,
-        average_query_time=0.0,
     )
 
     bench.create_enhanced_benchmark_result.return_value = expected
@@ -435,19 +442,12 @@ def test_postload_validation_invoked(tmp_path):
     bench.scale_factor = 1.0
     bench.tables = {}
     bench.output_dir = str(tmp_path)
-    bench.create_enhanced_benchmark_result.return_value = BenchmarkResults(
+    bench.create_enhanced_benchmark_result.return_value = make_benchmark_results(
         benchmark_name="TPC-H",
         platform="duckdb",
         scale_factor=1.0,
         execution_id="eid",
-        timestamp=datetime.now(),
-        duration_seconds=0.0,
         query_definitions={},
-        total_queries=0,
-        successful_queries=0,
-        failed_queries=0,
-        total_execution_time=0.0,
-        average_query_time=0.0,
     )
 
     mock_adapter = Mock()
@@ -495,21 +495,11 @@ def test_run_benchmark_lifecycle_propagates_verbosity(tmp_path):
             return []
 
         def create_enhanced_benchmark_result(self, **kwargs):
-            return BenchmarkResults(
+            return make_benchmark_results(
                 benchmark_name="TPC-H",
                 platform="stub",
-                scale_factor=cfg.scale_factor,
                 execution_id="eid",
-                timestamp=datetime.now(),
-                duration_seconds=0.0,
                 query_definitions={},
-                total_queries=0,
-                successful_queries=0,
-                failed_queries=0,
-                total_execution_time=0.0,
-                average_query_time=0.0,
-                execution_phases=None,
-                test_execution_type="standard",
             )
 
     class StubAdapter(VerbosityMixin):
@@ -523,21 +513,13 @@ def test_run_benchmark_lifecycle_propagates_verbosity(tmp_path):
 
         def run_benchmark(self, benchmark, **run_config):
             self.last_run_kwargs = run_config
-            return BenchmarkResults(
+            return make_benchmark_results(
                 benchmark_name="TPC-H",
                 platform=self.platform_name,
-                scale_factor=cfg.scale_factor,
                 execution_id="eid",
-                timestamp=datetime.now(),
                 duration_seconds=0.1,
                 query_definitions={},
-                total_queries=0,
-                successful_queries=0,
-                failed_queries=0,
                 total_execution_time=0.1,
-                average_query_time=0.0,
-                execution_phases=None,
-                test_execution_type="standard",
             )
 
     cfg = BenchmarkConfig(name="tpch", display_name="TPC-H")
@@ -566,6 +548,70 @@ def test_run_benchmark_lifecycle_propagates_verbosity(tmp_path):
     assert adapter.last_run_kwargs["verbose"] is True
     assert adapter.last_run_kwargs["verbose_level"] == 2
     assert adapter.last_run_kwargs["quiet"] is False
+
+
+@pytest.mark.unit
+def test_run_benchmark_lifecycle_propagates_capture_plans(tmp_path):
+    """capture_plans and strict_plan_capture must be forwarded to the adapter via RunConfig."""
+
+    class StubBenchmark(VerbosityMixin):
+        def __init__(self):
+            self.logger = logging.getLogger("stub-benchmark")
+            self.output_dir = tmp_path
+            self.tables = None
+            self.apply_verbosity(VerbositySettings.default())
+
+        def generate_data(self):
+            self.tables = {"table": tmp_path / "data.tbl"}
+            return []
+
+        def create_enhanced_benchmark_result(self, **kwargs):
+            return make_benchmark_results(
+                benchmark_name="TPC-H",
+                platform="stub",
+                scale_factor=1.0,
+                execution_id="eid",
+                query_definitions={},
+            )
+
+    class StubAdapter(VerbosityMixin):
+        platform_name = "stub"
+
+        def __init__(self):
+            self.logger = logging.getLogger("stub-adapter")
+            self.apply_verbosity(VerbositySettings.default())
+            self.last_run_kwargs = None
+            self.enable_validation = False
+
+        def run_benchmark(self, benchmark, **run_config):
+            self.last_run_kwargs = run_config
+            return make_benchmark_results(
+                benchmark_name="TPC-H",
+                platform=self.platform_name,
+                scale_factor=1.0,
+                execution_id="eid",
+                duration_seconds=0.1,
+                query_definitions={},
+                total_execution_time=0.1,
+            )
+
+    cfg = BenchmarkConfig(name="tpch", display_name="TPC-H", capture_plans=True, strict_plan_capture=True)
+    db = DatabaseConfig(type="duckdb", name="test", options={})
+    benchmark = StubBenchmark()
+    adapter = StubAdapter()
+
+    with patch("benchbox.core.runner.runner.get_platform_adapter", return_value=adapter):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": str(tmp_path / "db.duckdb")},
+            benchmark_instance=benchmark,
+        )
+
+    assert adapter.last_run_kwargs is not None
+    assert adapter.last_run_kwargs["capture_plans"] is True, "capture_plans not forwarded to adapter"
+    assert adapter.last_run_kwargs["strict_plan_capture"] is True, "strict_plan_capture not forwarded to adapter"
 
 
 @pytest.mark.unit
@@ -739,3 +785,177 @@ def test_base_benchmark_run_benchmark_avoids_wall_clock_elapsed_arithmetic():
     assert result["successful_queries"] == 1
     assert result["total_execution_time"] == pytest.approx(0.8)
     assert result["query_results"][0]["execution_time_seconds"] == pytest.approx(0.3)
+
+
+def _mk_representative_benchmark(benchmark_id: str, tmp_path: Path):
+    if benchmark_id == "nyctaxi":
+        return NYCTaxiBenchmark(
+            scale_factor=0.01,
+            year=2019,
+            months=[1],
+            output_dir=tmp_path,
+            seed=42,
+        )
+
+    if benchmark_id == "tsbs_devops":
+        return TSBSDevOpsBenchmark(
+            scale_factor=0.1,
+            num_hosts=2,
+            duration_days=1,
+            interval_seconds=3600,
+            output_dir=tmp_path,
+            seed=42,
+        )
+
+    raise AssertionError(f"Unknown benchmark_id: {benchmark_id}")
+
+
+@pytest.mark.parametrize("benchmark_id", ["nyctaxi", "tsbs_devops"])
+def test_representative_benchmarks_data_only_path(benchmark_id: str, tmp_path: Path) -> None:
+    cfg = BenchmarkConfig(
+        name=benchmark_id,
+        display_name=benchmark_id.upper(),
+        scale_factor=0.01,
+        test_execution_type="data_only",
+    )
+    benchmark = _mk_representative_benchmark(benchmark_id, tmp_path)
+
+    with patch("benchbox.core.runner.runner._ensure_data_generated", return_value=False):
+        result = run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=None,
+            system_profile=_mk_system_profile(),
+            phases=LifecyclePhases(generate=True, load=False, execute=False),
+            output_root=str(tmp_path),
+            benchmark_instance=benchmark,
+        )
+
+    assert result.platform == "data_only"
+    assert result.execution_metadata.get("mode") == "datagen"
+
+
+@pytest.mark.parametrize("benchmark_id", ["nyctaxi", "tsbs_devops"])
+def test_representative_benchmarks_load_only_path(benchmark_id: str, tmp_path: Path) -> None:
+    cfg = BenchmarkConfig(
+        name=benchmark_id,
+        display_name=benchmark_id.upper(),
+        scale_factor=0.01,
+        test_execution_type="load_only",
+    )
+    db = DatabaseConfig(type="duckdb", name="duckdb")
+    benchmark = _mk_representative_benchmark(benchmark_id, tmp_path)
+
+    class DummyAdapter:
+        platform_name = "duckdb"
+
+        def __init__(self):
+            self.created_schema = False
+            self.loaded_data = False
+
+        def create_connection(self, **kwargs):
+            return Mock()
+
+        def close_connection(self, _conn):
+            return None
+
+        def create_schema(self, benchmark, connection):
+            self.created_schema = True
+            return 0.02
+
+        def load_data(self, benchmark, connection, data_dir):
+            self.loaded_data = True
+            return {"table": 5}, 0.03, {"table": {"total_ms": 30}}
+
+    adapter = DummyAdapter()
+
+    with patch("benchbox.core.runner.runner._ensure_data_generated", return_value=False):
+        result = run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": str(tmp_path / "test.duckdb")},
+            phases=LifecyclePhases(generate=False, load=True, execute=False),
+            benchmark_instance=benchmark,
+            platform_adapter=adapter,
+        )
+
+    assert adapter.created_schema is True
+    assert adapter.loaded_data is True
+    assert result.execution_metadata.get("mode") == "load_only"
+    assert result.table_statistics.get("table", {}).get("rows") == 5
+
+
+@pytest.mark.parametrize("benchmark_id", ["nyctaxi", "tsbs_devops"])
+def test_representative_benchmarks_setup_only_path(benchmark_id: str, tmp_path: Path) -> None:
+    cfg = BenchmarkConfig(
+        name=benchmark_id,
+        display_name=benchmark_id.upper(),
+        scale_factor=0.01,
+        test_execution_type="standard",
+    )
+    benchmark = _mk_representative_benchmark(benchmark_id, tmp_path)
+
+    with patch("benchbox.core.runner.runner._ensure_data_generated", return_value=False):
+        result = run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=None,
+            system_profile=_mk_system_profile(),
+            phases=LifecyclePhases(generate=False, load=False, execute=False),
+            benchmark_instance=benchmark,
+        )
+
+    assert result.platform == "unknown"
+    assert result.execution_metadata.get("mode") == "setup_only"
+
+
+@pytest.mark.parametrize("benchmark_id", ["nyctaxi", "tsbs_devops"])
+def test_representative_benchmarks_standard_path(benchmark_id: str, tmp_path: Path) -> None:
+    cfg = BenchmarkConfig(
+        name=benchmark_id,
+        display_name=benchmark_id.upper(),
+        scale_factor=0.01,
+        test_execution_type="standard",
+    )
+    db = DatabaseConfig(type="duckdb", name="duckdb")
+    benchmark = _mk_representative_benchmark(benchmark_id, tmp_path)
+
+    class DummyAdapter:
+        platform_name = "duckdb"
+
+        def __init__(self):
+            self.called = False
+            self.kwargs = None
+
+        def run_benchmark(self, benchmark, **kwargs):
+            self.called = True
+            self.kwargs = kwargs
+            return benchmark.create_enhanced_benchmark_result(
+                platform="duckdb",
+                query_results=[
+                    {
+                        "query_id": "Q1",
+                        "execution_time_seconds": 0.01,
+                        "status": "success",
+                        "rows": 1,
+                    }
+                ],
+                duration_seconds=0.01,
+                execution_metadata={"mode": "standard"},
+            )
+
+    adapter = DummyAdapter()
+
+    with patch("benchbox.core.runner.runner._ensure_data_generated", return_value=False):
+        result = run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": str(tmp_path / "test.duckdb")},
+            phases=LifecyclePhases(generate=False, load=False, execute=True),
+            benchmark_instance=benchmark,
+            platform_adapter=adapter,
+        )
+
+    assert adapter.called is True
+    assert adapter.kwargs is not None
+    assert result.total_queries == 1

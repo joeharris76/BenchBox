@@ -9,12 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
+from benchbox.core.data_organization.config import DataOrganizationConfig, SortColumn
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
 pytestmark = pytest.mark.fast
 
 
-@pytest.mark.requires_zstd
 class TestTPCDSStreamingCompression:
     """Test suite for TPC-DS streaming compression feature.
 
@@ -202,7 +202,6 @@ class TestTPCDSStreamingCompression:
             mock_prune.assert_called_once_with(temp_dir)
 
 
-@pytest.mark.requires_zstd
 def test_streaming_compression_integration():
     """Integration test for streaming compression functionality."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -232,3 +231,47 @@ def test_streaming_compression_integration():
             # If dsdgen is not available, that's okay for this test
             if "dsdgen" not in str(e):
                 raise e
+
+
+@patch("benchbox.core.tpcds.generator.TPCDSDataGenerator._find_or_build_dsdgen")
+def test_generate_local_prefers_data_organization_over_compression(mock_find_dsdgen, tmp_path: Path):
+    dsdgen_exe = tmp_path / "dsdgen"
+    dsdgen_exe.write_text("#!/bin/bash\necho 'mock dsdgen'", encoding="utf-8")
+    dsdgen_exe.chmod(0o755)
+    mock_find_dsdgen.return_value = dsdgen_exe
+
+    data_org = DataOrganizationConfig(sort_columns=[SortColumn(name="c_customer_sk")], compression="none")
+    generator = TPCDSDataGenerator(
+        scale_factor=1.0,
+        output_dir=tmp_path,
+        compress_data=True,
+        compression_type="zstd",
+        data_organization=data_org,
+        force_regenerate=True,
+    )
+
+    raw_customer = tmp_path / "customer.dat"
+    raw_customer.write_text("1|name|\n", encoding="utf-8")
+    organized = tmp_path / "customer.parquet"
+    organized.write_text("placeholder", encoding="utf-8")
+
+    with (
+        patch.object(generator.validator, "should_regenerate_data", return_value=(True, None)),
+        patch.object(generator, "_prune_stale_table_artifacts", return_value=[]),
+        patch.object(generator, "_run_dsdgen_native", return_value=None),
+        patch.object(
+            generator, "_gather_existing_table_files", return_value={"customer": [raw_customer]}
+        ) as mock_gather,
+        patch.object(generator, "_apply_data_organization", return_value={"customer": [organized]}) as mock_apply,
+        patch.object(generator, "_compress_raw_dat_files") as mock_compress,
+        patch.object(generator, "_validate_file_format_consistency") as mock_validate,
+        patch.object(generator, "_write_manifest") as mock_manifest,
+    ):
+        result = generator._generate_local(tmp_path)
+
+    assert result == {"customer": [organized]}
+    mock_gather.assert_called_once_with(tmp_path, use_compression=False)
+    mock_apply.assert_called_once_with(tmp_path, {"customer": [raw_customer]})
+    mock_compress.assert_not_called()
+    mock_validate.assert_not_called()
+    mock_manifest.assert_called_once_with(tmp_path, {"customer": [organized]})

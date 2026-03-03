@@ -18,7 +18,7 @@ Looking ahead? See the [Development Roadmap](../development/roadmap.md) for plan
 | **DuckDB**          | Built-in  | In-process analytical database                               | `uv add duckdb`                                     |
 | **DataFusion**      | Available | In-memory query engine (Apache Arrow)                        | `uv add datafusion`                                 |
 | **ClickHouse**      | Available | Column-oriented OLAP database                                | `uv add clickhouse-driver`                          |
-| **Databricks**      | Available | Data Intelligence Platform (lakehouse)                       | `uv add databricks-sql-connector`                   |
+| **Databricks SQL**  | Available | Data Intelligence Platform (lakehouse)                       | `uv add databricks-sql-connector`                   |
 | **BigQuery**        | Available | Serverless data warehouse (Google Cloud)                     | `uv add google-cloud-bigquery google-cloud-storage` |
 | **Redshift**        | Available | Cloud data warehouse (AWS)                                   | `uv add redshift-connector boto3`                   |
 | **Snowflake**       | Available | Data Cloud / Multi-cloud data warehouse                      | `uv add snowflake-connector-python`                 |
@@ -64,7 +64,7 @@ Or install individual platforms:
 # ClickHouse
 uv add benchbox[clickhouse]
 
-# Databricks
+# Databricks SQL
 uv add benchbox[databricks]
 ```
 
@@ -77,7 +77,7 @@ BenchBox now includes a dedicated CLI for managing database platforms. This simp
 benchbox platforms list
 ```
 
-**Check the status of a specific platform (e.g., Databricks):**
+**Check the status of a specific platform (e.g., Databricks SQL):**
 ```bash
 benchbox platforms status databricks
 ```
@@ -192,7 +192,7 @@ adapter = ClickHouseAdapter(
 
 ---
 
-## Databricks
+## Databricks SQL
 
 **Type**: Data Intelligence Platform (lakehouse architecture)
 **Common Use Cases**: SQL analytics, ML/data science workflows, lakehouse deployments
@@ -216,7 +216,7 @@ adapter = DatabricksAdapter(
 ## BigQuery
 
 **Type**: Serverless data warehouse (Google Cloud)
-**Common Use Cases**: Large-scale analytics, petabyte-scale datasets, GCP-native applications
+**Common Use Cases**: Large-scale analytics, petabyte-scale datasets, Google Cloud-native applications
 
 ### Configuration
 
@@ -335,7 +335,7 @@ adapter = ClickHouseAdapter(
 )
 ```
 
-**Cloud Platforms (Databricks, BigQuery, Snowflake, Redshift)**:
+**Cloud Platforms (Databricks SQL, BigQuery, Snowflake, Redshift)**:
 ```python
 # Verify environment variables
 import os
@@ -363,7 +363,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"
 gcloud auth application-default login
 ```
 
-**Databricks**:
+**Databricks SQL**:
 ```bash
 # Personal access token
 export DATABRICKS_TOKEN="dapi..."
@@ -469,7 +469,7 @@ adapter = ClickHouseAdapter(
 
 **Cloud Platforms**:
 ```python
-# Databricks: Use larger cluster
+# Databricks SQL: Use larger cluster
 adapter = DatabricksAdapter(
     http_path="/sql/1.0/warehouses/large-warehouse"
 )
@@ -539,7 +539,7 @@ adapter = ClickHouseAdapter(
 )
 ```
 
-#### Databricks
+#### Databricks SQL
 
 **Issue**: "Cluster not found" or "Warehouse not available"
 ```python

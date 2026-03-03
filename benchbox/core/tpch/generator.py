@@ -13,6 +13,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 import platform
@@ -20,7 +21,7 @@ import shutil
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from benchbox.utils.cloud_storage import CloudStorageGeneratorMixin, create_path_handler
 from benchbox.utils.compression_mixin import CompressionMixin
@@ -84,6 +85,17 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
         """
         # Extract data organization config before passing kwargs to super
         self._data_organization_config = kwargs.pop("data_organization", None)
+        if self._data_organization_config is None:
+            raw_config = os.getenv("BENCHBOX_DATA_ORGANIZATION_CONFIG_JSON")
+            if raw_config:
+                try:
+                    from benchbox.core.data_organization.config import DataOrganizationConfig
+
+                    self._data_organization_config = DataOrganizationConfig.from_dict(json.loads(raw_config))
+                except Exception as exc:
+                    logging.getLogger("benchbox.core.tpch.generator").warning(
+                        "Ignoring invalid BENCHBOX_DATA_ORGANIZATION_CONFIG_JSON: %s", exc
+                    )
 
         # Initialize compression mixin
         super().__init__(**kwargs)
@@ -973,6 +985,13 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
         """
         table_paths, precompressed_tables = self._gather_generated_table_paths(target_dir)
 
+        # Data organization is a post-generation output mode. When configured,
+        # prefer organized outputs over raw compression artifacts.
+        if self._data_organization_config is not None:
+            table_paths = self._apply_data_organization(target_dir, table_paths)
+            self._write_manifest(target_dir, table_paths)
+            return table_paths
+
         if self.should_use_compression():
             compressed_paths = self._compress_table_paths(target_dir, table_paths, precompressed_tables)
 
@@ -983,10 +1002,6 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
             self._validate_file_format_consistency(target_dir)
             self._write_manifest(target_dir, compressed_paths)
             return compressed_paths
-
-        # Apply data organization (sorted Parquet export) if configured
-        if self._data_organization_config is not None:
-            table_paths = self._apply_data_organization(target_dir, table_paths)
 
         self._write_manifest(target_dir, table_paths)
         return table_paths
@@ -1012,12 +1027,14 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
         from benchbox.core.data_organization.sorting import SortedParquetWriter
 
         config = self._data_organization_config
-        writer = SortedParquetWriter(config)
+        writer = SortedParquetWriter(config, schema_registry=self._build_schema_registry())
         result = dict(table_paths)
 
         for table_name, paths in table_paths.items():
             sort_columns = config.get_sort_columns_for_table(table_name)
-            if not sort_columns:
+            partition_columns = config.get_partition_columns_for_table(table_name)
+            cluster_columns = config.get_cluster_columns_for_table(table_name)
+            if not sort_columns and not partition_columns and not cluster_columns:
                 continue
 
             # Normalize to list of source files
@@ -1031,6 +1048,24 @@ class TPCHDataGenerator(CompressionMixin, CloudStorageGeneratorMixin, VerbosityM
             result[table_name] = parquet_path
 
         return result
+
+    def _build_schema_registry(self) -> dict[str, dict[str, Any]]:
+        """Build table schema mapping for sorted writer column resolution."""
+        from benchbox.core.tpch.schema import TABLES
+
+        schema_registry: dict[str, dict[str, Any]] = {}
+        for table in TABLES:
+            schema_registry[table.name.lower()] = {
+                "name": table.name.lower(),
+                "columns": [
+                    {
+                        "name": col.name,
+                        "type": col.get_sql_type(),
+                    }
+                    for col in table.columns
+                ],
+            }
+        return schema_registry
 
     def _gather_generated_table_paths(self, target_dir: Path) -> tuple[dict[str, Path | list[Path]], set[str]]:
         """Locate generated table files from various possible locations.

@@ -5,8 +5,11 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import fcntl
 import os
+import sys
 import tempfile
+import time
 import warnings
 from collections.abc import Generator, Iterable
 from contextlib import ExitStack
@@ -29,30 +32,106 @@ except (ImportError, AttributeError):
 
 from benchbox.core.results.models import BenchmarkResults
 
-# Check for optional compression library availability
-try:
-    import zstandard
-
-    ZSTD_AVAILABLE = True
-except ImportError:
-    ZSTD_AVAILABLE = False
+# zstandard is a runtime dependency (always available)
+ZSTD_AVAILABLE = True
 
 # Register fixture plugins - this must come before any imports from those modules
 # to allow pytest to rewrite assertions in the fixture modules
 pytest_plugins = [
     "tests.fixtures.database_fixtures",
     "tests.fixtures.test_data_fixtures",
+    "tests.fixtures.result_dict_fixtures",
 ]
+
+# ── Parallel test run mutual exclusion ──────────────────────────────────────
+_TEST_LOCK_PATH = Path.home() / ".benchbox" / "test.lock"
+_test_lock_fd: int | None = None  # Kept open to hold the flock for the session lifetime.
+
+
+def _should_acquire_test_lock(config: pytest.Config) -> bool:
+    """Return True when this process should compete for the parallel run lock.
+
+    Skips lock acquisition for xdist worker subprocesses (only the controller
+    process locks), when parallelism is disabled (-n 0 / no numprocesses), or
+    when BENCHBOX_SKIP_TEST_LOCK is set in the environment.
+    """
+    if hasattr(config, "workerinput"):
+        return False  # xdist worker — the controller holds the lock on our behalf
+    if os.environ.get("BENCHBOX_SKIP_TEST_LOCK"):
+        return False  # explicit opt-out (e.g. intentional concurrent debug runs)
+    try:
+        n = config.option.numprocesses
+    except AttributeError:
+        return False  # xdist not installed or numprocesses not yet registered
+    # Lock for '-n auto' (string) or any explicit positive worker count.
+    # bool(0) is False so n != 0 would be redundant — bool(n) is sufficient.
+    # Assumes numprocesses is None, 0, "auto", or a positive int (pytest-xdist contract).
+    return bool(n)
 
 
 def pytest_configure(config) -> None:
     """Configure pytest with enhanced test organization and optimization settings."""
+    global _test_lock_fd
+
+    # Acquire exclusive lock to prevent concurrent parallel test runs from
+    # competing for CPU. Only the controller process (not xdist workers) locks.
+    if _should_acquire_test_lock(config):
+        _TEST_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(_TEST_LOCK_PATH), os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0), 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # Another parallel run holds the lock — fail fast with a clear message.
+            try:
+                holder_info = _TEST_LOCK_PATH.read_text().strip()
+            except OSError:
+                holder_info = "(could not read lock file)"
+            os.close(fd)
+            # Use os._exit() rather than sys.exit(): pytest_configure is called
+            # before the session loop so SystemExit bubbles up as INTERNALERROR.
+            # os._exit() terminates the process immediately with the given code.
+            sys.stderr.write(
+                f"\n\033[91m[benchbox] BLOCKED: A parallel test run is already active.\033[0m\n"
+                f"  Lock file : {_TEST_LOCK_PATH}\n"
+                f"  Holder    : {holder_info}\n\n"
+                f"  Options:\n"
+                f"    \u2022 Wait for the other run to finish and retry.\n"
+                f"    \u2022 Kill the other run, then retry.\n"
+                f"    \u2022 Run single-threaded (no lock):  pytest -n 0 ...\n"
+                f"    \u2022 Bypass lock (dangerous):         BENCHBOX_SKIP_TEST_LOCK=1 pytest ...\n\n"
+            )
+            sys.stderr.flush()
+            os._exit(1)
+        # Write diagnostic info so other processes can identify the lock holder.
+        # ftruncate is safe here: O_RDWR opens at position 0, so the subsequent
+        # write lands at offset 0 without needing an explicit seek.
+        started = time.strftime("%Y-%m-%d %H:%M:%S")
+        cmd = " ".join(sys.argv[:4])
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, f"pid:{os.getpid()} started:{started} cmd:{cmd}\n".encode())
+        except OSError:
+            pass
+        _test_lock_fd = fd  # Keep fd open to maintain the lock for the whole session.
+
     # Configure DuckDB for optimal testing performance
     config.option.duckdb_memory_limit = "2GB"
     config.option.duckdb_threads = 2  # Limit for CI environments
     config.option.duckdb_enable_extensions = True
 
     # Markers are defined in pytest.ini - no need to register here
+
+
+def pytest_unconfigure(config) -> None:
+    """Release the parallel run lock when the session ends."""
+    global _test_lock_fd
+    if _test_lock_fd is not None:
+        try:
+            fcntl.flock(_test_lock_fd, fcntl.LOCK_UN)
+            os.close(_test_lock_fd)
+        except OSError:
+            pass
+        _test_lock_fd = None
 
 
 def make_benchmark_results(
@@ -119,6 +198,18 @@ def make_benchmark_results(
     return result
 
 
+@pytest.fixture
+def make_results():
+    """Factory fixture for creating BenchmarkResults with sensible defaults.
+
+    Usage::
+
+        def test_something(make_results):
+            result = make_results(platform="snowflake", total_queries=22)
+    """
+    return make_benchmark_results
+
+
 def pytest_runtest_setup(item) -> None:
     """Set up test-specific configurations based on markers."""
     # Set timeouts based on speed markers
@@ -135,10 +226,6 @@ def pytest_runtest_setup(item) -> None:
 
     if item.get_closest_marker("local_only") and os.environ.get("CI"):
         pytest.skip("Local-only test skipped in CI")
-
-    # Skip tests that require zstd when it's not available
-    if item.get_closest_marker("requires_zstd") and not ZSTD_AVAILABLE:
-        pytest.skip("zstandard library not installed")
 
 
 # Paths with known slow tests (>10s) - should be marked "slow" not "fast"
@@ -195,6 +282,28 @@ MEDIUM_SPEED_PATTERNS = frozenset(
     }
 )
 
+# Marker names that are known to create high CPU/memory or import pressure when
+# fanned out across many xdist workers.
+# Tests in these categories are forced into the serial lane in `make test-all`.
+# Keep this focused on tests that materially increase CPU/memory/import pressure.
+RESOURCE_HEAVY_MARKERS = frozenset(
+    {
+        "slow",
+        "performance",
+        "live_integration",
+        "cloud_import",
+        "requires_table_formats",
+    }
+)
+
+# Extremely expensive suites are routed to explicit stress lane.
+# They remain covered, but are excluded from default `make test-all` runs.
+STRESS_PATH_PATTERNS = frozenset(
+    {
+        "tests/performance/",
+    }
+)
+
 
 def _get_speed_marker_for_path(test_path: Path) -> str | None:
     """Determine speed marker based on test path patterns.
@@ -222,7 +331,15 @@ def pytest_collection_modifyitems(config, items) -> None:
     """Apply directory-based defaults for markers with speed-aware classification."""
     for item in items:
         test_path = Path(str(item.fspath))
+        path_str = str(test_path)
         marker_names = {marker.name for marker in item.iter_markers()}
+
+        if "stress" not in marker_names:
+            for pattern in STRESS_PATH_PATTERNS:
+                if pattern in path_str:
+                    item.add_marker(pytest.mark.stress)
+                    marker_names.add("stress")
+                    break
 
         # Directory-driven test categories
         if "unit" not in marker_names and "integration" not in marker_names and "performance" not in marker_names:
@@ -237,8 +354,8 @@ def pytest_collection_modifyitems(config, items) -> None:
                 marker_names.add("performance")
 
         # Speed markers with pattern-based classification
-        # stress is also a terminal speed marker — don't add a second one
-        if not {"fast", "medium", "slow", "stress"} & marker_names:
+        # Always assign one of fast/medium/slow even when stress is present.
+        if not {"fast", "medium", "slow"} & marker_names:
             # First check if this path matches known slow/medium patterns
             speed_marker = _get_speed_marker_for_path(test_path)
 
@@ -262,6 +379,15 @@ def pytest_collection_modifyitems(config, items) -> None:
             else:
                 item.add_marker(pytest.mark.medium)
                 marker_names.add("medium")
+
+        # Route all existing slow tests into the explicit stress lane.
+        # This preserves coverage while keeping default `make test-all` lean.
+        if "slow" in marker_names and "stress" not in marker_names:
+            item.add_marker(pytest.mark.stress)
+            marker_names.add("stress")
+
+        if marker_names & RESOURCE_HEAVY_MARKERS and "resource_heavy" not in marker_names:
+            item.add_marker(pytest.mark.resource_heavy)
 
 
 @pytest.fixture(autouse=True)
@@ -366,34 +492,6 @@ def mock_environment_variables() -> Generator[None, None, None]:
         # Restore original environment variables
         os.environ.clear()
         os.environ.update(original_env)
-
-
-@pytest.fixture
-def tpch_c_tools_path() -> Path:
-    """Return path to TPC-H C tools if available."""
-    project_root = Path(__file__).parent.parent
-    return project_root / "_sources" / "tpc-h" / "dbgen"
-
-
-@pytest.fixture
-def skip_if_no_c_tools() -> None:
-    """Skip test if TPC-H C tools are not available."""
-    # NOTE: This fixture is obsolete but preserved for backward compatibility
-    # Ultra-simplified implementation assumes qgen is always available
-    pytest.skip("C tools compatibility testing removed in ultra-simplified implementation")
-
-
-@pytest.fixture
-def c_compatible_test_config() -> dict[str, Any]:
-    """Configuration for C-compatible tests."""
-    return {
-        "timeout": 60,
-        "max_retries": 3,
-        "comparison_threshold": 0.85,
-        "ignore_whitespace": True,
-        "ignore_case": True,
-        "verbose": False,
-    }
 
 
 def pytest_sessionstart(session) -> None:
@@ -545,49 +643,91 @@ def cli_benchmark_mocks():
             assert result.exit_code == 0
     """
     with (
-        patch("benchbox.cli.main.BenchmarkManager") as mock_manager,
-        patch("benchbox.cli.main.DatabaseManager") as mock_db_manager,
-        patch("benchbox.cli.main.SystemProfiler") as mock_profiler,
+        patch("benchbox.cli.main.BenchmarkManager") as mock_main_manager,
+        patch("benchbox.cli.main.DatabaseManager") as mock_main_db_manager,
+        patch("benchbox.cli.main.SystemProfiler") as mock_main_profiler,
         patch("benchbox.cli.main.ConfigManager") as mock_config,
+        patch("benchbox.cli.main.get_config_manager") as mock_get_config_manager,
         patch("benchbox.cli.orchestrator.BenchmarkOrchestrator") as mock_orchestrator,
+        patch("benchbox.cli.commands.run.BenchmarkManager") as mock_run_manager,
+        patch("benchbox.cli.commands.run.DatabaseManager") as mock_run_db_manager,
+        patch("benchbox.cli.commands.run.SystemProfiler") as mock_run_profiler,
+        patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_run_orchestrator,
+        patch("benchbox.cli.commands.run._execute_orchestrated_run") as mock_execute_orchestrated_run,
+        patch("benchbox.cli.commands.run._export_orchestrated_result") as mock_export_orchestrated_result,
+        patch("benchbox.cli.commands.run._render_post_run_charts"),
+        patch("benchbox.cli.preferences.save_last_run_config"),
     ):
         # Configure BenchmarkManager
-        mock_manager_instance = mock_manager.return_value
+        mock_manager_instance = type("MockBenchmarkManager", (), {})()
         mock_manager_instance.benchmarks = {
             "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)},
             "tpcds": {"display_name": "TPC-DS", "estimated_time_range": (5, 30)},
         }
+        mock_manager_instance.set_verbosity = lambda *_args, **_kwargs: None
+        mock_manager_instance.validate_scale_factor = lambda *_args, **_kwargs: None
+        mock_main_manager.return_value = mock_manager_instance
+        mock_run_manager.return_value = mock_manager_instance
 
         # Configure DatabaseManager
-        mock_db_manager_instance = mock_db_manager.return_value
-        mock_db_config = type("MockDbConfig", (), {"type": "duckdb", "options": {}})()
-        mock_db_manager_instance.create_config.return_value = mock_db_config
+        mock_db_manager_instance = type("MockDatabaseManager", (), {})()
+        mock_db_manager_instance.set_verbosity = lambda *_args, **_kwargs: None
+        mock_db_config = type(
+            "MockDbConfig",
+            (),
+            {
+                "type": "duckdb",
+                "options": {},
+                "driver_version_actual": None,
+                "driver_version_resolved": None,
+            },
+        )()
+        mock_db_manager_instance.create_config = lambda *_args, **_kwargs: mock_db_config
+        mock_main_db_manager.return_value = mock_db_manager_instance
+        mock_run_db_manager.return_value = mock_db_manager_instance
 
         # Configure SystemProfiler
-        mock_profiler_instance = mock_profiler.return_value
         mock_system_profile = type(
             "MockSystemProfile",
             (),
             {"cpu_cores_logical": 4, "memory_total_gb": 8},
         )()
-        mock_profiler_instance.get_system_profile.return_value = mock_system_profile
+        mock_profiler_instance = type("MockProfiler", (), {})()
+        mock_profiler_instance.get_system_profile = lambda: mock_system_profile
+        mock_main_profiler.return_value = mock_profiler_instance
+        mock_run_profiler.return_value = mock_profiler_instance
 
         # Configure ConfigManager
-        mock_config_instance = mock_config.return_value
-        mock_config_instance.validate_config.return_value = True
-        mock_config_instance.load_unified_tuning_config.return_value = None
+        mock_config_instance = type("MockConfigManager", (), {})()
+        mock_config_instance.config_path = Path("benchbox.yaml")
+        mock_config_instance.validate_config = lambda: True
+        mock_config_instance.load_unified_tuning_config = lambda *_args, **_kwargs: None
+        mock_config_instance.get = lambda _key, default=None: default
+        mock_config.return_value = mock_config_instance
+        mock_get_config_manager.return_value = mock_config_instance
 
         # Configure BenchmarkOrchestrator
-        mock_orchestrator_instance = mock_orchestrator.return_value
-        mock_result = type("MockResult", (), {"validation_status": "PASSED"})()
-        mock_orchestrator_instance.execute_benchmark.return_value = mock_result
+        mock_orchestrator_instance = type("MockOrchestrator", (), {})()
+        mock_orchestrator_instance.set_verbosity = lambda *_args, **_kwargs: None
+        mock_orchestrator_instance.set_custom_output_dir = lambda *_args, **_kwargs: None
+        mock_orchestrator.return_value = mock_orchestrator_instance
+        mock_run_orchestrator.return_value = mock_orchestrator_instance
+
+        # Configure result execution helpers
+        mock_result = type(
+            "MockResult",
+            (),
+            {"validation_status": "PASSED", "execution_id": "mock-exec-id", "query_results": []},
+        )()
+        mock_execute_orchestrated_run.return_value = mock_result
+        mock_export_orchestrated_result.return_value = {"json": "benchmark_runs/results/mock-exec-id.json"}
 
         yield {
-            "manager": mock_manager,
-            "db_manager": mock_db_manager,
-            "profiler": mock_profiler,
+            "manager": mock_run_manager,
+            "db_manager": mock_run_db_manager,
+            "profiler": mock_run_profiler,
             "config": mock_config,
-            "orchestrator": mock_orchestrator,
+            "orchestrator": mock_run_orchestrator,
         }
 
 

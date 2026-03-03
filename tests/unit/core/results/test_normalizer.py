@@ -9,6 +9,7 @@ from benchbox.core.results.normalizer import (
     get_query_map,
     normalize_result_dict,
 )
+from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 
 
 class TestDetectSchemaVersion:
@@ -40,31 +41,27 @@ class TestNormalizeResultDictV2:
 
     @pytest.fixture
     def v2_result(self):
-        return {
-            "version": "2.0",
-            "benchmark": {"name": "TPC-H", "id": "tpch", "scale_factor": 1.0},
-            "platform": {"name": "DuckDB", "version": "0.10.0"},
-            "run": {
-                "id": "test-run-123",
-                "timestamp": "2026-01-28T12:00:00",
-            },
-            "config": {"mode": "sql"},
-            "summary": {
-                "timing": {
-                    "total_ms": 1000.0,
-                    "avg_ms": 50.0,
-                    "min_ms": 10.0,
-                    "max_ms": 200.0,
-                },
-                "queries": {"total": 20, "passed": 18, "failed": 2},
-            },
-            "cost": {"total_usd": 0.05},
-            "queries": [
+        result = make_v2_result_dict(
+            version="2.0",
+            platform="DuckDB",
+            platform_version="0.10.0",
+            scale_factor=1.0,
+            execution_id="test-run-123",
+            timestamp="2026-01-28T12:00:00",
+            execution_mode="sql",
+            total_queries=20,
+            passed_queries=18,
+            failed_queries=2,
+            total_ms=1000.0,
+            queries=[
                 {"id": "Q1", "ms": 100.5, "rows": 50, "status": "SUCCESS"},
                 {"id": "Q2", "ms": 50.0, "rows": 25, "status": "SUCCESS"},
                 {"id": "Q3", "ms": None, "rows": 0, "status": "FAILED"},
             ],
-        }
+            cost={"total_usd": 0.05},
+        )
+        result["summary"]["timing"].update(avg_ms=50.0, min_ms=10.0, max_ms=200.0)
+        return result
 
     def test_extracts_schema_version(self, v2_result):
         result = normalize_result_dict(v2_result)

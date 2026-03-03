@@ -43,8 +43,6 @@ class TestTimingMeasurementAccuracy:
         def mock_get_query(*args, **kwargs):
             with execution_lock:
                 execution_times.append(time.time())
-            # Simulate query generation taking time
-            time.sleep(0.01)
             return "SELECT 1"
 
         benchmark = Mock()
@@ -81,8 +79,6 @@ class TestTimingMeasurementAccuracy:
             verbose=config.verbose,
         )
 
-        # Add small delay before running to ensure timing is clean
-        time.sleep(0.1)
         test_start = time.time()
         result = test.run(config)
         test_end = time.time()
@@ -118,7 +114,6 @@ class TestTimingMeasurementAccuracy:
         def mock_get_query(*args, **kwargs):
             with execution_lock:
                 execution_times.append(time.time())
-            time.sleep(0.01)
             return "SELECT 1"
 
         def connection_factory():
@@ -167,7 +162,6 @@ class TestTimingMeasurementAccuracy:
             mock_manager.generate_streams.return_value = mock_streams
             mock_create.return_value = mock_manager
 
-            time.sleep(0.1)
             test_start = time.time()
             result = test.run(config)
             test_end = time.time()
@@ -250,8 +244,10 @@ class TestConnectionCleanup:
         # Even though queries failed, connections must be cleaned up
         assert len(connections_created) == 2  # 2 streams = 2 connections
 
-        # Give threads time to clean up
-        time.sleep(0.5)
+        # Wait briefly for background cleanup paths to close all connections.
+        deadline = time.time() + 0.5
+        while len(connections_closed) < 2 and time.time() < deadline:
+            time.sleep(0.01)
 
         assert len(connections_closed) == 2  # All connections closed
 
@@ -330,7 +326,9 @@ class TestConnectionCleanup:
         # Validate cleanup
         assert len(connections_created) == 2
 
-        time.sleep(0.5)
+        deadline = time.time() + 0.5
+        while len(connections_closed) < 2 and time.time() < deadline:
+            time.sleep(0.01)
 
         assert len(connections_closed) == 2
         assert set(connections_created) == set(connections_closed)

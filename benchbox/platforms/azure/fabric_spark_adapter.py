@@ -637,7 +637,7 @@ class FabricSparkAdapter(SparkTuningMixin, PlatformAdapter):
             """
             try:
                 self._execute_statement(create_sql, kind="sql")
-                per_table_timings[table] = elapsed_seconds(tbl_start)
+                per_table_timings[table] = {"total_ms": elapsed_seconds(tbl_start) * 1000}
                 logger.debug("Created Delta table: %s", table)
             except Exception as e:
                 logger.warning("Failed to create table %s: %s", table, e)

@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    outlier_severity_markers,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -75,15 +81,16 @@ class ASCIIBarChart(ASCIIChartBase):
 
         # Outlier truncation: cap the scale so extreme values don't squash all others
         scale_max = max_value
-        truncated_labels: set[str] = set()
+        truncation_active = False
         if len(sorted_data) > 5:
             values = sorted(d.value for d in sorted_data)
-            p95_idx = max(0, int(len(values) * 0.95) - 1)
-            p95 = values[p95_idx]
+            p95 = robust_p95(values)
             median_val = values[len(values) // 2]
-            if median_val > 0 and max_value > median_val * 10 and max_value > p95 * 3:
+            median_gate = median_val > 0 and max_value > median_val * 10
+            zero_heavy_gate = median_val <= 0
+            if p95 > 0 and max_value > p95 * 3 and (median_gate or zero_heavy_gate):
                 scale_max = p95 * 2
-                truncated_labels = {d.label for d in sorted_data if d.value > scale_max}
+                truncation_active = True
 
         # Reserve space for: label + " " + bar + " " + value
         value_width = max(8, len(self._format_value(max_value)) + 2)
@@ -119,7 +126,7 @@ class ASCIIBarChart(ASCIIChartBase):
 
         # Render bars
         no_color = not self.options.use_color
-        for datum in sorted_data:
+        for i, datum in enumerate(sorted_data):
             label = self._truncate_label(datum.label, max_label_len)
             label_padded = label.ljust(max_label_len)
 
@@ -130,7 +137,7 @@ class ASCIIBarChart(ASCIIChartBase):
             else:
                 ratio = 1.0 if datum.value > 0 else 0.0
 
-            is_truncated = datum.label in truncated_labels
+            is_truncated = truncation_active and datum.value > scale_max
             if is_truncated:
                 ratio = 1.0  # Fill the full bar width
 
@@ -155,19 +162,16 @@ class ASCIIBarChart(ASCIIChartBase):
                 bar += blocks[partial] if not no_color else fill_char  # Partial block
             bar = bar.ljust(bar_width)
 
-            # Mark truncated bars with a break indicator
+            # Mark truncated bars with severity-scaled markers (1-4 ▸)
             if is_truncated:
-                bar = bar[: bar_width - 1] + "\u25b8"  # ▸ right-pointing triangle
+                markers = outlier_severity_markers(datum.value, scale_max)
+                bar = bar[: bar_width - len(markers)] + markers
 
-            # Determine bar color
-            if datum.is_best:
-                bar_color = "#1b9e77"  # Green
-            elif datum.is_worst:
-                bar_color = "#d95f02"  # Orange
-            elif use_groups and datum.group:
+            # Determine bar color: cycle palette per bar, grouped bars share a color
+            if use_groups and datum.group:
                 bar_color = group_colors.get(datum.group, palette[0])
             else:
-                bar_color = palette[0]
+                bar_color = palette[i % len(palette)]
 
             # Format value with optional error
             value_str = self._format_value(datum.value)

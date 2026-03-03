@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from benchbox.core.visualization.ascii.base import ASCIIChartBase, ASCIIChartOptions, TerminalColors
+from benchbox.core.visualization.ascii.base import (
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    TerminalColors,
+    outlier_severity_markers,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -123,6 +129,20 @@ class ASCIIPercentileLadder(ASCIIChartBase):
         # Format the values annotation: "P50 | P90 | P95 | P99"
         # Find the max p99 to determine bar scaling and shared annotation width
         max_p99 = max(d.p99 for d in self.data) if self.data else 1
+
+        # Cap scale so one extreme P99 doesn't compress all other bars
+        scale_max = max_p99
+        truncation_active = False
+        all_p99 = sorted(d.p99 for d in self.data)
+        if len(all_p99) > 5:
+            p95_val = robust_p95(all_p99)
+            median_val = all_p99[len(all_p99) // 2]
+            median_gate = median_val > 0 and max_p99 > median_val * 10
+            zero_heavy_gate = median_val <= 0
+            if p95_val > 0 and max_p99 > p95_val * 3 and (median_gate or zero_heavy_gate):
+                scale_max = p95_val * 2
+                truncation_active = True
+
         annotation_value_width = self._annotation_value_width()
 
         # Create sample annotation to measure width
@@ -153,7 +173,8 @@ class ASCIIPercentileLadder(ASCIIChartBase):
             label_padded = label.ljust(max_label_len)
 
             # Build the layered bar: each band extends from 0 to its percentile value
-            bar = self._render_bar(datum, bar_width, max_p99, fills, colors)
+            is_truncated = truncation_active and datum.p99 > scale_max
+            bar = self._render_bar(datum, bar_width, scale_max, fills, colors, is_truncated)
 
             # Format annotation
             annotation = self._format_annotation(datum, annotation_value_width)
@@ -184,6 +205,7 @@ class ASCIIPercentileLadder(ASCIIChartBase):
         max_val: float,
         fills: tuple[str, ...],
         colors: TerminalColors,
+        is_truncated: bool = False,
     ) -> str:
         """Render a single layered percentile bar.
 
@@ -193,13 +215,22 @@ class ASCIIPercentileLadder(ASCIIChartBase):
         if max_val <= 0:
             return " " * bar_width
 
+        # Reserve space for severity markers on truncated bars
+        markers = ""
+        effective_width = bar_width
+        if is_truncated:
+            markers = outlier_severity_markers(datum.p99, max_val)
+            effective_width = max(1, bar_width - len(markers))
+
         percentiles = [datum.p50, datum.p90, datum.p95, datum.p99]
+        # Clamp percentiles to max_val for position calculation
+        clamped = [min(p, max_val) for p in percentiles]
 
         # Calculate the character position for each percentile
-        positions = [min(bar_width, max(0, int((p / max_val) * bar_width))) for p in percentiles]
+        positions = [min(effective_width, max(0, int((p / max_val) * effective_width))) for p in clamped]
 
         # Ensure minimum visibility: if a band has non-zero width but maps to 0 chars,
-        # give it at least 1 char. Interleave clamping to avoid exceeding bar_width.
+        # give it at least 1 char. Interleave clamping to avoid exceeding effective_width.
         for i in range(len(positions)):
             if percentiles[i] > 0 and positions[i] == 0:
                 positions[i] = 1
@@ -207,7 +238,11 @@ class ASCIIPercentileLadder(ASCIIChartBase):
             if i > 0 and positions[i] <= positions[i - 1] and percentiles[i] > percentiles[i - 1]:
                 positions[i] = positions[i - 1] + 1
             # Clamp immediately after each adjustment
-            positions[i] = min(bar_width, positions[i])
+            positions[i] = min(effective_width, positions[i])
+
+        if is_truncated:
+            # Fill to full effective width for truncated bars
+            positions[-1] = effective_width
 
         # Build the bar character by character
         bar_chars: list[str] = []
@@ -220,6 +255,11 @@ class ASCIIPercentileLadder(ASCIIChartBase):
                 segment = fill * segment_len
                 bar_chars.append(colors.colorize(segment, fg_color=color))
             prev_pos = pos
+
+        # Append severity markers for truncated bars
+        if markers:
+            bar_chars.append(markers)
+            prev_pos += len(markers)
 
         # Pad remaining space
         remaining = bar_width - prev_pos

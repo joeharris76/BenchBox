@@ -25,35 +25,6 @@ class TestSnowflakeE2E:
 
     @pytest.mark.e2e
     @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with Snowflake generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "snowflake",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-        # Check artifacts were generated
-        artifacts = list(output_dir.glob("*"))
-        assert artifacts, "No artifacts generated"
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
     @pytest.mark.live_integration
     @pytest.mark.live_snowflake
     def test_full_execution_with_credentials(self, tmp_path: Path) -> None:
@@ -76,31 +47,6 @@ class TestBigQueryE2E:
 
     @pytest.mark.e2e
     @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with BigQuery generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "bigquery",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
     @pytest.mark.live_integration
     @pytest.mark.live_bigquery
     def test_full_execution_with_credentials(self, tmp_path: Path) -> None:
@@ -120,31 +66,6 @@ class TestRedshiftE2E:
 
     @pytest.mark.e2e
     @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with Redshift generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "redshift",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
     @pytest.mark.live_integration
     @pytest.mark.live_redshift
     def test_full_execution_with_credentials(self, tmp_path: Path) -> None:
@@ -152,40 +73,6 @@ class TestRedshiftE2E:
         if not has_cloud_credentials("redshift"):
             pytest.skip("Redshift credentials not configured")
         pytest.skip("Full Redshift execution test requires manual setup")
-
-
-# ============================================================================
-# Athena E2E Tests
-# ============================================================================
-
-
-class TestAthenaE2E:
-    """E2E tests for Athena platform."""
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with Athena generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "athena",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
 
 
 # ============================================================================
@@ -198,31 +85,6 @@ class TestDatabricksE2E:
 
     @pytest.mark.e2e
     @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with Databricks generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "databricks",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
     @pytest.mark.live_integration
     @pytest.mark.live_databricks
     def test_full_execution_with_credentials(self, tmp_path: Path) -> None:
@@ -230,108 +92,6 @@ class TestDatabricksE2E:
         if not has_cloud_credentials("databricks"):
             pytest.skip("Databricks credentials not configured")
         pytest.skip("Full Databricks execution test requires manual setup")
-
-
-# ============================================================================
-# Firebolt E2E Tests
-# ============================================================================
-
-
-class TestFireboltE2E:
-    """E2E tests for Firebolt platform."""
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with Firebolt generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "firebolt",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-
-# ============================================================================
-# Trino E2E Tests
-# ============================================================================
-
-
-class TestTrinoE2E:
-    """E2E tests for Trino platform."""
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with Trino generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "trino",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-
-# ============================================================================
-# Presto E2E Tests
-# ============================================================================
-
-
-class TestPrestoE2E:
-    """E2E tests for Presto platform."""
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_cloud
-    @pytest.mark.e2e_quick
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode with Presto generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "presto",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
 
 
 # ============================================================================

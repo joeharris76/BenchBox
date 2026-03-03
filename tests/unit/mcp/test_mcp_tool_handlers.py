@@ -6,13 +6,13 @@ execution, file I/O) to verify argument handling, error paths, and response
 structure.
 """
 
-import json
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from tests.fixtures.result_dict_fixtures import write_v2_result_file
 
 pytestmark = [
     pytest.mark.fast,
@@ -341,23 +341,8 @@ class TestRunBenchmarkToolSuccess:
 
         mock_bm_class = MagicMock(return_value=mock_instance)
 
-        payload = {
-            "version": "2.1",
-            "run": {
-                "id": "mcp_test",
-                "timestamp": "2026-01-01T00:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 1000,
-                "iterations": 1,
-                "streams": 1,
-            },
-            "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-            "platform": {"name": "duckdb"},
-            "summary": {"queries": {"total": 22, "passed": 22, "failed": 0}, "timing": {"total_ms": 5000}},
-            "queries": [],
-        }
         result_path = tmp_path / "result.json"
-        result_path.write_text(json.dumps(payload))
+        write_v2_result_file(result_path, execution_id="mcp_test", timestamp="2026-01-01T00:00:00")
 
         mock_exporter = MagicMock()
         mock_exporter.export_result.return_value = {"json": result_path}
@@ -476,25 +461,20 @@ class TestRunBenchmarkToolSuccess:
 
         mock_bm_class = MagicMock(return_value=mock_instance)
 
-        payload = {
-            "version": "2.1",
-            "run": {
-                "id": "mcp_test",
-                "timestamp": "2026-01-01T00:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 1000,
-                "iterations": 1,
-                "streams": 1,
-            },
-            "benchmark": {"id": "tpcds", "name": "TPC-DS", "scale_factor": 0.01},
-            "platform": {"name": "duckdb"},
-            "summary": {"queries": {"total": 99, "passed": 99, "failed": 0}, "timing": {"total_ms": 5000}},
-            "queries": [
-                {"id": str(i), "ms": 100 + i, "status": "SUCCESS", "run_type": "measurement"} for i in range(1, 100)
-            ],
-        }
+        tpcds_queries = [
+            {"id": str(i), "ms": 100 + i, "status": "SUCCESS", "run_type": "measurement"} for i in range(1, 100)
+        ]
         result_path = tmp_path / "result.json"
-        result_path.write_text(json.dumps(payload))
+        write_v2_result_file(
+            result_path,
+            execution_id="mcp_test",
+            timestamp="2026-01-01T00:00:00",
+            benchmark_id="tpcds",
+            benchmark_name="TPC-DS",
+            total_queries=99,
+            passed_queries=99,
+            queries=tpcds_queries,
+        )
 
         mock_exporter = MagicMock()
         mock_exporter.export_result.return_value = {"json": result_path}
@@ -521,25 +501,17 @@ class TestRunBenchmarkToolSuccess:
             {"query_id": f"Q{i}", "execution_time": 0.1, "status": "SUCCESS"} for i in range(1, 23)
         ]
 
-        payload = {
-            "version": "2.1",
-            "run": {
-                "id": "mcp_test",
-                "timestamp": "2026-01-01T00:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 1000,
-                "iterations": 1,
-                "streams": 1,
-            },
-            "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-            "platform": {"name": "polars-df"},
-            "summary": {"queries": {"total": 22, "passed": 22, "failed": 0}, "timing": {"total_ms": 5000}},
-            "queries": [
-                {"id": str(i), "ms": 100 + i, "status": "SUCCESS", "run_type": "measurement"} for i in range(1, 23)
-            ],
-        }
+        polars_queries = [
+            {"id": str(i), "ms": 100 + i, "status": "SUCCESS", "run_type": "measurement"} for i in range(1, 23)
+        ]
         result_path = tmp_path / "result.json"
-        result_path.write_text(json.dumps(payload))
+        write_v2_result_file(
+            result_path,
+            execution_id="mcp_test",
+            timestamp="2026-01-01T00:00:00",
+            platform="polars-df",
+            queries=polars_queries,
+        )
 
         mock_exporter = MagicMock()
         mock_exporter.export_result.return_value = {"json": result_path}
@@ -587,23 +559,15 @@ class TestGetResultsImpl:
         """Valid JSON result file returns parsed data."""
         from benchbox.mcp.tools.results import _get_results_impl
 
-        result_data = {
-            "version": "2.1",
-            "run": {
-                "id": "test_run",
-                "timestamp": "2026-01-01T00:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 1000,
-                "iterations": 1,
-                "streams": 1,
-            },
-            "platform": {"name": "duckdb"},
-            "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-            "summary": {"queries": {"total": 2, "passed": 2, "failed": 0}, "timing": {"total_ms": 5.0}},
-            "queries": [],
-        }
         result_file = tmp_path / "test_run.json"
-        result_file.write_text(json.dumps(result_data))
+        write_v2_result_file(
+            result_file,
+            execution_id="test_run",
+            timestamp="2026-01-01T00:00:00",
+            total_queries=2,
+            passed_queries=2,
+            total_ms=5.0,
+        )
 
         result = _get_results_impl("test_run.json", results_dir=tmp_path)
 
@@ -628,26 +592,22 @@ class TestGetResultsImpl:
         """Query results are included when include_queries=True."""
         from benchbox.mcp.tools.results import _get_results_impl
 
-        result_data = {
-            "version": "2.1",
-            "run": {
-                "id": "test_run",
-                "timestamp": "2026-01-01T00:00:00",
-                "total_duration_ms": 150,
-                "query_time_ms": 150,
-                "iterations": 1,
-                "streams": 1,
-            },
-            "platform": {"name": "duckdb"},
-            "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-            "summary": {"queries": {"total": 2, "passed": 2, "failed": 0}, "timing": {"total_ms": 150}},
-            "queries": [
-                {"id": "1", "ms": 100, "status": "SUCCESS", "run_type": "measurement"},
-                {"id": "6", "ms": 50, "status": "SUCCESS", "run_type": "measurement"},
-            ],
-        }
+        query_list = [
+            {"id": "1", "ms": 100, "status": "SUCCESS", "run_type": "measurement"},
+            {"id": "6", "ms": 50, "status": "SUCCESS", "run_type": "measurement"},
+        ]
         result_file = tmp_path / "with_queries.json"
-        result_file.write_text(json.dumps(result_data))
+        write_v2_result_file(
+            result_file,
+            execution_id="test_run",
+            timestamp="2026-01-01T00:00:00",
+            total_duration_ms=150,
+            query_time_ms=150,
+            total_queries=2,
+            passed_queries=2,
+            total_ms=150,
+            queries=query_list,
+        )
 
         result = _get_results_impl("with_queries.json", include_queries=True, results_dir=tmp_path)
 
@@ -659,24 +619,15 @@ class TestGetResultsImpl:
         from benchbox.mcp.tools.results import _get_results_impl
 
         result_file = tmp_path / "run.json"
-        result_file.write_text(
-            json.dumps(
-                {
-                    "version": "2.1",
-                    "run": {
-                        "id": "test_run",
-                        "timestamp": "2026-01-01T00:00:00",
-                        "total_duration_ms": 0,
-                        "query_time_ms": 0,
-                        "iterations": 1,
-                        "streams": 1,
-                    },
-                    "platform": {"name": "duckdb"},
-                    "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-                    "summary": {"queries": {"total": 0, "passed": 0, "failed": 0}, "timing": {"total_ms": 0}},
-                    "queries": [],
-                }
-            )
+        write_v2_result_file(
+            result_file,
+            execution_id="test_run",
+            timestamp="2026-01-01T00:00:00",
+            total_duration_ms=0,
+            query_time_ms=0,
+            total_queries=0,
+            passed_queries=0,
+            total_ms=0,
         )
 
         result = _get_results_impl("run", results_dir=tmp_path)
@@ -805,23 +756,8 @@ class TestModeParameterValidation:
 
         mock_bm_class = MagicMock(return_value=mock_instance)
 
-        payload = {
-            "version": "2.1",
-            "run": {
-                "id": "mcp_test",
-                "timestamp": "2026-01-01T00:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 1000,
-                "iterations": 1,
-                "streams": 1,
-            },
-            "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-            "platform": {"name": "duckdb"},
-            "summary": {"queries": {"total": 22, "passed": 22, "failed": 0}, "timing": {"total_ms": 5000}},
-            "queries": [],
-        }
         result_path = tmp_path / "result.json"
-        result_path.write_text(json.dumps(payload))
+        write_v2_result_file(result_path, execution_id="mcp_test", timestamp="2026-01-01T00:00:00")
 
         mock_exporter = MagicMock()
         mock_exporter.export_result.return_value = {"json": result_path}
@@ -978,16 +914,8 @@ class TestPhasesMapping:
 
         mock_bm_class = MagicMock(return_value=mock_instance)
 
-        payload = {
-            "version": "2.1",
-            "run": {"id": "test", "timestamp": "2026-01-01T00:00:00", "total_duration_ms": 1000},
-            "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-            "platform": {"name": "duckdb"},
-            "summary": {"queries": {"total": 22, "passed": 22, "failed": 0}, "timing": {"total_ms": 5000}},
-            "queries": [],
-        }
         result_path = tmp_path / "result.json"
-        result_path.write_text(json.dumps(payload))
+        write_v2_result_file(result_path, execution_id="test", timestamp="2026-01-01T00:00:00")
 
         mock_exporter = MagicMock()
         mock_exporter.export_result.return_value = {"json": result_path}
@@ -1016,16 +944,13 @@ class TestPhasesMapping:
 
         mock_bm_class = MagicMock(return_value=mock_instance)
 
-        payload = {
-            "version": "2.1",
-            "run": {"id": "test", "timestamp": "2026-01-01T00:00:00", "total_duration_ms": 1000},
-            "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 0.01},
-            "platform": {"name": "datafusion"},
-            "summary": {"queries": {"total": 22, "passed": 22, "failed": 0}, "timing": {"total_ms": 5000}},
-            "queries": [],
-        }
         result_path = tmp_path / "result.json"
-        result_path.write_text(json.dumps(payload))
+        write_v2_result_file(
+            result_path,
+            execution_id="test",
+            timestamp="2026-01-01T00:00:00",
+            platform="datafusion",
+        )
 
         mock_exporter = MagicMock()
         mock_exporter.export_result.return_value = {"json": result_path}

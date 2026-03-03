@@ -60,7 +60,7 @@ BenchBox uses optional dependency extras to keep the core installation lightweig
 | ------------------ | --------------------------------------------------------- | ------------------------------------------------- |
 | `(none)`           | DuckDB + SQLite (local development)                       | `uv add benchbox`                         |
 | `[cloudstorage]`   | Cloudpathlib helpers for S3, GCS, Azure paths             | `uv add benchbox --extra cloudstorage`        |
-| `[cloud]`          | BigQuery, Databricks, Redshift, Snowflake connectors      | `uv add benchbox --extra cloud`               |
+| `[cloud]`          | BigQuery, Databricks SQL, Redshift, Snowflake connectors  | `uv add benchbox --extra cloud`               |
 | `[databricks]`     | Databricks SQL Warehouses + Unity Catalog tooling         | `uv add benchbox --extra databricks`          |
 | `[bigquery]`       | BigQuery client libraries + Google Cloud Storage support | `uv add benchbox --extra bigquery`            |
 | `[redshift]`       | Redshift connector, boto3, and cloud storage helpers      | `uv add benchbox --extra redshift`            |
@@ -72,11 +72,11 @@ BenchBox uses optional dependency extras to keep the core installation lightweig
 
 Need to double-check your environment? Run `benchbox check-deps --matrix` for the full installation matrix or `benchbox check-deps --platform <name>` for targeted guidance.
 
-## Presto Lineage: Trino vs PrestoDB vs Athena
+## Presto Lineage: Trino vs PrestoDB vs Amazon Athena
 
 - **Trino**: Community-driven fork; uses `trino` Python client and `X-Trino-*` headers. Compatible with Starburst deployments.
 - **PrestoDB**: Original project maintained by Meta; uses `presto-python-client` with `X-Presto-*` headers. Compatible with Meta ecosystem tools.
-- **Athena**: AWS managed service built on the Presto/Trino lineage; serverless execution without self-managed coordinators.
+- **Amazon Athena**: AWS managed service built on the Presto/Trino lineage; serverless execution without self-managed coordinators.
 
 ## SQL vs DataFrame: When to Choose Each
 
@@ -193,7 +193,7 @@ adapter = ClickHouseAdapter(
 - Moderate resource requirements
 
 #### Large Scale (100GB+)
-**Platform Options**: BigQuery, Databricks, Redshift, Snowflake
+**Platform Options**: BigQuery, Databricks SQL, Redshift, Snowflake
 
 ```python
 # Cloud platform examples (choose based on your cloud environment)
@@ -248,7 +248,7 @@ adapter = DataFusionAdapter(
 | Platform       | Pricing Model   | Cost Control        |
 | -------------- | --------------- | ------------------- |
 | **BigQuery**   | $5/TB queried   | Query limits, slots |
-| **Databricks** | DBU consumption | Auto-termination    |
+| **Databricks SQL** | DBU consumption | Auto-termination    |
 
 **Cost-Optimized Configuration**:
 ```python
@@ -305,7 +305,7 @@ adapter = ClickHouseAdapter(
 
 #### Throughput-Optimized Workloads
 
-**Platform Options**: BigQuery, Databricks, Snowflake
+**Platform Options**: BigQuery, Databricks SQL, Snowflake
 
 ```python
 # BigQuery: Serverless auto-scaling
@@ -351,7 +351,7 @@ adapter = BigQueryAdapter(
 
 #### Some Operations Acceptable
 
-**Platform Options**: ClickHouse (managed), Databricks, Redshift
+**Platform Options**: ClickHouse (managed), Databricks SQL, Redshift
 
 ```python
 # Managed service with configuration options
@@ -431,7 +431,7 @@ adapter = BigQueryAdapter(
 
 #### Medium Team (10-50 people)
 
-**Platform Options**: Databricks, Snowflake
+**Platform Options**: Databricks SQL, Snowflake
 
 ```python
 # Enterprise features for growing teams
@@ -451,7 +451,7 @@ adapter = SnowflakeAdapter(
 
 #### Large Enterprise (50+ people)
 
-**Platform Options**: Databricks, Redshift, Snowflake
+**Platform Options**: Databricks SQL, Redshift, Snowflake
 
 ```python
 # Enterprise deployment
@@ -473,7 +473,7 @@ adapter = DatabricksAdapter(
 
 #### Python-Centric Environment
 
-**All platforms supported**. DuckDB and Databricks offer native Python integration:
+**All platforms supported**. DuckDB and Databricks SQL offer native Python integration:
 
 ```python
 # DuckDB: Native Python integration
@@ -484,7 +484,7 @@ import pandas as pd
 df = pd.read_csv("data.csv")
 result = duckdb.query("SELECT * FROM df WHERE value > 100").to_df()
 
-# Databricks: Spark/Python integration
+# Databricks SQL: Spark/Python integration
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.appName("BenchBox").getOrCreate()
 ```
@@ -503,7 +503,7 @@ adapter = BigQueryAdapter()
 
 #### Multi-Language Requirements
 
-**Platform Options**: ClickHouse, Databricks
+**Platform Options**: ClickHouse, Databricks SQL
 
 ```python
 # ClickHouse: Multiple client libraries available
@@ -511,7 +511,7 @@ adapter = BigQueryAdapter()
 # - HTTP API for any language
 # - JDBC/ODBC drivers
 
-# Databricks: Spark ecosystem language support
+# Databricks SQL: Spark ecosystem language support
 # - Scala, Python, Java, R, SQL
 # - REST APIs
 # - Notebook interface
@@ -522,7 +522,7 @@ adapter = BigQueryAdapter()
 #### Amazon Web Services
 
 **AWS-integrated platform**: Redshift
-**Other options**: ClickHouse (EKS), Databricks, DuckDB, Snowflake
+**Other options**: ClickHouse (EKS), Databricks SQL, DuckDB, Snowflake
 
 ```python
 # AWS integration example
@@ -537,8 +537,8 @@ adapter = RedshiftAdapter(
 
 #### Google Cloud Platform
 
-**GCP-integrated platform**: BigQuery
-**Other options**: ClickHouse (GKE), Databricks, DuckDB, Snowflake
+**Google Cloud-integrated platform**: BigQuery
+**Other options**: ClickHouse (GKE), Databricks SQL, DuckDB, Snowflake
 
 ```python
 # GCP integration example
@@ -556,7 +556,7 @@ adapter = BigQueryAdapter(
 #### Microsoft Azure
 
 **Azure-integrated platforms**: Azure Synapse Analytics, Microsoft Fabric
-**Multi-cloud platforms on Azure**: Databricks, Snowflake
+**Multi-cloud platforms on Azure**: Databricks SQL, Snowflake
 **Other options**: DuckDB
 
 ```python
@@ -585,7 +585,7 @@ See the [Azure Platforms](azure-platforms.md) page for details on all Azure inte
 
 #### Multi-Cloud or Cloud-Agnostic
 
-**Multi-cloud platforms**: Databricks, Snowflake
+**Multi-cloud platforms**: Databricks SQL, Snowflake
 **Cloud-agnostic options**: ClickHouse, DuckDB
 
 ```python
@@ -600,7 +600,7 @@ adapter = DatabricksAdapter(
 #### On-Premises or Hybrid
 
 **Self-hosted options**: ClickHouse, DuckDB
-**Hybrid options**: Databricks (private cloud)
+**Hybrid options**: Databricks SQL (private cloud)
 
 ```python
 # On-premises deployment example
@@ -641,11 +641,11 @@ Performance Benchmarking
 1. Data scale considerations:
    ├── < 1GB → Embedded databases (DuckDB, SQLite)
    ├── 1-100GB → ClickHouse, DuckDB, or cloud platforms
-   └── > 100GB → Cloud platforms (BigQuery, Databricks, Redshift, Snowflake)
+   └── > 100GB → Cloud platforms (BigQuery, Databricks SQL, Redshift, Snowflake)
 
 2. Budget model:
    ├── No cost → ClickHouse (self-hosted), DuckDB, SQLite
-   ├── Pay-per-use → BigQuery, Databricks (usage-based)
+   ├── Pay-per-use → BigQuery, Databricks SQL (usage-based)
    └── Predictable costs → Redshift, Snowflake (provisioned)
 
 3. Team size:
@@ -655,10 +655,10 @@ Performance Benchmarking
    └── Large enterprise → Cloud platforms with enterprise features
 
 4. Cloud environment:
-   ├── AWS → Redshift (integrated), or Databricks, Snowflake (multi-cloud)
-   ├── Azure → Databricks, Snowflake (multi-cloud)
-   ├── Google Cloud → BigQuery (integrated), or Databricks, Snowflake (multi-cloud)
-   ├── Multi-cloud → Databricks, Snowflake
+   ├── AWS → Redshift (integrated), or Databricks SQL, Snowflake (multi-cloud)
+   ├── Azure → Databricks SQL, Snowflake (multi-cloud)
+   ├── Google Cloud → BigQuery (integrated), or Databricks SQL, Snowflake (multi-cloud)
+   ├── Multi-cloud → Databricks SQL, Snowflake
    └── On-premises → ClickHouse, DuckDB (self-hosted)
 
 5. Architecture characteristics:
@@ -871,7 +871,7 @@ prod_adapter = DatabricksAdapter(
 
 1. **Match platform to workload characteristics**
    - OLAP-heavy: ClickHouse, BigQuery
-   - Mixed workloads: Snowflake, Databricks
+   - Mixed workloads: Snowflake, Databricks SQL
    - Development: DuckDB
 
 2. **Use appropriate scale factors for testing**
@@ -908,7 +908,7 @@ Platform selection depends on your specific requirements. Common platform choice
 - **No-cost options**: ClickHouse (self-hosted), DuckDB, SQLite
 - **In-process execution**: ClickHouse, DuckDB (columnar architecture, no network overhead)
 - **Enterprise teams**: Cloud platforms with governance features
-- **Cloud-native deployments**: BigQuery, Databricks, Redshift, Snowflake (managed services)
+- **Cloud-native deployments**: BigQuery, Databricks SQL, Redshift, Snowflake (managed services)
 - **Self-hosted deployments**: ClickHouse, DuckDB (full control)
 
 ### DataFrame Platforms

@@ -19,6 +19,7 @@ from benchbox.core.results.query_plan_models import (
     LogicalOperatorType,
     QueryPlanDAG,
 )
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
@@ -37,16 +38,6 @@ class MockPhaseResults:
     """Mock phase results for testing."""
 
     queries: list[MockQueryExecution] = field(default_factory=list)
-
-
-@dataclass
-class MockBenchmarkResults:
-    """Mock benchmark results for testing."""
-
-    run_id: str
-    start_time: str = "2024-01-01T00:00:00Z"
-    platform: str = "duckdb"
-    phases: dict[str, MockPhaseResults] = field(default_factory=dict)
 
 
 def _create_plan_with_fingerprint(query_id: str, fingerprint: str) -> QueryPlanDAG:
@@ -112,7 +103,7 @@ class TestPlanHistory:
             history = PlanHistory(Path(tmpdir))
 
             plan = _create_plan_with_fingerprint("q1", "a" * 64)
-            results = MockBenchmarkResults(
+            results = make_benchmark_results(
                 run_id="run1",
                 phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
             )
@@ -137,7 +128,7 @@ class TestPlanHistory:
             # Add multiple runs
             for i in range(3):
                 plan = _create_plan_with_fingerprint("q1", "a" * 64)
-                results = MockBenchmarkResults(
+                results = make_benchmark_results(
                     run_id=f"run{i}",
                     start_time=f"2024-01-0{i + 1}T00:00:00Z",
                     phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0 + i * 10, plan)])},
@@ -165,7 +156,7 @@ class TestPlanHistory:
             # All runs have same fingerprint - no flapping
             for i in range(5):
                 plan = _create_plan_with_fingerprint("q1", "a" * 64)
-                results = MockBenchmarkResults(
+                results = make_benchmark_results(
                     run_id=f"run{i}",
                     start_time=f"2024-01-0{i + 1}T00:00:00Z",
                     phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
@@ -183,7 +174,7 @@ class TestPlanHistory:
             fingerprints = ["a" * 64, "a" * 64, "b" * 64, "b" * 64, "b" * 64]
             for i, fp in enumerate(fingerprints):
                 plan = _create_plan_with_fingerprint("q1", fp)
-                results = MockBenchmarkResults(
+                results = make_benchmark_results(
                     run_id=f"run{i}",
                     start_time=f"2024-01-0{i + 1}T00:00:00Z",
                     phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
@@ -202,7 +193,7 @@ class TestPlanHistory:
             fingerprints = ["a" * 64, "b" * 64, "a" * 64, "b" * 64, "a" * 64]
             for i, fp in enumerate(fingerprints):
                 plan = _create_plan_with_fingerprint("q1", fp)
-                results = MockBenchmarkResults(
+                results = make_benchmark_results(
                     run_id=f"run{i}",
                     start_time=f"2024-01-0{i + 1}T00:00:00Z",
                     phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
@@ -221,7 +212,7 @@ class TestPlanHistory:
             for i in range(2):
                 fp = "a" * 64 if i == 0 else "b" * 64
                 plan = _create_plan_with_fingerprint("q1", fp)
-                results = MockBenchmarkResults(
+                results = make_benchmark_results(
                     run_id=f"run{i}",
                     start_time=f"2024-01-0{i + 1}T00:00:00Z",
                     phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
@@ -238,7 +229,7 @@ class TestPlanHistory:
             fingerprints = ["a" * 64, "a" * 64, "b" * 64, "c" * 64, "c" * 64]
             for i, fp in enumerate(fingerprints):
                 plan = _create_plan_with_fingerprint("q1", fp)
-                results = MockBenchmarkResults(
+                results = make_benchmark_results(
                     run_id=f"run{i}",
                     start_time=f"2024-01-0{i + 1}T00:00:00Z",
                     phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
@@ -263,7 +254,7 @@ class TestPlanHistory:
 
             plan1 = _create_plan_with_fingerprint("q1", "a" * 64)
             plan2 = _create_plan_with_fingerprint("q2", "b" * 64)
-            results = MockBenchmarkResults(
+            results = make_benchmark_results(
                 run_id="run1",
                 phases={
                     "power": MockPhaseResults(
@@ -289,7 +280,7 @@ class TestPlanHistory:
 
             for i in range(3):
                 plan = _create_plan_with_fingerprint("q1", "a" * 64)
-                results = MockBenchmarkResults(
+                results = make_benchmark_results(
                     run_id=f"run{i}",
                     phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
                 )
@@ -303,7 +294,7 @@ class TestPlanHistory:
             history = PlanHistory(Path(tmpdir))
 
             plan = _create_plan_with_fingerprint("q1", "a" * 64)
-            results = MockBenchmarkResults(
+            results = make_benchmark_results(
                 run_id="run1",
                 phases={"power": MockPhaseResults(queries=[MockQueryExecution("q1", 100.0, plan)])},
             )

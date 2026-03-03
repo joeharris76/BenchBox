@@ -1,6 +1,5 @@
 """Integration tests for cost estimation added to benchmark results."""
 
-from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,26 +10,23 @@ from benchbox.core.cost.integration import (
     _extract_platform_config_from_results,
     add_cost_estimation_to_results,
 )
-from benchbox.core.results.models import BenchmarkResults
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
 
 def create_test_results(**kwargs):
-    """Helper to create BenchmarkResults with required fields."""
+    """Cost-test defaults delegating to shared factory."""
     defaults = {
         "benchmark_name": "Test",
         "platform": "snowflake",
         "scale_factor": 1,
-        "execution_id": "test-exec-001",
-        "timestamp": datetime.now(),
         "duration_seconds": 10.0,
         "total_queries": 2,
         "successful_queries": 2,
-        "failed_queries": 0,
     }
     defaults.update(kwargs)
-    return BenchmarkResults(**defaults)
+    return make_benchmark_results(**defaults)
 
 
 class TestAddCostEstimationToResults:

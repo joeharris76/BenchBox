@@ -336,7 +336,7 @@ class SSBRowCountStrategy(RowCountStrategy):
         """Get expected row count range for SSB tables."""
         ranges = {
             "lineorder": (6000000 * self.scale_factor * 0.8, 6000000 * self.scale_factor * 1.2),
-            "customer": (150000 * self.scale_factor * 0.8, 150000 * self.scale_factor * 1.2),
+            "customer": (30000 * self.scale_factor * 0.8, 30000 * self.scale_factor * 1.2),
         }
         return ranges.get(table)
 

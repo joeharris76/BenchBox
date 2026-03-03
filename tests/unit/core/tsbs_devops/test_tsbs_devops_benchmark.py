@@ -356,3 +356,8 @@ class TestBenchmarkLoader:
         assert instance is not None
         assert hasattr(instance, "generate_data")
         assert hasattr(instance, "get_queries")
+        assert hasattr(instance, "create_enhanced_benchmark_result")
+        assert hasattr(instance, "create_minimal_benchmark_result")
+        assert hasattr(instance, "validate_preflight")
+        assert hasattr(instance, "validate_manifest")
+        assert hasattr(instance, "validate_loaded_data")

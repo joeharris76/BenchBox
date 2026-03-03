@@ -73,7 +73,6 @@ class TestCompressionIntegration:
             assert compressed_size > 0
             assert compressed_size < 100000  # Should be much smaller than uncompressed
 
-    @pytest.mark.requires_zstd
     def test_compression_with_multiple_tables_zstd(self):
         """Test compression with multiple tables using zstd."""
         with tempfile.TemporaryDirectory() as temp_dir:

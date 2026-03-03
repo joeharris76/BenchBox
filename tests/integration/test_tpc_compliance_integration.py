@@ -230,7 +230,7 @@ class TestTPCHCompliance:
             )
 
             # Run the maintenance test
-            result = maintenance_test.run_maintenance_test()
+            result = maintenance_test.run_maintenance_test(rf1_interval=0.0, rf2_interval=0.0)
 
             # Verify results
             assert result.config.scale_factor == 1.0
@@ -483,7 +483,7 @@ class TestTPCComplianceEndToEnd:
                 scale_factor=1.0,
                 verbose=False,
             )
-            maintenance_result = maintenance_test.run_maintenance_test()
+            maintenance_result = maintenance_test.run_maintenance_test(rf1_interval=0.0, rf2_interval=0.0)
 
             # Calculate final QphH@Size
             metrics = TPCOfficialMetrics(benchmark_name="TPC-H", scale_factor=1.0)

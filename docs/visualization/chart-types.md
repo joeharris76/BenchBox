@@ -3,7 +3,7 @@
 ```{tags} intermediate, reference, visualization
 ```
 
-BenchBox provides nine chart types optimized for benchmarking narratives, rendered as ASCII art directly in the terminal. Each chart is designed for a specific analytical purpose and can be generated via `benchbox visualize` or programmatically through the Python API. No external dependencies are required.
+BenchBox provides chart types optimized for benchmarking narratives, rendered as ASCII art directly in the terminal. Each chart is designed for a specific analytical purpose and can be generated via `benchbox visualize` or programmatically through the Python API. No external dependencies are required.
 
 ## Performance Bar Chart
 
@@ -36,6 +36,39 @@ Legend: ■ Best  ■ Worst
 - Platform shootouts ("DuckDB vs Snowflake")
 - Before/after optimization comparisons
 - Multi-benchmark summaries
+
+---
+
+## Power@Size Bar Chart
+
+**Purpose:** Compare TPC Power@Size scores across platforms or versions. Power@Size is a TPC-defined throughput metric expressed in queries-per-hour at a given scale factor - higher is better.
+
+**Key Features:**
+- Automatic best/worst highlighting (highest score = green, lowest = red)
+- Longer bars indicate better throughput performance (inverted vs execution time)
+- Silently excluded for non-TPC benchmarks (no Power@Size in result)
+
+```text
+Power@Size Comparison (Power@Size)
+──────────────────────────────────────────────────────────
+DuckDB 1.5.0-dev ███████████████████████████████████████   669.3K
+DuckDB 1.4.4     ██████████████████████████████████████    630.9K
+DuckDB 1.3.2     ███████████████████████████████████████   614.9K
+DuckDB 1.1.3     ██████████████████████████████████████    594.7K
+DuckDB 1.2.2     ███████████████████████████████████       500.5K
+DuckDB 1.0.0     ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓               385.8K
+```
+
+*TPC-DS SF=10 version comparison showing Power@Size progression from v1.0.0 to v1.5.0-dev*
+
+**Data Requirements:**
+- `summary.tpc_metrics.power_at_size` in result JSON (present in TPC-H and TPC-DS runs)
+- At least 1 result (multiple for comparison)
+
+**Best For:**
+- TPC-H and TPC-DS version-over-version comparisons
+- Tracking throughput improvement across platform upgrades
+- Executive summaries of TPC benchmark results
 
 ---
 
@@ -369,6 +402,7 @@ Q21                       | ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒──�
 | Scenario | Recommended Chart |
 |----------|-------------------|
 | "Which platform is fastest?" | Performance Bar |
+| "What is the TPC throughput score?" | Power@Size Bar |
 | "How has performance changed over time?" | Time-Series Line |
 | "Which platform has best price/performance?" | Cost-Performance Scatter |
 | "Which queries does each platform struggle with?" | Query Variance Heatmap |
@@ -384,6 +418,7 @@ Q21                       | ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒──�
 | Chart Type | Required Fields | Minimum Results |
 |------------|-----------------|-----------------|
 | Performance Bar | `total_time_ms` or `avg_time_ms` | 1 |
+| Power@Size Bar | `summary.tpc_metrics.power_at_size` | 1 (TPC benchmarks only) |
 | Time-Series Line | `total_time_ms` + timestamps | 2 |
 | Cost-Performance Scatter | `cost_summary.total_cost` + timing | 1 (2+ useful) |
 | Query Variance Heatmap | `queries[].execution_time_ms` | 2 platforms |

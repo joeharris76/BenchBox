@@ -283,7 +283,7 @@ wheels = [
 
 [[package]]
 name = "benchbox"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -298,6 +298,7 @@ dependencies = [
     { name = "rich" },
     { name = "sqlglot" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "zstandard" },
 ]
 
 [package.optional-dependencies]
@@ -628,7 +629,6 @@ dev = [
     { name = "sphinxcontrib-mermaid" },
     { name = "trino" },
     { name = "ty" },
-    { name = "zstandard" },
 ]
 
 [package.metadata]
@@ -804,8 +804,9 @@ requires-dist = [
     { name = "trino", marker = "extra == 'all'", specifier = ">=0.328.0" },
     { name = "trino", marker = "extra == 'cloud'", specifier = ">=0.328.0" },
     { name = "trino", marker = "extra == 'trino'", specifier = ">=0.328.0" },
+    { name = "zstandard", specifier = ">=0.20.0" },
 ]
-provides-extras = ["duckdb", "clickhouse-connect", "dev", "docs", "viz", "all", "cloud", "cloudstorage", "clickhouse", "databricks", "bigquery", "redshift", "snowflake", "trino", "presto", "postgresql", "questdb", "synapse", "fabric", "athena", "datafusion", "firebolt", "databend", "doris", "influxdb", "starrocks", "tpcdi", "clickhouse-local", "table-formats", "pandas", "dataframe-pandas", "modin", "dataframe-modin", "dask", "dataframe-dask", "cudf", "dataframe-cudf", "polars", "dataframe-polars", "pyspark", "lakesail", "dataframe-pyspark", "dataframe-datafusion", "dataframe-pandas-family", "dataframe-expression-family", "dataframe-all", "quick-start", "cloud-spark-aws", "cloud-spark-gcp", "cloud-spark-azure", "cloud-spark-snowflake", "cloud-spark-databricks", "databricks-connect", "cloud-spark", "mcp", "spark"]
+provides-extras = ["dev", "docs", "viz", "all", "cloud", "cloudstorage", "duckdb", "clickhouse", "clickhouse-connect", "databricks", "bigquery", "redshift", "snowflake", "trino", "presto", "postgresql", "questdb", "synapse", "fabric", "athena", "datafusion", "firebolt", "databend", "doris", "influxdb", "starrocks", "tpcdi", "clickhouse-local", "table-formats", "pandas", "dataframe-pandas", "modin", "dataframe-modin", "dask", "dataframe-dask", "cudf", "dataframe-cudf", "polars", "dataframe-polars", "pyspark", "lakesail", "dataframe-pyspark", "dataframe-datafusion", "dataframe-pandas-family", "dataframe-expression-family", "dataframe-all", "quick-start", "cloud-spark-aws", "cloud-spark-gcp", "cloud-spark-azure", "cloud-spark-snowflake", "cloud-spark-databricks", "databricks-connect", "cloud-spark", "mcp", "spark"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -845,7 +846,6 @@ dev = [
     { name = "sphinxcontrib-mermaid", specifier = ">=1.2.3" },
     { name = "trino", specifier = ">=0.336.0" },
     { name = "ty", specifier = ">=0.0.1a14" },
-    { name = "zstandard", specifier = ">=0.20.0" },
 ]
 
 [[package]]

@@ -19,6 +19,7 @@ from benchbox.platforms.base import (
     ConnectionConfig,
     PlatformAdapter,
 )
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
@@ -491,19 +492,15 @@ class TestBenchmarkResults:
 
     def test_benchmark_results_creation(self):
         """Test creating BenchmarkResults instance."""
-        from datetime import datetime
-
-        results = BenchmarkResults(
+        results = make_benchmark_results(
             benchmark_name="test_benchmark",
             platform="test_platform",
             scale_factor=1.0,
             execution_id="test_001",
-            timestamp=datetime.now(),
             duration_seconds=10.5,
             total_queries=5,
             successful_queries=4,
             failed_queries=1,
-            query_results=[],
             total_execution_time=8.0,
             average_query_time=2.0,
             data_loading_time=1.5,
@@ -511,7 +508,10 @@ class TestBenchmarkResults:
             total_rows_loaded=1000,
             data_size_mb=10.5,
             table_statistics={"table1": 1000},
+            validation_status="PASSED",
         )
+        # Factory sets validation_details={} by default; reset to match dataclass default for this test
+        results.validation_details = None
 
         assert results.benchmark_name == "test_benchmark"
         assert results.platform == "test_platform"
@@ -543,8 +543,6 @@ class TestPlatformAdapterWorkflow:
 
     def test_run_benchmark_success(self, mock_benchmark, tmp_path):
         """Test successful benchmark execution."""
-        from datetime import datetime
-
         adapter = MockPlatformAdapter()
         mock_benchmark.output_dir = tmp_path
 
@@ -553,17 +551,14 @@ class TestPlatformAdapterWorkflow:
         test_file.write_text("test,data\n1,value")
 
         # Mock create_enhanced_benchmark_result to return correct values
-        mock_result = BenchmarkResults(
+        mock_result = make_benchmark_results(
             benchmark_name="test_benchmark",
             platform="mock",
             scale_factor=1.0,
             execution_id="test_001",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=2,
             successful_queries=2,
-            failed_queries=0,
-            query_results=[],
             total_execution_time=0.2,
             average_query_time=0.1,
             data_loading_time=0.5,
@@ -585,23 +580,18 @@ class TestPlatformAdapterWorkflow:
 
     def test_run_benchmark_with_query_subset(self, mock_benchmark, tmp_path):
         """Test benchmark execution with query subset."""
-        from datetime import datetime
-
         adapter = MockPlatformAdapter()
         mock_benchmark.output_dir = tmp_path
 
         # Mock create_enhanced_benchmark_result to return correct values for subset
-        mock_result = BenchmarkResults(
+        mock_result = make_benchmark_results(
             benchmark_name="test_benchmark",
             platform="mock",
             scale_factor=1.0,
             execution_id="test_001",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=1,  # Only 1 query in subset
             successful_queries=1,
-            failed_queries=0,
-            query_results=[],
             total_execution_time=0.1,
             average_query_time=0.1,
             data_loading_time=0.5,
@@ -619,24 +609,19 @@ class TestPlatformAdapterWorkflow:
 
     def test_run_benchmark_with_categories(self, mock_benchmark, tmp_path):
         """Test benchmark execution with categories."""
-        from datetime import datetime
-
         adapter = MockPlatformAdapter()
         mock_benchmark.output_dir = tmp_path
         mock_benchmark.get_queries_by_category = Mock(return_value={"q1": "SELECT 1"})
 
         # Mock create_enhanced_benchmark_result to return correct values for categories
-        mock_result = BenchmarkResults(
+        mock_result = make_benchmark_results(
             benchmark_name="test_benchmark",
             platform="mock",
             scale_factor=1.0,
             execution_id="test_001",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=1,  # Only 1 query in category
             successful_queries=1,
-            failed_queries=0,
-            query_results=[],
             total_execution_time=0.1,
             average_query_time=0.1,
             data_loading_time=0.5,
@@ -660,25 +645,20 @@ class TestPlatformAdapterWorkflow:
         adapter itself does not call generate_data(); it proceeds directly to
         connection, schema, load, and execute phases.
         """
-        from datetime import datetime
-
         adapter = MockPlatformAdapter()
         mock_benchmark.output_dir = tmp_path
         mock_benchmark.tables = None
         mock_benchmark._impl = None
 
         # Mock create_enhanced_benchmark_result
-        mock_result = BenchmarkResults(
+        mock_result = make_benchmark_results(
             benchmark_name="test_benchmark",
             platform="mock",
             scale_factor=1.0,
             execution_id="test_001",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=2,
             successful_queries=2,
-            failed_queries=0,
-            query_results=[],
             total_execution_time=0.2,
             average_query_time=0.1,
             data_loading_time=0.5,
@@ -697,8 +677,6 @@ class TestPlatformAdapterWorkflow:
 
     def test_run_benchmark_query_failure(self, mock_benchmark, tmp_path):
         """Test benchmark execution with query failures."""
-        from datetime import datetime
-
         adapter = MockPlatformAdapter()
         mock_benchmark.output_dir = tmp_path
 
@@ -716,12 +694,11 @@ class TestPlatformAdapterWorkflow:
         adapter.execute_query = mock_execute_query
 
         # Mock create_enhanced_benchmark_result to return correct failure counts
-        mock_result = BenchmarkResults(
+        mock_result = make_benchmark_results(
             benchmark_name="test_benchmark",
             platform="mock",
             scale_factor=1.0,
             execution_id="test_001",
-            timestamp=datetime.now(),
             duration_seconds=10.0,
             total_queries=2,
             successful_queries=1,  # 1 success, 1 failure

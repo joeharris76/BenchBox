@@ -178,6 +178,7 @@ class DuckDBAdapter(PlatformAdapter):
             "driver_runtime_path",
             "driver_runtime_python_executable",
             "driver_auto_install",
+            "driver_auto_install_used",
         ]:
             if key in config:
                 adapter_config[key] = config[key]
@@ -269,7 +270,7 @@ class DuckDBAdapter(PlatformAdapter):
             requested=requested,
             resolved=config.get("driver_version_resolved") or requested,
             actual=config.get("driver_version_actual"),
-            auto_install_used=bool(config.get("driver_auto_install", False)),
+            auto_install_used=bool(config.get("driver_auto_install_used", False)),
             runtime_strategy=config.get("driver_runtime_strategy") or DriverRuntimeStrategy.CURRENT_PROCESS.value,
             runtime_path=config.get("driver_runtime_path"),
             runtime_python_executable=config.get("driver_runtime_python_executable"),
@@ -658,24 +659,34 @@ class DuckDBAdapter(PlatformAdapter):
                 connection.execute("PRAGMA disable_profiling")
 
     def get_query_plan(self, connection: Any, query: str) -> str | None:
-        """Get DuckDB query execution plan."""
+        """Get DuckDB query execution plan using EXPLAIN (ANALYZE, FORMAT JSON).
+
+        Uses EXPLAIN (ANALYZE, FORMAT JSON) by default (PostgreSQL-style combined syntax)
+        to capture actual per-operator timing and cardinality from real query execution.
+        The ANALYZE format uses different field names than plain EXPLAIN (FORMAT JSON):
+        operator_timing/operator_cardinality/operator_name vs timing/cardinality/name.
+        DuckDBQueryPlanParser handles both schemas transparently.
+
+        When self.analyze_plans is False, falls back to EXPLAIN (FORMAT JSON) which
+        captures estimated plans only (timing/cardinality fields absent). Use this
+        opt-out when plan capture overhead must be minimised.
+
+        Note: EXPLAIN (ANALYZE, ...) re-executes the query, adding ~1× query cost to the
+        capture step. Plan fingerprints are unaffected — compute_plan_fingerprint()
+        excludes timing/cardinality by design.
+        """
+        analyze = self.analyze_plans
+        # EXPLAIN (ANALYZE, FORMAT JSON) is the PostgreSQL-style combined syntax supported by DuckDB.
+        # Plain EXPLAIN (FORMAT JSON) produces estimated plans only (no timing/cardinality data).
+        explain_options = "ANALYZE, FORMAT JSON" if analyze else "FORMAT JSON"
         try:
-            # Get profiling information from DuckDB
-            profile_info = connection.execute("PRAGMA show_profiling_info").fetchall()
-            if profile_info:
-                # Format the profiling information into a readable string
-                plan_parts = []
-                for row in profile_info:
-                    if len(row) >= 2:
-                        plan_parts.append(str(row[1]))  # The plan text is usually in the second column
-                return "\n".join(plan_parts)
+            rows = connection.execute(f"EXPLAIN ({explain_options}) {query}").fetchall()
+            # DuckDB returns rows of (explain_key, explain_value); the JSON payload is in column 1
+            parts = [str(row[1]) for row in rows if len(row) > 1]
+            if parts:
+                return "\n".join(parts)
         except Exception:
-            # Fallback to EXPLAIN if profiling isn't available
-            try:
-                explain_result = connection.execute(f"EXPLAIN {query}").fetchall()
-                return "\n".join([str(row[1]) for row in explain_result if len(row) > 1])
-            except Exception:
-                pass
+            pass
         return None
 
     def get_query_plan_parser(self):

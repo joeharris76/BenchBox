@@ -14,7 +14,7 @@ from benchbox.core.query_plans.visualization import (
     render_plan,
     render_summary,
 )
-from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.results.loader import load_result_file
 
 
 @click.command("show-plan")
@@ -81,11 +81,8 @@ def show_plan(
         benchbox show-plan --run results.json --query-id q05 --compact --no-properties
     """
     try:
-        # Load benchmark results
-        with open(run_path) as f:
-            data = json.load(f)
-
-        results = BenchmarkResults.from_dict(data)
+        # Load benchmark results (also loads companion .plans.json if present)
+        results, _ = load_result_file(run_path)
 
         # Find query execution
         query_exec = None

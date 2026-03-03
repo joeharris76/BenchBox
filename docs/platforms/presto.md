@@ -9,9 +9,9 @@ PrestoDB is Meta's distributed SQL query engine (the original Presto project). B
 
 ## Overview
 
-**Type**: Distributed SQL query engine  
-**Common Use Cases**: Legacy Presto clusters, Meta ecosystem deployments, Presto-compatible managed services  
-**BenchBox Extra**: `uv add benchbox --extra presto`  
+**Type**: Distributed SQL query engine
+**Common Use Cases**: Legacy Presto clusters, Meta ecosystem deployments, Presto-compatible managed services
+**BenchBox Extra**: `uv add benchbox --extra presto`
 **Driver-only install**: `python -m pip install presto-python-client`
 
 ### Why a Separate Adapter (Not Shared With Trino)
@@ -77,8 +77,8 @@ benchbox run --platform presto --benchmark tpch --scale 1.0 \
 - **Session Properties**: Can be set via `session_properties` mapping (applied after connect with `SET SESSION`)
 - **Data Loading**: Uses batch `INSERT` statements with small batches tuned for PrestoDB; supports memory or Hive catalogs
 
-## When to Choose PrestoDB vs Trino vs Athena
+## When to Choose PrestoDB vs Trino vs Amazon Athena
 
 - **PrestoDB**: Existing Presto deployments, Meta ecosystem, or environments pinned to Presto-only features.
 - **Trino**: Recommended default for modern clusters and Starburst Enterprise.
-- **Athena**: AWS-managed Presto/Trino lineage with serverless execution.
+- **Amazon Athena**: AWS-managed Presto/Trino lineage with serverless execution.

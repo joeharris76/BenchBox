@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.1.4] - 2026-03-03
+
+### Added
+
+- **`power_bar` chart type** - Added a horizontal bar chart for TPC Power@Size comparisons.
+  Higher values are treated as better (opposite of `performance_bar`), powered by
+  `summary.tpc_metrics.power_at_size` and exposed in `NormalizedResult`.
+- **`power_bar` template coverage** - Added to `flagship`, `head_to_head`, `trends`,
+  `regression_triage`, and `executive_summary`. The chart renders only when TPC metric data is
+  present and is skipped for non-TPC runs.
+- **Driver-version-aware chart labeling** - Multi-platform chart series labels and run summaries
+  now include driver version context so version comparisons stay explicit in rendered output.
+- **Runtime ABI validation for isolated drivers** - Added ABI compatibility checks to isolated
+  runtime discovery so driver auto-install paths fail fast with actionable validation errors
+  instead of late runtime crashes.
+- **Presorted data-generation modes for table formats** - Added `parquet-sorted` output mode,
+  plus `delta-sorted` and `iceberg-sorted` organization paths with clustering primitives
+  (z-order, Hilbert, partition-aware sorting) and `cluster-by` tuning integration.
+
+### Fixed
+
+- **Query plan capture correctness and persistence** - Fixed multiple plan-capture defects:
+  forwarding `capture_plans` through `RunConfig`, DuckDB JSON plan parsing edge cases,
+  preservation of `query_plan` through normalization, and `show-plan` / `compare-plans`
+  loading through the standard result-file path.
+- **SSB dot-notation query IDs** - `--queries` now accepts IDs like `Q2.1`, and plan-oriented
+  CLI flows preserve dotted IDs instead of normalizing them away.
+- **Result timing pipeline accuracy** - Fixed datagen/load timing propagation end-to-end,
+  including per-table load timings in `table_statistics`, corrected load-phase duration keying,
+  datagen phase duration and manifest stats in metadata, and explicit total duration override
+  propagation in result builders. Data-only runs now correctly execute generation, and
+  `force_regenerate` is forwarded through CLI and runner paths.
+- **ASCII visualization readability under skewed data** - Fixed outlier handling across chart
+  types (bar, histogram, stacked, scatter, line, CDF, percentile ladder, heatmap), addressed
+  zero-heavy fallback truncation edge cases, improved natural query sorting and color cycling,
+  and raised effective render width cap from 120 to 400 characters.
+- **`--quiet` output contract for automation** - Quiet mode now emits only the bare result
+  filepath to stdout, removing decorative output that broke script parsing.
+- **Runtime environment stability** - Fixed interpreter targeting for driver auto-install,
+  corrected `auto_install_used` state propagation, and resolved SIGSEGV-class failures when
+  `driver_auto_install=true` reused an already-matching version.
+- **Additional correctness fixes** - Restored `ai_primitives` registry resolution fallback,
+  corrected SQLite `force_recreate` option handling, fixed SSB customer row-count expectation in
+  `SSBRowCountStrategy`, and resolved visualize command crashes / multi-series rendering issues.
+
+### Changed
+
+- **Plan-capture default now uses actual execution timing** - `--capture-plans` now defaults to
+  `EXPLAIN (ANALYZE, FORMAT JSON)` behavior via `analyze_plans=True`, recording measured timing
+  in captured plans. Users can opt out with `analyze_plans: false` for estimate-only capture.
+- **Benchmark runtime/result internals harmonized** - Refactored enhanced result construction to
+  use a shared factory path and aligned canonical runtime behavior for benchmarks like NYC Taxi
+  and TSBS DevOps.
+- **`make test-all` resource policy and parallelism** - Resource-heavy tests are now serialized
+  to prevent machine stalls, while slow/performance suites are moved to a dedicated stress lane.
+  The test suite also replaces fixed sleeps with bounded polling, reduces fixture/harness
+  duplication, and shifts selected CLI/e2e coverage to in-process runners for faster execution.
+- **CI quality gates tightened** - Added required table-format integration coverage and promoted
+  doc checks (linkcheck, example validation, docstring coverage) plus security audit policy
+  controls to blocking CI behavior.
+
 ## [0.1.3] - 2026-02-23
 
 ### Added

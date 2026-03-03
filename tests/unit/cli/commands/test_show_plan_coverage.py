@@ -32,12 +32,9 @@ class _Results:
         self.phases = {"power": _Phase([_Exec(query_id, plan)])}
 
 
-class _BR:
-    result = _Results()
-
-    @staticmethod
-    def from_dict(_d):
-        return _BR.result
+def _make_load(results: _Results):
+    """Return a load_result_file stub yielding (results, {})."""
+    return lambda _p: (results, {})
 
 
 def _write(path: Path, payload: str = "{}") -> None:
@@ -47,7 +44,7 @@ def _write(path: Path, payload: str = "{}") -> None:
 def test_show_plan_tree_summary_and_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     p = tmp_path / "r.json"
     _write(p)
-    monkeypatch.setattr(mod, "BenchmarkResults", _BR)
+    monkeypatch.setattr(mod, "load_result_file", _make_load(_Results()))
     monkeypatch.setattr(mod, "render_plan", lambda *_a, **_k: "TREE")
     monkeypatch.setattr(mod, "render_summary", lambda *_a, **_k: "SUMMARY")
 
@@ -60,21 +57,37 @@ def test_show_plan_tree_summary_and_json(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert '"node": "scan"' in r3.output
 
 
+def test_show_plan_uses_load_result_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """show-plan must use load_result_file (which also loads the companion .plans.json)."""
+    p = tmp_path / "r.json"
+    _write(p)
+    calls = []
+
+    def _spy(path):
+        calls.append(path)
+        return (_Results(), {})
+
+    monkeypatch.setattr(mod, "load_result_file", _spy)
+    monkeypatch.setattr(mod, "render_plan", lambda *_a, **_k: "TREE")
+    CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1"])
+    assert len(calls) == 1
+
+
 def test_show_plan_missing_query_and_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     p = tmp_path / "r.json"
     _write(p)
-    monkeypatch.setattr(mod, "BenchmarkResults", _BR)
 
-    _BR.result = _Results(query_id="q2", has_plan=True)
+    monkeypatch.setattr(mod, "load_result_file", _make_load(_Results(query_id="q2", has_plan=True)))
     miss_q = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1"])
     assert miss_q.exit_code == 1
 
-    _BR.result = _Results(query_id="q1", has_plan=False)
+    monkeypatch.setattr(mod, "load_result_file", _make_load(_Results(query_id="q1", has_plan=False)))
     miss_p = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1"])
     assert miss_p.exit_code == 1
 
 
-def test_show_plan_json_error_and_verbose_exception(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_show_plan_load_error_and_verbose_exception(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # File that causes load_result_file to fail (bad JSON → ResultLoadError → caught as Exception)
     bad = tmp_path / "bad.json"
     _write(bad, "{bad")
     out = CliRunner().invoke(mod.show_plan, ["--run", str(bad), "--query-id", "q1"])
@@ -82,8 +95,7 @@ def test_show_plan_json_error_and_verbose_exception(monkeypatch: pytest.MonkeyPa
 
     p = tmp_path / "ok.json"
     _write(p)
-    monkeypatch.setattr(mod, "BenchmarkResults", _BR)
-    _BR.result = _Results(query_id="q1", has_plan=True)
+    monkeypatch.setattr(mod, "load_result_file", _make_load(_Results(query_id="q1", has_plan=True)))
     monkeypatch.setattr(mod, "render_plan", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
     res = CliRunner().invoke(mod.show_plan, ["--run", str(p), "--query-id", "q1"], obj={"verbose": True})
     assert res.exit_code == 1

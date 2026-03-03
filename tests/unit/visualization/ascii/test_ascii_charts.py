@@ -8,6 +8,7 @@ import pytest
 
 from benchbox.core.visualization.ascii.bar_chart import ASCIIBarChart, BarData, from_bar_data
 from benchbox.core.visualization.ascii.base import (
+    TRUNCATION_MARKER,
     ASCIIChartBase,
     ASCIIChartOptions,
     ColorMode,
@@ -47,6 +48,7 @@ from benchbox.core.visualization.ascii.sparkline_table import (
     SparklineTableData,
 )
 from benchbox.core.visualization.ascii.stacked_bar import ASCIIStackedBar, StackedBarData, StackedBarSegment
+from tests.fixtures.result_dict_fixtures import make_normalized_result
 
 
 class TestTerminalCapabilities:
@@ -1737,31 +1739,13 @@ class TestNewChartEdgeCases:
 class TestSeriesNamingSymmetry:
     """Tests for Phase 1: symmetric mode naming in ResultPlotter."""
 
-    @staticmethod
-    def _make_result(platform, execution_mode="sql"):
-        from benchbox.core.visualization.result_plotter import NormalizedResult
-
-        return NormalizedResult(
-            benchmark="tpch",
-            platform=platform,
-            scale_factor=1,
-            execution_id=None,
-            timestamp=None,
-            total_time_ms=None,
-            avg_time_ms=None,
-            success_rate=None,
-            cost_total=None,
-            execution_mode=execution_mode,
-            raw={},
-        )
-
     def test_disambiguate_modes_both_get_suffix(self):
         """When same platform has SQL and DataFrame modes, both get suffixed."""
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DataFusion", "sql"),
-            self._make_result("DataFusion", "dataframe"),
+            make_normalized_result(platform="DataFusion", execution_mode="sql"),
+            make_normalized_result(platform="DataFusion", execution_mode="dataframe"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1775,7 +1759,7 @@ class TestSeriesNamingSymmetry:
         """Single result gets no mode suffix."""
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
-        results = [self._make_result("DuckDB", "sql")]
+        results = [make_normalized_result(platform="DuckDB", execution_mode="sql")]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
         plotter._disambiguate_modes()
@@ -1787,8 +1771,8 @@ class TestSeriesNamingSymmetry:
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DuckDB", "sql"),
-            self._make_result("Polars", "sql"),
+            make_normalized_result(platform="DuckDB", execution_mode="sql"),
+            make_normalized_result(platform="Polars", execution_mode="sql"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1808,33 +1792,13 @@ class TestSeriesNamingSymmetry:
 class TestDisambiguateVersions:
     """Tests for _disambiguate_versions in ResultPlotter."""
 
-    @staticmethod
-    def _make_result(platform: str, version: str | None = None):
-        from benchbox.core.visualization.result_plotter import NormalizedResult
-
-        raw: dict = {}
-        if version:
-            raw["platform"] = {"name": platform, "version": version}
-        return NormalizedResult(
-            benchmark="tpch",
-            platform=platform,
-            scale_factor=1,
-            execution_id=None,
-            timestamp=None,
-            total_time_ms=None,
-            avg_time_ms=None,
-            success_rate=None,
-            cost_total=None,
-            raw=raw,
-        )
-
     def test_different_versions_appended_to_label(self):
         """When same platform has different driver versions, both labels get version appended."""
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DuckDB", "1.0.0"),
-            self._make_result("DuckDB", "1.4.3"),
+            make_normalized_result(platform="DuckDB", platform_version="1.0.0"),
+            make_normalized_result(platform="DuckDB", platform_version="1.4.3"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1849,8 +1813,8 @@ class TestDisambiguateVersions:
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DuckDB", "1.4.3"),
-            self._make_result("DuckDB", "1.4.3"),
+            make_normalized_result(platform="DuckDB", platform_version="1.4.3"),
+            make_normalized_result(platform="DuckDB", platform_version="1.4.3"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1864,8 +1828,8 @@ class TestDisambiguateVersions:
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DuckDB", "1.0.0"),
-            self._make_result("Polars", "0.19.0"),
+            make_normalized_result(platform="DuckDB", platform_version="1.0.0"),
+            make_normalized_result(platform="Polars", platform_version="0.19.0"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1880,8 +1844,8 @@ class TestDisambiguateVersions:
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DuckDB", None),
-            self._make_result("DuckDB", None),
+            make_normalized_result(platform="DuckDB"),
+            make_normalized_result(platform="DuckDB"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1894,32 +1858,15 @@ class TestDisambiguateVersions:
 class TestSortResultsByVersion:
     """Tests for _sort_results_by_version in ResultPlotter."""
 
-    @staticmethod
-    def _make_result(platform: str):
-        from benchbox.core.visualization.result_plotter import NormalizedResult
-
-        return NormalizedResult(
-            benchmark="tpch",
-            platform=platform,
-            scale_factor=1,
-            execution_id=None,
-            timestamp=None,
-            total_time_ms=None,
-            avg_time_ms=None,
-            success_rate=None,
-            cost_total=None,
-            raw={},
-        )
-
     def test_versions_sorted_ascending(self):
         """Results with version labels are sorted from oldest to newest."""
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DuckDB 1.3.2"),
-            self._make_result("DuckDB 1.0.0"),
-            self._make_result("DuckDB 1.2.2"),
-            self._make_result("DuckDB 1.1.3"),
+            make_normalized_result(platform="DuckDB 1.3.2"),
+            make_normalized_result(platform="DuckDB 1.0.0"),
+            make_normalized_result(platform="DuckDB 1.2.2"),
+            make_normalized_result(platform="DuckDB 1.1.3"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1933,8 +1880,8 @@ class TestSortResultsByVersion:
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("DuckDB 1.5.0-dev7404"),
-            self._make_result("DuckDB 1.4.4"),
+            make_normalized_result(platform="DuckDB 1.5.0-dev7404"),
+            make_normalized_result(platform="DuckDB 1.4.4"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1964,7 +1911,7 @@ class TestSortResultsByVersion:
             "DuckDB 1.5.0-dev7404",
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
-        plotter.results = [self._make_result(p) for p in insert_order]
+        plotter.results = [make_normalized_result(platform=p) for p in insert_order]
         plotter._sort_results_by_version()
 
         assert [r.platform for r in plotter.results] == expected
@@ -1974,8 +1921,8 @@ class TestSortResultsByVersion:
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
         results = [
-            self._make_result("Polars"),
-            self._make_result("DuckDB 1.0.0"),
+            make_normalized_result(platform="Polars"),
+            make_normalized_result(platform="DuckDB 1.0.0"),
         ]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
@@ -1988,7 +1935,7 @@ class TestSortResultsByVersion:
         """Single result is unaffected."""
         from benchbox.core.visualization.result_plotter import ResultPlotter
 
-        results = [self._make_result("DuckDB 1.0.0")]
+        results = [make_normalized_result(platform="DuckDB 1.0.0")]
         plotter = ResultPlotter.__new__(ResultPlotter)
         plotter.results = results
         plotter._sort_results_by_version()
@@ -3470,3 +3417,1105 @@ class TestNewChartsModuleImports:
         assert ASCIIRankTable is not None
         assert ASCIISparklineTable is not None
         assert ASCIIStackedBar is not None
+
+
+# ---------------------------------------------------------------------------
+# Session regression tests: heatmap ordering, bar colors, outlier markers,
+# box-plot scale capping, stats table, and centralized severity markers
+# ---------------------------------------------------------------------------
+
+
+class TestOutlierSeverityMarkers:
+    """Unit tests for the centralised outlier_severity_markers() helper."""
+
+    def test_value_at_or_below_scale_returns_empty(self):
+        from benchbox.core.visualization.ascii.base import outlier_severity_markers
+
+        assert outlier_severity_markers(100, 100) == ""
+        assert outlier_severity_markers(50, 100) == ""
+
+    def test_scale_zero_returns_empty(self):
+        from benchbox.core.visualization.ascii.base import outlier_severity_markers
+
+        assert outlier_severity_markers(10, 0) == ""
+
+    @pytest.mark.parametrize(
+        "value, scale_max, expected_count",
+        [
+            (150, 100, 1),  # 1.5× → 1 marker
+            (200, 100, 1),  # 2× boundary → 1 marker
+            (201, 100, 2),  # just over 2× → 2 markers
+            (500, 100, 2),  # 5× boundary → 2 markers
+            (501, 100, 3),  # just over 5× → 3 markers
+            (1000, 100, 3),  # 10× boundary → 3 markers
+            (1001, 100, 4),  # just over 10× → 4 markers
+            (50000, 100, 4),  # extreme → 4 markers
+        ],
+    )
+    def test_severity_thresholds(self, value, scale_max, expected_count):
+        from benchbox.core.visualization.ascii.base import TRUNCATION_MARKER, outlier_severity_markers
+
+        result = outlier_severity_markers(value, scale_max)
+        assert result == TRUNCATION_MARKER * expected_count
+
+
+class TestHeatmapQueryOrdering:
+    """Verify _build_query_matrix sorts query IDs naturally."""
+
+    def test_query_ids_sorted_numerically(self):
+        """Query IDs like '14','2','9' should be sorted as 2, 9, 14."""
+        from types import SimpleNamespace
+
+        from benchbox.core.visualization.ascii_runtime import _build_query_matrix
+
+        queries = [
+            SimpleNamespace(query_id="14", execution_time_ms=100),
+            SimpleNamespace(query_id="2", execution_time_ms=200),
+            SimpleNamespace(query_id="9", execution_time_ms=150),
+        ]
+        result = SimpleNamespace(platform="DuckDB", queries=queries)
+        _, query_ids, _ = _build_query_matrix([result])
+        assert query_ids == ["2", "9", "14"]
+
+    def test_query_ids_with_prefix_sorted(self):
+        """Query IDs like 'Q2','Q10','Q1' should sort naturally."""
+        from types import SimpleNamespace
+
+        from benchbox.core.visualization.ascii_runtime import _build_query_matrix
+
+        queries = [
+            SimpleNamespace(query_id="Q10", execution_time_ms=10),
+            SimpleNamespace(query_id="Q2", execution_time_ms=20),
+            SimpleNamespace(query_id="Q1", execution_time_ms=30),
+        ]
+        result = SimpleNamespace(platform="DuckDB", queries=queries)
+        _, query_ids, _ = _build_query_matrix([result])
+        assert query_ids == ["Q1", "Q2", "Q10"]
+
+
+class TestBarChartColorCycling:
+    """Verify bars cycle through palette colours instead of 2-color scheme."""
+
+    def test_ungrouped_bars_get_distinct_colors(self):
+        """Each non-grouped bar should get a different palette colour."""
+        import re
+
+        data = [BarData(label=f"P{i}", value=(5 - i) * 100) for i in range(5)]
+        opts = ASCIIChartOptions(use_color=True, use_unicode=True)
+        chart = ASCIIBarChart(data=data, options=opts)
+        result = chart.render()
+
+        # Match both 256-color (\x1b[38;5;Nm) and truecolor (\x1b[38;2;R;G;Bm) codes
+        ansi_color_re = re.compile(r"\x1b\[38;[25];([\d;]+)m")
+        colors_seen: set[str] = set()
+        for line in result.split("\n"):
+            for label in [f"P{i}" for i in range(5)]:
+                if label in line:
+                    matches = ansi_color_re.findall(line)
+                    colors_seen.update(matches)
+
+        # Should have more than 2 unique colours (the old behaviour)
+        assert len(colors_seen) >= 3, f"Expected ≥3 colours, got {len(colors_seen)}: {colors_seen}"
+
+
+class TestBarChartOutlierSeverityMarkers:
+    """Verify bar chart truncation uses severity-scaled ▸ markers."""
+
+    def test_extreme_outlier_shows_multiple_markers(self):
+        """A bar 20× the scale should show 4 ▸ markers."""
+        from benchbox.core.visualization.ascii.base import TRUNCATION_MARKER
+
+        # 10 small bars + 1 extreme outlier to trigger truncation (needs >5 bars,
+        # max > median*10 and max > p95*3)
+        data = [BarData(label=f"Q{i}", value=10) for i in range(10)]
+        data.append(BarData(label="Outlier", value=10000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBarChart(data=data, options=opts)
+        result = chart.render()
+
+        outlier_line = [l for l in result.split("\n") if "Outlier" in l]
+        assert outlier_line, "Outlier bar not found"
+        marker_count = outlier_line[0].count(TRUNCATION_MARKER)
+        assert marker_count >= 2, f"Expected ≥2 severity markers, got {marker_count}"
+
+    def test_duplicate_labels_do_not_inherit_outlier_truncation(self):
+        """Non-outlier rows with the same label as an outlier keep their true bar length."""
+        data = [BarData(label="dup", value=10) for _ in range(10)]
+        data.append(BarData(label="dup", value=10000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True, width=70)
+        chart = ASCIIBarChart(data=data, options=opts)
+        result = chart.render()
+
+        dup_lines = [line for line in result.split("\n") if line.startswith("dup ")]
+        assert len(dup_lines) == 11
+        short_dup_lines = [line for line in dup_lines if " 10" in line and TRUNCATION_MARKER not in line]
+        assert short_dup_lines, "Expected non-outlier duplicate-label rows without truncation markers"
+
+
+class TestBoxPlotScaleCapping:
+    """Verify box plot scale is capped at max_whisker × 1.5."""
+
+    def test_extreme_outlier_does_not_dominate_scale(self):
+        """With one extreme value, scale should be capped, not span full range."""
+        series = [
+            BoxPlotSeries(name="Normal", values=[10, 20, 30, 40, 50]),
+            BoxPlotSeries(name="WithOutlier", values=[10, 20, 30, 40, 50, 10000]),
+        ]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBoxPlot(series=series, options=opts)
+        result = chart.render()
+
+        # The axis max label should NOT be "10.0K" — it should be capped
+        assert "10.0K" not in result, "Scale should be capped, not span to 10K"
+
+    def test_no_capping_when_no_extreme_outliers(self):
+        """Without extreme outliers, scale should reflect actual data range."""
+        series = [BoxPlotSeries(name="A", values=[10, 20, 30, 40, 50])]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBoxPlot(series=series, options=opts)
+        result = chart.render()
+        assert "50" in result
+
+
+class TestBoxPlotOutlierTruncationMarkers:
+    """Verify box plot outliers beyond scale_max show severity ▸ markers."""
+
+    def test_truncated_outlier_shows_marker(self):
+        from benchbox.core.visualization.ascii.base import TRUNCATION_MARKER
+
+        # Values where 10000 is an extreme outlier well beyond whisker×1.5
+        series = [BoxPlotSeries(name="Test", values=[10, 20, 30, 40, 50, 10000])]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBoxPlot(series=series, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Truncated outlier should show ▸ marker"
+
+    def test_severity_markers_form_contiguous_block(self):
+        """Severity ▸ markers must not be interleaved with outlier o dots."""
+        # Many outliers ensure some occupy rightmost positions
+        values = list(range(10, 60)) + [5000, 6000, 7000, 8000, 9000, 10000]
+        series = [BoxPlotSeries(name="Test", values=values)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True, width=80)
+        chart = ASCIIBoxPlot(series=series, options=opts)
+        result = chart.render()
+
+        # Find the middle line (contains the label)
+        mid_line = [l for l in result.split("\n") if "Test" in l]
+        assert mid_line, "Box plot middle line not found"
+        text = mid_line[0]
+        # Extract the trailing marker region: everything after the last whisker end
+        # The ▸ markers should be contiguous (no 'o' between them)
+        marker_region = text[text.rfind(TRUNCATION_MARKER[0]) - 3 :] if TRUNCATION_MARKER in text else ""
+        if marker_region:
+            # Between the first ▸ and the end, there should be no 'o'
+            first_marker = marker_region.index(TRUNCATION_MARKER)
+            after_first = marker_region[first_marker:]
+            assert "o" not in after_first, f"Outlier 'o' found within severity markers: {after_first!r}"
+
+    def test_no_dead_line_before_stats_table(self):
+        """There should be no blank line between axis label and stats table."""
+        series = [BoxPlotSeries(name="A", values=[10, 20, 30, 40, 50])]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBoxPlot(series=series, show_stats=True, options=opts)
+        result = chart.render()
+
+        lines = result.split("\n")
+        # Find the axis label line (contains "→")
+        axis_idx = next((i for i, l in enumerate(lines) if "→" in l), None)
+        assert axis_idx is not None, "Axis label not found"
+        # The next line should be the stats header, not blank
+        assert lines[axis_idx + 1].strip() != "", "Blank line between axis label and stats table"
+
+
+class TestBoxPlotSeriesSpacing:
+    """Verify no dead vertical space between series."""
+
+    def test_no_blank_line_between_series(self):
+        """Adjacent series should not have blank lines between them."""
+        series = [
+            BoxPlotSeries(name="A", values=[10, 20, 30, 40, 50]),
+            BoxPlotSeries(name="B", values=[15, 25, 35, 45, 55]),
+        ]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBoxPlot(series=series, show_stats=False, options=opts)
+        result = chart.render()
+
+        lines = result.split("\n")
+        # Find lines with series labels
+        label_indices = [i for i, l in enumerate(lines) if "A" in l.split()[0:1] or "B" in l.split()[0:1]]
+        if len(label_indices) >= 2:
+            # Between the bottom of series A (label_idx[0]+1) and top of series B
+            # (label_idx[1]-1), there should be no blank line
+            gap = label_indices[1] - label_indices[0]
+            # Each series is 3 lines (top, mid, bottom), so gap should be exactly 3
+            assert gap == 3, f"Expected 3-line gap between series labels, got {gap}"
+
+
+class TestBoxPlotStatsTable:
+    """Verify statistics are rendered as an aligned table."""
+
+    def test_stats_table_has_header_and_separator(self):
+        series = [BoxPlotSeries(name="Test", values=[10, 20, 30, 40, 50])]
+        chart = ASCIIBoxPlot(series=series, show_stats=True)
+        result = chart.render()
+
+        assert "median" in result
+        assert "mean" in result
+        assert "std" in result
+        # Separator line with ─
+        assert "─" in result.split("median")[-1]
+
+    def test_stats_table_uniform_decimals(self):
+        """All values in a column should use the same decimal format."""
+        series = [
+            BoxPlotSeries(name="A", values=[10, 20, 30, 40, 50]),  # median=30.0
+            BoxPlotSeries(name="B", values=[15, 25, 35, 45, 55]),  # median=35.0
+        ]
+        chart = ASCIIBoxPlot(series=series, show_stats=True)
+        result = chart.render()
+
+        # Both medians should have .0 suffix for consistency
+        lines = result.split("\n")
+        stat_lines = [l for l in lines if l.strip().startswith(("A", "B"))]
+        for line in stat_lines:
+            # Find numeric values — they should all have exactly one decimal place
+            import re
+
+            numbers = re.findall(r"\d+\.\d+", line)
+            for num in numbers:
+                decimal_places = len(num.split(".")[1])
+                assert decimal_places == 1, f"Expected 1 decimal place, got {decimal_places} in '{num}'"
+
+    def test_stats_table_k_suffix_for_large_values(self):
+        """Large values should use K suffix uniformly in their column."""
+        series = [
+            BoxPlotSeries(name="A", values=[1000, 2000, 3000, 4000, 5000]),
+            BoxPlotSeries(name="B", values=[1500, 2500, 3500, 4500, 5500]),
+        ]
+        chart = ASCIIBoxPlot(series=series, show_stats=True)
+        result = chart.render()
+
+        # All stat values should use K suffix since they're all ≥1000
+        lines = result.split("\n")
+        stat_lines = [l for l in lines if l.strip().startswith(("A", "B"))]
+        for line in stat_lines:
+            assert "K" in line, f"Expected K suffix in stats line: {line}"
+
+
+class TestComparisonBarOutlierSeverityMarkers:
+    """Verify comparison bar truncation uses severity-scaled ▸ markers."""
+
+    def test_extreme_outlier_shows_severity_markers(self):
+        from benchbox.core.visualization.ascii.base import TRUNCATION_MARKER
+        from benchbox.core.visualization.ascii.comparison_bar import ASCIIComparisonBar, ComparisonBarData
+
+        # One query with extreme baseline value to trigger truncation
+        data = [
+            ComparisonBarData(
+                label="Q1", baseline_value=10, comparison_value=15, baseline_name="Old", comparison_name="New"
+            ),
+            ComparisonBarData(
+                label="Q2", baseline_value=20, comparison_value=25, baseline_name="Old", comparison_name="New"
+            ),
+            ComparisonBarData(
+                label="Q3", baseline_value=5000, comparison_value=12, baseline_name="Old", comparison_name="New"
+            ),
+        ]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIComparisonBar(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Truncated outlier bar should show ▸ marker"
+
+
+# ---------------------------------------------------------------------------
+# Histogram outlier truncation (scale capping)
+# ---------------------------------------------------------------------------
+
+
+class TestHistogramOutlierTruncation:
+    """Verify histogram caps scale at IQR fence so outliers don't compress data."""
+
+    def test_extreme_outlier_caps_scale(self):
+        """With one extreme value, Y-axis max should not show the outlier's value."""
+        data = [HistogramBar(query_id=f"Q{i}", latency_ms=10 + i) for i in range(10)]
+        data.append(HistogramBar(query_id="Q99", latency_ms=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        result = chart.render()
+
+        # The axis should NOT show 50K — it should be capped
+        assert "50.0K" not in result, "Scale should be capped, not span to 50K"
+
+    def test_extreme_outlier_shows_severity_markers(self):
+        """Truncated histogram bar should show ▸ severity markers."""
+        data = [HistogramBar(query_id=f"Q{i}", latency_ms=10 + i) for i in range(10)]
+        data.append(HistogramBar(query_id="Q99", latency_ms=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Truncated bar should show ▸ marker"
+
+    def test_no_capping_without_extreme_outliers(self):
+        """Uniform data should not trigger scale capping."""
+        data = [HistogramBar(query_id=f"Q{i}", latency_ms=10 + i * 2) for i in range(10)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result, "No truncation expected for uniform data"
+
+    def test_grouped_histogram_outlier_truncation(self):
+        """Multi-platform histogram should also cap scale and show markers."""
+        data = []
+        for plat in ["DuckDB", "Polars"]:
+            for i in range(6):
+                data.append(HistogramBar(query_id=f"Q{i}", latency_ms=10 + i, platform=plat))
+        data.append(HistogramBar(query_id="Q99", latency_ms=50000, platform="DuckDB"))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Grouped histogram should show truncation markers"
+
+    def test_footer_shows_truncated_legend(self):
+        """Footer should include a 'Truncated' legend entry when scale is capped."""
+        data = [HistogramBar(query_id=f"Q{i}", latency_ms=10 + i) for i in range(10)]
+        data.append(HistogramBar(query_id="Q99", latency_ms=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        result = chart.render()
+
+        assert "Truncated" in result, "Footer should mention 'Truncated'"
+
+
+# ---------------------------------------------------------------------------
+# Heatmap outlier truncation (P95 capping)
+# ---------------------------------------------------------------------------
+
+
+class TestHeatmapOutlierTruncation:
+    """Verify heatmap caps color scale at P95×2 for extreme outliers."""
+
+    def test_extreme_outlier_shows_truncation_marker(self):
+        """Cells exceeding P95×2 should have ▸ appended to their value."""
+        # 9 normal values + 1 extreme outlier
+        row_labels = [f"Q{i}" for i in range(10)]
+        col_labels = ["Platform"]
+        matrix = [[10 + i] for i in range(9)]
+        matrix.append([50000])  # extreme outlier
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=row_labels, col_labels=col_labels, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Outlier cell should show ▸ marker"
+
+    def test_range_footer_shows_capping_info(self):
+        """Range footer should mention scale capping when truncation is active."""
+        row_labels = [f"Q{i}" for i in range(10)]
+        col_labels = ["Platform"]
+        matrix = [[10 + i] for i in range(9)]
+        matrix.append([50000])
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=row_labels, col_labels=col_labels, options=opts)
+        result = chart.render()
+
+        assert "capped" in result.lower(), "Footer should mention scale capping"
+
+    def test_no_capping_without_outliers(self):
+        """Uniform data should not trigger capping or truncation markers."""
+        row_labels = [f"Q{i}" for i in range(10)]
+        col_labels = ["Platform"]
+        matrix = [[10 + i * 2] for i in range(10)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=row_labels, col_labels=col_labels, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+        assert "capped" not in result.lower()
+
+    def test_heatmap_with_color_truncation(self):
+        """Heatmap with color should also show truncation markers."""
+        row_labels = [f"Q{i}" for i in range(10)]
+        col_labels = ["Platform"]
+        matrix = [[10 + i] for i in range(9)]
+        matrix.append([50000])
+        opts = ASCIIChartOptions(use_color=True, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=row_labels, col_labels=col_labels, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+
+    def test_zero_heavy_matrix_still_caps_outlier_scale(self):
+        """Sparse positive baseline should still allow capping an extreme outlier."""
+        row_labels = [f"Q{i}" for i in range(20)]
+        col_labels = ["Platform"]
+        matrix = [[0.0] for _ in range(18)] + [[10.0], [50000.0]]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=row_labels, col_labels=col_labels, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+        assert "capped" in result.lower()
+
+    def test_single_positive_zero_heavy_matrix_has_no_false_truncation(self):
+        """One positive value among zeros should not be marked as truncated."""
+        row_labels = [f"Q{i}" for i in range(20)]
+        col_labels = ["Platform"]
+        matrix = [[0.0] for _ in range(19)] + [[10.0]]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIHeatmap(matrix=matrix, row_labels=row_labels, col_labels=col_labels, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+        assert "capped" not in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Stacked bar outlier truncation (P95 capping)
+# ---------------------------------------------------------------------------
+
+
+class TestStackedBarOutlierTruncation:
+    """Verify stacked bar caps scale when extreme totals compress other bars."""
+
+    def test_extreme_outlier_shows_severity_markers(self):
+        """A bar with extreme total should show ▸ severity markers."""
+        data = [
+            StackedBarData(
+                label=f"P{i}",
+                segments=[StackedBarSegment(phase_name="Load", value=10 + i)],
+            )
+            for i in range(10)
+        ]
+        data.append(
+            StackedBarData(
+                label="Outlier",
+                segments=[StackedBarSegment(phase_name="Load", value=50000)],
+            )
+        )
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Truncated bar should show ▸ marker"
+
+    def test_no_capping_without_extreme_outliers(self):
+        """Uniform totals should not trigger truncation."""
+        data = [
+            StackedBarData(
+                label=f"P{i}",
+                segments=[StackedBarSegment(phase_name="Load", value=10 + i * 2)],
+            )
+            for i in range(10)
+        ]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+    def test_outlier_bar_still_shows_correct_total(self):
+        """The total annotation should show the actual (uncapped) value."""
+        data = [
+            StackedBarData(
+                label=f"P{i}",
+                segments=[StackedBarSegment(phase_name="Load", value=10)],
+            )
+            for i in range(10)
+        ]
+        data.append(
+            StackedBarData(
+                label="Outlier",
+                segments=[StackedBarSegment(phase_name="Load", value=60000)],
+            )
+        )
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+
+        # The total annotation should still show the real value (1.0min or 60.0s)
+        assert "1.0min" in result or "60.0s" in result, "Total should show actual value"
+
+    def test_duplicate_labels_do_not_inherit_outlier_truncation(self):
+        """Truncation must be determined per row total, not by platform label text."""
+        data = [
+            StackedBarData(
+                label="dup",
+                segments=[StackedBarSegment(phase_name="Load", value=10)],
+            )
+            for _ in range(10)
+        ]
+        data.append(
+            StackedBarData(
+                label="dup",
+                segments=[StackedBarSegment(phase_name="Load", value=10000)],
+            )
+        )
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True, width=70)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+
+        dup_lines = [line for line in result.split("\n") if line.startswith("dup ")]
+        assert len(dup_lines) == 11
+        short_dup_lines = [line for line in dup_lines if "10ms" in line and TRUNCATION_MARKER not in line]
+        assert short_dup_lines, "Expected non-outlier duplicate-label rows without truncation markers"
+
+
+# ---------------------------------------------------------------------------
+# Scatter plot outlier truncation (P95 axis capping)
+# ---------------------------------------------------------------------------
+
+
+class TestScatterPlotOutlierTruncation:
+    """Verify scatter plot caps axes when one extreme point wastes plot area."""
+
+    def test_extreme_outlier_caps_axis(self):
+        """With one extreme x value, axis labels should not span to that value."""
+        points = [ScatterPoint(name=f"P{i}", x=10 + i, y=100 + i) for i in range(10)]
+        points.append(ScatterPoint(name="Extreme", x=50000, y=150))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIScatterPlot(points=points, options=opts)
+        result = chart.render()
+
+        # The axis labels (before "Points:" section) should not show 50K
+        axis_section = result.split("Points:")[0] if "Points:" in result else result
+        assert "50.0K" not in axis_section, "X-axis should be capped, not span to 50K"
+
+    def test_truncated_point_shows_marker_in_legend(self):
+        """Legend should show ▸ for truncated points."""
+        points = [ScatterPoint(name=f"P{i}", x=10 + i, y=100 + i) for i in range(10)]
+        points.append(ScatterPoint(name="Extreme", x=50000, y=150))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIScatterPlot(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Truncated point should show ▸ in legend"
+
+    def test_no_capping_without_outliers(self):
+        """Uniform data should not trigger axis capping."""
+        points = [ScatterPoint(name=f"P{i}", x=10 + i * 5, y=100 + i * 10) for i in range(10)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIScatterPlot(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+    def test_y_axis_outlier_capping(self):
+        """Extreme y value should also be capped."""
+        points = [ScatterPoint(name=f"P{i}", x=10 + i, y=100 + i) for i in range(10)]
+        points.append(ScatterPoint(name="Extreme", x=15, y=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIScatterPlot(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+
+    def test_zero_heavy_points_still_trigger_capping(self):
+        """Sparse positive baseline should still allow capping an extreme outlier."""
+        points = [ScatterPoint(name=f"P{i}", x=0.0, y=0.0) for i in range(18)]
+        points.append(ScatterPoint(name="P18", x=10.0, y=10.0))
+        points.append(ScatterPoint(name="Outlier", x=50000.0, y=50000.0))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIScatterPlot(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+
+    def test_single_positive_zero_heavy_points_have_no_false_truncation(self):
+        """One positive point among zeros should not be marked truncated."""
+        points = [ScatterPoint(name=f"P{i}", x=0.0, y=0.0) for i in range(19)]
+        points.append(ScatterPoint(name="P19", x=10.0, y=10.0))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIScatterPlot(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+
+# ---------------------------------------------------------------------------
+# Line chart outlier truncation (Y-axis capping)
+# ---------------------------------------------------------------------------
+
+
+class TestLineChartOutlierTruncation:
+    """Verify line chart caps y-axis when one spike compresses all series."""
+
+    def test_extreme_spike_caps_y_axis(self):
+        """With one extreme y value, y-axis should not show that value."""
+        points = [LinePoint(series="A", x=i, y=10 + i) for i in range(10)]
+        points.append(LinePoint(series="A", x=10, y=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIILineChart(points=points, options=opts)
+        result = chart.render()
+
+        assert "50.0K" not in result, "Y-axis should be capped"
+
+    def test_capped_shows_truncation_note(self):
+        """When y-axis is capped, a note should appear."""
+        points = [LinePoint(series="A", x=i, y=10 + i) for i in range(10)]
+        points.append(LinePoint(series="A", x=10, y=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIILineChart(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Should show truncation note"
+        assert "capped" in result.lower(), "Should mention capping"
+
+    def test_no_capping_without_spikes(self):
+        """Uniform data should not trigger y-axis capping."""
+        points = [LinePoint(series="A", x=i, y=10 + i * 2) for i in range(10)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIILineChart(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+    def test_zero_heavy_series_still_caps_y_axis(self):
+        """Sparse positive baseline should still allow capping an extreme outlier."""
+        points = [LinePoint(series="A", x=i, y=0.0) for i in range(18)]
+        points.append(LinePoint(series="A", x=18, y=10.0))
+        points.append(LinePoint(series="A", x=19, y=50000.0))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIILineChart(points=points, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+        assert "capped" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# CDF chart outlier truncation (X-axis capping)
+# ---------------------------------------------------------------------------
+
+
+class TestCDFChartOutlierTruncation:
+    """Verify CDF chart caps x-axis when extreme tail bunches all data left."""
+
+    def test_extreme_tail_caps_x_axis(self):
+        """With one extreme value, x-axis should be capped."""
+        values = list(range(10, 30))  # 20 normal values
+        values.append(50000)  # extreme outlier
+        data = [CDFSeriesData(name="Platform", values=values)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+
+        assert "50.0K" not in result, "X-axis should be capped"
+
+    def test_capped_shows_truncation_marker(self):
+        """Legend should include truncation marker when x-axis is capped."""
+        values = list(range(10, 30))
+        values.append(50000)
+        data = [CDFSeriesData(name="Platform", values=values)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+
+    def test_no_capping_without_extreme_tail(self):
+        """Uniform data should not trigger x-axis capping."""
+        values = list(range(10, 30))
+        data = [CDFSeriesData(name="Platform", values=values)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+    def test_zero_heavy_distribution_still_caps_x_axis(self):
+        """Sparse positive baseline should still allow capping an extreme tail value."""
+        values = [0.0] * 18 + [10.0, 50000.0]
+        data = [CDFSeriesData(name="Platform", values=values)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIICDFChart(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+
+
+# ---------------------------------------------------------------------------
+# Percentile ladder outlier truncation (P99 capping)
+# ---------------------------------------------------------------------------
+
+
+class TestPercentileLadderOutlierTruncation:
+    """Verify percentile ladder caps scale when one extreme P99 compresses others."""
+
+    def test_extreme_p99_shows_severity_markers(self):
+        """A platform with extreme P99 should show ▸ severity markers."""
+        data = [PercentileData(name=f"P{i}", p50=10 + i, p90=20 + i, p95=30 + i, p99=40 + i) for i in range(10)]
+        data.append(PercentileData(name="Outlier", p50=15, p90=25, p95=35, p99=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Truncated bar should show ▸ marker"
+
+    def test_no_capping_without_extreme_p99(self):
+        """Uniform P99 values should not trigger truncation."""
+        data = [PercentileData(name=f"P{i}", p50=10 + i, p90=20 + i, p95=30 + i, p99=40 + i * 2) for i in range(10)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+    def test_annotation_shows_actual_values(self):
+        """The annotation should still show the real P99 value, not capped."""
+        data = [PercentileData(name=f"P{i}", p50=10, p90=20, p95=30, p99=40) for i in range(10)]
+        data.append(PercentileData(name="Outlier", p50=15, p90=25, p95=35, p99=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+
+        assert "50000" in result, "Annotation should show actual P99 value"
+
+    def test_zero_heavy_p99_still_truncates_outlier(self):
+        """Sparse positive baseline should still allow capping an extreme P99."""
+        data = [PercentileData(name=f"P{i}", p50=0, p90=0, p95=0, p99=0) for i in range(8)]
+        data.append(PercentileData(name="P8", p50=0, p90=0, p95=0, p99=10))
+        data.append(PercentileData(name="Outlier", p50=0, p90=0, p95=0, p99=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result
+
+    def test_duplicate_labels_do_not_inherit_outlier_truncation(self):
+        """Duplicate names should not cause non-outlier rows to render as truncated."""
+        data = [PercentileData(name="dup", p50=1, p90=2, p95=3, p99=10) for _ in range(10)]
+        data.append(PercentileData(name="dup", p50=5, p90=9, p95=10, p99=10000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True, width=80)
+        chart = ASCIIPercentileLadder(data=data, options=opts)
+        result = chart.render()
+
+        dup_lines = [line for line in result.split("\n") if line.startswith("dup ")]
+        assert len(dup_lines) == 11
+        non_outlier_lines = [line for line in dup_lines if " |    10.0" in line and TRUNCATION_MARKER not in line]
+        assert non_outlier_lines, "Expected duplicate non-outlier rows without truncation markers"
+
+
+# ---------------------------------------------------------------------------
+# Bar chart zero-heavy outlier truncation
+# ---------------------------------------------------------------------------
+
+
+class TestBarChartZeroHeavyTruncation:
+    """Verify bar chart handles zero-heavy distributions with outlier capping."""
+
+    def test_zero_heavy_bars_still_trigger_capping(self):
+        """Sparse positive baseline plus one extreme outlier should truncate."""
+        data = [BarData(label=f"Q{i}", value=0) for i in range(18)]
+        data.append(BarData(label="Q18", value=10))
+        data.append(BarData(label="Outlier", value=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBarChart(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Zero-heavy bar chart should still cap and truncate outlier"
+
+    def test_normal_data_no_false_positive(self):
+        """Uniform non-zero data should not trigger truncation."""
+        data = [BarData(label=f"Q{i}", value=10 + i * 2) for i in range(10)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIBarChart(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+
+# ---------------------------------------------------------------------------
+# Histogram zero-heavy outlier truncation
+# ---------------------------------------------------------------------------
+
+
+class TestHistogramZeroHeavyTruncation:
+    """Verify histogram handles zero-heavy distributions with IQR fallback."""
+
+    def test_zero_heavy_latencies_still_trigger_capping(self):
+        """Sparse positive baseline plus one extreme outlier should truncate."""
+        data = [HistogramBar(query_id=f"Q{i}", latency_ms=0) for i in range(18)]
+        data.append(HistogramBar(query_id="Q18", latency_ms=10))
+        data.append(HistogramBar(query_id="Q99", latency_ms=50000))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Zero-heavy histogram should still cap and truncate outlier"
+
+    def test_normal_data_no_false_positive(self):
+        """Uniform non-zero latencies should not trigger false truncation."""
+        data = [HistogramBar(query_id=f"Q{i}", latency_ms=10 + i * 2) for i in range(10)]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIQueryHistogram(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+
+# ---------------------------------------------------------------------------
+# Stacked bar zero-heavy outlier truncation
+# ---------------------------------------------------------------------------
+
+
+class TestStackedBarZeroHeavyTruncation:
+    """Verify stacked bar handles zero-heavy distributions with outlier capping."""
+
+    def test_zero_heavy_totals_still_trigger_capping(self):
+        """Sparse positive baseline plus one extreme outlier should truncate."""
+        data = [
+            StackedBarData(label=f"P{i}", segments=[StackedBarSegment(phase_name="Load", value=0)]) for i in range(19)
+        ]
+        data[-1] = StackedBarData(label="P18", segments=[StackedBarSegment(phase_name="Load", value=10)])
+        data.append(StackedBarData(label="Outlier", segments=[StackedBarSegment(phase_name="Load", value=50000)]))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER in result, "Zero-heavy stacked bar should still cap and truncate outlier"
+
+    def test_normal_data_no_false_positive(self):
+        """Uniform non-zero totals should not trigger truncation."""
+        data = [
+            StackedBarData(label=f"P{i}", segments=[StackedBarSegment(phase_name="Load", value=10 + i * 2)])
+            for i in range(10)
+        ]
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIStackedBar(data=data, options=opts)
+        result = chart.render()
+
+        assert TRUNCATION_MARKER not in result
+
+
+# ---------------------------------------------------------------------------
+# Scatter plot duplicate-label truncation
+# ---------------------------------------------------------------------------
+
+
+class TestScatterPlotDuplicateLabelTruncation:
+    """Verify scatter plot uses value-based truncation, not name-based."""
+
+    def test_duplicate_names_do_not_inherit_outlier_truncation(self):
+        """Non-outlier points with same name as an outlier should not show truncation marker."""
+        points = [ScatterPoint(name="dup", x=10 + i, y=100 + i) for i in range(10)]
+        points.append(ScatterPoint(name="dup", x=50000, y=150))
+        opts = ASCIIChartOptions(use_color=False, use_unicode=True)
+        chart = ASCIIScatterPlot(points=points, options=opts)
+        result = chart.render()
+
+        dup_lines = [line for line in result.split("\n") if "dup:" in line]
+        truncated = [line for line in dup_lines if TRUNCATION_MARKER in line]
+        non_truncated = [line for line in dup_lines if TRUNCATION_MARKER not in line]
+        assert len(truncated) == 1, f"Expected exactly 1 truncated dup line, got {len(truncated)}"
+        assert len(non_truncated) == 10, f"Expected 10 non-truncated dup lines, got {len(non_truncated)}"
+
+
+class TestPowerBarRenderer:
+    """Tests for _render_power_bar in ascii_runtime."""
+
+    def test_renders_with_valid_power_data(self):
+        """power_bar renders a bar per platform when power_at_size is present."""
+        from benchbox.core.visualization.ascii.base import ASCIIChartOptions
+        from benchbox.core.visualization.ascii_runtime import render_ascii_chart_from_results
+
+        results = [
+            make_normalized_result(platform="DuckDB 1.0.0", benchmark="tpcds", scale_factor=10, power_at_size=385807.0),
+            make_normalized_result(platform="DuckDB 1.5.0", benchmark="tpcds", scale_factor=10, power_at_size=669328.0),
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        output = render_ascii_chart_from_results(results, "power_bar", opts, {})
+        assert output is not None
+        assert "DuckDB 1.0.0" in output
+        assert "DuckDB 1.5.0" in output
+        assert "Power@Size" in output
+
+    def test_returns_none_when_no_power_data(self):
+        """power_bar returns None when no results carry power_at_size."""
+        from benchbox.core.visualization.ascii.base import ASCIIChartOptions
+        from benchbox.core.visualization.ascii_runtime import render_ascii_chart_from_results
+
+        results = [
+            make_normalized_result(platform="DuckDB", benchmark="tpcds", scale_factor=10),
+            make_normalized_result(platform="Polars", benchmark="tpcds", scale_factor=10),
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        output = render_ascii_chart_from_results(results, "power_bar", opts, {})
+        assert output is None
+
+    def test_best_is_highest_value(self):
+        """The result with the highest Power@Size is marked is_best."""
+        from benchbox.core.visualization.ascii.bar_chart import BarData
+        from benchbox.core.visualization.ascii.base import ASCIIChartOptions
+        from benchbox.core.visualization.ascii_runtime import _render_power_bar
+
+        captured: list[BarData] = []
+
+        class _CapturingBarChart:
+            def __init__(self, data, **kwargs):
+                captured.extend(data)
+
+            def render(self):
+                return ""
+
+        import benchbox.core.visualization.ascii_runtime as runtime
+
+        original = runtime.ASCIIBarChart
+        runtime.ASCIIBarChart = _CapturingBarChart  # type: ignore[assignment]
+        try:
+            results = [
+                make_normalized_result(platform="Slow", benchmark="tpcds", scale_factor=10, power_at_size=100.0),
+                make_normalized_result(platform="Fast", benchmark="tpcds", scale_factor=10, power_at_size=900.0),
+                make_normalized_result(platform="Mid", benchmark="tpcds", scale_factor=10, power_at_size=500.0),
+            ]
+            _render_power_bar(results, ASCIIChartOptions(use_color=False), {})
+        finally:
+            runtime.ASCIIBarChart = original  # type: ignore[assignment]
+
+        best = [d for d in captured if d.is_best]
+        worst = [d for d in captured if d.is_worst]
+        assert len(best) == 1 and best[0].label == "Fast"
+        assert len(worst) == 1 and worst[0].label == "Slow"
+
+    def test_single_result_no_worst(self):
+        """With a single result, is_worst is not set (nothing to compare against)."""
+        from benchbox.core.visualization.ascii.bar_chart import BarData
+        from benchbox.core.visualization.ascii.base import ASCIIChartOptions
+        from benchbox.core.visualization.ascii_runtime import _render_power_bar
+
+        captured: list[BarData] = []
+
+        class _CapturingBarChart:
+            def __init__(self, data, **kwargs):
+                captured.extend(data)
+
+            def render(self):
+                return ""
+
+        import benchbox.core.visualization.ascii_runtime as runtime
+
+        original = runtime.ASCIIBarChart
+        runtime.ASCIIBarChart = _CapturingBarChart  # type: ignore[assignment]
+        try:
+            _render_power_bar(
+                [make_normalized_result(platform="Only", benchmark="tpcds", scale_factor=10, power_at_size=500.0)],
+                ASCIIChartOptions(use_color=False),
+                {},
+            )
+        finally:
+            runtime.ASCIIBarChart = original  # type: ignore[assignment]
+
+        assert captured[0].is_best is True
+        assert not any(d.is_worst for d in captured)
+
+    def test_mixed_results_only_power_data_rendered(self):
+        """Results without power_at_size are silently excluded from the chart."""
+        from benchbox.core.visualization.ascii.base import ASCIIChartOptions
+        from benchbox.core.visualization.ascii_runtime import render_ascii_chart_from_results
+
+        results = [
+            make_normalized_result(platform="HasPower", benchmark="tpcds", scale_factor=10, power_at_size=500.0),
+            make_normalized_result(platform="NoPower", benchmark="tpcds", scale_factor=10),
+        ]
+        opts = ASCIIChartOptions(use_color=False)
+        output = render_ascii_chart_from_results(results, "power_bar", opts, {})
+        assert output is not None
+        assert "HasPower" in output
+        assert "NoPower" not in output
+
+
+class TestNormalizeDictPowerAtSize:
+    """Tests for power_at_size extraction in ResultPlotter._normalize_dict."""
+
+    @staticmethod
+    def _make_payload(power_at_size=None):
+        payload = {
+            "benchmark": {"name": "tpcds", "scale_factor": 10},
+            "execution": {"platform": "duckdb"},
+            "results": {"timing": {"total_ms": 5000}},
+        }
+        if power_at_size is not None:
+            payload["summary"] = {"tpc_metrics": {"power_at_size": power_at_size}}
+        return payload
+
+    def test_extracts_power_at_size_from_tpc_metrics(self):
+        """_normalize_dict populates power_at_size from summary.tpc_metrics."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        result = ResultPlotter._normalize_dict(self._make_payload(power_at_size=385807.0), source_path=None)
+        assert result.power_at_size == pytest.approx(385807.0)
+
+    def test_power_at_size_none_when_absent(self):
+        """_normalize_dict sets power_at_size to None when the field is missing."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        result = ResultPlotter._normalize_dict(self._make_payload(), source_path=None)
+        assert result.power_at_size is None
+
+    def test_power_at_size_coerced_to_float(self):
+        """Integer power_at_size values in JSON are coerced to float."""
+        from benchbox.core.visualization.result_plotter import ResultPlotter
+
+        result = ResultPlotter._normalize_dict(self._make_payload(power_at_size=385807), source_path=None)
+        assert isinstance(result.power_at_size, float)
+
+
+class TestSuggestChartTypesPowerBar:
+    """Tests for power_bar inclusion in _suggest_chart_types."""
+
+    @staticmethod
+    def _make_plotter(power_values: list[float | None]):
+        from benchbox.core.visualization.result_plotter import NormalizedResult, ResultPlotter
+
+        results = [
+            NormalizedResult(
+                benchmark="tpcds",
+                platform=f"platform_{i}",
+                scale_factor=10,
+                execution_id=None,
+                timestamp=None,
+                total_time_ms=1000.0,
+                avg_time_ms=None,
+                success_rate=None,
+                cost_total=None,
+                power_at_size=v,
+            )
+            for i, v in enumerate(power_values)
+        ]
+        plotter = ResultPlotter.__new__(ResultPlotter)
+        plotter.results = results
+        return plotter
+
+    def test_power_bar_suggested_when_power_data_present(self):
+        plotter = self._make_plotter([385807.0, 669328.0])
+        assert "power_bar" in plotter._suggest_chart_types()
+
+    def test_power_bar_not_suggested_without_power_data(self):
+        plotter = self._make_plotter([None, None])
+        assert "power_bar" not in plotter._suggest_chart_types()
+
+    def test_power_bar_suggested_when_at_least_one_has_power(self):
+        """Partial power data is enough to suggest the chart."""
+        plotter = self._make_plotter([None, 500.0])
+        assert "power_bar" in plotter._suggest_chart_types()
+
+
+class TestRobustP95Fallback:
+    """Regression tests for robust_p95 zero-heavy behavior."""
+
+    def test_single_positive_does_not_artificially_shrink_p95(self):
+        """One positive value among zeros should keep p95 at that value."""
+        from benchbox.core.visualization.ascii.base import robust_p95
+
+        vals = [0.0] * 19 + [10.0]
+        assert robust_p95(vals) == 10.0
+
+    def test_sparse_positive_tail_uses_positive_rank(self):
+        """With sparse positives, p95 should come from positive-tail nearest rank."""
+        from benchbox.core.visualization.ascii.base import robust_p95
+
+        vals = [0.0] * 18 + [10.0, 50000.0]
+        assert robust_p95(vals) == 10.0

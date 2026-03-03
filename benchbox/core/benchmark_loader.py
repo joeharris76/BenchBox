@@ -10,6 +10,10 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from benchbox.core.benchmark_registry import (
+    get_core_benchmark_class_name,
+    list_loader_benchmark_ids,
+)
 from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
 
@@ -48,57 +52,12 @@ def get_benchmark_class(benchmark_name: str) -> Any:
     """Dynamically load benchmark class using importlib."""
     benchmark_name = benchmark_name.lower()
     module_name = f"benchbox.core.{benchmark_name}.benchmark"
-
-    class_name_map = {
-        "tpch": "TPCHBenchmark",
-        "tpcds": "TPCDSBenchmark",
-        "ssb": "SSBBenchmark",
-        "read_primitives": "ReadPrimitivesBenchmark",
-        "metadata_primitives": "MetadataPrimitivesBenchmark",
-        "ai_primitives": "AIPrimitivesBenchmark",
-        "clickbench": "ClickBenchBenchmark",
-        "h2odb": "H2OBenchmark",
-        "amplab": "AMPLabBenchmark",
-        "tpcdi": "TPCDIBenchmark",
-        "merge": "MergeBenchmark",
-        "joinorder": "JoinOrderBenchmark",
-        "tpchavoc": "TPCHavocBenchmark",
-        "tpch_skew": "TPCHSkewBenchmark",
-        "tsbs_devops": "TSBSDevOpsBenchmark",
-        "nyctaxi": "NYCTaxiBenchmark",
-        "coffeeshop": "CoffeeShopBenchmark",
-        "write_primitives": "WritePrimitivesBenchmark",
-        "datavault": "DataVaultBenchmark",
-        "tpcds_obt": "TPCDSOBTBenchmark",
-    }
-
-    class_name = class_name_map.get(benchmark_name, f"{benchmark_name.capitalize()}Benchmark")
+    class_name = get_core_benchmark_class_name(benchmark_name) or f"{benchmark_name.capitalize()}Benchmark"
 
     try:
         module = importlib.import_module(module_name)
         benchmark_class = getattr(module, class_name)
         return benchmark_class
     except (ImportError, AttributeError) as e:
-        available = [
-            "read_primitives",
-            "metadata_primitives",
-            "ai_primitives",
-            "tpch",
-            "tpcds",
-            "tpcds_obt",
-            "ssb",
-            "clickbench",
-            "h2odb",
-            "amplab",
-            "tpcdi",
-            "merge",
-            "joinorder",
-            "tpchavoc",
-            "tpch_skew",
-            "tsbs_devops",
-            "nyctaxi",
-            "coffeeshop",
-            "write_primitives",
-            "datavault",
-        ]
+        available = list_loader_benchmark_ids()
         raise ValueError(f"Benchmark '{benchmark_name}' not supported yet. Available: {', '.join(available)}") from e

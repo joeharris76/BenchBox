@@ -71,7 +71,17 @@ Maintain live rows below. Do not leave compatibility changes untracked.
 
 | Location | Compatibility Marker | Status | Target Removal | Rationale | Owner |
 | --- | --- | --- | --- | --- | --- |
-| _No active compatibility shims_ |  |  |  |  |  |
+| `benchbox/base.py` | `BaseBenchmark.create_enhanced_benchmark_result()` continues accepting legacy kwargs (`table_statistics`, `data_loading_time`, `phases`, `execution_metadata`) while delegating to shared result factory | active | Beta compatibility review | Preserve stable result-shape behavior for adapters and wrapper benchmarks while runtime internals are unified | core-runtime |
+| `benchbox/core/base_benchmark.py` | Internal base class retained for existing benchmarks, with result creation delegated to shared result factory | deprecate | After all core benchmarks migrate to `benchbox.base.BaseBenchmark` | Avoid breaking remaining internal benchmark classes during staged runtime harmonization | core-runtime |
+
+## Runtime Harmonization Notes (2026-02-26)
+
+- Loader benchmark-set definitions are now registry-backed (`list_loader_benchmark_ids` + `get_core_benchmark_class_name`) to prevent loader/registry drift.
+- `transaction_primitives` is now part of the core loader-supported benchmark set; stale loader-only entries were removed.
+- Runtime contract coverage now runs against loader benchmark IDs sourced from the shared registry contract.
+- Cleanup boundary for this workstream:
+  - Keep top-level wrapper classes in `benchbox/*.py` as-is.
+  - Keep `benchbox.core.base_benchmark.BaseBenchmark` until a dedicated migration/removal item is approved.
 
 ## Final Removal Report (2026-02-18)
 

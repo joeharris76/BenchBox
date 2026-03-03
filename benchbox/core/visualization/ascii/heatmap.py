@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from benchbox.core.visualization.ascii.base import ASCIIChartBase, ASCIIChartOptions, ColorMode
+from benchbox.core.visualization.ascii.base import (
+    TRUNCATION_MARKER,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    ColorMode,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -68,6 +74,7 @@ class ASCIIHeatmap(ASCIIChartBase):
         self.value_label = value_label
         self._show_values = show_values
         self._color_scale = self.COLOR_SCALE_SEQUENTIAL if color_scheme == "sequential" else self.COLOR_SCALE_DIVERGING
+        self._scale_max = float("inf")
 
     # Background colors for heatmap cells (dark text on colored background)
     # Diverging: blue (fast) → neutral → red (slow)
@@ -107,7 +114,16 @@ class ASCIIHeatmap(ASCIIChartBase):
 
         min_val = min(all_values)
         max_val = max(all_values)
-        value_range = max_val - min_val if max_val > min_val else 1
+
+        # Cap scale at P95×2 to prevent extreme outliers from washing out the heatmap
+        scale_max = max_val
+        if len(all_values) >= 5:
+            p95 = robust_p95(all_values)
+            if p95 > 0 and max_val > p95 * 2:
+                scale_max = p95 * 2
+        self._scale_max = scale_max
+
+        value_range = scale_max - min_val if scale_max > min_val else 1
 
         lines: list[str] = []
 
@@ -177,7 +193,10 @@ class ASCIIHeatmap(ASCIIChartBase):
         lines.append(self._render_axis_label("Platform", width, axis="x"))
         lines.append("")
         lines.append(self._render_scale_legend(use_bg, bg_scale, colors, intensity_chars))
-        lines.append(f"Range: {self._format_value(min_val)} - {self._format_value(max_val)} {self.value_label}")
+        range_str = f"Range: {self._format_value(min_val)} - {self._format_value(max_val)} {self.value_label}"
+        if scale_max < max_val:
+            range_str += f"  (scale capped at {self._format_value(scale_max)}, {TRUNCATION_MARKER}=truncated)"
+        lines.append(range_str)
 
         return "\n".join(lines)
 
@@ -265,9 +284,16 @@ class ASCIIHeatmap(ASCIIChartBase):
         if value is None:
             return (" " * max(0, cell_width - 1)) + "-"
 
-        normalized = (value - min_val) / value_range if value_range > 0 else 0.5
+        # Clamp for color normalization; values beyond scale_max map to max color
+        clamped = min(value, self._scale_max)
+        normalized = (clamped - min_val) / value_range if value_range > 0 else 0.5
         color_idx = min(len(bg_scale) - 1, int(normalized * (len(bg_scale) - 1)))
         value_str = self._format_value(value)
+
+        # Mark cells that exceed the capped scale
+        is_truncated = value > self._scale_max
+        if is_truncated:
+            value_str += TRUNCATION_MARKER
 
         if use_bg:
             padded = value_str.center(cell_width)

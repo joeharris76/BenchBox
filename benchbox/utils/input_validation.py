@@ -36,7 +36,7 @@ MAX_PREDICATE_COUNT = 100
 
 # Patterns for validation
 VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-VALID_QUERY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+VALID_QUERY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-]+$")
 VALID_BENCHMARK_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 VALID_PLATFORM_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 
@@ -225,7 +225,7 @@ def validate_query_id(query_id: str | int, benchmark_type: str | None = None) ->
 
     if not VALID_QUERY_ID_PATTERN.match(query_id):
         raise ValidationError(
-            f"Invalid query ID: '{query_id}' - must contain only alphanumeric characters, underscores, and hyphens"
+            f"Invalid query ID: '{query_id}' - must contain only alphanumeric characters, underscores, hyphens, and dots"
         )
 
     # Validate against benchmark-specific allowlist if provided

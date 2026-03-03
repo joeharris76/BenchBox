@@ -17,6 +17,7 @@ from benchbox.core.query_plans.comparison import (
     generate_plan_comparison_summary,
 )
 from benchbox.core.query_plans.visualization import render_comparison
+from benchbox.core.results.loader import load_result_file
 from benchbox.core.results.models import BenchmarkResults
 
 
@@ -119,14 +120,9 @@ def compare_plans(
         benchbox compare-plans --run1 before.json --run2 after.json --output html --output-file report.html
     """
     try:
-        # Load both benchmark results
-        with open(run1_path) as f:
-            data1 = json.load(f)
-        results1 = BenchmarkResults.from_dict(data1)
-
-        with open(run2_path) as f:
-            data2 = json.load(f)
-        results2 = BenchmarkResults.from_dict(data2)
+        # Load both benchmark results (also loads companion .plans.json if present)
+        results1, _ = load_result_file(run1_path)
+        results2, _ = load_result_file(run2_path)
 
         # Handle summary mode
         if show_summary:

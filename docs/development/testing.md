@@ -166,6 +166,31 @@ uv run -- python -m pytest -m bigquery
 uv run -- python -m pytest --run-optional
 ```
 
+### Table-Format Integration Lane (Delta/Iceberg)
+
+The presorted open table-format integration checks are tagged with
+`requires_table_formats` and depend on `deltalake` and `pyiceberg`.
+
+Use this command locally when validating those paths:
+
+```bash
+uv run -- python -m pytest -q tests/integration/core/data_organization/test_presorted_generation.py -m "requires_table_formats"
+```
+
+CI runs this marker in a dedicated required workflow job
+`integration-table-formats` so dependency-gated tests are not silently skipped.
+
+#### Rollout Checklist
+
+Use this checklist when introducing or updating this lane:
+
+1. Confirm `.github/workflows/test.yml` defines `integration-table-formats`.
+2. Confirm marker registration exists in both `pytest.ini` and `pyproject.toml`.
+3. Confirm marker-selected tests are collected and executable:
+   `uv run -- python -m pytest --collect-only -q tests/integration/core/data_organization/test_presorted_generation.py -m "requires_table_formats"`
+4. Update GitHub branch protection rules manually so `integration-table-formats`
+   is a required status check for pull requests into `main`.
+
 ## Test Status
 
 Current test suite status:
@@ -175,4 +200,3 @@ Current test suite status:
 - ⚠️ **Full Suite**: Some tests skipped when optional dependencies unavailable
 
 For questions or issues, see the troubleshooting section in `docs/development/adding-new-platforms.md`.
-

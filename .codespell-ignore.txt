@@ -48,6 +48,7 @@ inactivate
 Inactivate
 CLOS
 ND
+nd
 
 # HTTP standard spelling (Referer header is intentionally misspelled per HTTP spec)
 referers

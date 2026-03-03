@@ -19,53 +19,35 @@ class TestDataprocAdapterInitialization:
 
     def test_missing_project_id_raises_error(self):
         """Test error when project_id is not provided."""
-        with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
-        ):
-            from benchbox.platforms.gcp import DataprocAdapter
+        from benchbox.platforms.gcp import DataprocAdapter
 
-            with pytest.raises(ConfigurationError, match="project_id"):
-                DataprocAdapter(
-                    gcs_staging_dir="gs://my-bucket/benchbox-data",
-                )
+        with pytest.raises(ConfigurationError, match="project_id"):
+            DataprocAdapter(
+                gcs_staging_dir="gs://my-bucket/benchbox-data",
+            )
 
     def test_missing_gcs_staging_dir_raises_error(self):
         """Test error when gcs_staging_dir is not provided."""
-        with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
-        ):
-            from benchbox.platforms.gcp import DataprocAdapter
+        from benchbox.platforms.gcp import DataprocAdapter
 
-            with pytest.raises(ConfigurationError, match="gcs_staging_dir"):
-                DataprocAdapter(
-                    project_id="my-project",
-                )
+        with pytest.raises(ConfigurationError, match="gcs_staging_dir"):
+            DataprocAdapter(
+                project_id="my-project",
+            )
 
     def test_invalid_gcs_path_raises_error(self):
         """Test error when gcs_staging_dir has invalid format."""
-        with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
-        ):
-            from benchbox.platforms.gcp import DataprocAdapter
+        from benchbox.platforms.gcp import DataprocAdapter
 
-            with pytest.raises(ConfigurationError, match="Invalid GCS"):
-                DataprocAdapter(
-                    project_id="my-project",
-                    gcs_staging_dir="/local/path",
-                )
+        with pytest.raises(ConfigurationError, match="Invalid GCS"):
+            DataprocAdapter(
+                project_id="my-project",
+                gcs_staging_dir="/local/path",
+            )
 
     def test_valid_configuration(self):
         """Test valid configuration initializes correctly."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -90,9 +72,6 @@ class TestDataprocAdapterInitialization:
     def test_default_values(self):
         """Test default configuration values."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -120,9 +99,6 @@ class TestDataprocAdapterPlatformInfo:
     def test_get_platform_info(self):
         """Test get_platform_info returns correct metadata."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -151,9 +127,6 @@ class TestDataprocAdapterPlatformInfo:
     def test_get_dialect(self):
         """Test get_target_dialect returns spark."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -174,9 +147,7 @@ class TestDataprocAdapterConnection:
     def test_create_connection_success(self):
         """Test successful connection to existing cluster."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
             patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1") as mock_dataproc,
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -214,9 +185,6 @@ class TestDataprocAdapterDataLoading:
         source_dir.mkdir()
 
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging_instance = MagicMock()
@@ -288,9 +256,6 @@ class TestDataprocAdapterTuning:
     def test_apply_platform_optimizations(self):
         """Test apply_platform_optimizations returns empty list."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -308,9 +273,6 @@ class TestDataprocAdapterTuning:
     def test_apply_primary_keys(self):
         """Test apply_primary_keys returns empty list."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -330,9 +292,6 @@ class TestDataprocAdapterTuning:
     def test_configure_for_benchmark(self):
         """Test configure_for_benchmark sets benchmark type."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
             # SparkConfigOptimizer is now used from the mixin module
             patch("benchbox.platforms.base.cloud_spark.mixins.SparkConfigOptimizer") as mock_optimizer,
@@ -376,9 +335,6 @@ class TestDataprocAdapterFromConfig:
     def test_from_config_basic(self):
         """Test from_config creates adapter with basic config."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -403,9 +359,6 @@ class TestDataprocAdapterFromConfig:
     def test_from_config_generates_cluster_name(self):
         """Test from_config generates cluster name if not provided."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -430,9 +383,6 @@ class TestDataprocAdapterClose:
     def test_close_logs_metrics(self):
         """Test close logs execution metrics."""
         with (
-            patch("benchbox.platforms.gcp.dataproc_adapter.GOOGLE_CLOUD_AVAILABLE", True),
-            patch("benchbox.platforms.gcp.dataproc_adapter.dataproc_v1", MagicMock()),
-            patch("benchbox.platforms.gcp.dataproc_adapter.storage", MagicMock()),
             patch("benchbox.platforms.gcp.dataproc_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.gcp.dataproc_adapter.logger") as mock_logger,
         ):

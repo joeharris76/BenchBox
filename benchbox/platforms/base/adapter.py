@@ -200,6 +200,10 @@ class PlatformAdapter(VerbosityMixin, ABC):
         self.force_recreate = config.get("force_recreate", False)
         self.show_query_plans = config.get("show_query_plans", False)
         self.capture_plans = config.get("capture_plans", False)
+        # When True (default), plan capture uses EXPLAIN (ANALYZE, FORMAT JSON) to include actual
+        # per-operator timing and cardinality. Set to False to use plain EXPLAIN (FORMAT JSON) for
+        # estimated-plan-only capture with no re-execution overhead.
+        self.analyze_plans: bool = config.get("analyze_plans", True)
         self.strict_plan_capture = config.get("strict_plan_capture", False)
         self.plan_capture_timeout_seconds = int(config.get("plan_capture_timeout_seconds", 30))
         # Plan capture sampling options
@@ -220,7 +224,7 @@ class PlatformAdapter(VerbosityMixin, ABC):
         self.driver_runtime_strategy = config.get("driver_runtime_strategy")
         self.driver_runtime_path = config.get("driver_runtime_path")
         self.driver_runtime_python_executable = config.get("driver_runtime_python_executable")
-        self.driver_auto_install_used = bool(config.get("driver_auto_install", False))
+        self.driver_auto_install_used = bool(config.get("driver_auto_install_used", False))
 
         # Unified tuning configuration support
         self.unified_tuning_configuration = config.get("unified_tuning_configuration")
@@ -1913,8 +1917,16 @@ class PlatformAdapter(VerbosityMixin, ABC):
     def capture_query_plan(self, connection: Any, query: str, query_id: str) -> tuple[Any, float]:
         """Capture structured query plan using platform-specific parser.
 
-        This method gets EXPLAIN output and parses it into a QueryPlanDAG.
+        Calls get_query_plan() to obtain EXPLAIN output and parses it into a QueryPlanDAG.
         Returns timing information for observability of capture overhead.
+
+        By default (analyze_plans=True), DuckDB uses EXPLAIN (ANALYZE, FORMAT JSON) which
+        re-executes the query to capture actual per-operator timing and cardinality.
+        Set analyze_plans=False in the adapter config to use plain EXPLAIN (FORMAT JSON)
+        for estimated-plan-only capture with no re-execution overhead.
+
+        Plan fingerprints exclude timing/cardinality by design — structural comparisons
+        are unaffected by this setting.
 
         Args:
             connection: Database connection

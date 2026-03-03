@@ -39,6 +39,11 @@ def test_platform_optimization_from_dict_supports_deep_sort_aliases() -> None:
     assert config.liquid_clustering_columns == ["event_time"]
 
 
+def test_platform_optimization_accepts_hilbert_method() -> None:
+    config = PlatformOptimizationConfiguration(sorted_ingestion_mode="force", sorted_ingestion_method="hilbert")
+    assert config.sorted_ingestion_method == "hilbert"
+
+
 def test_platform_optimization_rejects_invalid_sorted_ingestion_mode() -> None:
     with pytest.raises(ValueError, match="Invalid sorted_ingestion_mode"):
         PlatformOptimizationConfiguration(sorted_ingestion_mode="invalid")  # type: ignore[arg-type]

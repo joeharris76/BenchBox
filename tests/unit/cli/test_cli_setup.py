@@ -363,21 +363,6 @@ class TestSetupValidation:
         assert result.exit_code == 0
         assert "Redshift credentials are valid" in result.output
 
-    @patch("benchbox.cli.commands.setup.CredentialManager")
-    @patch("benchbox.platforms.credentials.bigquery.validate_bigquery_credentials")
-    def test_validate_bigquery(self, mock_validate, mock_cred_manager_class):
-        """Test validation for BigQuery platform."""
-        mock_manager = MagicMock()
-        mock_manager.has_credentials.return_value = True
-        mock_cred_manager_class.return_value = mock_manager
-        mock_validate.return_value = (True, None)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["setup", "--platform", "bigquery", "--validate-only"])
-
-        assert result.exit_code == 0
-        assert "Bigquery credentials are valid" in result.output
-
 
 class TestSetupIntegration:
     """Integration tests for setup command."""

@@ -15,11 +15,13 @@ from benchbox.cli.main import cli
 from benchbox.cli.orchestrator import BenchmarkOrchestrator
 from benchbox.cli.system import SystemProfile
 from benchbox.core.schemas import DatabaseConfig
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.slow  # CLI tests spawn subprocesses (~10-15s)
 
 
 @pytest.mark.medium
+@pytest.mark.xdist_group("cli_phase_validation")
 class TestCLIPowerThroughputExecution:
     """Test CLI Power and Throughput test execution."""
 
@@ -59,53 +61,12 @@ class TestCLIPowerThroughputExecution:
         assert result.exit_code != 0
         assert "database" in result.output.lower() or "error" in result.output.lower()
 
-    def test_multiple_phases_allowed(self):
+    def test_multiple_phases_allowed(self, cli_benchmark_mocks):
         """Test that multiple phases (power,throughput) are accepted together."""
-        with (
-            patch("benchbox.cli.main.BenchmarkManager") as mock_manager,
-            patch("benchbox.cli.main.DatabaseManager") as mock_db_manager,
-            patch("benchbox.cli.execution.BenchmarkExecutor") as mock_executor,
-            patch("benchbox.cli.main.SystemProfiler") as mock_profiler,
-        ):
-            # Configure mocks
-            mock_manager_instance = Mock()
-            mock_manager.return_value = mock_manager_instance
-            mock_manager_instance.benchmarks = {"tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}}
-
-            mock_db_manager_instance = Mock()
-            mock_db_manager.return_value = mock_db_manager_instance
-            mock_db_config = Mock()
-            mock_db_config.type = "duckdb"
-            mock_db_config.options = {}
-            mock_db_manager_instance.create_config.return_value = mock_db_config
-
-            mock_executor_instance = Mock()
-            mock_executor.return_value = mock_executor_instance
-            mock_executor_instance.execute_benchmark.return_value = Mock()
-
-            mock_profiler_instance = Mock()
-            mock_profiler.return_value = mock_profiler_instance
-            mock_profiler_instance.get_system_profile.return_value = Mock()
-
-            with patch("benchbox.cli.main.ConfigManager") as mock_config:
-                mock_cfg = Mock()
-                mock_config.return_value = mock_cfg
-                mock_cfg.validate_config.return_value = True
-                mock_cfg.load_unified_tuning_config.return_value = None
-
-                result = self.runner.invoke(
-                    cli,
-                    [
-                        "run",
-                        "--platform",
-                        "duckdb",
-                        "--benchmark",
-                        "tpch",
-                        "--phases",
-                        "power,throughput",
-                        "--non-interactive",
-                    ],
-                )
+        result = self.runner.invoke(
+            cli,
+            ["run", "--platform", "duckdb", "--benchmark", "tpch", "--phases", "power,throughput", "--non-interactive"],
+        )
         assert result.exit_code == 0
 
     def test_invalid_tuning_mode_value(self):
@@ -147,15 +108,7 @@ class TestCLIPowerThroughputExecution:
 
                 result = self.runner.invoke(
                     cli,
-                    [
-                        "run",
-                        "--platform",
-                        "duckdb",
-                        "--benchmark",
-                        "tpch",
-                        "--tuning",
-                        config_path,
-                    ],
+                    ["run", "--platform", "duckdb", "--benchmark", "tpch", "--tuning", config_path],
                 )
 
         assert result.exit_code == 0
@@ -220,26 +173,20 @@ class TestBenchmarkOrchestratorPowerThroughput:
         mock_platform._get_platform_metadata.return_value = {}
 
         # Mock enhanced benchmark result
-        from datetime import datetime
-
-        from benchbox.core.results.models import BenchmarkResults
         from benchbox.platforms.base import (
             ExecutionPhases,
             SetupPhase,
         )
 
-        mock_enhanced_result = BenchmarkResults(
+        mock_enhanced_result = make_benchmark_results(
             benchmark_name="TPC-H",
             platform="DuckDB",
-            scale_factor=0.01,
             execution_id="test-power-123",
-            timestamp=datetime.now(),
             duration_seconds=0.8,
             query_definitions={},
             execution_phases=ExecutionPhases(setup=SetupPhase()),
             total_queries=2,
             successful_queries=2,
-            failed_queries=0,
             total_execution_time=0.8,
             average_query_time=0.4,
             test_execution_type="power",
@@ -312,26 +259,20 @@ class TestBenchmarkOrchestratorPowerThroughput:
         mock_platform._get_platform_metadata.return_value = {}
 
         # Mock enhanced benchmark result for throughput
-        from datetime import datetime
-
-        from benchbox.core.results.models import BenchmarkResults
         from benchbox.platforms.base import (
             ExecutionPhases,
             SetupPhase,
         )
 
-        mock_enhanced_result = BenchmarkResults(
+        mock_enhanced_result = make_benchmark_results(
             benchmark_name="TPC-H",
             platform="DuckDB",
-            scale_factor=0.01,
             execution_id="test-throughput-123",
-            timestamp=datetime.now(),
             duration_seconds=1.3,
             query_definitions={},
             execution_phases=ExecutionPhases(setup=SetupPhase()),
             total_queries=2,
             successful_queries=2,
-            failed_queries=0,
             total_execution_time=1.3,
             average_query_time=0.65,
             test_execution_type="throughput",
@@ -403,26 +344,20 @@ class TestBenchmarkOrchestratorPowerThroughput:
         mock_platform._get_platform_metadata.return_value = {}
 
         # Mock enhanced benchmark result for combined
-        from datetime import datetime
-
-        from benchbox.core.results.models import BenchmarkResults
         from benchbox.platforms.base import (
             ExecutionPhases,
             SetupPhase,
         )
 
-        mock_enhanced_result = BenchmarkResults(
+        mock_enhanced_result = make_benchmark_results(
             benchmark_name="TPC-H",
             platform="DuckDB",
-            scale_factor=0.01,
             execution_id="test-combined-123",
-            timestamp=datetime.now(),
             duration_seconds=1.8,
             query_definitions={},
             execution_phases=ExecutionPhases(setup=SetupPhase()),
             total_queries=3,
             successful_queries=3,
-            failed_queries=0,
             total_execution_time=1.8,
             average_query_time=0.6,
             test_execution_type="combined",
@@ -458,22 +393,15 @@ class TestTPCMetricsCalculation:
 
     def test_power_at_size_passthrough(self):
         """Power@Size is provided by adapter results and passed through unchanged."""
-        from datetime import datetime
-
-        from benchbox.core.results.models import BenchmarkResults
-
-        result = BenchmarkResults(
+        result = make_benchmark_results(
             benchmark_name="TPC-H",
             platform="duckdb",
-            scale_factor=0.01,
             execution_id="p1",
-            timestamp=datetime.now(),
             duration_seconds=1.0,
             query_definitions={},
             execution_phases={},
             total_queries=22,
             successful_queries=22,
-            failed_queries=0,
             total_execution_time=1.0,
             average_query_time=0.1,
             power_at_size=4321.0,
@@ -482,22 +410,16 @@ class TestTPCMetricsCalculation:
 
     def test_throughput_at_size_passthrough(self):
         """Throughput@Size is provided by adapter results and passed through unchanged."""
-        from datetime import datetime
-
-        from benchbox.core.results.models import BenchmarkResults
-
-        result = BenchmarkResults(
+        result = make_benchmark_results(
             benchmark_name="TPC-DS",
             platform="duckdb",
             scale_factor=0.1,
             execution_id="t1",
-            timestamp=datetime.now(),
             duration_seconds=2.0,
             query_definitions={},
             execution_phases={},
             total_queries=99,
             successful_queries=99,
-            failed_queries=0,
             total_execution_time=2.0,
             average_query_time=0.02,
             throughput_at_size=9876.5,
@@ -506,22 +428,16 @@ class TestTPCMetricsCalculation:
 
     def test_combined_test_metrics_passthrough(self):
         """Combined test metrics are adapter-provided and passed through unchanged."""
-        from datetime import datetime
-
-        from benchbox.core.results.models import BenchmarkResults
-
-        result = BenchmarkResults(
+        result = make_benchmark_results(
             benchmark_name="TPC-H",
             platform="duckdb",
             scale_factor=1.0,
             execution_id="c1",
-            timestamp=datetime.now(),
             duration_seconds=3.0,
             query_definitions={},
             execution_phases={},
             total_queries=22,
             successful_queries=22,
-            failed_queries=0,
             total_execution_time=3.0,
             average_query_time=0.2,
             test_execution_type="combined",
@@ -554,37 +470,13 @@ class TestNoTuningValidation:
         assert config.primary_keys.enabled is False
         assert config.foreign_keys.enabled is False
 
-    def test_cli_no_tuning_flag_processing(self):
+    def test_cli_no_tuning_flag_processing(self, cli_benchmark_mocks, cli_runner):
         """Test that CLI properly processes `--tuning notuning`."""
-        runner = CliRunner()
+        result = cli_runner.invoke(
+            cli,
+            ["run", "--platform", "duckdb", "--benchmark", "tpch", "--tuning", "notuning", "--non-interactive"],
+        )
 
-        with (
-            patch("benchbox.cli.main.BenchmarkManager") as mock_manager,
-            patch("benchbox.cli.main.DatabaseManager") as mock_db_manager,
-            patch("benchbox.cli.main.SystemProfiler") as mock_profiler,
-            patch("benchbox.cli.orchestrator.BenchmarkOrchestrator") as mock_orchestrator,
-        ):
-            # Configure mocks to allow the command to run
-            mock_manager.return_value.benchmarks = {"tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}}
-            mock_profiler.return_value.get_system_profile.return_value = Mock()
-            mock_db_manager.return_value.create_config.return_value = Mock(type="duckdb", options={})
-            mock_orchestrator.return_value.execute_benchmark.return_value = Mock(validation_status="PASSED")
-
-            result = runner.invoke(
-                cli,
-                [
-                    "run",
-                    "--platform",
-                    "duckdb",
-                    "--benchmark",
-                    "tpch",
-                    "--tuning",
-                    "notuning",
-                    "--non-interactive",
-                ],
-            )
-
-        # Command should succeed when properly configured
         assert result.exit_code == 0
 
 

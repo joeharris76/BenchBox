@@ -85,6 +85,38 @@ class TestDuckDBAdapter:
         mock_load_driver_module.assert_called_once()
 
     @patch("benchbox.platforms.duckdb.load_driver_module")
+    def test_auto_install_preference_does_not_trigger_purge(self, mock_load_driver_module):
+        """driver_auto_install=True without driver_auto_install_used must not trigger module purge.
+
+        Regression test for SIGSEGV caused by conflating user preference flag
+        (driver_auto_install) with actual installation state (driver_auto_install_used).
+        When the requested version is already installed, auto_install_used is False and
+        load_driver_module must receive auto_install_used=False to avoid purging the
+        C extension module (which causes a segfault on reimport via dlopen).
+        """
+        mock_duckdb_module = Mock()
+        mock_duckdb_module.__version__ = "1.2.2"
+        mock_load_driver_module.return_value = mock_duckdb_module
+
+        with patch("benchbox.platforms.duckdb.duckdb", None):
+            DuckDBAdapter(
+                driver_package="duckdb",
+                driver_version="1.2.2",
+                driver_version_resolved="1.2.2",
+                driver_runtime_strategy="current-process",
+                # User requested auto-install, but version already matched so it wasn't used.
+                driver_auto_install=True,
+                driver_auto_install_used=False,
+            )
+
+        call_kwargs = mock_load_driver_module.call_args
+        resolution = call_kwargs.kwargs.get("resolution") or call_kwargs[1].get("resolution")
+        assert resolution.auto_install_used is False, (
+            "load_driver_module received auto_install_used=True from driver_auto_install preference; "
+            "this would trigger _purge_module_tree and SIGSEGV on C extension reimport"
+        )
+
+    @patch("benchbox.platforms.duckdb.load_driver_module")
     def test_create_connection_uses_materialized_duckdb_module(self, mock_load_driver_module):
         """Connection creation should use the runtime-bound DuckDB module."""
         mock_connection = Mock()
@@ -649,28 +681,35 @@ class TestDuckDBAdapter:
 
     @patch("benchbox.platforms.duckdb.duckdb")
     def test_get_query_plan(self, mock_duckdb):
-        """Test query plan retrieval."""
+        """Test query plan retrieval via EXPLAIN (ANALYZE, FORMAT JSON) / EXPLAIN (FORMAT JSON)."""
         mock_connection = Mock()
-        mock_connection.execute.return_value.fetchall.side_effect = [
-            [["profile_info", "Plan: SELECT * FROM test"]],  # Profiling info
-            [["explain", "SEQ_SCAN test"]],  # Fallback explain
-        ]
         mock_duckdb.connect.return_value = mock_connection
 
+        # Default (analyze_plans=True): uses EXPLAIN (ANALYZE, FORMAT JSON)
+        json_payload = '{"operator_type": "SEQ_SCAN", "operator_timing": 0.001}'
+        mock_connection.execute.return_value.fetchall.return_value = [("explain_key", json_payload)]
         adapter = DuckDBAdapter()
-
-        # Test with profiling info available
         plan = adapter.get_query_plan(mock_connection, "SELECT * FROM test")
-        assert plan == "Plan: SELECT * FROM test"
+        assert plan == json_payload
+        call_sql = mock_connection.execute.call_args[0][0]
+        assert "ANALYZE" in call_sql
+        assert "FORMAT JSON" in call_sql
 
-        # Test fallback to EXPLAIN
-        mock_connection.execute.return_value.fetchall.side_effect = [
-            Exception("No profiling"),  # Profiling fails
-            [["explain", "SEQ_SCAN test"]],  # Explain works
-        ]
+        # analyze_plans=False: uses EXPLAIN (FORMAT JSON) — estimated plan only
+        mock_connection.execute.reset_mock()
+        estimated_payload = '{"name": "SEQ_SCAN", "timing": null}'
+        mock_connection.execute.return_value.fetchall.return_value = [("explain_key", estimated_payload)]
+        adapter_no_analyze = DuckDBAdapter(analyze_plans=False)
+        plan = adapter_no_analyze.get_query_plan(mock_connection, "SELECT * FROM test")
+        assert plan == estimated_payload
+        call_sql = mock_connection.execute.call_args[0][0]
+        assert "ANALYZE" not in call_sql
+        assert "FORMAT JSON" in call_sql
 
+        # Exception during EXPLAIN → returns None
+        mock_connection.execute.side_effect = Exception("explain failed")
         plan = adapter.get_query_plan(mock_connection, "SELECT * FROM test")
-        assert plan == "SEQ_SCAN test"
+        assert plan is None
 
     @patch("benchbox.platforms.duckdb.duckdb")
     def test_get_platform_metadata(self, mock_duckdb):

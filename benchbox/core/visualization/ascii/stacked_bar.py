@@ -6,7 +6,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions, TerminalColors
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    TerminalColors,
+    outlier_severity_markers,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -102,6 +109,17 @@ class ASCIIStackedBar(ASCIIChartBase):
         if max_total <= 0:
             max_total = 1
 
+        # Outlier truncation: cap scale so extreme bars don't compress others
+        scale_max = max_total
+        totals = sorted(d.total or 0 for d in self.data)
+        if len(totals) > 5:
+            p95 = robust_p95(totals)
+            median_val = totals[len(totals) // 2]
+            median_gate = median_val > 0 and max_total > median_val * 10
+            zero_heavy_gate = median_val <= 0
+            if p95 > 0 and max_total > p95 * 3 and (median_gate or zero_heavy_gate):
+                scale_max = p95 * 2
+
         lines: list[str] = []
 
         # Title and subtitle
@@ -117,7 +135,8 @@ class ASCIIStackedBar(ASCIIChartBase):
             label_padded = label.ljust(max_label_len)
 
             # Build stacked bar
-            bar = self._render_stacked_bar(datum, bar_width, max_total, fills, phase_names, colors)
+            is_truncated = (datum.total or 0) > scale_max
+            bar = self._render_stacked_bar(datum, bar_width, scale_max, fills, phase_names, colors, is_truncated)
 
             # Format total time annotation
             total = datum.total or 0
@@ -150,14 +169,24 @@ class ASCIIStackedBar(ASCIIChartBase):
         fills: tuple[str, ...],
         phase_names: list[str],
         colors: TerminalColors,
+        is_truncated: bool = False,
     ) -> str:
         """Render a single stacked bar with colored segments."""
         total = datum.total or 0
         if total <= 0 or max_total <= 0:
             return " " * bar_width
 
-        # Total bar length proportional to this platform's total vs max
-        total_bar_len = max(1, int((total / max_total) * bar_width))
+        # Truncated bars fill to full width; severity markers appended at end
+        display_total = min(total, max_total) if is_truncated else total
+        total_bar_len = max(1, int((display_total / max_total) * bar_width))
+        if is_truncated:
+            total_bar_len = bar_width  # fill full width
+
+        # Reserve space for severity markers on truncated bars
+        markers = ""
+        if is_truncated:
+            markers = outlier_severity_markers(total, max_total)
+            total_bar_len = max(1, total_bar_len - len(markers))
 
         # Calculate each segment's proportional length (sum duplicates)
         seg_values: dict[str, float] = {}
@@ -183,6 +212,11 @@ class ASCIIStackedBar(ASCIIChartBase):
             segment = fill * seg_len
             bar_chars.append(colors.colorize(segment, fg_color=color))
             used += seg_len
+
+        # Append severity markers for truncated bars
+        if markers:
+            bar_chars.append(markers)
+            used += len(markers)
 
         # Pad remaining
         remaining = bar_width - used

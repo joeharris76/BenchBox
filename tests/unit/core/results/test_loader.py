@@ -17,57 +17,9 @@ from benchbox.core.results.loader import (
 )
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.results.schema import build_result_payload
+from tests.fixtures.result_dict_fixtures import make_v2_result_dict, write_v2_result_file
 
 pytestmark = pytest.mark.fast
-
-
-def create_v2_result_file(
-    path: Path,
-    benchmark_id: str = "tpch",
-    benchmark_name: str = "TPC-H",
-    platform: str = "DuckDB",
-    timestamp: str = "2025-01-01T10:00:00",
-    scale_factor: float = 1.0,
-    execution_id: str = "test123",
-) -> dict:
-    """Create a v2.0 schema result file for testing."""
-    data = {
-        "version": "2.0",
-        "run": {
-            "id": execution_id,
-            "timestamp": timestamp,
-            "total_duration_ms": 1000,
-            "query_time_ms": 800,
-        },
-        "benchmark": {
-            "id": benchmark_id,
-            "name": benchmark_name,
-            "scale_factor": scale_factor,
-        },
-        "platform": {
-            "name": platform,
-        },
-        "summary": {
-            "queries": {
-                "total": 22,
-                "passed": 22,
-                "failed": 0,
-            },
-            "timing": {
-                "total_ms": 800,
-                "avg_ms": 36.4,
-                "min_ms": 10.0,
-                "max_ms": 100.0,
-            },
-        },
-        "queries": [
-            {"id": "1", "ms": 50.0, "rows": 4},
-            {"id": "2", "ms": 30.0, "rows": 100},
-        ],
-    }
-    with open(path, "w") as f:
-        json.dump(data, f)
-    return data
 
 
 class TestFindLatestResult:
@@ -88,8 +40,8 @@ class TestFindLatestResult:
         older_result = tmp_path / "result1.json"
         newer_result = tmp_path / "result2.json"
 
-        create_v2_result_file(older_result, timestamp="2025-01-01T10:00:00")
-        create_v2_result_file(newer_result, timestamp="2025-01-02T10:00:00")
+        write_v2_result_file(older_result, version="2.0", timestamp="2025-01-01T10:00:00")
+        write_v2_result_file(newer_result, version="2.0", timestamp="2025-01-02T10:00:00")
 
         result = find_latest_result(tmp_path)
         assert result == newer_result
@@ -99,13 +51,10 @@ class TestFindLatestResult:
         tpch_result = tmp_path / "tpch.json"
         tpcds_result = tmp_path / "tpcds.json"
 
-        create_v2_result_file(
-            tpch_result,
-            benchmark_id="tpch",
-            timestamp="2025-01-02T10:00:00",
-        )
-        create_v2_result_file(
+        write_v2_result_file(tpch_result, version="2.0", timestamp="2025-01-02T10:00:00")
+        write_v2_result_file(
             tpcds_result,
+            version="2.0",
             benchmark_id="tpcds",
             timestamp="2025-01-01T10:00:00",
         )
@@ -121,13 +70,15 @@ class TestFindLatestResult:
         duckdb_result = tmp_path / "duckdb.json"
         databricks_result = tmp_path / "databricks.json"
 
-        create_v2_result_file(
+        write_v2_result_file(
             duckdb_result,
+            version="2.0",
             platform="DuckDB",
             timestamp="2025-01-02T10:00:00",
         )
-        create_v2_result_file(
+        write_v2_result_file(
             databricks_result,
+            version="2.0",
             platform="Databricks",
             timestamp="2025-01-01T10:00:00",
         )
@@ -143,14 +94,15 @@ class TestFindLatestResult:
         matching_result = tmp_path / "match.json"
         non_matching_result = tmp_path / "nomatch.json"
 
-        create_v2_result_file(
+        write_v2_result_file(
             matching_result,
-            benchmark_id="tpch",
+            version="2.0",
             platform="DuckDB",
             timestamp="2025-01-02T10:00:00",
         )
-        create_v2_result_file(
+        write_v2_result_file(
             non_matching_result,
+            version="2.0",
             benchmark_id="tpcds",
             platform="Databricks",
             timestamp="2025-01-03T10:00:00",
@@ -164,7 +116,7 @@ class TestFindLatestResult:
         good_result = tmp_path / "good.json"
         bad_result = tmp_path / "bad.json"
 
-        create_v2_result_file(good_result, timestamp="2025-01-01T10:00:00")
+        write_v2_result_file(good_result, version="2.0", timestamp="2025-01-01T10:00:00")
 
         with open(bad_result, "w") as f:
             f.write("{ invalid json")
@@ -175,7 +127,7 @@ class TestFindLatestResult:
     def test_find_latest_result_no_matching_filters(self, tmp_path):
         """Test that no match returns None when filters don't match."""
         result_file = tmp_path / "result.json"
-        create_v2_result_file(result_file, benchmark_id="tpch")
+        write_v2_result_file(result_file, version="2.0")
 
         result = find_latest_result(tmp_path, benchmark="nonexistent")
         assert result is None
@@ -186,7 +138,7 @@ class TestFindLatestResult:
         plans_file = tmp_path / "result.plans.json"
         tuning_file = tmp_path / "result.tuning.json"
 
-        create_v2_result_file(result_file)
+        write_v2_result_file(result_file, version="2.0")
 
         # Write companion files (shouldn't be returned)
         with open(plans_file, "w") as f:
@@ -202,7 +154,7 @@ class TestFindLatestResult:
         v2_result = tmp_path / "v2_result.json"
         v1_result = tmp_path / "v1_result.json"
 
-        create_v2_result_file(v2_result, timestamp="2025-01-01T10:00:00")
+        write_v2_result_file(v2_result, version="2.0", timestamp="2025-01-01T10:00:00")
 
         # Create a v1.x file (should be skipped)
         v1_data = {
@@ -223,7 +175,12 @@ class TestLoadResultFile:
     def test_load_result_file_success(self, tmp_path):
         """Test successfully loading a valid v2.0 result file."""
         result_file = tmp_path / "result.json"
-        create_v2_result_file(result_file)
+        write_v2_result_file(
+            result_file,
+            version="2.0",
+            platform="DuckDB",
+            scale_factor=1.0,
+        )
 
         result, raw_data = load_result_file(result_file)
 
@@ -286,28 +243,19 @@ class TestReconstructBenchmarkResults:
 
     def test_reconstruct_minimal_result(self):
         """Test reconstructing result with minimal required fields."""
-        data = {
-            "version": "2.0",
-            "run": {
-                "id": "test123",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 800,
-            },
-            "benchmark": {
-                "id": "tpch",
-                "name": "TPC-H Benchmark",
-                "scale_factor": 1.0,
-            },
-            "platform": {
-                "name": "DuckDB",
-            },
-            "summary": {
-                "queries": {"total": 0, "passed": 0, "failed": 0},
-                "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0},
-            },
-            "queries": [],
-        }
+        data = make_v2_result_dict(
+            version="2.0",
+            benchmark_name="TPC-H Benchmark",
+            platform="DuckDB",
+            scale_factor=1.0,
+            execution_id="test123",
+            timestamp="2025-01-01T10:00:00",
+            query_time_ms=800,
+            total_queries=0,
+            passed_queries=0,
+            failed_queries=0,
+            total_ms=0,
+        )
 
         result = reconstruct_benchmark_results(data)
 
@@ -319,65 +267,51 @@ class TestReconstructBenchmarkResults:
 
     def test_reconstruct_complete_result(self):
         """Test reconstructing result with all fields populated."""
-        data = {
-            "version": "2.0",
-            "run": {
-                "id": "test123",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 5000,
-                "query_time_ms": 4000,
-                "iterations": 3,
-            },
-            "benchmark": {
-                "id": "tpch",
-                "name": "TPC-H Benchmark",
-                "scale_factor": 10.0,
-                "mode": "power_test",
-            },
-            "platform": {
-                "name": "DuckDB",
-                "version": "1.0.0",
-                "variant": "in-memory",
-            },
-            "summary": {
-                "queries": {
-                    "total": 22,
-                    "passed": 22,
-                    "failed": 0,
-                },
-                "timing": {
-                    "total_ms": 5000,
-                    "avg_ms": 227.27,
-                    "min_ms": 50,
-                    "max_ms": 500,
-                    "geometric_mean_ms": 150.5,
-                },
-                "data": {
-                    "rows_loaded": 1000000,
-                    "load_time_ms": 1000,
-                },
-                "validation": "passed",
-                "tpc_metrics": {
-                    "power_at_size": 1234.5,
-                    "throughput_at_size": 5678.9,
-                    "qphh_at_size": 9012.3,
-                },
-            },
-            "queries": [
+        data = make_v2_result_dict(
+            version="2.0",
+            benchmark_name="TPC-H Benchmark",
+            platform="DuckDB",
+            platform_version="1.0.0",
+            scale_factor=10.0,
+            execution_id="test123",
+            timestamp="2025-01-01T10:00:00",
+            total_duration_ms=5000,
+            query_time_ms=4000,
+            iterations=3,
+            total_ms=5000,
+            queries=[
                 {"id": "1", "ms": 100.0, "rows": 4},
                 {"id": "2", "ms": 50.0, "rows": 100},
             ],
-            "environment": {
-                "os": "Darwin 24.0.0",
-                "arch": "arm64",
-                "cpu_count": 16,
-                "memory_gb": 64,
-                "python": "3.12.0",
-            },
-            "tables": {
-                "lineitem": {"rows": 600000, "load_ms": 500},
-                "orders": {"rows": 150000, "load_ms": 200},
-            },
+        )
+        # Add fields not covered by the shared factory
+        data["benchmark"]["mode"] = "power_test"
+        data["platform"]["variant"] = "in-memory"
+        data["summary"]["timing"].update(
+            {
+                "avg_ms": 227.27,
+                "min_ms": 50,
+                "max_ms": 500,
+                "geometric_mean_ms": 150.5,
+            }
+        )
+        data["summary"]["data"] = {"rows_loaded": 1000000, "load_time_ms": 1000}
+        data["summary"]["validation"] = "passed"
+        data["summary"]["tpc_metrics"] = {
+            "power_at_size": 1234.5,
+            "throughput_at_size": 5678.9,
+            "qphh_at_size": 9012.3,
+        }
+        data["environment"] = {
+            "os": "Darwin 24.0.0",
+            "arch": "arm64",
+            "cpu_count": 16,
+            "memory_gb": 64,
+            "python": "3.12.0",
+        }
+        data["tables"] = {
+            "lineitem": {"rows": 600000, "load_ms": 500},
+            "orders": {"rows": 150000, "load_ms": 200},
         }
 
         result = reconstruct_benchmark_results(data)
@@ -412,28 +346,21 @@ class TestReconstructBenchmarkResults:
 
     def test_reconstruct_handles_missing_optional_fields(self):
         """Test that reconstruction handles missing optional fields gracefully."""
-        data = {
-            "version": "2.0",
-            "run": {
-                "id": "",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 0,
-                "query_time_ms": 0,
-            },
-            "benchmark": {
-                "id": "test",
-                "name": "Test Benchmark",
-                "scale_factor": 1.0,
-            },
-            "platform": {
-                "name": "Test Platform",
-            },
-            "summary": {
-                "queries": {"total": 0, "passed": 0, "failed": 0},
-                "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0},
-            },
-            "queries": [],
-        }
+        data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="test",
+            benchmark_name="Test Benchmark",
+            platform="Test Platform",
+            scale_factor=1.0,
+            execution_id="",
+            timestamp="2025-01-01T10:00:00",
+            total_duration_ms=0,
+            query_time_ms=0,
+            total_queries=0,
+            passed_queries=0,
+            failed_queries=0,
+            total_ms=0,
+        )
 
         result = reconstruct_benchmark_results(data)
 
@@ -446,26 +373,20 @@ class TestReconstructBenchmarkResults:
 
     def test_reconstruct_timestamp_parsing(self):
         """Test that timestamp is properly parsed."""
-        data = {
-            "version": "2.0",
-            "run": {
-                "id": "test",
-                "timestamp": "2025-10-28T15:30:45.123456",
-                "total_duration_ms": 1000,
-                "query_time_ms": 800,
-            },
-            "benchmark": {
-                "id": "test",
-                "name": "Test",
-                "scale_factor": 1.0,
-            },
-            "platform": {"name": "Test"},
-            "summary": {
-                "queries": {"total": 0, "passed": 0, "failed": 0},
-                "timing": {"total_ms": 0, "avg_ms": 0, "min_ms": 0, "max_ms": 0},
-            },
-            "queries": [],
-        }
+        data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="test",
+            benchmark_name="Test",
+            platform="Test",
+            scale_factor=1.0,
+            execution_id="test",
+            timestamp="2025-10-28T15:30:45.123456",
+            query_time_ms=800,
+            total_queries=0,
+            passed_queries=0,
+            failed_queries=0,
+            total_ms=0,
+        )
 
         result = reconstruct_benchmark_results(data)
 
@@ -527,27 +448,26 @@ class TestReconstructBenchmarkResults:
 
     def test_reconstruct_query_results_with_iteration(self):
         """Test that iteration field is properly reconstructed."""
-        data = {
-            "version": "2.0",
-            "run": {
-                "id": "test",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 800,
-                "iterations": 3,
-            },
-            "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
-            "platform": {"name": "Test"},
-            "summary": {
-                "queries": {"total": 3, "passed": 3, "failed": 0},
-                "timing": {"total_ms": 300, "avg_ms": 100, "min_ms": 80, "max_ms": 120},
-            },
-            "queries": [
+        data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="test",
+            benchmark_name="Test",
+            platform="Test",
+            scale_factor=1.0,
+            execution_id="test",
+            timestamp="2025-01-01T10:00:00",
+            query_time_ms=800,
+            iterations=3,
+            total_queries=3,
+            passed_queries=3,
+            failed_queries=0,
+            total_ms=300,
+            queries=[
                 {"id": "1", "ms": 100.0, "rows": 4, "iter": 1},
                 {"id": "1", "ms": 90.0, "rows": 4, "iter": 2},
                 {"id": "1", "ms": 110.0, "rows": 4, "iter": 3},
             ],
-        }
+        )
 
         result = reconstruct_benchmark_results(data)
 
@@ -558,26 +478,25 @@ class TestReconstructBenchmarkResults:
 
     def test_reconstruct_query_results_with_stream(self):
         """Test that stream field is properly reconstructed."""
-        data = {
-            "version": "2.0",
-            "run": {
-                "id": "test",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 800,
-                "streams": 2,
-            },
-            "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
-            "platform": {"name": "Test"},
-            "summary": {
-                "queries": {"total": 2, "passed": 2, "failed": 0},
-                "timing": {"total_ms": 200, "avg_ms": 100, "min_ms": 80, "max_ms": 120},
-            },
-            "queries": [
+        data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="test",
+            benchmark_name="Test",
+            platform="Test",
+            scale_factor=1.0,
+            execution_id="test",
+            timestamp="2025-01-01T10:00:00",
+            query_time_ms=800,
+            streams=2,
+            total_queries=2,
+            passed_queries=2,
+            failed_queries=0,
+            total_ms=200,
+            queries=[
                 {"id": "1", "ms": 100.0, "rows": 4, "stream": 1},
                 {"id": "1", "ms": 90.0, "rows": 4, "stream": 2},
             ],
-        }
+        )
 
         result = reconstruct_benchmark_results(data)
 
@@ -587,27 +506,26 @@ class TestReconstructBenchmarkResults:
 
     def test_reconstruct_with_errors(self):
         """Test that errors array is properly reconstructed."""
-        data = {
-            "version": "2.0",
-            "run": {
-                "id": "test",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 1000,
-                "query_time_ms": 500,
-            },
-            "benchmark": {"id": "test", "name": "Test", "scale_factor": 1.0},
-            "platform": {"name": "Test"},
-            "summary": {
-                "queries": {"total": 2, "passed": 1, "failed": 1},
-                "timing": {"total_ms": 500, "avg_ms": 500, "min_ms": 500, "max_ms": 500},
-            },
-            "queries": [
+        data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="test",
+            benchmark_name="Test",
+            platform="Test",
+            scale_factor=1.0,
+            execution_id="test",
+            timestamp="2025-01-01T10:00:00",
+            query_time_ms=500,
+            total_queries=2,
+            passed_queries=1,
+            failed_queries=1,
+            total_ms=500,
+            queries=[
                 {"id": "1", "ms": 500.0, "rows": 4},
             ],
-            "errors": [
+            errors=[
                 {"phase": "query", "query_id": "2", "type": "QueryError", "message": "Syntax error"},
             ],
-        }
+        )
 
         result = reconstruct_benchmark_results(data)
 

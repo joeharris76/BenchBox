@@ -356,7 +356,7 @@ def _execute_load_only_mode(
         if data_dir is None:
             raise RuntimeError("Benchmark output directory not configured; cannot perform load-only operations")
 
-        table_stats, load_time, _per_table_timings = adapter.load_data(benchmark, connection, data_dir)
+        table_stats, load_time, per_table_timings = adapter.load_data(benchmark, connection, data_dir)
 
         if validation_opts.enable_postload_validation:
             if hasattr(benchmark, "validate_loaded_data"):
@@ -375,12 +375,11 @@ def _execute_load_only_mode(
             "data_generation": {"status": "COMPLETED"},
             "schema_creation": {
                 "status": "COMPLETED",
-                "duration_seconds": schema_time,
+                "duration_ms": int(schema_time * 1000),
             },
             "data_loading": {
                 "status": "COMPLETED",
-                "tables": table_stats,
-                "duration_seconds": load_time,
+                "duration_ms": int(load_time * 1000),
             },
         }
 
@@ -403,6 +402,7 @@ def _execute_load_only_mode(
             schema_creation_time=schema_time,
             data_loading_time=load_time,
             table_statistics=table_stats,
+            per_table_timings=per_table_timings,
             total_rows_loaded=total_rows,
             data_size_mb=data_size_mb,
         )
@@ -603,12 +603,16 @@ def run_benchmark_lifecycle(
     output_dir_handler = _resolve_output_dir_handler(benchmark, output_root)
     validation_records: list[tuple[str, ValidationResult]] = []
 
-    # Determine test type and whether data is needed
+    # Determine test type and whether data generation / loading is needed
     test_type = getattr(benchmark_config, "test_execution_type", "standard")
     needs_data = test_type != "data_only"
 
-    # Ensure data exists for execution/loading (via reuse or generation)
-    if needs_data:
+    # Ensure data exists: always when phases.generate is requested (including data_only),
+    # or when a downstream phase (load/execute) needs it.
+    datagen_duration = 0.0
+    if needs_data or phases.generate:
+        datagen_start = time.monotonic()
+
         # Only run preflight validation when explicitly generating fresh data
         if phases.generate and validation_opts.enable_preflight_validation:
             preflight_result = _run_preflight_validation(benchmark, benchmark_config, output_dir_handler)
@@ -634,17 +638,23 @@ def run_benchmark_lifecycle(
         if phases.generate:
             _run_format_conversion(benchmark, benchmark_config)
 
+        datagen_duration = time.monotonic() - datagen_start
+
     if test_type == "data_only":
         execution_id = uuid.uuid4().hex[:8]
+        datagen_phase = {
+            "status": "COMPLETED",
+            "duration_ms": int(datagen_duration * 1000),
+        }
+        datagen_phase.update(_read_datagen_stats_from_manifest(benchmark))
         result_obj = benchmark.create_enhanced_benchmark_result(
             platform="data_only",
             query_results=[],
-            duration_seconds=0.0,
-            phases={"data_generation": {"status": "COMPLETED"}},
+            duration_seconds=datagen_duration,
+            phases={"data_generation": datagen_phase},
             execution_metadata={
                 "mode": "datagen",
                 "benchmark_id": benchmark_config.name,
-                "phase_status": {"data_generation": {"status": "COMPLETED"}},
             },
             execution_id=execution_id,
         )
@@ -784,6 +794,8 @@ def run_benchmark_lifecycle(
         iterations=max(1, iterations),
         warm_up_iterations=max(0, warmups),
         power_fail_fast=fail_fast,
+        capture_plans=benchmark_config.capture_plans,
+        strict_plan_capture=benchmark_config.strict_plan_capture,
     )
 
     if is_dataframe_adapter:
@@ -855,6 +867,91 @@ def run_benchmark_lifecycle(
     return result_with_validation
 
 
+def _flatten_manifest_v2_entries(table_formats: Any, preferred_formats: list[str] | None = None) -> list[Any]:
+    """Select one v2 table format and return its file entries.
+
+    Manifests may contain multiple materializations per table (for example
+    `tbl` and `parquet`). For aggregate stats we should count one canonical
+    representation per table, not sum across all formats.
+    """
+
+    formats = getattr(table_formats, "formats", {}) or {}
+    if not isinstance(formats, dict) or not formats:
+        return []
+
+    format_order: list[str] = []
+    if preferred_formats:
+        format_order.extend(preferred_formats)
+    format_order.extend(["tbl", "csv", "parquet"])
+    format_order.extend(sorted(formats.keys()))
+
+    seen: set[str] = set()
+    for format_name in format_order:
+        if format_name in seen:
+            continue
+        seen.add(format_name)
+        files = formats.get(format_name)
+        if isinstance(files, list) and files:
+            return files
+
+    return []
+
+
+def _read_datagen_stats_from_manifest(benchmark: Any) -> dict[str, int]:
+    """Read aggregate datagen stats from manifest when available.
+
+    Returns non-critical stats used for data-only phase reporting. Any
+    parse/load failure returns an empty dict by design.
+    """
+
+    try:
+        output_dir = getattr(benchmark, "output_dir", None)
+        if output_dir is None or not hasattr(output_dir, "joinpath"):
+            return {}
+
+        manifest_path = output_dir.joinpath("_datagen_manifest.json")
+        if not manifest_path.exists():
+            return {}
+
+        from benchbox.core.manifest.io import load_manifest
+
+        manifest = load_manifest(manifest_path)
+        tables = getattr(manifest, "tables", {}) or {}
+        if not isinstance(tables, dict) or not tables:
+            return {}
+        preferred_formats = list(getattr(manifest, "format_preference", []) or [])
+
+        tables_generated = 0
+        total_rows = 0
+        total_size_bytes = 0
+
+        for table_data in tables.values():
+            if isinstance(table_data, list):
+                entries = table_data
+            else:
+                entries = _flatten_manifest_v2_entries(table_data, preferred_formats)
+
+            if not entries:
+                continue
+
+            tables_generated += 1
+            for entry in entries:
+                total_rows += int(getattr(entry, "row_count", 0) or 0)
+                total_size_bytes += int(getattr(entry, "size_bytes", 0) or 0)
+
+        if tables_generated == 0:
+            return {}
+
+        return {
+            "tables_generated": tables_generated,
+            "total_rows": total_rows,
+            "total_size_bytes": total_size_bytes,
+        }
+    except Exception:
+        logger.debug("Failed to read datagen stats from manifest", exc_info=True)
+        return {}
+
+
 def _ensure_data_generated(benchmark: Any, config: BenchmarkConfig) -> bool:
     """Ensure data is generated, respecting manifest and generator validator.
 
@@ -869,8 +966,8 @@ def _ensure_data_generated(benchmark: Any, config: BenchmarkConfig) -> bool:
     force_regenerate_flag = bool(options.get("force_regenerate"))
     no_regenerate_flag = bool(options.get("no_regenerate"))
 
-    # If tables already present, assume generation done
-    if getattr(benchmark, "tables", None):
+    # If tables already present, assume generation done (unless force requested)
+    if getattr(benchmark, "tables", None) and not force_regenerate_flag:
         return False
 
     output_dir = getattr(benchmark, "output_dir", None)

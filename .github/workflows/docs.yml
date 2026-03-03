@@ -4,17 +4,27 @@ on:
   push:
     branches: [ main ]
     paths:
+      - 'benchbox/**'
       - 'docs/**'
+      - 'examples/**'
       - 'landing/**'
+      - 'scripts/**'
       - '.github/workflows/docs.yml'
+      - 'Makefile'
       - 'README.md'
+      - 'pyproject.toml'
   pull_request:
     branches: [ main ]
     paths:
+      - 'benchbox/**'
       - 'docs/**'
+      - 'examples/**'
       - 'landing/**'
+      - 'scripts/**'
       - '.github/workflows/docs.yml'
+      - 'Makefile'
       - 'README.md'
+      - 'pyproject.toml'
   workflow_dispatch:
 
 permissions:
@@ -94,10 +104,9 @@ jobs:
       uses: actions/deploy-pages@v4
 
   # Validate example files and documentation references
-  # Non-blocking: failures are warnings, not errors
+  # Blocking: failures should fail the workflow
   example-validation:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
     - uses: actions/checkout@v4
@@ -120,10 +129,9 @@ jobs:
       run: uv run python scripts/check_example_syntax.py
 
   # Check for broken links
-  # Non-blocking: external links can be flaky
+  # Blocking: curated ignore list handles known flaky hosts
   linkcheck:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
     - uses: actions/checkout@v4
@@ -167,10 +175,9 @@ jobs:
         skip: "*.pyc,_build,*.json,*.lock,*.svg,*.min.js,*.min.css,_binaries,*.tpl,*.dst,*.tbl,_sources,benchmark_runs,*.dat,*.pdf,_project,_blog,htmlcov,.venv"
 
   # Docstring coverage check
-  # Non-blocking: coverage threshold may need adjustment
+  # Blocking: enforce configured interrogate threshold
   docstring-coverage:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
     - uses: actions/checkout@v4
@@ -187,7 +194,7 @@ jobs:
 
     - name: Check docstring coverage
       run: |
-        interrogate -c pyproject.toml --fail-under 64 benchbox/
+        interrogate -c pyproject.toml --fail-under 90 benchbox/
 
     - name: Generate docstring coverage badge
       run: |

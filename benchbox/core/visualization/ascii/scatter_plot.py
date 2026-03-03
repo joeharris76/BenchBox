@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions, ColorMode
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    TRUNCATION_MARKER,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    ColorMode,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -68,6 +75,9 @@ class ASCIIScatterPlot(ASCIIChartBase):
         self.x_label = x_label
         self.y_label = y_label
         self.show_pareto = show_pareto
+        self._truncation_active = False
+        self._x_cap: float = float("inf")
+        self._y_cap: float = float("inf")
 
     def render(self) -> str:
         """Render the scatter plot as a string."""
@@ -94,6 +104,22 @@ class ASCIIScatterPlot(ASCIIChartBase):
 
         x_min, x_max = min(x_values), max(x_values)
         y_min, y_max = min(y_values), max(y_values)
+
+        # Cap axes at P95×2 so one extreme point doesn't waste plot area
+        self._truncation_active = False
+        self._x_cap = float("inf")
+        self._y_cap = float("inf")
+        if len(self.points) >= 5:
+            p95_x = robust_p95(x_values)
+            p95_y = robust_p95(y_values)
+            if p95_x > 0 and x_max > p95_x * 3:
+                x_max = p95_x * 2
+                self._x_cap = x_max
+                self._truncation_active = True
+            if p95_y > 0 and y_max > p95_y * 3:
+                y_max = p95_y * 2
+                self._y_cap = y_max
+                self._truncation_active = True
 
         # Add padding
         x_range = x_max - x_min if x_max > x_min else 1
@@ -237,8 +263,10 @@ class ASCIIScatterPlot(ASCIIChartBase):
             else:
                 marker_colored = marker
             pareto_note = " (Pareto optimal)" if point.is_pareto else ""
+            is_truncated = self._truncation_active and (point.x > self._x_cap or point.y > self._y_cap)
+            truncated_note = f" {TRUNCATION_MARKER}" if is_truncated else ""
             lines.append(
-                f"  {marker_colored} {point.name}: x={self._format_value(point.x)}, y={self._format_value(point.y)}{pareto_note}"
+                f"  {marker_colored} {point.name}: x={self._format_value(point.x)}, y={self._format_value(point.y)}{pareto_note}{truncated_note}"
             )
 
         return "\n".join(lines)

@@ -228,6 +228,7 @@ class ResultBuilder:
         self._throughput_streams: list[dict[str, Any]] = []
         self._throughput_total_time_seconds: float = 0.0
         self._execution_phases_override: ExecutionPhases | None = None
+        self._total_duration_seconds: float | None = None
 
     @staticmethod
     def _generate_id() -> str:
@@ -290,6 +291,14 @@ class ResultBuilder:
         """
         self._loading_time_ms = time_ms
 
+    def set_total_duration(self, duration_seconds: float) -> None:
+        """Set explicit total run duration in seconds.
+
+        Args:
+            duration_seconds: Total duration in seconds
+        """
+        self._total_duration_seconds = duration_seconds
+
     # -------------------------------------------------------------------------
     # Timing Metadata
     # -------------------------------------------------------------------------
@@ -344,11 +353,25 @@ class ResultBuilder:
         """Set run configuration for reproducibility."""
         self._run_config = config
 
-    def set_phase_status(self, phase: str, status: str, duration_ms: float | None = None) -> None:
-        """Set phase status metadata for export."""
+    def set_phase_status(
+        self,
+        phase: str,
+        status: str,
+        duration_ms: float | None = None,
+        **extra: Any,
+    ) -> None:
+        """Set phase status metadata for export.
+
+        Args:
+            phase: Phase name (e.g., "data_generation", "power")
+            status: Phase status (e.g., "COMPLETED", "FAILED")
+            duration_ms: Optional duration in milliseconds
+            **extra: Additional phase metadata (e.g., tables_generated, total_rows)
+        """
         entry: dict[str, Any] = {"status": status}
         if duration_ms is not None:
             entry["duration_ms"] = duration_ms
+        entry.update(extra)
         self._phase_status[phase] = entry
 
     def set_system_profile(self, profile: dict[str, Any]) -> None:
@@ -505,7 +528,12 @@ class ResultBuilder:
             # Loading stats
             data_loading_time=self._loading_time_ms / 1000.0,
             total_rows_loaded=sum(ts.rows for ts in self._table_stats.values()),
-            table_statistics={name: stats.rows for name, stats in self._table_stats.items()},
+            table_statistics={
+                name: {"rows": stats.rows, "load_time_ms": stats.load_time_ms}
+                if stats.load_time_ms > 0
+                else {"rows": stats.rows}
+                for name, stats in self._table_stats.items()
+            },
             # Execution phases
             execution_phases=execution_phases,
             # TPC metrics
@@ -537,6 +565,9 @@ class ResultBuilder:
 
     def _calculate_duration(self) -> float:
         """Calculate total duration in seconds."""
+        if self._total_duration_seconds is not None:
+            return self._total_duration_seconds
+
         if self._start_time and self._end_time:
             delta = self._end_time - self._start_time
             return delta.total_seconds()
@@ -811,6 +842,12 @@ class ResultBuilder:
                 result_dict["row_count_validation"] = result.row_count_validation
             if result.dataframe_skip_summary:
                 result_dict["dataframe_skip_summary"] = result.dataframe_skip_summary
+            if result.query_plan is not None:
+                result_dict["query_plan"] = result.query_plan
+            if result.plan_fingerprint is not None:
+                result_dict["plan_fingerprint"] = result.plan_fingerprint
+            if result.plan_capture_time_ms is not None:
+                result_dict["plan_capture_time_ms"] = result.plan_capture_time_ms
 
             results.append(result_dict)
 
@@ -861,7 +898,17 @@ class ResultBuilder:
         if self._run_config:
             metadata["run_config"] = self._run_config.to_dict()
         if self._phase_status:
-            metadata["phase_status"] = dict(self._phase_status)
+            merged_phase_status: dict[str, dict[str, Any]] = {}
+            existing_phase_status = metadata.get("phase_status")
+            if isinstance(existing_phase_status, dict):
+                for phase_name, phase_data in existing_phase_status.items():
+                    if isinstance(phase_data, dict):
+                        merged_phase_status[phase_name] = dict(phase_data)
+            for phase_name, phase_data in self._phase_status.items():
+                current = merged_phase_status.get(phase_name, {})
+                current.update(phase_data)
+                merged_phase_status[phase_name] = current
+            metadata["phase_status"] = merged_phase_status
 
         return metadata
 

@@ -112,6 +112,15 @@ class TestTPCDSDataGenerator:
             for table in key_tables:
                 assert table in table_names
 
+    def test_build_schema_registry_includes_tpcds_columns(self, temp_dir):
+        generator = TPCDSDataGenerator(scale_factor=1.0, output_dir=temp_dir)
+
+        schema_registry = generator._build_schema_registry()
+
+        assert "customer" in schema_registry
+        column_names = [column["name"] for column in schema_registry["customer"]["columns"]]
+        assert "c_customer_sk" in column_names
+
     @patch("subprocess.run")
     @patch("benchbox.core.tpcds.generator.TPCDSDataGenerator._find_or_build_dsdgen")
     def test_data_generation_workflow(self, mock_find_dsdgen, mock_subprocess, temp_dir):
@@ -292,7 +301,6 @@ class TestGeneratorExtended:
         assert generator.scale_factor == 1.0
 
     @skip_windows_shell
-    @pytest.mark.requires_zstd
     @patch("subprocess.run")
     @patch("benchbox.core.tpcds.generator.TPCDSDataGenerator._find_or_build_dsdgen")
     def test_file_format_consistency_with_compression(self, mock_find_dsdgen, mock_subprocess, temp_dir):

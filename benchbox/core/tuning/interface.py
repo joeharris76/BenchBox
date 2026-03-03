@@ -309,7 +309,7 @@ PartitionStrategyType = Literal["RANGE", "LIST", "HASH", "DATE"]
 PartitionGranularityType = Literal["HOURLY", "DAILY", "MONTHLY", "YEARLY"]
 SortKeyStyleType = Literal["COMPOUND", "INTERLEAVED", "AUTO"]
 SortedIngestionModeType = Literal["off", "auto", "force"]
-SortedIngestionMethodType = Literal["auto", "ctas", "z_order", "liquid_clustering", "vacuum_sort"]
+SortedIngestionMethodType = Literal["auto", "ctas", "z_order", "hilbert", "liquid_clustering", "vacuum_sort"]
 DatabricksClusteringStrategyType = Literal["z_order", "liquid_clustering", "none"]
 
 
@@ -1051,7 +1051,7 @@ class PlatformOptimizationConfiguration:
     def __post_init__(self) -> None:
         """Validate strategy fields for deterministic tuning behavior."""
         valid_modes = {"off", "auto", "force"}
-        valid_methods = {"auto", "ctas", "z_order", "liquid_clustering", "vacuum_sort"}
+        valid_methods = {"auto", "ctas", "z_order", "hilbert", "liquid_clustering", "vacuum_sort"}
         valid_dbx_strategies = {"z_order", "liquid_clustering", "none"}
 
         if self.sorted_ingestion_mode not in valid_modes:

@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    outlier_severity_markers,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -151,7 +156,7 @@ class ASCIIBoxPlot(ASCIIChartBase):
             stats = compute_quartiles(s.values)
             stats_list.append((s.name, stats))
 
-        # Find global min/max for scale (includes outliers)
+        # Find global min/max for scale
         all_values: list[float] = []
         for s in self.series:
             all_values.extend(s.values)
@@ -162,8 +167,12 @@ class ASCIIBoxPlot(ASCIIChartBase):
         global_min = min(all_values)
         global_max = max(all_values)
 
-        # Add padding for outliers
-        value_range = global_max - global_min if global_max > global_min else 1
+        # Cap the scale at max whisker × 1.5 to prevent extreme outliers from
+        # crushing the box plots.  If the actual data max is lower, use that instead.
+        max_whisker = max(stats.max_val for _, stats in stats_list)
+        scale_max = min(max_whisker * 1.5, global_max)
+
+        value_range = scale_max - global_min if scale_max > global_min else 1
 
         # Layout calculations — dynamic label width, capped at 30
         name_width = min(30, max(len(s.name) for s in self.series))
@@ -254,13 +263,27 @@ class ASCIIBoxPlot(ASCIIChartBase):
 
             # Add outliers to middle line at their actual scaled positions
             if stats.outliers:
+                # Collect truncated outliers to render severity markers after the loop
+                max_truncated: float = 0
                 for outlier_val in stats.outliers:
-                    outlier_pos = to_pos(outlier_val)
-                    # Clamp to valid range
-                    outlier_pos = max(0, min(outlier_pos, plot_width - 1))
-                    # Only place if position is empty (don't overwrite box/whisker)
-                    if mid_line[outlier_pos] == " ":
-                        mid_line[outlier_pos] = self.OUTLIER
+                    if outlier_val > scale_max:
+                        max_truncated = max(max_truncated, outlier_val)
+                    else:
+                        outlier_pos = to_pos(outlier_val)
+                        outlier_pos = max(0, min(outlier_pos, plot_width - 1))
+                        if mid_line[outlier_pos] == " ":
+                            mid_line[outlier_pos] = self.OUTLIER
+
+                # Render truncation markers scaled to severity (1-4 ▸ chars)
+                # Markers overwrite any existing outlier dots to form a
+                # contiguous block at the right edge of the plot.
+                if max_truncated > 0:
+                    marker_str = outlier_severity_markers(max_truncated, scale_max)
+                    start = plot_width - len(marker_str)
+                    for offset in range(len(marker_str)):
+                        pos = start + offset
+                        if 0 <= pos < plot_width:
+                            mid_line[pos] = marker_str[offset]
 
             # Colorize and add
             top_colored = colors.colorize("".join(top_line), fg_color=color)
@@ -271,7 +294,6 @@ class ASCIIBoxPlot(ASCIIChartBase):
             lines.append(f"{' ' * label_width}  {top_colored}")
             lines.append(f"{colored_label}  {mid_colored}")
             lines.append(f"{' ' * label_width}  {bottom_colored}")
-            lines.append("")
 
         # X-axis scale
         axis_line = ["─"] * plot_width
@@ -280,8 +302,8 @@ class ASCIIBoxPlot(ASCIIChartBase):
         # Scale labels
         scale_line = [" "] * plot_width
         min_label = self._format_value(global_min)
-        max_label = self._format_value(global_max)
-        mid_val = (global_min + global_max) / 2
+        max_label = self._format_value(scale_max)
+        mid_val = (global_min + scale_max) / 2
         mid_label = self._format_value(mid_val)
 
         # Place labels
@@ -295,17 +317,58 @@ class ASCIIBoxPlot(ASCIIChartBase):
         # Axis label
         lines.append(self._render_axis_label(self.y_label, width, axis="x"))
 
-        # Statistics summary
+        # Statistics table
         if self.show_stats:
-            lines.append("")
-            lines.append("Statistics:")
+            name_col_w = max(len(name) for name, _ in stats_list)
+            headers = ["median"]
+            if self.show_mean:
+                headers.extend(["mean", "std"])
+
+            # Collect raw values per column so we can format each column uniformly
+            raw_rows: list[tuple[str, list[float]]] = []
             for name, stats in stats_list:
-                stat_line = f"  {name}: "
-                stat_line += f"median={self._format_value(stats.median)}"
+                vals = [stats.median]
                 if self.show_mean:
-                    stat_line += f", mean={self._format_value(stats.mean)}"
-                    stat_line += f", std={self._format_value(stats.std)}"
-                lines.append(stat_line)
+                    vals.extend([stats.mean, stats.std])
+                raw_rows.append((name, vals))
+
+            # Format each column with consistent precision and suffix
+            num_cols = len(headers)
+            formatted_cols: list[list[str]] = [[] for _ in range(num_cols)]
+            for col_idx in range(num_cols):
+                col_vals = [row[1][col_idx] for row in raw_rows]
+                col_max = max(abs(v) for v in col_vals) if col_vals else 0
+                # Choose suffix based on the largest value in the column
+                if col_max >= 1_000_000:
+                    suffix, divisor = "M", 1_000_000
+                elif col_max >= 1_000:
+                    suffix, divisor = "K", 1_000
+                else:
+                    suffix, divisor = "", 1
+                for v in col_vals:
+                    formatted_cols[col_idx].append(f"{v / divisor:.1f}{suffix}")
+
+            # Build rows and measure column widths
+            rows: list[tuple[str, list[str]]] = []
+            col_widths = [len(h) for h in headers]
+            for row_idx, (name, _) in enumerate(raw_rows):
+                vals = [formatted_cols[c][row_idx] for c in range(num_cols)]
+                for j, v in enumerate(vals):
+                    col_widths[j] = max(col_widths[j], len(v))
+                rows.append((name, vals))
+
+            # Header row
+            header = " " * (name_col_w + 2)
+            header += "  ".join(h.rjust(col_widths[j]) for j, h in enumerate(headers))
+            lines.append(header)
+            sep = " " * (name_col_w + 2) + "  ".join("─" * col_widths[j] for j in range(num_cols))
+            lines.append(sep)
+
+            # Data rows
+            for name, vals in rows:
+                row = name.ljust(name_col_w) + "  "
+                row += "  ".join(v.rjust(col_widths[j]) for j, v in enumerate(vals))
+                lines.append(row)
 
         return "\n".join(lines)
 

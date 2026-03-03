@@ -54,8 +54,13 @@ def normalize_query_id(query_id: str | int) -> str:
 
     normalized = normalized.strip()
 
-    # Remove common file suffix (e.g., ".sql")
-    normalized = normalized.split(".", 1)[0].strip()
+    # Remove file extensions (e.g., ".sql", ".q") but preserve dot-notation
+    # query IDs like SSB's "3.1", "4.2".  Split on the LAST dot and only strip
+    # when the trailing part is purely alphabetic (a file extension), not numeric.
+    if "." in normalized:
+        base, _, ext = normalized.rpartition(".")
+        if ext.isalpha():  # "sql", "q", "txt" → strip; "1", "2" → keep
+            normalized = base.strip()
 
     # Preserve variant suffixes for multi-part templates (e.g., "14a", "39b")
     match = re.fullmatch(r"(\d+)([A-Za-z]+)?", normalized)
@@ -102,6 +107,10 @@ class QueryResultInput:
     cost: float | None = None  # Cloud platform cost estimation
     row_count_validation: dict[str, Any] | None = None  # Validation results
     dataframe_skip_summary: dict[str, Any] | None = None  # DataFrame skip metadata
+    # Query plan capture (passed through to BenchmarkResults.query_results for companion file)
+    query_plan: Any | None = None
+    plan_fingerprint: str | None = None
+    plan_capture_time_ms: float | None = None
 
 
 def normalize_query_result(
@@ -182,6 +191,9 @@ def normalize_query_result(
         cost=raw_result.get("cost"),
         row_count_validation=raw_result.get("row_count_validation"),
         dataframe_skip_summary=raw_result.get("dataframe_skip_summary"),
+        query_plan=raw_result.get("query_plan"),
+        plan_fingerprint=raw_result.get("plan_fingerprint"),
+        plan_capture_time_ms=raw_result.get("plan_capture_time_ms"),
     )
 
 

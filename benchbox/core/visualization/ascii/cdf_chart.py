@@ -7,7 +7,13 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    TRUNCATION_MARKER,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -64,6 +70,7 @@ class ASCIICDFChart(ASCIIChartBase):
         self.data = list(data)
         self.title = title or "Cumulative Distribution of Query Latency"
         self.height = max(5, height)
+        self._x_capped = False
 
     def render(self) -> str:
         """Render the CDF chart as a string."""
@@ -93,6 +100,13 @@ class ASCIICDFChart(ASCIIChartBase):
         x_max = max(all_values)
         if x_min == x_max:
             x_max = x_min + 1  # Avoid division by zero
+
+        # Cap x_max at P95×2 so one extreme tail doesn't bunch all data left
+        if len(all_values) >= 5:
+            p95 = robust_p95(all_values)
+            if p95 > 0 and x_max > p95 * 3:
+                x_max = p95 * 2
+                self._x_capped = True
 
         # Build the grid
         grid = [[" " for _ in range(plot_width)] for _ in range(self.height)]
@@ -188,7 +202,10 @@ class ASCIICDFChart(ASCIIChartBase):
             color = DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]
             colored_marker = colors.colorize(marker, fg_color=color)
             legend_parts.append(f"{colored_marker} {series.name}")
-        lines.append("  " + "    ".join(legend_parts))
+        legend_line = "  " + "    ".join(legend_parts)
+        if self._x_capped:
+            legend_line += f"  {TRUNCATION_MARKER} X-axis capped"
+        lines.append(legend_line)
 
         return "\n".join(lines)
 

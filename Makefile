@@ -1,14 +1,17 @@
 # BenchBox Makefile
 # This makefile provides commands for building, testing and development
 
-.PHONY: test test-unit test-integration test-tpch test-all test-fast test-medium test-slow test-pytest clean lint install develop coverage coverage-html coverage-report coverage-check test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke test-local-matrix complexity-check complexity-report duplicate-check duplicate-check-verbose duplicate-check-json
+.PHONY: test test-unit test-integration test-tpch test-all test-fast test-unlock test-medium test-slow test-stress test-pytest clean lint install develop coverage coverage-html coverage-report coverage-check test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke test-local-matrix complexity-check complexity-report duplicate-check duplicate-check-verbose duplicate-check-json
 
 # Primary test commands using pytest marker system
 test: test-fast
 	@echo "Default test run completed. Use 'make help' to see all test options."
 
 test-all:
-	uv run -- python -m pytest -m "not stress"
+	@echo "Running non-resource-heavy tests in parallel..."
+	uv run -- python -m pytest -m "not (stress or resource_heavy)"
+	@echo "Running resource-heavy tests serially..."
+	uv run -- python -m pytest -m "resource_heavy and not stress" -n 0
 
 test-unit:
 	uv run -- python -m pytest -m "unit" --tb=short
@@ -35,11 +38,19 @@ test-pytest:
 test-fast:
 	uv run -- python -m pytest -m "fast" --tb=short
 
+test-unlock:
+	@echo "Removing stale BenchBox test lock..."
+	@rm -f ~/.benchbox/test.lock
+	@echo "Lock cleared."
+
 test-medium:
 	uv run -- python -m pytest -m "medium" --tb=short --timeout=60
 
 test-slow:
 	uv run -- python -m pytest -m "slow" --tb=short -v
+
+test-stress:
+	uv run -- python -m pytest -m "stress" -n 0 --tb=short -v
 
 # Development cycle testing
 test-dev:
@@ -209,7 +220,12 @@ ci-docs:
 # Security audit - exact match for test.yml security job
 security-audit:
 	@echo "Running security audit..."
-	uvx pip-audit
+	@if [ -n "$(PIP_AUDIT_IGNORE_VULNS)" ]; then \
+		IGNORE_ARGS=$$(printf '%s' "$(PIP_AUDIT_IGNORE_VULNS)" | tr ',' '\n' | sed '/^$$/d;s/^/--ignore-vuln /' | tr '\n' ' '); \
+		uvx pip-audit $$IGNORE_ARGS; \
+	else \
+		uvx pip-audit; \
+	fi
 	@echo "✅ Security audit passed"
 
 # Spellcheck - exact match for docs.yml spellcheck job
@@ -221,15 +237,15 @@ spellcheck:
 # Linkcheck - exact match for docs.yml linkcheck job
 ci-linkcheck:
 	@echo "Running documentation link check..."
-	@cd docs && uv run sphinx-build -b linkcheck . _build/linkcheck || true
+	@cd docs && uv run sphinx-build -b linkcheck . _build/linkcheck
 	@echo "Link check results:"
 	@cat docs/_build/linkcheck/output.txt 2>/dev/null || echo "No output file generated"
-	@echo "✅ Linkcheck complete (non-blocking)"
+	@echo "✅ Linkcheck passed"
 
 # Docstring coverage - exact match for docs.yml docstring-coverage job
 docstring-coverage:
 	@echo "Running docstring coverage check..."
-	uvx interrogate -c pyproject.toml --fail-under 64 benchbox/
+	uvx interrogate -c pyproject.toml --fail-under 90 benchbox/
 	@echo "✅ Docstring coverage passed"
 
 # Package build and install test - exact match for test.yml test-package job
@@ -317,7 +333,7 @@ docs-clean:
 # Check for broken links in documentation
 docs-linkcheck:
 	@echo "Checking documentation for broken links..."
-	@cd docs && sphinx-build -b linkcheck . _build/linkcheck
+	@cd docs && uv run sphinx-build -b linkcheck . _build/linkcheck
 	@echo ""
 	@echo "Link check results:"
 	@cat docs/_build/linkcheck/output.txt || echo "No broken links found!"

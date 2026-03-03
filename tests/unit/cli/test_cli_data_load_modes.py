@@ -6,6 +6,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import sys
+from contextlib import ExitStack, contextmanager
 from unittest.mock import Mock, patch
 
 import pytest
@@ -23,6 +24,34 @@ pytestmark = [
 ]
 
 
+@contextmanager
+def _mock_run_command_components(*, include_db_manager: bool = False):
+    """Provide shared run-command mocks with default successful execution behavior."""
+    with ExitStack() as stack:
+        mocks = {
+            "bench_mgr": stack.enter_context(patch("benchbox.cli.commands.run.BenchmarkManager")),
+            "profiler": stack.enter_context(patch("benchbox.cli.commands.run.SystemProfiler")),
+            "orchestrator": stack.enter_context(patch("benchbox.cli.commands.run.BenchmarkOrchestrator")),
+            "exporter": stack.enter_context(patch("benchbox.cli.commands.run.ResultExporter")),
+            "db_mgr": None,
+        }
+        if include_db_manager:
+            mocks["db_mgr"] = stack.enter_context(patch("benchbox.cli.commands.run.DatabaseManager"))
+
+        mocks["bench_mgr"].return_value.benchmarks = {
+            "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}
+        }
+        mocks["profiler"].return_value.get_system_profile.return_value = Mock()
+
+        mock_result = Mock()
+        mock_result.validation_status = "PASSED"
+        mock_result.validation_details = {"stages": []}
+        mocks["orchestrator"].return_value.execute_benchmark.return_value = mock_result
+        mocks["exporter"].return_value.export_result.return_value = {"json": "/tmp/result.json"}
+
+        yield mocks
+
+
 class TestCLIDataLoadModes:
     """Test data-only and load-only execution modes."""
 
@@ -32,52 +61,20 @@ class TestCLIDataLoadModes:
 
     def test_data_only_no_database_required(self):
         """Test that data-only mode doesn't require database parameter."""
-        with (
-            patch("benchbox.cli.commands.run.BenchmarkManager") as mock_bench_mgr,
-            patch("benchbox.cli.commands.run.SystemProfiler") as mock_profiler,
-            patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_orchestrator,
-            patch("benchbox.cli.commands.run.ResultExporter") as mock_exporter,
-        ):
-            # Setup mocks
-            mock_bench_mgr.return_value.benchmarks = {
-                "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}
-            }
-            mock_profiler.return_value.get_system_profile.return_value = Mock()
-
-            mock_result = Mock()
-            mock_result.validation_status = "PASSED"
-            mock_orchestrator.return_value.execute_benchmark.return_value = mock_result
-            mock_exporter.return_value.export_result.return_value = {"json": "/tmp/result.json"}
-
+        with _mock_run_command_components() as mocks:
             # Test data-only without database parameter
             result = self.runner.invoke(cli, ["run", "--benchmark", "tpch", "--scale", "0.01", "--phases", "generate"])
             assert result.exit_code == 0
             assert "Data generation completed" in result.output or "Benchmark completed" in result.output
 
             # Verify orchestrator was called with None database_config
-            mock_orchestrator.return_value.execute_benchmark.assert_called_once()
-            call_args = mock_orchestrator.return_value.execute_benchmark.call_args[0]
+            mocks["orchestrator"].return_value.execute_benchmark.assert_called_once()
+            call_args = mocks["orchestrator"].return_value.execute_benchmark.call_args[0]
             assert call_args[2] is None  # database_config should be None
 
     def test_data_only_ignores_database_parameter(self):
         """Test that data-only mode ignores database parameter if provided."""
-        with (
-            patch("benchbox.cli.commands.run.BenchmarkManager") as mock_bench_mgr,
-            patch("benchbox.cli.commands.run.SystemProfiler") as mock_profiler,
-            patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_orchestrator,
-            patch("benchbox.cli.commands.run.ResultExporter") as mock_exporter,
-        ):
-            # Setup mocks
-            mock_bench_mgr.return_value.benchmarks = {
-                "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}
-            }
-            mock_profiler.return_value.get_system_profile.return_value = Mock()
-
-            mock_result = Mock()
-            mock_result.validation_status = "PASSED"
-            mock_orchestrator.return_value.execute_benchmark.return_value = mock_result
-            mock_exporter.return_value.export_result.return_value = {"json": "/tmp/result.json"}
-
+        with _mock_run_command_components():
             # Test data-only with database parameter (should be ignored)
             result = self.runner.invoke(
                 cli,
@@ -104,28 +101,13 @@ class TestCLIDataLoadModes:
 
     def test_load_only_with_database(self):
         """Test load-only mode with database parameter."""
-        with (
-            patch("benchbox.cli.commands.run.DatabaseManager") as mock_db_mgr,
-            patch("benchbox.cli.commands.run.BenchmarkManager") as mock_bench_mgr,
-            patch("benchbox.cli.commands.run.SystemProfiler") as mock_profiler,
-            patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_orchestrator,
-            patch("benchbox.cli.commands.run.ResultExporter") as mock_exporter,
-        ):
+        with _mock_run_command_components(include_db_manager=True) as mocks:
             # Setup mocks
             mock_db_config = Mock()
             mock_db_config.type = "duckdb"
             mock_db_config.options = {}
-            mock_db_mgr.return_value.create_config.return_value = mock_db_config
-
-            mock_bench_mgr.return_value.benchmarks = {
-                "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}
-            }
-            mock_profiler.return_value.get_system_profile.return_value = Mock()
-
-            mock_result = Mock()
-            mock_result.validation_status = "PASSED"
-            mock_orchestrator.return_value.execute_benchmark.return_value = mock_result
-            mock_exporter.return_value.export_result.return_value = {"json": "/tmp/result.json"}
+            assert mocks["db_mgr"] is not None
+            mocks["db_mgr"].return_value.create_config.return_value = mock_db_config
 
             # Test load-only with database parameter
             result = self.runner.invoke(
@@ -146,64 +128,34 @@ class TestCLIDataLoadModes:
             assert "Data loading completed" in result.output or "Benchmark completed" in result.output
 
             # Verify database config was created
-            mock_db_mgr.return_value.create_config.assert_called_once()
+            mocks["db_mgr"].return_value.create_config.assert_called_once()
 
             # Verify orchestrator was called with proper database_config
-            mock_orchestrator.return_value.execute_benchmark.assert_called_once()
-            call_args = mock_orchestrator.return_value.execute_benchmark.call_args[0]
+            mocks["orchestrator"].return_value.execute_benchmark.assert_called_once()
+            call_args = mocks["orchestrator"].return_value.execute_benchmark.call_args[0]
             assert call_args[2] is not None  # database_config should not be None
 
     def test_benchmark_config_test_execution_type(self):
         """Test that benchmark config gets correct test_execution_type."""
-        with (
-            patch("benchbox.cli.commands.run.BenchmarkManager") as mock_bench_mgr,
-            patch("benchbox.cli.commands.run.SystemProfiler") as mock_profiler,
-            patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_orchestrator,
-            patch("benchbox.cli.commands.run.ResultExporter") as mock_exporter,
-        ):
-            # Setup mocks
-            mock_bench_mgr.return_value.benchmarks = {
-                "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}
-            }
-            mock_profiler.return_value.get_system_profile.return_value = Mock()
-
-            mock_result = Mock()
-            mock_result.validation_status = "PASSED"
-            mock_orchestrator.return_value.execute_benchmark.return_value = mock_result
-            mock_exporter.return_value.export_result.return_value = {"json": "/tmp/result.json"}
-
+        with _mock_run_command_components() as mocks:
             # Test data-only mode
             result = self.runner.invoke(cli, ["run", "--benchmark", "tpch", "--scale", "0.01", "--phases", "generate"])
             assert result.exit_code == 0
             # Data generation mode always shows COMPLETED status (not validation_status)
             assert "Data generation completed: COMPLETED" in result.output
 
-            mock_orchestrator.return_value.execute_benchmark.assert_called_once()
-            phases = mock_orchestrator.return_value.execute_benchmark.call_args[0][3]
+            mocks["orchestrator"].return_value.execute_benchmark.assert_called_once()
+            phases = mocks["orchestrator"].return_value.execute_benchmark.call_args[0][3]
             assert phases == ["generate"]
 
     def test_force_flag(self):
         """Ensure CLI forwards force flags into benchmark config options."""
-        with (
-            patch("benchbox.cli.commands.run.BenchmarkManager") as mock_bench_mgr,
-            patch("benchbox.cli.commands.run.SystemProfiler") as mock_profiler,
-            patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_orchestrator,
-            patch("benchbox.cli.commands.run.DatabaseManager") as mock_db_mgr,
-            patch("benchbox.cli.commands.run.ResultExporter") as mock_exporter,
-        ):
-            mock_bench_mgr.return_value.benchmarks = {
-                "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}
-            }
-            mock_profiler.return_value.get_system_profile.return_value = Mock()
+        with _mock_run_command_components(include_db_manager=True) as mocks:
             mock_db_cfg = Mock()
             mock_db_cfg.type = "duckdb"
             mock_db_cfg.options = {}
-            mock_db_mgr.return_value.create_config.return_value = mock_db_cfg
-
-            mock_result = Mock()
-            mock_result.validation_status = "PASSED"
-            mock_orchestrator.return_value.execute_benchmark.return_value = mock_result
-            mock_exporter.return_value.export_result.return_value = {"json": "/tmp/result.json"}
+            assert mocks["db_mgr"] is not None
+            mocks["db_mgr"].return_value.create_config.return_value = mock_db_cfg
 
             result = self.runner.invoke(
                 cli,
@@ -221,30 +173,14 @@ class TestCLIDataLoadModes:
             )
             assert result.exit_code == 0
 
-            mock_orchestrator.return_value.execute_benchmark.assert_called_once()
-            config = mock_orchestrator.return_value.execute_benchmark.call_args[0][0]
+            mocks["orchestrator"].return_value.execute_benchmark.assert_called_once()
+            config = mocks["orchestrator"].return_value.execute_benchmark.call_args[0][0]
             assert isinstance(config, BenchmarkConfig)
             assert config.options.get("force_regenerate") is True
 
     def test_enable_postgen_manifest_flag_forwarded(self):
         """Ensure CLI forwards the manifest validation flag into benchmark options."""
-        with (
-            patch("benchbox.cli.commands.run.BenchmarkManager") as mock_bench_mgr,
-            patch("benchbox.cli.commands.run.SystemProfiler") as mock_profiler,
-            patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_orchestrator,
-            patch("benchbox.cli.commands.run.ResultExporter") as mock_exporter,
-        ):
-            mock_bench_mgr.return_value.benchmarks = {
-                "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)}
-            }
-            mock_profiler.return_value.get_system_profile.return_value = Mock()
-
-            mock_result = Mock()
-            mock_result.validation_status = "PASSED"
-            mock_result.validation_details = {"stages": []}
-            mock_orchestrator.return_value.execute_benchmark.return_value = mock_result
-            mock_exporter.return_value.export_result.return_value = {"json": "/tmp/result.json"}
-
+        with _mock_run_command_components() as mocks:
             # Use new composite --validation flag (postgen enables just manifest validation)
             result = self.runner.invoke(
                 cli,
@@ -262,7 +198,7 @@ class TestCLIDataLoadModes:
             )
 
             assert result.exit_code == 0
-            call_args = mock_orchestrator.return_value.execute_benchmark.call_args[0]
+            call_args = mocks["orchestrator"].return_value.execute_benchmark.call_args[0]
             benchmark_config = call_args[0]
             assert benchmark_config.options["enable_postgen_manifest_validation"] is True
 

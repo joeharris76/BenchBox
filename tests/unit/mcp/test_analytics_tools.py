@@ -14,59 +14,55 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+")
 
 
+def _make_analytics_mcp(results_dir: Path):
+    """Create a FastMCP server with analytics tools registered."""
+    from mcp.server.fastmcp import FastMCP
+
+    from benchbox.mcp.tools.analytics import register_analytics_tools
+
+    mcp = FastMCP("test")
+    register_analytics_tools(mcp, results_dir=results_dir)
+    return mcp
+
+
+def _get_tool(mcp, name: str):
+    """Look up a registered MCP tool by name."""
+    tools = list(mcp._tool_manager._tools.values())
+    return next(t for t in tools if t.name == name)
+
+
+@pytest.fixture
+def analytics_mcp(tmp_path):
+    """Pre-registered MCP server with analytics tools."""
+    return _make_analytics_mcp(tmp_path)
+
+
 class TestGetQueryPlanTool:
     """Tests for get_query_plan tool functionality."""
 
-    def test_invalid_format_returns_error(self):
+    def test_invalid_format_returns_error(self, analytics_mcp):
         """Test that invalid format parameter returns validation error."""
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-        # Get the registered tool function
-        tools = list(mcp._tool_manager._tools.values())
-        get_query_plan = next(t for t in tools if t.name == "get_query_plan")
+        get_query_plan = _get_tool(analytics_mcp, "get_query_plan")
 
         result = get_query_plan.fn(result_file="test.json", query_id="1", format="invalid")
 
         assert "error" in result
         assert result["error_code"] == "VALIDATION_INVALID_FORMAT"
 
-    def test_valid_formats_accepted(self):
+    def test_valid_formats_accepted(self, analytics_mcp):
         """Test that valid format parameters are accepted."""
-        valid_formats = ["tree", "json", "summary"]
-        for fmt in valid_formats:
-            # Just validate format is not rejected (file won't exist)
-            from mcp.server.fastmcp import FastMCP
+        get_query_plan = _get_tool(analytics_mcp, "get_query_plan")
 
-            from benchbox.mcp.tools.analytics import register_analytics_tools
-
-            mcp = FastMCP("test")
-            register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-            tools = list(mcp._tool_manager._tools.values())
-            get_query_plan = next(t for t in tools if t.name == "get_query_plan")
-
+        for fmt in ["tree", "json", "summary"]:
             result = get_query_plan.fn(result_file="nonexistent.json", query_id="1", format=fmt)
 
             # Should fail with file not found, not format validation
             if "error" in result:
                 assert result["error_code"] != "VALIDATION_INVALID_FORMAT"
 
-    def test_missing_file_returns_error(self):
+    def test_missing_file_returns_error(self, analytics_mcp):
         """Test that missing result file returns appropriate error."""
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-        tools = list(mcp._tool_manager._tools.values())
-        get_query_plan = next(t for t in tools if t.name == "get_query_plan")
+        get_query_plan = _get_tool(analytics_mcp, "get_query_plan")
 
         result = get_query_plan.fn(result_file="nonexistent_file.json", query_id="1", format="tree")
 
@@ -79,31 +75,16 @@ class TestAnalyzeResultsRegressions:
 
     def test_no_results_directory_returns_no_data(self, tmp_path):
         """Test that missing results directory returns no_data status."""
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=tmp_path / "nonexistent")
-
-        tools = list(mcp._tool_manager._tools.values())
-        analyze_results = next(t for t in tools if t.name == "analyze_results")
+        mcp = _make_analytics_mcp(tmp_path / "nonexistent")
+        analyze_results = _get_tool(mcp, "analyze_results")
 
         result = analyze_results.fn(analysis="regressions")
 
         assert result["status"] in ["no_data", "insufficient_data"]
 
-    def test_threshold_percent_default(self):
+    def test_threshold_percent_default(self, analytics_mcp):
         """Test default threshold percent is used."""
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-        tools = list(mcp._tool_manager._tools.values())
-        analyze_results = next(t for t in tools if t.name == "analyze_results")
+        analyze_results = _get_tool(analytics_mcp, "analyze_results")
 
         # The tool should accept no arguments beyond analysis type
         result = analyze_results.fn(analysis="regressions")
@@ -115,38 +96,20 @@ class TestAnalyzeResultsRegressions:
 class TestAnalyzeResultsTrends:
     """Tests for analyze_results with analysis='trends'."""
 
-    def test_invalid_metric_returns_error(self):
+    def test_invalid_metric_returns_error(self, analytics_mcp):
         """Test that invalid metric parameter returns validation error."""
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-        tools = list(mcp._tool_manager._tools.values())
-        analyze_results = next(t for t in tools if t.name == "analyze_results")
+        analyze_results = _get_tool(analytics_mcp, "analyze_results")
 
         result = analyze_results.fn(analysis="trends", metric="invalid_metric")
 
         assert "error" in result
         assert result["error_code"] == "VALIDATION_ERROR"
 
-    def test_valid_metrics_accepted(self):
+    def test_valid_metrics_accepted(self, analytics_mcp):
         """Test that valid metric parameters are accepted."""
-        valid_metrics = ["geometric_mean", "p50", "p95", "p99", "total_time"]
+        analyze_results = _get_tool(analytics_mcp, "analyze_results")
 
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-        tools = list(mcp._tool_manager._tools.values())
-        analyze_results = next(t for t in tools if t.name == "analyze_results")
-
-        for metric in valid_metrics:
+        for metric in ["geometric_mean", "p50", "p95", "p99", "total_time"]:
             result = analyze_results.fn(analysis="trends", metric=metric)
 
             # Should not fail with metric validation error
@@ -155,15 +118,8 @@ class TestAnalyzeResultsTrends:
 
     def test_no_results_returns_no_data(self, tmp_path):
         """Test that missing results returns appropriate status."""
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=tmp_path / "nonexistent")
-
-        tools = list(mcp._tool_manager._tools.values())
-        analyze_results = next(t for t in tools if t.name == "analyze_results")
+        mcp = _make_analytics_mcp(tmp_path / "nonexistent")
+        analyze_results = _get_tool(mcp, "analyze_results")
 
         result = analyze_results.fn(analysis="trends")
 
@@ -173,38 +129,20 @@ class TestAnalyzeResultsTrends:
 class TestAnalyzeResultsAggregate:
     """Tests for analyze_results with analysis='aggregate'."""
 
-    def test_invalid_group_by_returns_error(self):
+    def test_invalid_group_by_returns_error(self, analytics_mcp):
         """Test that invalid group_by parameter returns validation error."""
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-        tools = list(mcp._tool_manager._tools.values())
-        analyze_results = next(t for t in tools if t.name == "analyze_results")
+        analyze_results = _get_tool(analytics_mcp, "analyze_results")
 
         result = analyze_results.fn(analysis="aggregate", group_by="invalid")
 
         assert "error" in result
         assert result["error_code"] == "VALIDATION_ERROR"
 
-    def test_valid_group_by_accepted(self):
+    def test_valid_group_by_accepted(self, analytics_mcp):
         """Test that valid group_by parameters are accepted."""
-        valid_group_by = ["platform", "benchmark", "date"]
+        analyze_results = _get_tool(analytics_mcp, "analyze_results")
 
-        from mcp.server.fastmcp import FastMCP
-
-        from benchbox.mcp.tools.analytics import register_analytics_tools
-
-        mcp = FastMCP("test")
-        register_analytics_tools(mcp, results_dir=Path("benchmark_runs/results"))
-
-        tools = list(mcp._tool_manager._tools.values())
-        analyze_results = next(t for t in tools if t.name == "analyze_results")
-
-        for group in valid_group_by:
+        for group in ["platform", "benchmark", "date"]:
             result = analyze_results.fn(analysis="aggregate", group_by=group)
 
             # Should not fail with validation error

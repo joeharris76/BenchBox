@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 import pytest
 
+from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 from tests.integration._cli_e2e_utils import run_cli_command
 
 
@@ -18,10 +18,7 @@ def make_v2_result_data(
     scale_factor: float = 1.0,
     queries: list | None = None,
 ) -> dict:
-    """Create a valid v2.0 schema result for testing.
-
-    Schema v2.0 requires: version, run, benchmark, platform, summary, queries
-    """
+    """Create a valid v2.0 schema result for testing."""
     if queries is None:
         queries = [
             {"id": "1", "ms": 100.0, "rows": 10},
@@ -29,35 +26,20 @@ def make_v2_result_data(
         ]
 
     total_ms = sum(q.get("ms", 0) for q in queries)
-    return {
-        "version": "2.0",
-        "run": {
-            "id": execution_id,
-            "timestamp": datetime.now().isoformat(),
-            "total_duration_ms": total_ms + 500,
-            "query_time_ms": total_ms,
-        },
-        "benchmark": {
-            "id": benchmark_id,
-            "name": benchmark_name,
-            "scale_factor": scale_factor,
-        },
-        "platform": {
-            "name": platform,
-        },
-        "summary": {
-            "queries": {
-                "total": len(queries),
-                "successful": len(queries),
-                "failed": 0,
-            },
-            "timing": {
-                "total_ms": total_ms,
-                "avg_ms": total_ms / len(queries) if queries else 0,
-            },
-        },
-        "queries": queries,
-    }
+    return make_v2_result_dict(
+        version="2.0",
+        benchmark_id=benchmark_id,
+        benchmark_name=benchmark_name,
+        platform=platform,
+        execution_id=execution_id,
+        scale_factor=scale_factor,
+        total_duration_ms=total_ms + 500,
+        query_time_ms=total_ms,
+        total_queries=len(queries),
+        passed_queries=len(queries),
+        total_ms=total_ms,
+        queries=queries,
+    )
 
 
 @pytest.mark.integration

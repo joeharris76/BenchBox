@@ -122,7 +122,7 @@ class TestTPCDI:
         with pytest.raises(ValueError):
             tpcdi.get_query("X999")  # Non-existent query
 
-    def test_get_query(self, tpcdi: TPCDI) -> None:
+    def test_get_query_with_params(self, tpcdi: TPCDI) -> None:
         """Test that parameterized queries can be retrieved."""
         queries = tpcdi.get_queries()
         first_query_id = list(queries.keys())[0]

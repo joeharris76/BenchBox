@@ -323,6 +323,39 @@ class TestRowCountStrategies:
         assert len(samples) == len(available)
         assert set(samples) == available
 
+    def test_ssb_strategy_expected_ranges(self):
+        """Test SSB strategy returns correct row count ranges based on SSB spec (not TPC-H)."""
+        strategy = SSBRowCountStrategy(scale_factor=1.0)
+
+        # SSB customer base = 30,000/SF (not 150,000 which is the TPC-H value)
+        customer_range = strategy.get_expected_range("customer")
+        assert customer_range is not None
+        assert customer_range[0] == 30000 * 0.8
+        assert customer_range[1] == 30000 * 1.2
+
+        # SSB lineorder base = 6,000,000/SF
+        lineorder_range = strategy.get_expected_range("lineorder")
+        assert lineorder_range is not None
+        assert lineorder_range[0] == 6000000 * 0.8
+        assert lineorder_range[1] == 6000000 * 1.2
+
+        # Unknown tables return None
+        assert strategy.get_expected_range("supplier") is None
+
+    def test_ssb_strategy_expected_ranges_sf10(self):
+        """Test SSB expected ranges at SF=10 match actual generated row counts."""
+        strategy = SSBRowCountStrategy(scale_factor=10.0)
+
+        # At SF=10: 300,000 customer rows must be within range
+        customer_range = strategy.get_expected_range("customer")
+        assert customer_range[0] <= 300_000 <= customer_range[1], (
+            f"300,000 customer rows at SF=10 should be in range {customer_range}"
+        )
+
+        # At SF=10: 60,000,000 lineorder rows must be within range
+        lineorder_range = strategy.get_expected_range("lineorder")
+        assert lineorder_range[0] <= 60_000_000 <= lineorder_range[1]
+
     def test_generic_strategy_sample_tables(self):
         """Test generic strategy checks all tables for emptiness."""
         strategy = GenericRowCountStrategy(scale_factor=1.0)

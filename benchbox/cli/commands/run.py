@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -61,6 +63,7 @@ from benchbox.utils.output_path import normalize_output_root
 from benchbox.utils.verbosity import VerbositySettings, compute_verbosity
 
 logger = logging.getLogger(__name__)
+DATA_ORGANIZATION_ENV = "BENCHBOX_DATA_ORGANIZATION_CONFIG_JSON"
 
 # Benchmark name aliases - maps common variations to canonical names
 BENCHMARK_ALIASES: dict[str, str] = {
@@ -88,6 +91,86 @@ def normalize_benchmark_name(name: str) -> str:
     """Normalize benchmark name: lowercase and resolve aliases."""
     normalized = name.lower()
     return BENCHMARK_ALIASES.get(normalized, normalized)
+
+
+def _build_data_organization_from_tuning(unified_tuning: Any) -> dict[str, Any] | None:
+    """Build data organization payload from unified tuning configuration."""
+    if unified_tuning is None:
+        return None
+
+    table_configs: dict[str, list[dict[str, str]]] = {}
+    table_partition_configs: dict[str, list[str]] = {}
+    table_cluster_configs: dict[str, list[str]] = {}
+
+    table_tunings = getattr(unified_tuning, "table_tunings", {}) or {}
+    for table_name, table_tuning in table_tunings.items():
+        sorting = sorted(getattr(table_tuning, "sorting", []) or [], key=lambda c: c.order)
+        partitioning = sorted(getattr(table_tuning, "partitioning", []) or [], key=lambda c: c.order)
+        clustering = sorted(getattr(table_tuning, "clustering", []) or [], key=lambda c: c.order)
+
+        if sorting:
+            table_configs[table_name] = [{"name": c.name, "order": str(c.sort_order).lower()} for c in sorting]
+        if partitioning:
+            table_partition_configs[table_name] = [c.name for c in partitioning]
+        if clustering:
+            table_cluster_configs[table_name] = [c.name for c in clustering]
+
+    if not table_configs and not table_partition_configs and not table_cluster_configs:
+        return None
+
+    platform_opts = getattr(unified_tuning, "platform_optimizations", None)
+    method = "z_order"
+    method_hint = str(getattr(platform_opts, "sorted_ingestion_method", "auto") or "auto").lower()
+    if method_hint == "hilbert":
+        method = "hilbert"
+    elif method_hint == "z_order" or getattr(platform_opts, "z_ordering_enabled", False):
+        method = "z_order"
+
+    return {
+        "table_configs": table_configs,
+        "table_partition_configs": table_partition_configs,
+        "table_cluster_configs": table_cluster_configs,
+        "clustering_method": method,
+    }
+
+
+def _resolve_data_organization_payload(
+    benchmark_name: str | None,
+    data_format: str | None,
+    tuning_payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Resolve effective data organization payload from tuning and CLI flags."""
+    if data_format not in {"parquet-sorted", "delta-sorted", "iceberg-sorted"}:
+        return tuning_payload
+
+    if tuning_payload is not None:
+        if data_format in {"delta-sorted", "iceberg-sorted"}:
+            payload = dict(tuning_payload)
+            payload["output_format"] = "delta" if data_format == "delta-sorted" else "iceberg"
+            return payload
+        return tuning_payload
+
+    benchmark_key = (benchmark_name or "").lower()
+    output_format_map = {
+        "parquet-sorted": "parquet",
+        "delta-sorted": "delta",
+        "iceberg-sorted": "iceberg",
+    }
+    output_format = output_format_map[data_format]
+    if benchmark_key == "tpch":
+        return {
+            "table_configs": {"lineitem": [{"name": "l_shipdate", "order": "asc"}]},
+            "output_format": output_format,
+        }
+    if benchmark_key == "tpcds":
+        return {
+            "table_configs": {"store_sales": [{"name": "ss_sold_date_sk", "order": "asc"}]},
+            "output_format": output_format,
+        }
+
+    if benchmark_key:
+        raise ValueError("--data-format sorted modes are currently supported for tpch and tpcds benchmarks")
+    return tuning_payload
 
 
 def _render_post_run_charts(
@@ -403,7 +486,7 @@ def _configure_third_party_loggers(settings: VerbositySettings) -> None:
 )
 @advanced_option(
     "--sorted-ingestion-method",
-    type=click.Choice(["auto", "ctas", "z_order", "liquid_clustering", "vacuum_sort"], case_sensitive=False),
+    type=click.Choice(["auto", "ctas", "z_order", "hilbert", "liquid_clustering", "vacuum_sort"], case_sensitive=False),
     default=None,
     help="Cloud sorted-ingestion method override",
 )
@@ -446,7 +529,12 @@ def _configure_third_party_loggers(settings: VerbositySettings) -> None:
 @advanced_option(
     "--capture-plans",
     is_flag=True,
-    help="Capture query execution plans (3-8%% overhead). Supported: DuckDB, PostgreSQL, DataFusion.",
+    help=(
+        "Capture query execution plans. Supported: DuckDB, PostgreSQL, DataFusion. "
+        "DuckDB uses EXPLAIN (ANALYZE, FORMAT JSON) by default — actual per-operator timing and "
+        "cardinality included, at ~2x query cost per captured plan. "
+        "Set analyze_plans=false via --platform-option to capture estimated plans only."
+    ),
 )
 @advanced_option(
     "--plan-config",
@@ -467,6 +555,12 @@ def _configure_third_party_loggers(settings: VerbositySettings) -> None:
     type=CONVERT,
     default=None,
     help="Convert format: parquet, vortex, delta:snappy, iceberg:zstd,partition:year,month",
+)
+@advanced_option(
+    "--data-format",
+    type=click.Choice(["parquet-sorted", "delta-sorted", "iceberg-sorted"], case_sensitive=False),
+    default=None,
+    help="Generate pre-sorted data in open table formats (parquet-sorted, delta-sorted, iceberg-sorted).",
 )
 # Validation
 @advanced_option(
@@ -533,6 +627,7 @@ def run(
     plan_config: PlanCaptureConfig | None,
     compression: CompressionConfig | None,
     convert: ConvertConfig | None,
+    data_format: str | None,
     validation: ValidationConfig | None,
     platform_option_pairs: tuple[tuple[str, str], ...],
     mode: str | None,
@@ -661,8 +756,6 @@ def run(
 
     # Set non-interactive environment variable if flag is provided
     if non_interactive:
-        import os
-
         os.environ["BENCHBOX_NON_INTERACTIVE"] = "true"
         if logger:
             logger.debug("Non-interactive mode enabled via CLI flag")
@@ -742,12 +835,12 @@ def run(
             ctx.exit(1)
 
         # Character validation (alphanumeric only)
-        query_id_pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+        query_id_pattern = re.compile(r"^[a-zA-Z0-9_.\-]+$")
         invalid_format = [q for q in queries_to_run if not query_id_pattern.match(q)]
         if invalid_format:
             console.print(
                 f"[red]❌ Invalid query ID format: {', '.join(invalid_format[:5])} "
-                f"(must be alphanumeric, dash, or underscore)[/red]"
+                f"(must be alphanumeric, dash, underscore, or dot)[/red]"
             )
             if logger:
                 logger.error(f"Invalid query ID format: {invalid_format}")
@@ -1029,6 +1122,19 @@ def run(
         if columns:
             loaded_unified_config.platform_optimizations.liquid_clustering_enabled = True
 
+    data_organization_payload = _build_data_organization_from_tuning(loaded_unified_config)
+    try:
+        data_organization_payload = _resolve_data_organization_payload(
+            benchmark, data_format, data_organization_payload
+        )
+    except ValueError as exc:
+        console.print(f"[red]❌ {exc}[/red]")
+        ctx.exit(1)
+    if data_organization_payload is None:
+        os.environ.pop(DATA_ORGANIZATION_ENV, None)
+    else:
+        os.environ[DATA_ORGANIZATION_ENV] = json.dumps(data_organization_payload)
+
     # Apply DataFrame tuning configuration (for DataFrame platforms)
     # Uses the unified --tuning parameter
     df_tuning_config = None
@@ -1086,8 +1192,6 @@ def run(
             logger.debug("Compression disabled via --no-compression flag")
     else:
         # Check for environment variable override
-        import os
-
         env_no_compression = os.getenv("BENCHBOX_NO_COMPRESSION", "").lower() in [
             "true",
             "1",
@@ -1291,6 +1395,7 @@ def run(
                 "estimated_time_range": benchmark_info["estimated_time_range"],
                 "tuning_enabled": tuning_enabled,
                 "unified_tuning_configuration": loaded_unified_config,
+                **({"data_organization": data_organization_payload} if data_organization_payload is not None else {}),
                 "force_regenerate": force_regenerate,
                 "enable_preflight_validation": enable_preflight_validation,
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
@@ -1302,6 +1407,7 @@ def run(
                 **({"convert_format": convert_format} if convert_format is not None else {}),
                 **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
                 **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
+                **({"data_format": data_format} if data_format is not None else {}),
             },
         )
 
@@ -1451,6 +1557,7 @@ def run(
                 "estimated_time_range": benchmark_info["estimated_time_range"],
                 "tuning_enabled": tuning_enabled,
                 "unified_tuning_configuration": loaded_unified_config,
+                **({"data_organization": data_organization_payload} if data_organization_payload is not None else {}),
                 "force_regenerate": force_regenerate,
                 "enable_preflight_validation": enable_preflight_validation,
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
@@ -1461,6 +1568,7 @@ def run(
                 **({"convert_format": convert_format} if convert_format is not None else {}),
                 **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
                 **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
+                **({"data_format": data_format} if data_format is not None else {}),
             },
         )
 
@@ -1523,7 +1631,10 @@ def run(
                 export_formats=["json"],
             )
 
-            if not quiet:
+            if quiet:
+                for format_name, filepath in exported_files.items():
+                    click.echo(filepath)
+            else:
                 console.print(f"\n[green]✅ Benchmark completed: {result.validation_status}[/green]")
                 for format_name, filepath in exported_files.items():
                     console.print(f"{format_name.upper()}: [dim]{filepath}[/dim]")
@@ -1654,6 +1765,8 @@ def run(
                 **verbosity_payload,
                 "estimated_time_range": benchmark_info["estimated_time_range"],
                 "unified_tuning_configuration": loaded_unified_config,
+                **({"data_organization": data_organization_payload} if data_organization_payload is not None else {}),
+                "force_regenerate": force_regenerate,
                 "enable_preflight_validation": enable_preflight_validation,
                 "enable_postgen_manifest_validation": enable_postgen_manifest_validation,
                 "enable_postload_validation": enable_postload_validation,
@@ -1663,6 +1776,7 @@ def run(
                 **({"convert_format": convert_format} if convert_format is not None else {}),
                 **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
                 **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
+                **({"data_format": data_format} if data_format is not None else {}),
             },
         )
 
@@ -1752,7 +1866,10 @@ def run(
                 else:
                     operation_status = "NOT_RUN"
 
-            if not quiet:
+            if quiet:
+                for format_name, filepath in exported_files.items():
+                    click.echo(filepath)
+            else:
                 console.print(f"\n[green]✅ {operation_name} completed: {operation_status}[/green]")
                 for format_name, filepath in exported_files.items():
                     console.print(f"{format_name.upper()}: {filepath}")
@@ -1891,6 +2008,12 @@ def run(
                 options={
                     "estimated_time_range": benchmark_info.get("estimated_time_range", (0, 60)),
                     "complexity": benchmark_info.get("complexity", "medium"),
+                    **(
+                        {"data_organization": data_organization_payload}
+                        if data_organization_payload is not None
+                        else {}
+                    ),
+                    "force_regenerate": force_regenerate,
                     "seed": seed,
                     "ignore_memory_warnings": ignore_memory_warnings,
                     **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
@@ -1903,6 +2026,7 @@ def run(
                         if conversion_partition_cols
                         else {}
                     ),
+                    **({"data_format": data_format} if data_format is not None else {}),
                 },
             )
 
@@ -2268,11 +2392,15 @@ def run(
         )
 
         # Show what was exported
-        console.print(f"\n[green]✅ Benchmark completed with status: {result.validation_status}[/green]")
-        console.print(f"Result ID: [cyan]{result.execution_id}[/cyan]")
+        if quiet:
+            for format_name, filepath in exported_files.items():
+                click.echo(filepath)
+        else:
+            console.print(f"\n[green]✅ Benchmark completed with status: {result.validation_status}[/green]")
+            console.print(f"Result ID: [cyan]{result.execution_id}[/cyan]")
 
-        for format_name, filepath in exported_files.items():
-            console.print(f"{format_name.upper()}: [dim]{filepath}[/dim]")
+            for format_name, filepath in exported_files.items():
+                console.print(f"{format_name.upper()}: [dim]{filepath}[/dim]")
 
         _render_post_run_charts(result, console, quiet)
 

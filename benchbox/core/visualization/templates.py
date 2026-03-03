@@ -39,6 +39,7 @@ _TEMPLATES: dict[str, ChartTemplate] = {
         description="Multi-platform flagship comparison with full chart suite.",
         chart_types=(
             "performance_bar",
+            "power_bar",
             "query_heatmap",
             "query_histogram",
             "cost_scatter",
@@ -56,6 +57,7 @@ _TEMPLATES: dict[str, ChartTemplate] = {
         description="Two-platform comparison with ranking and normalized speedup.",
         chart_types=(
             "performance_bar",
+            "power_bar",
             "distribution_box",
             "query_histogram",
             "query_heatmap",
@@ -67,7 +69,7 @@ _TEMPLATES: dict[str, ChartTemplate] = {
     "trends": ChartTemplate(
         name="trends",
         description="Multi-period performance trend lines with regression overlay.",
-        chart_types=("time_series", "performance_bar"),
+        chart_types=("time_series", "power_bar", "performance_bar"),
         formats=("ascii",),
     ),
     "cost_optimization": ChartTemplate(
@@ -97,13 +99,13 @@ _TEMPLATES: dict[str, ChartTemplate] = {
     "regression_triage": ChartTemplate(
         name="regression_triage",
         description="Two-run triage pack to pinpoint regressions and summarize impact quickly.",
-        chart_types=("comparison_bar", "diverging_bar", "summary_box", "rank_table"),
+        chart_types=("power_bar", "comparison_bar", "diverging_bar", "summary_box", "rank_table"),
         formats=("ascii",),
     ),
     "executive_summary": ChartTemplate(
         name="executive_summary",
         description="Compact high-level view of total performance, relative speedups, and key metrics.",
-        chart_types=("performance_bar", "normalized_speedup", "sparkline_table", "summary_box"),
+        chart_types=("performance_bar", "power_bar", "normalized_speedup", "sparkline_table", "summary_box"),
         formats=("ascii",),
     ),
 }

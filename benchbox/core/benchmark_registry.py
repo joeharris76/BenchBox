@@ -11,6 +11,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 # Category ordering for display (most popular first)
@@ -19,7 +20,13 @@ CATEGORY_ORDER = ["TPC", "Primitives", "Industry", "Academic", "Time Series", "R
 # Benchmark ordering within categories (most popular first)
 BENCHMARK_ORDER = {
     "TPC": ["tpch", "tpcds", "tpcdi"],
-    "Primitives": ["read_primitives", "write_primitives", "transaction_primitives", "metadata_primitives"],
+    "Primitives": [
+        "read_primitives",
+        "write_primitives",
+        "transaction_primitives",
+        "metadata_primitives",
+        "ai_primitives",
+    ],
     "Industry": ["clickbench", "h2odb", "coffeeshop"],
     "Academic": ["ssb", "joinorder", "amplab"],
     "Time Series": ["tsbs_devops"],
@@ -40,6 +47,7 @@ BENCHMARK_CLASS_NAMES: dict[str, str] = {
     "read_primitives": "ReadPrimitives",
     "write_primitives": "WritePrimitives",
     "metadata_primitives": "MetadataPrimitives",
+    "ai_primitives": "AIPrimitives",
     "transaction_primitives": "TransactionPrimitives",
     "joinorder": "JoinOrder",
     "coffeeshop": "CoffeeShop",
@@ -49,6 +57,16 @@ BENCHMARK_CLASS_NAMES: dict[str, str] = {
     "nyctaxi": "NYCTaxi",
     "datavault": "DataVault",
     "tpcds_obt": "TPCDSOBT",
+}
+
+# Concrete class names in benchbox.core.<id>.benchmark, derived from BENCHMARK_CLASS_NAMES.
+# `benchbox.core.benchmark_loader` imports this map to avoid local benchmark-set drift.
+# Override individual entries where the core class name doesn't follow the {wrapper}Benchmark pattern.
+_CORE_CLASS_NAME_OVERRIDES: dict[str, str] = {
+    "h2odb": "H2OBenchmark",  # core class is H2OBenchmark, not H2ODBBenchmark
+}
+CORE_BENCHMARK_CLASS_NAMES: dict[str, str] = {
+    bid: _CORE_CLASS_NAME_OVERRIDES.get(bid, f"{name}Benchmark") for bid, name in BENCHMARK_CLASS_NAMES.items()
 }
 
 
@@ -223,6 +241,20 @@ BENCHMARK_METADATA: dict[str, dict[str, Any]] = {
         "estimated_time_range": (2, 5),
         "supports_dataframe": False,
     },
+    "ai_primitives": {
+        "display_name": "AI Primitives",
+        "description": "AI/ML function benchmarks (Snowflake Cortex, BigQuery ML, Databricks AI)",
+        "category": "Primitives",
+        "num_queries": 16,
+        "query_description": "16 AI/ML function queries",
+        "supports_streams": False,
+        "default_scale": 0.01,
+        "scale_options": [0.01, 0.1, 1.0],
+        "min_scale": 0.01,
+        "complexity": "Medium",
+        "estimated_time_range": (3, 15),
+        "supports_dataframe": False,
+    },
     "joinorder": {
         "display_name": "JoinOrder",
         "description": "Query optimizer testing",
@@ -357,6 +389,18 @@ def get_benchmark_class_name(benchmark_id: str) -> str | None:
     return BENCHMARK_CLASS_NAMES.get(benchmark_id.lower())
 
 
+def get_core_benchmark_class_name(benchmark_id: str) -> str | None:
+    """Get the class name for a benchmark in benchbox.core.<id>.benchmark.
+
+    Args:
+        benchmark_id: Benchmark identifier (e.g., 'tpch', 'tpcds')
+
+    Returns:
+        Core benchmark class name (e.g., 'TPCHBenchmark'), or None if not found.
+    """
+    return CORE_BENCHMARK_CLASS_NAMES.get(benchmark_id.lower())
+
+
 def get_benchmark_class(benchmark_id: str):
     """Get the benchmark class from the benchbox module.
 
@@ -370,6 +414,7 @@ def get_benchmark_class(benchmark_id: str):
     """
     import benchbox
 
+    benchmark_id = benchmark_id.lower()
     class_name = get_benchmark_class_name(benchmark_id)
     if class_name is None:
         return None
@@ -377,7 +422,18 @@ def get_benchmark_class(benchmark_id: str):
     try:
         return getattr(benchbox, class_name)
     except (AttributeError, ImportError):
-        return None
+        # Fallback for benchmarks that are implemented in core but not exported
+        # by the top-level benchbox lazy registry.
+        core_class_name = get_core_benchmark_class_name(benchmark_id)
+        if core_class_name is None:
+            return None
+
+        module_name = f"benchbox.core.{benchmark_id}.benchmark"
+        try:
+            module = importlib.import_module(module_name)
+            return getattr(module, core_class_name)
+        except (ImportError, AttributeError):
+            return None
 
 
 def is_benchmark_available(benchmark_id: str) -> bool:
@@ -399,6 +455,15 @@ def list_benchmark_ids() -> list[str]:
         List of benchmark identifiers.
     """
     return list(BENCHMARK_METADATA.keys())
+
+
+def list_loader_benchmark_ids() -> list[str]:
+    """Get benchmark IDs supported by the core benchmark loader.
+
+    Returns:
+        List of benchmark identifiers loadable via benchbox.core.benchmark_loader.
+    """
+    return list(CORE_BENCHMARK_CLASS_NAMES.keys())
 
 
 def get_benchmarks_by_category(category: str) -> dict[str, dict[str, Any]]:

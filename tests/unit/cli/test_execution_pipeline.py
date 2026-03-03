@@ -5,6 +5,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import time
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -117,6 +118,42 @@ class TestBenchmarkExecutionStage:
         assert result_context.result is not None
         assert result_context.result.test_execution_type == "data_only"
         assert result_context.result.benchmark_id == "test"
+
+    def test_benchmark_execution_stage_data_only_emits_duration_and_phase_status(self):
+        """Data-only pipeline path should emit non-zero duration and phase timing metadata."""
+        benchmark_config = BenchmarkConfig(
+            name="test",
+            display_name="Test Benchmark",
+            scale_factor=0.01,
+            test_execution_type="data_only",
+        )
+        run_config = RunConfig(scale_factor=0.01, test_execution_type="data_only")
+        context = ExecutionContext(benchmark_config=benchmark_config, run_config=run_config)
+
+        mock_benchmark = MagicMock()
+
+        def _generate_data():
+            time.sleep(0.02)
+            return ["/path/file1.csv"]
+
+        mock_benchmark.generate_data.side_effect = _generate_data
+        mock_benchmark.create_enhanced_benchmark_result.side_effect = lambda **kwargs: make_benchmark_results(
+            benchmark_id="test",
+            benchmark_name="Test Benchmark",
+            duration_seconds=kwargs.get("duration_seconds", 0.0),
+            execution_metadata=kwargs.get("execution_metadata", {}),
+            test_execution_type="data_only",
+        )
+        context.benchmark_instance = mock_benchmark
+
+        stage = BenchmarkExecutionStage()
+        result_context = stage.execute(context)
+
+        assert result_context.result is not None
+        assert result_context.result.duration_seconds > 0
+        phase_status = result_context.result.execution_metadata["phase_status"]["data_generation"]
+        assert phase_status["duration_ms"] > 0
+        assert phase_status["artifacts_generated"] == 1
 
 
 class TestExecutionPipeline:

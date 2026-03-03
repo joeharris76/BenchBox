@@ -33,7 +33,7 @@ benchbox visualize run1.json run2.json          # Multiple files
 
 ### Template Selection
 
-`--template {default,flagship,head_to_head,trends,cost_optimization,comparison}`
+`--template {default,flagship,head_to_head,trends,cost_optimization,comparison,latency_deep_dive,regression_triage,executive_summary}`
 : Use a predefined chart template. Overrides `--chart-type`.
 
 ```bash
@@ -42,8 +42,8 @@ benchbox visualize results/*.json --template flagship
 
 ### Chart Type Selection
 
-`--chart-type {auto,all,performance_bar,distribution_box,query_heatmap,query_histogram,cost_scatter,time_series}`
-: Specify chart types to generate. Repeatable for multiple types.
+`--chart-type {auto,all,performance_bar,power_bar,distribution_box,query_heatmap,query_histogram,cost_scatter,time_series,...}`
+: Specify chart types to generate. Repeatable for multiple types. Run `benchbox visualize --help` for the full list.
 
 ```bash
 benchbox visualize results/*.json --chart-type performance_bar --chart-type distribution_box
@@ -53,12 +53,22 @@ benchbox visualize results/*.json --chart-type performance_bar --chart-type dist
 |-------|-------------|
 | `auto` | Render all applicable chart types (default) |
 | `all` | Same as `auto` |
-| `performance_bar` | Platform comparison bar chart |
+| `performance_bar` | Platform comparison bar chart (total execution time, lower is better) |
+| `power_bar` | TPC Power@Size comparison bar chart (higher is better; TPC benchmarks only) |
 | `distribution_box` | Latency distribution box plot |
 | `query_heatmap` | Query x platform variance heatmap |
 | `query_histogram` | Per-query latency vertical bars (auto-splits for >33 queries) |
 | `cost_scatter` | Cost-performance scatter plot |
 | `time_series` | Performance trend line chart |
+| `comparison_bar` | Per-query paired bars with % change (requires 2 results) |
+| `diverging_bar` | Percentage change centered on zero (requires 2 results) |
+| `summary_box` | Key aggregate statistics panel |
+| `percentile_ladder` | P50/P90/P95/P99 ladder across platforms |
+| `normalized_speedup` | Log₂-scaled speedup relative to a baseline |
+| `stacked_phase` | Stacked phase breakdown by benchmark phase |
+| `sparkline_table` | Compact metric table with sparklines |
+| `cdf_chart` | Cumulative distribution of query latency |
+| `rank_table` | Per-query platform rankings (1st = fastest) |
 
 ### Appearance
 

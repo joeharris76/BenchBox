@@ -431,6 +431,7 @@ class DatabaseManager:
             config.driver_runtime_path = resolution.runtime_path
             config.driver_runtime_python_executable = resolution.runtime_python_executable
             config.driver_auto_install = auto_install or resolution.auto_install_used
+            config.driver_auto_install_used = resolution.auto_install_used
 
             # Defensive: ensure options is not None before subscript access (Pydantic v2 can set to None if explicitly passed)
             if config.options is None:
@@ -450,6 +451,7 @@ class DatabaseManager:
             if config.driver_runtime_python_executable:
                 config.options["driver_runtime_python_executable"] = config.driver_runtime_python_executable
             config.options["driver_auto_install"] = config.driver_auto_install
+            config.options["driver_auto_install_used"] = config.driver_auto_install_used
             if platform_info:
                 platform_info.driver_version_requested = config.driver_version
                 platform_info.driver_version_resolved = config.driver_version_resolved

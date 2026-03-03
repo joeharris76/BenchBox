@@ -7,7 +7,13 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions, TerminalColors
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    TerminalColors,
+    outlier_severity_markers,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -230,12 +236,9 @@ class ASCIIComparisonBar(ASCIIChartBase):
         if partial > 0 and full_blocks < bar_width:
             bar += fc if fill_char else blocks[partial]
 
-        if truncated:
-            # Add overflow indicator (Unicode: warning sign, ASCII: exclamation)
-            indicator = " \u26a0" if self.options.use_unicode else " !"
-            if len(bar) + len(indicator) <= bar_width:
-                bar = bar.rstrip() + indicator
-            bar = bar.ljust(bar_width)
+        if truncated and truncate_threshold and truncate_threshold > 0:
+            markers = outlier_severity_markers(value, truncate_threshold)
+            bar = bar[: bar_width - len(markers)] + markers
         else:
             bar = bar.ljust(bar_width)
 

@@ -544,8 +544,6 @@ class TestDatabaseIntegration:
             min_time = min(execution_times)
 
             # Performance should be consistent (max time shouldn't be more than 50x min time)
-            # Threshold increased to account for CI environment variability, cold starts,
-            # and parallel test execution with xdist
             if min_time > 0:
                 performance_ratio = max_time / min_time
                 assert performance_ratio < 50, f"Performance inconsistency too high: {performance_ratio:.2f}"

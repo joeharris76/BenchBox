@@ -1,4 +1,6 @@
 import importlib
+import importlib.machinery
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import call, patch
@@ -9,6 +11,7 @@ from benchbox.utils import runtime_env
 from benchbox.utils.runtime_env import (
     DriverResolution,
     DriverRuntimeStrategy,
+    _validate_runtime_abi,
     discover_isolated_runtime,
     ensure_driver_version,
     load_driver_module,
@@ -393,3 +396,185 @@ def test_autoinstall_raises_when_both_installers_fail(monkeypatch):
     assert "1.0.0" in error_text
     # The error should surface the last failure reason so the user can diagnose it.
     assert "No module named pip" in error_text
+
+
+# ---------------------------------------------------------------------------
+# Tests for ABI validation in isolated runtime discovery
+# ---------------------------------------------------------------------------
+
+
+def _make_isolated_env(root: Path, name: str, pkg: str, version: str, ext_files: list[str] | None = None) -> Path:
+    """Helper to create a fake isolated runtime environment for testing.
+
+    Returns the site-packages path.
+    """
+    site_packages = root / name / "lib" / "python3.11" / "site-packages"
+    site_packages.mkdir(parents=True)
+    dist_info = site_packages / f"{pkg}-{version}.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(f"Name: {pkg}\nVersion: {version}\n")
+    if ext_files is not None:
+        pkg_dir = site_packages / pkg
+        pkg_dir.mkdir(exist_ok=True)
+        (pkg_dir / "__init__.py").write_text(f"__version__ = '{version}'\n")
+        for fname in ext_files:
+            (pkg_dir / fname).write_bytes(b"")
+    return site_packages
+
+
+def _wrong_abi_filename() -> str:
+    """Return a .so filename with a cpython ABI tag that does NOT match the running Python."""
+    major, minor = sys.version_info.major, sys.version_info.minor
+    wrong_minor = minor + 1  # guaranteed to differ
+    return f"duckdb.cpython-{major}{wrong_minor}-darwin.so"
+
+
+def test_validate_runtime_abi_wrong_suffix(tmp_path):
+    """Extension files with wrong ABI tag are rejected."""
+    site_packages = _make_isolated_env(
+        tmp_path,
+        "env",
+        "duckdb",
+        "1.2.2",
+        ext_files=[_wrong_abi_filename()],
+    )
+    assert not _validate_runtime_abi(site_packages, "duckdb")
+
+
+def test_validate_runtime_abi_correct_suffix(tmp_path):
+    """Extension files matching the current interpreter's ABI tag are accepted."""
+    current_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]  # e.g. .cpython-311-darwin.so
+    site_packages = _make_isolated_env(
+        tmp_path,
+        "env",
+        "duckdb",
+        "1.2.2",
+        ext_files=[f"duckdb{current_suffix}"],
+    )
+    assert _validate_runtime_abi(site_packages, "duckdb")
+
+
+def test_validate_runtime_abi_pure_python(tmp_path):
+    """Packages with no extension files (pure Python) are accepted."""
+    site_packages = _make_isolated_env(
+        tmp_path,
+        "env",
+        "sqlglot",
+        "20.0.0",
+        ext_files=[],  # creates pkg dir but no .so files
+    )
+    assert _validate_runtime_abi(site_packages, "sqlglot")
+
+
+def test_validate_runtime_abi_stable_abi(tmp_path):
+    """Stable ABI extensions (.abi3.so) are accepted across Python versions."""
+    site_packages = _make_isolated_env(
+        tmp_path,
+        "env",
+        "mypackage",
+        "1.0.0",
+        ext_files=["_core.abi3.so"],
+    )
+    assert _validate_runtime_abi(site_packages, "mypackage")
+
+
+def test_validate_runtime_abi_mixed_tags_accepts_if_any_match(tmp_path):
+    """Package with both wrong-ABI and correct-ABI extensions is accepted."""
+    current_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
+    site_packages = _make_isolated_env(
+        tmp_path,
+        "env",
+        "duckdb",
+        "1.2.2",
+        ext_files=[_wrong_abi_filename(), f"duckdb{current_suffix}"],
+    )
+    assert _validate_runtime_abi(site_packages, "duckdb")
+
+
+def test_validate_runtime_abi_no_package_dir(tmp_path):
+    """When no package directory exists (single-file module), accepted."""
+    site_packages = _make_isolated_env(tmp_path, "env", "duckdb", "1.2.2")
+    # No ext_files means no package dir created
+    assert _validate_runtime_abi(site_packages, "duckdb")
+
+
+def test_discover_skips_abi_mismatch_candidate(tmp_path, monkeypatch, caplog):
+    """Discovery skips a candidate with wrong ABI and returns None."""
+    _make_isolated_env(
+        tmp_path / "envs",
+        "duckdb-1.2.2",
+        "duckdb",
+        "1.2.2",
+        ext_files=[_wrong_abi_filename()],
+    )
+    monkeypatch.setenv("BENCHBOX_DRIVER_RUNTIME_ROOTS", str(tmp_path / "envs"))
+
+    with caplog.at_level(logging.WARNING, logger="benchbox.utils.runtime_env"):
+        runtime = discover_isolated_runtime(package_name="duckdb", requested_version="1.2.2")
+
+    assert runtime is None
+    assert "ABI mismatch" in caplog.text
+    assert "Skipping isolated runtime" in caplog.text
+
+
+def test_discover_skips_bad_candidate_returns_good_one(tmp_path, monkeypatch):
+    """When first candidate has wrong ABI, discovery falls through to the second."""
+    envs = tmp_path / "envs"
+    current_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
+
+    # Bad candidate (wrong ABI)
+    _make_isolated_env(
+        envs,
+        "bad-env",
+        "duckdb",
+        "1.2.2",
+        ext_files=[_wrong_abi_filename()],
+    )
+    # Good candidate (correct ABI)
+    good_sp = _make_isolated_env(
+        envs,
+        "good-env",
+        "duckdb",
+        "1.2.2",
+        ext_files=[f"duckdb{current_suffix}"],
+    )
+    monkeypatch.setenv("BENCHBOX_DRIVER_RUNTIME_ROOTS", str(envs))
+
+    runtime = discover_isolated_runtime(package_name="duckdb", requested_version="1.2.2")
+
+    assert runtime is not None
+    assert runtime.runtime_path == str(good_sp)
+
+
+def test_corrupted_runtime_fallthrough_to_autoinstall(tmp_path, monkeypatch):
+    """ensure_driver_version() falls through to auto-install when isolated runtime has wrong ABI."""
+    monkeypatch.setattr(runtime_env, "_get_installed_version", lambda _: "1.4.3")
+
+    envs = tmp_path / "envs"
+    _make_isolated_env(
+        envs,
+        "duckdb-1.2.2",
+        "duckdb",
+        "1.2.2",
+        ext_files=[_wrong_abi_filename()],
+    )
+    monkeypatch.setenv("BENCHBOX_DRIVER_RUNTIME_ROOTS", str(envs))
+
+    installed_version = {"value": "1.4.3"}
+
+    def fake_install(_command):
+        installed_version["value"] = "1.2.2"
+
+    monkeypatch.setattr(runtime_env, "_get_installed_version", lambda _: installed_version["value"])
+    monkeypatch.setattr(runtime_env, "_run_install_command", fake_install)
+    monkeypatch.setattr(runtime_env, "_should_auto_install", lambda _: True)
+
+    resolution = ensure_driver_version(
+        package_name="duckdb",
+        requested_version="1.2.2",
+        auto_install=True,
+    )
+
+    assert resolution.auto_install_used is True
+    assert resolution.resolved == "1.2.2"
+    assert resolution.runtime_strategy == DriverRuntimeStrategy.CURRENT_PROCESS.value

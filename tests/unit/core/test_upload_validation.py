@@ -16,6 +16,26 @@ from benchbox.core.upload_validation import (
 pytestmark = pytest.mark.fast
 
 
+def make_manifest(
+    *,
+    benchmark: str = "tpch",
+    scale_factor: float | int = 1.0,
+    tables: dict | None = None,
+    compression: dict | None = None,
+    **extras: object,
+) -> dict:
+    manifest = {
+        "version": 2,
+        "benchmark": benchmark,
+        "scale_factor": scale_factor,
+        "compression": compression or {"enabled": False, "type": None, "level": None},
+        "tables": tables or {"a": {"formats": {"tbl": [{}]}}},
+        "formats": ["tbl"],
+    }
+    manifest.update(extras)
+    return manifest
+
+
 class FakeRemoteFS:
     """In-memory fake RemoteFileSystemAdapter for tests."""
 
@@ -39,12 +59,8 @@ class FakeRemoteFS:
 
 @pytest.fixture()
 def local_manifest(tmp_path: Path) -> Path:
-    manifest = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {
+    manifest = make_manifest(
+        tables={
             "customer": {
                 "formats": {
                     "tbl": [
@@ -61,9 +77,8 @@ def local_manifest(tmp_path: Path) -> Path:
                 }
             },
         },
-        "formats": ["tbl"],
-        "format_preference": ["tbl"],
-    }
+        format_preference=["tbl"],
+    )
     path = tmp_path / "_datagen_manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     # Create dummy local files
@@ -74,12 +89,7 @@ def local_manifest(tmp_path: Path) -> Path:
 
 
 def test_manifest_comparison_matches():
-    local = {
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": [{}], "b": [{}]},
-    }
+    local = make_manifest(tables={"a": [{}], "b": [{}]}, formats=[])
     remote = json.loads(json.dumps(local))  # deep copy
     comp = RemoteManifestValidator().compare_manifests(local, remote)
     assert isinstance(comp, ManifestComparisonResult)
@@ -124,13 +134,7 @@ def test_validate_remote_files_exist_reports_missing(monkeypatch):
 
 def test_manifest_comparison_scale_factor_mismatch():
     """Test that scale factor mismatch is detected."""
-    local = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{}]}}},
-    }
+    local = make_manifest()
     remote = json.loads(json.dumps(local))
     remote["scale_factor"] = 10.0  # Different scale factor
 
@@ -142,13 +146,7 @@ def test_manifest_comparison_scale_factor_mismatch():
 
 def test_manifest_comparison_benchmark_mismatch():
     """Test that benchmark type mismatch is detected."""
-    local = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{}]}}},
-    }
+    local = make_manifest()
     remote = json.loads(json.dumps(local))
     remote["benchmark"] = "tpcds"  # Different benchmark
 
@@ -160,13 +158,7 @@ def test_manifest_comparison_benchmark_mismatch():
 
 def test_manifest_comparison_compression_mismatch():
     """Test that compression mismatch is detected."""
-    local = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{}]}}},
-    }
+    local = make_manifest()
     remote = json.loads(json.dumps(local))
     remote["compression"] = {"enabled": True, "type": "zstd", "level": 3}  # Different compression
 
@@ -178,16 +170,12 @@ def test_manifest_comparison_compression_mismatch():
 
 def test_manifest_comparison_table_count_mismatch():
     """Test that table count mismatch is detected."""
-    local = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {
+    local = make_manifest(
+        tables={
             "a": {"formats": {"tbl": [{}]}},
             "b": {"formats": {"tbl": [{}]}},
-        },
-    }
+        }
+    )
     remote = json.loads(json.dumps(local))
     remote["tables"] = {"a": {"formats": {"tbl": [{}]}}}  # One less table
 
@@ -199,13 +187,7 @@ def test_manifest_comparison_table_count_mismatch():
 
 def test_manifest_comparison_file_count_mismatch():
     """Test that file count mismatch is detected (sharded tables)."""
-    local = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{}, {}]}}},  # 2 files
-    }
+    local = make_manifest(tables={"a": {"formats": {"tbl": [{}, {}]}}})  # 2 files
     remote = json.loads(json.dumps(local))
     remote["tables"] = {"a": {"formats": {"tbl": [{}]}}}  # Only 1 file
 
@@ -217,13 +199,7 @@ def test_manifest_comparison_file_count_mismatch():
 
 def test_manifest_comparison_int_float_tolerance():
     """Test that int and float scale factors are treated as equivalent."""
-    local = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1,  # int
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{}]}}},
-    }
+    local = make_manifest(scale_factor=1)  # int
     remote = json.loads(json.dumps(local))
     remote["scale_factor"] = 1.0  # float, but same value
 
@@ -238,14 +214,7 @@ def test_force_upload_always_uploads():
     fs = FakeRemoteFS()
 
     # Create valid remote manifest
-    manifest = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}},
-        "formats": ["tbl"],
-    }
+    manifest = make_manifest(tables={"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}})
     fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
     fs.write_file(f"{remote_root}/a.tbl", b"x" * 10)
 
@@ -281,14 +250,7 @@ def test_should_upload_when_manifest_corrupted():
     fs.write_file(f"{remote_root}/_datagen_manifest.json", b"corrupted json {{{")
 
     # Create valid local manifest
-    manifest = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}},
-        "formats": ["tbl"],
-    }
+    manifest = make_manifest(tables={"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}})
     tmp = Path(__file__).parent.parent.parent / "_project"
     tmp.mkdir(exist_ok=True)
     local_manifest_path = tmp / "test_manifest_corrupted.json"
@@ -312,14 +274,7 @@ def test_remote_manifest_attached_to_validation_result():
     fs = FakeRemoteFS()
 
     # Create valid remote manifest
-    manifest = {
-        "version": 2,
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}},
-        "formats": ["tbl"],
-    }
+    manifest = make_manifest(tables={"a": {"formats": {"tbl": [{"path": "a.tbl", "size_bytes": 10}]}}})
     fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
     fs.write_file(f"{remote_root}/a.tbl", b"x" * 10)
 
@@ -358,17 +313,12 @@ def test_print_validation_report_with_valid_manifest(caplog):
         is_valid=True,
         errors=[],
         warnings=[],
-        remote_manifest={
-            "version": 2,
-            "benchmark": "tpch",
-            "scale_factor": 1.0,
-            "tables": {
+        remote_manifest=make_manifest(
+            tables={
                 "customer": {"formats": {"tbl": [{}]}},
                 "orders": {"formats": {"tbl": [{}]}},
-            },
-            "formats": ["tbl"],
-            "compression": {"enabled": False, "type": None, "level": None},
-        },
+            }
+        ),
     )
 
     engine = UploadValidationEngine()
@@ -393,17 +343,17 @@ def test_print_validation_report_verbose_mode(caplog):
         is_valid=True,
         errors=[],
         warnings=[],
-        remote_manifest={
-            "benchmark": "tpcds",
-            "scale_factor": 10.0,
-            "tables": {
+        remote_manifest=make_manifest(
+            benchmark="tpcds",
+            scale_factor=10.0,
+            tables={
                 "catalog_sales": {
                     "formats": {"zst": [{"path": "catalog_sales.dat.1.zst"}, {"path": "catalog_sales.dat.2.zst"}]}
                 },
                 "store_sales": {"formats": {"zst": [{"path": "store_sales.dat.1.zst"}]}},
             },
-            "compression": {"enabled": True, "type": "zstd", "level": 3},
-        },
+            compression={"enabled": True, "type": "zstd", "level": 3},
+        ),
     )
 
     engine = UploadValidationEngine()
@@ -470,12 +420,10 @@ def test_should_upload_data_logs_validation_messages(caplog):
     fs = FakeRemoteFS()
 
     # Create valid remote manifest
-    manifest = {
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"customer": [{"path": "customer.tbl", "size_bytes": 10}]},
-    }
+    manifest = make_manifest(
+        tables={"customer": [{"path": "customer.tbl", "size_bytes": 10}]},
+        formats=[],
+    )
     fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
     fs.write_file(f"{remote_root}/customer.tbl", b"x" * 10)
 
@@ -538,16 +486,14 @@ def test_print_validation_report_missing_scale_factor(caplog):
 
     caplog.set_level(logging.INFO, logger="benchbox.core.upload_validation")
 
+    manifest = make_manifest(tables={"customer": [{}]}, formats=[])
+    manifest.pop("scale_factor")
+
     validation_result = ValidationResult(
         is_valid=True,
         errors=[],
         warnings=[],
-        remote_manifest={
-            "benchmark": "tpch",
-            # scale_factor missing - should default to "unknown"
-            "tables": {"customer": [{}]},
-            "compression": {"enabled": False, "type": None, "level": None},
-        },
+        remote_manifest=manifest,
     )
 
     engine = UploadValidationEngine()
@@ -565,16 +511,14 @@ def test_print_validation_report_malformed_compression(caplog):
 
     caplog.set_level(logging.INFO, logger="benchbox.core.upload_validation")
 
+    manifest = make_manifest(tables={"customer": [{}]}, formats=[])
+    manifest["compression"] = None  # Malformed - should handle gracefully
+
     validation_result = ValidationResult(
         is_valid=True,
         errors=[],
         warnings=[],
-        remote_manifest={
-            "benchmark": "tpch",
-            "scale_factor": 1.0,
-            "tables": {"customer": [{}]},
-            "compression": None,  # Malformed - should handle gracefully
-        },
+        remote_manifest=manifest,
     )
 
     engine = UploadValidationEngine()
@@ -597,12 +541,10 @@ def test_databricks_adapter_passes_verbose_flag():
     fs = FakeRemoteFS()
 
     # Create valid remote manifest
-    manifest = {
-        "benchmark": "tpch",
-        "scale_factor": 1.0,
-        "compression": {"enabled": False, "type": None, "level": None},
-        "tables": {"customer": [{"path": "customer.tbl", "size_bytes": 10}]},
-    }
+    manifest = make_manifest(
+        tables={"customer": [{"path": "customer.tbl", "size_bytes": 10}]},
+        formats=[],
+    )
     fs.write_file(f"{remote_root}/_datagen_manifest.json", json.dumps(manifest).encode("utf-8"))
     fs.write_file(f"{remote_root}/customer.tbl", b"x" * 10)
 

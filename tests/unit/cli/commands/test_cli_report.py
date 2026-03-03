@@ -10,7 +10,8 @@ from click.testing import CliRunner
 
 from benchbox.cli.app import cli
 from benchbox.core.results.database import ResultDatabase
-from benchbox.core.results.models import BenchmarkResults
+from tests.conftest import make_benchmark_results
+from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 
 pytestmark = pytest.mark.fast
 
@@ -22,21 +23,19 @@ def create_test_result(
     scale_factor: float = 1.0,
     timestamp: datetime | None = None,
     geometric_mean_ms: float = 100.0,
-) -> BenchmarkResults:
-    """Create a test BenchmarkResults object."""
-    ts = timestamp or datetime.now(timezone.utc)
-    return BenchmarkResults(
+):
+    """Report-test defaults delegating to shared factory."""
+    return make_benchmark_results(
         benchmark_name=benchmark,
         platform=platform,
         scale_factor=scale_factor,
         execution_id=execution_id,
-        timestamp=ts,
+        timestamp=timestamp,
         duration_seconds=10.0,
         total_queries=22,
         successful_queries=22,
-        failed_queries=0,
-        geometric_mean_execution_time=geometric_mean_ms / 1000.0,
         validation_status="PASSED",
+        geometric_mean_execution_time=geometric_mean_ms / 1000.0,
         platform_info={"platform_version": "1.0.0"},
     )
 
@@ -242,24 +241,16 @@ class TestReportImport:
         results_dir.mkdir()
 
         # Create test result file using v2.0 schema format
-        result_data = {
-            "version": "2.0",
-            "benchmark": {"id": "tpc_h", "name": "TPC-H", "scale_factor": 1.0},
-            "platform": {"name": "DuckDB", "version": "1.0.0"},
-            "run": {
-                "id": "import-test",
-                "timestamp": "2025-01-01T10:00:00",
-                "total_duration_ms": 1000,
-            },
-            "summary": {
-                "queries": {"total": 22, "passed": 22, "failed": 0},
-                "timing": {"total_ms": 1000, "geometric_mean_ms": 100.0},
-                "validation": "PASSED",
-            },
-            "queries": [],
-            "system": {},
-            "driver": {},
-        }
+        result_data = make_v2_result_dict(
+            version="2.0",
+            benchmark_id="tpc_h",
+            benchmark_name="TPC-H",
+            platform="DuckDB",
+            platform_version="1.0.0",
+            execution_id="import-test",
+            timestamp="2025-01-01T10:00:00",
+            scale_factor=1.0,
+        )
 
         with open(results_dir / "result.json", "w") as f:
             json.dump(result_data, f)

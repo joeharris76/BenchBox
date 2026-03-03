@@ -10,7 +10,14 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from benchbox.core.visualization.ascii.base import DEFAULT_PALETTE, ASCIIChartBase, ASCIIChartOptions
+from benchbox.core.visualization.ascii.base import (
+    DEFAULT_PALETTE,
+    TRUNCATION_MARKER,
+    ASCIIChartBase,
+    ASCIIChartOptions,
+    outlier_severity_markers,
+    robust_p95,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -81,6 +88,9 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         self.sort_by = sort_by
         self.max_per_chart = max(5, max_per_chart)
         self.show_mean_line = show_mean_line
+        self._scale_max = 0.0
+        self._global_max = 0.0
+        self._capping_active = False
 
     def render(self) -> str:
         """Render the histogram as a string (may contain multiple charts)."""
@@ -112,9 +122,10 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         global_max = max(all_latencies) if all_latencies else 1
         global_mean = sum(all_latencies) / len(all_latencies) if all_latencies else 0
 
-        # Detect outliers via IQR
+        # Detect outliers via IQR and cap scale to avoid compression
         self._outlier_ids: set[str] = set()
         self._outlier_bar_keys: set[tuple[str | None, str]] = set()
+        scale_max = global_max
         if len(all_latencies) >= 4:
             s = sorted(all_latencies)
             n = len(s)
@@ -122,10 +133,23 @@ class ASCIIQueryHistogram(ASCIIChartBase):
             q3 = s[3 * n // 4]
             iqr = q3 - q1
             upper_fence = q3 + 1.5 * iqr
+            # Zero-heavy fallback: when IQR collapses to 0 (Q1=Q3=0),
+            # upper_fence is 0 and no outliers are detected. Use robust_p95 instead.
+            if upper_fence <= 0:
+                p95 = robust_p95(all_latencies)
+                if p95 > 0:
+                    upper_fence = p95 * 1.5
             for d in sorted_data:
                 if d.latency_ms > upper_fence:
                     self._outlier_ids.add(d.query_id)
                     self._outlier_bar_keys.add((d.platform, d.query_id))
+            # Cap scale at fence so outliers don't compress the rest
+            if upper_fence > 0 and global_max > upper_fence * 1.5:
+                scale_max = upper_fence * 1.5
+
+        self._scale_max = scale_max
+        self._global_max = global_max
+        self._capping_active = self._scale_max < self._global_max
 
         rendered_charts: list[str] = []
         for chunk_idx, chunk in enumerate(chunks):
@@ -140,7 +164,7 @@ class ASCIIQueryHistogram(ASCIIChartBase):
             chart_str = self._render_chunk(
                 chunk,
                 chunk_title,
-                global_max,
+                scale_max,
                 global_mean,
             )
             rendered_charts.append(chart_str)
@@ -353,6 +377,7 @@ class ASCIIQueryHistogram(ASCIIChartBase):
                     no_color,
                     colors,
                     blocks,
+                    chart_height,
                 )
                 row_chars.append(colored_block)
                 row_chars.append(" ")
@@ -378,15 +403,26 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         no_color: bool,
         colors: object,
         blocks: list[str],
+        chart_height: int = 12,
     ) -> str:
         """Render a single bar cell in a simple histogram row."""
         is_outlier = self._is_outlier(datum)
+        is_truncated = self._capping_active and datum.latency_ms > self._scale_max
         bar_color = self._simple_bar_color(datum, palette)
         outlier_char = self._get_outlier_char(no_color=no_color)
         fill_char = outlier_char if is_outlier else blocks[-1]
 
         if row <= math.ceil(bar_height):
             block = self._compute_bar_block(row, bar_height, fill_char, is_outlier, bar_width, blocks)
+            # Top row of a truncated bar: append severity markers
+            if is_truncated and row == chart_height:
+                markers = outlier_severity_markers(datum.latency_ms, self._scale_max)
+                if markers and len(markers) < bar_width:
+                    block = block[: bar_width - len(markers)] + markers
+                elif markers and bar_width >= 2:
+                    # Very narrow bars: use as many markers as fit, keep 1 fill char
+                    trimmed = markers[: bar_width - 1]
+                    block = block[:1] + trimmed
             return colors.colorize(block, fg_color=bar_color)
 
         if self.show_mean_line and row == mean_row:
@@ -431,6 +467,7 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         has_best = any(d.is_best for d in chunk)
         has_worst = any(d.is_worst for d in chunk)
         has_outlier = any(self._is_outlier(d) for d in chunk)
+        has_truncated = self._capping_active and any(d.latency_ms > self._scale_max for d in chunk)
 
         if has_best:
             best_marker = self.options.get_series_marker(0)
@@ -441,6 +478,8 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         if has_outlier:
             outlier_char = self._get_outlier_char(no_color=no_color)
             footer_parts.append(f"{colors.colorize(outlier_char, fg_color='#666666')} Outlier")
+        if has_truncated:
+            footer_parts.append(f"{TRUNCATION_MARKER} Truncated")
 
         if footer_parts:
             return " " * y_axis_width + "  ".join(footer_parts)
@@ -612,6 +651,7 @@ class ASCIIQueryHistogram(ASCIIChartBase):
         raw_height = (datum.latency_ms / global_max) * chart_height if global_max > 0 else 0
         bar_height = max(0.125, raw_height) if raw_height > 0 else 0
         is_outlier = self._is_outlier(datum)
+        is_truncated = self._capping_active and datum.latency_ms > self._scale_max
 
         bar_color = platform_colors.get(datum.platform or "", palette[0])
         outlier_char = self._get_outlier_char(no_color=no_color, used_fills=set(platform_fills.values()))
@@ -620,6 +660,14 @@ class ASCIIQueryHistogram(ASCIIChartBase):
 
         if row <= math.ceil(bar_height):
             block = self._compute_bar_block(row, bar_height, fill_char, is_outlier, sub_bar_width, blocks)
+            # Top row of a truncated bar: append severity markers
+            if is_truncated and row == chart_height:
+                markers = outlier_severity_markers(datum.latency_ms, self._scale_max)
+                if markers and len(markers) < sub_bar_width:
+                    block = block[: sub_bar_width - len(markers)] + markers
+                elif markers and sub_bar_width >= 2:
+                    trimmed = markers[: sub_bar_width - 1]
+                    block = block[:1] + trimmed
             return colors.colorize(block, fg_color=bar_color)
 
         if self.show_mean_line and row == mean_row:

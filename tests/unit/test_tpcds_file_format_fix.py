@@ -19,7 +19,6 @@ from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
 @pytest.mark.unit
 @pytest.mark.fast
-@pytest.mark.requires_zstd
 class TestTPCDSFileFormatFix:
     """Test the fixes for TPC-DS file format inconsistency issue.
 

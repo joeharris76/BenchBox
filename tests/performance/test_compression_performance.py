@@ -182,7 +182,6 @@ class TestCompressionPerformance:
                 assert compression_ratio > 1.0  # Should achieve compression
 
     @pytest.mark.performance
-    @pytest.mark.requires_zstd
     def test_ssb_benchmark_compression_performance(self):
         """Test SSB benchmark with compression performance (zstd)."""
         scale_factors = [0.01, 0.1]  # Small scale factors for testing

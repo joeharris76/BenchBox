@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import importlib.machinery
 import logging
 import os
 import re
@@ -119,6 +120,48 @@ def _find_distribution_version(site_packages: Path, package_name: str) -> str | 
     return None
 
 
+_CPYTHON_ABI_RE = re.compile(r"\.cpython-(\d{2,3})")
+
+
+def _validate_runtime_abi(site_packages: Path, package_name: str) -> bool:
+    """Check that a discovered isolated runtime has ABI-compatible extensions.
+
+    Scans the package directory under *site_packages* for compiled extension
+    files (.so / .pyd).  If any carry a ``cpython-3XX`` ABI tag that differs
+    from the running interpreter, the runtime is rejected.  Extensions with
+    no cpython tag (stable ABI ``.abi3.so``, bare ``.so``) and pure-Python
+    packages (no extension files at all) are always accepted.
+
+    Returns ``True`` when the runtime is usable, ``False`` otherwise.
+    """
+    pkg_dir = site_packages / package_name.replace("-", "_")
+    if not pkg_dir.is_dir():
+        # No package directory — might be a single-file module; accept it.
+        return True
+
+    current_tag = f"{sys.version_info.major}{sys.version_info.minor}"
+    has_tagged_extension = False
+
+    for child in pkg_dir.iterdir():
+        name = child.name
+        if not child.is_file():
+            continue
+        if not (name.endswith(".so") or name.endswith(".pyd")):
+            continue
+        m = _CPYTHON_ABI_RE.search(name)
+        if m is None:
+            # Bare .so, .abi3.so, or .pyd without cpython tag — always compatible.
+            continue
+        has_tagged_extension = True
+        if m.group(1) == current_tag:
+            return True
+
+    # If we found tagged extensions but none matched, this runtime is incompatible.
+    # If no tagged extensions exist at all, the package is compatible (pure-Python
+    # or stable ABI only).
+    return not has_tagged_extension
+
+
 def discover_isolated_runtime(
     *,
     package_name: str,
@@ -149,6 +192,16 @@ def discover_isolated_runtime(
                     continue
                 version = _find_distribution_version(site_packages, expected)
                 if version == requested:
+                    if not _validate_runtime_abi(site_packages, normalized_package):
+                        logger.warning(
+                            "Skipping isolated runtime at %s: ABI mismatch "
+                            "(no extension files match current Python %d.%d). "
+                            "Delete this runtime or rebuild for current Python.",
+                            site_packages,
+                            sys.version_info.major,
+                            sys.version_info.minor,
+                        )
+                        continue
                     return DriverRuntimeLocation(
                         package=normalized_package,
                         version=version,
@@ -190,8 +243,20 @@ def load_driver_module(
     """Materialize/import a driver module according to runtime resolution."""
     if resolution.runtime_strategy != DriverRuntimeStrategy.ISOLATED_SITE_PACKAGES.value:
         if resolution.auto_install_used:
-            _purge_module_tree(import_name)
-            importlib.invalidate_caches()
+            # Only purge if the already-loaded module doesn't match the requested
+            # version.  C extension modules (e.g. DuckDB) cannot be safely
+            # unloaded and reloaded via dlopen within the same process — doing so
+            # causes SIGSEGV.  If the correct version is already in sys.modules we
+            # can skip the purge entirely.
+            existing = sys.modules.get(import_name)
+            already_correct = (
+                existing is not None
+                and resolution.requested
+                and getattr(existing, "__version__", None) == str(resolution.requested)
+            )
+            if not already_correct:
+                _purge_module_tree(import_name)
+                importlib.invalidate_caches()
         module = importlib.import_module(import_name)
     else:
         runtime_path = (resolution.runtime_path or "").strip()

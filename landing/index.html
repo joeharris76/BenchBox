@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BenchBox - Run Your Own Benchmarks</title>
     <meta name="description"
-        content="Run your own benchmarks and compare database performance. 18 benchmarks (TPC-H/DS/DI, ClickBench, SSB, more). 38 platforms (DuckDB, Snowflake, Databricks, Polars, Onehouse, more). CLI, Python library, or MCP for AI assistants.">
+        content="Run your own benchmarks and compare database performance. 18 benchmarks (TPC-H/DS/DI, ClickBench, SSB, more). 38 platforms (DuckDB, Snowflake, Databricks SQL, Polars, Onehouse, more). CLI, Python library, or MCP for AI assistants.">
 
     <!-- Prism.js for syntax highlighting -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
@@ -66,7 +66,7 @@ from benchbox import TPCH</code></pre>
                         <a href="https://github.com/joeharris76/benchbox" target="_blank" class="badge">
                             Star on GitHub ⭐
                         </a>
-                        <a href="https://github.com/joeharris76/benchbox/releases" target="_blank" class="badge badge-version">v0.1.3</a>
+                        <a href="https://github.com/joeharris76/benchbox/releases" target="_blank" class="badge badge-version">v0.1.4</a>
                         <a href="https://benchbox.dev/docs/usage/installation.html" class="badge badge-info">Python 3.10+</a>
                         <a href="https://benchbox.dev/docs/usage/installation.html#no-docker-required" class="badge badge-info">No Docker Required</a>
                     </div>
@@ -381,14 +381,14 @@ from benchbox import TPCH</code></pre>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/databricks.html" class="benchmark-card">
-                        <h3>Databricks</h3>
+                        <h3>Databricks SQL</h3>
                         <p>Data Intelligence Platform with lakehouse architecture.</p>
                         <div class="benchmark-meta">Cloud • Lakehouse</div>
                     </a>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/bigquery.html" class="benchmark-card">
-                        <h3>BigQuery</h3>
+                        <h3>Google BigQuery</h3>
                         <p>Google Cloud serverless data warehouse.</p>
                         <div class="benchmark-meta">GCP • Serverless</div>
                     </a>
@@ -402,7 +402,7 @@ from benchbox import TPCH</code></pre>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/redshift.html" class="benchmark-card">
-                        <h3>Redshift</h3>
+                        <h3>Amazon Redshift</h3>
                         <p>AWS cloud data warehouse (serverless or provisioned).</p>
                         <div class="benchmark-meta">AWS • Warehouse</div>
                     </a>
@@ -416,7 +416,7 @@ from benchbox import TPCH</code></pre>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/azure-platforms.html" class="benchmark-card">
-                        <h3>Azure Synapse</h3>
+                        <h3>Azure Synapse Analytics</h3>
                         <p>Microsoft Azure analytics service.</p>
                         <div class="benchmark-meta">Azure • Analytics</div>
                     </a>
@@ -503,21 +503,21 @@ from benchbox import TPCH</code></pre>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/athena-spark.html" class="benchmark-card">
-                        <h3>Athena for Apache Spark</h3>
-                        <p>Interactive Spark notebooks on AWS Athena.</p>
+                        <h3>Amazon Athena for Apache Spark</h3>
+                        <p>Interactive Spark notebooks on Amazon Athena.</p>
                         <div class="benchmark-meta">AWS • Interactive</div>
                     </a>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/gcp-dataproc.html" class="benchmark-card">
-                        <h3>GCP Dataproc</h3>
+                        <h3>Google Cloud Dataproc</h3>
                         <p>Managed Spark and Hadoop clusters on Google Cloud.</p>
                         <div class="benchmark-meta">GCP • Clusters</div>
                     </a>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/dataproc-serverless.html" class="benchmark-card">
-                        <h3>GCP Dataproc Serverless</h3>
+                        <h3>Google Cloud Dataproc Serverless</h3>
                         <p>Serverless Spark with no cluster management.</p>
                         <div class="benchmark-meta">GCP • Serverless</div>
                     </a>
@@ -531,14 +531,14 @@ from benchbox import TPCH</code></pre>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/synapse-spark.html" class="benchmark-card">
-                        <h3>Azure Synapse Spark</h3>
+                        <h3>Azure Synapse Analytics Spark</h3>
                         <p>Enterprise Spark pools with ADLS Gen2.</p>
                         <div class="benchmark-meta">Azure • Enterprise</div>
                     </a>
                 </div>
                 <div class="benchmark-card-wrapper">
                     <a href="https://benchbox.dev/docs/platforms/snowpark-connect.html" class="benchmark-card">
-                        <h3>Snowpark Connect</h3>
+                        <h3>Snowpark Connect for Spark</h3>
                         <p>PySpark API compatibility on Snowflake.</p>
                         <div class="benchmark-meta">Snowflake • PySpark API</div>
                     </a>

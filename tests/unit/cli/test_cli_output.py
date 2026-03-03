@@ -19,7 +19,7 @@ import pytest
 
 from benchbox.cli.output import ConsoleResultFormatter, ResultExporter
 from benchbox.core.schemas import QueryResult
-from benchbox.platforms.base import BenchmarkResults
+from tests.conftest import make_benchmark_results
 
 pytestmark = pytest.mark.fast
 
@@ -63,12 +63,10 @@ class TestConsoleResultFormatter:
             ),
         ]
 
-        return BenchmarkResults(
+        return make_benchmark_results(
             benchmark_name="TPC-H",
             platform="duckdb",
-            scale_factor=0.01,
             execution_id="exec_123",
-            timestamp=datetime.now(),
             duration_seconds=5.5,
             total_queries=len(query_results),
             successful_queries=2,
@@ -86,12 +84,10 @@ class TestConsoleResultFormatter:
 
     def create_platform_result(self):
         """Create a mock platform BenchmarkResults."""
-        return BenchmarkResults(
+        return make_benchmark_results(
             benchmark_name="TPC-H",
             platform="duckdb",
-            scale_factor=0.01,
             execution_id="exec_456",
-            timestamp=datetime.now(),
             duration_seconds=4.2,
             total_queries=22,
             successful_queries=20,
@@ -174,12 +170,10 @@ class TestConsoleResultFormatter:
     @patch("benchbox.cli.output.console")
     def test_display_handles_minimal_query_dicts(self, mock_console):
         """Display should cope with dict-based query results containing sparse fields."""
-        result = BenchmarkResults(
+        result = make_benchmark_results(
             benchmark_name="Test",
             platform="duckdb",
-            scale_factor=0.01,
             execution_id="exec_minimal",
-            timestamp=datetime.now(),
             duration_seconds=1.0,
             total_queries=2,
             successful_queries=1,
@@ -283,7 +277,7 @@ class TestResultExporter:
         *,
         query_results: Optional[list[QueryResult]] = None,
         execution_id: str = "exec_123",
-    ) -> BenchmarkResults:
+    ):
         """Create a test BenchmarkResults instance representing legacy CLI output."""
 
         if query_results is None:
@@ -328,10 +322,9 @@ class TestResultExporter:
         total_execution_time = sum(_extract_execution_ms(q) for q in query_results) / 1000.0
         average_query_time = total_execution_time / successful_queries if successful_queries else 0.0
 
-        return BenchmarkResults(
+        return make_benchmark_results(
+            benchmark_id="tpch",
             benchmark_name="TPC-H",
-            platform="cli",
-            scale_factor=0.01,
             execution_id=execution_id,
             timestamp=datetime(2025, 1, 15, 10, 30, 0),
             duration_seconds=3.5,
@@ -354,16 +347,14 @@ class TestResultExporter:
 
     def create_platform_result(self):
         """Create a test platform result."""
-        return BenchmarkResults(
+        return make_benchmark_results(
             benchmark_name="TPC-H",
             platform="duckdb",
-            scale_factor=0.01,
             execution_id="exec_456",
             timestamp=datetime(2025, 1, 15, 11, 0, 0),
             duration_seconds=4.2,
             total_queries=2,
             successful_queries=2,
-            failed_queries=0,
             query_results=[
                 {
                     "query_id": "Q1",
@@ -832,17 +823,11 @@ class TestResultExporterErrorHandling:
     @patch("benchbox.cli.output.console")
     def test_export_invalid_format(self, mock_console):
         """Test export with invalid format."""
-        result = BenchmarkResults(
+        result = make_benchmark_results(
             benchmark_name="Test",
-            platform="cli",
             scale_factor=1.0,
             execution_id="exec_1",
-            timestamp=datetime.now(),
             duration_seconds=1.0,
-            total_queries=0,
-            successful_queries=0,
-            failed_queries=0,
-            query_results=[],
             validation_status="PASSED",
         )
 

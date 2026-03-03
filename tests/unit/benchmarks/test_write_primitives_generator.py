@@ -13,6 +13,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import json
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -21,6 +22,75 @@ import pytest
 
 from benchbox.core.tpch.generator import TPCHDataGenerator
 from benchbox.core.write_primitives.generator import WritePrimitivesDataGenerator
+
+_TPCH_TABLE_FILES = (
+    "customer.tbl",
+    "lineitem.tbl",
+    "nation.tbl",
+    "orders.tbl",
+    "part.tbl",
+    "partsupp.tbl",
+    "region.tbl",
+    "supplier.tbl",
+)
+
+
+def _write_mock_tpch_data(directory: Path) -> None:
+    """Write a deterministic lightweight TPCH dataset for generator tests."""
+    directory.mkdir(parents=True, exist_ok=True)
+
+    orders_path = directory / "orders.tbl"
+    with open(orders_path, "w", encoding="utf-8") as f:
+        # Keep >2000 rows so parallel split/error-path tests remain meaningful.
+        for order_key in range(1, 4001):
+            row = (
+                f"{order_key}|{order_key}|O|{1000.0 + order_key:.2f}|1995-01-01|"
+                f"1-URGENT|Clerk#000000001|0|sample order {order_key}|\n"
+            )
+            f.write(row)
+
+    lineitem_path = directory / "lineitem.tbl"
+    with open(lineitem_path, "w", encoding="utf-8") as f:
+        for line_key in range(1, 6001):
+            row = (
+                f"{line_key}|{line_key}|{line_key}|1|1.0|10.0|0.0|0.0|N|O|1995-01-02|"
+                f"1995-01-03|1995-01-04|DELIVER IN PERSON|AIR|sample lineitem {line_key}|\n"
+            )
+            f.write(row)
+
+    tiny_row = "1|1|\n"
+    for filename in _TPCH_TABLE_FILES:
+        table_path = directory / filename
+        if table_path.exists():
+            continue
+        table_path.write_text(tiny_row, encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def shared_tpch_seed_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Create module-scoped seed TPCH data once for fast test reuse."""
+    seed_dir = tmp_path_factory.mktemp("write_primitives_tpch_seed")
+    _write_mock_tpch_data(seed_dir)
+    return seed_dir
+
+
+@pytest.fixture(autouse=True)
+def mock_tpch_generator(shared_tpch_seed_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock TPCH generation by copying shared seed files into each output dir."""
+
+    def _mock_generate(self: TPCHDataGenerator) -> dict[str, Path]:
+        output_dir = Path(self.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        table_paths: dict[str, Path] = {}
+        for filename in _TPCH_TABLE_FILES:
+            source = shared_tpch_seed_dir / filename
+            target = output_dir / filename
+            shutil.copy2(source, target)
+            table_paths[filename.removesuffix(".tbl")] = target
+        return table_paths
+
+    monkeypatch.setattr(TPCHDataGenerator, "generate", _mock_generate)
 
 
 @pytest.mark.slow
@@ -179,15 +249,16 @@ class TestScaleFactorValidation:
             assert test_file.exists()
             original_mtime = test_file.stat().st_mtime
 
-            # Wait a moment to ensure time difference
-            time.sleep(0.1)
+            # Set a known baseline mtime so we can assert unchanged deterministically.
+            frozen_mtime = original_mtime - 1
+            os.utime(test_file, (frozen_mtime, frozen_mtime))
 
             # Generate again with same scale factor (should reuse files)
             gen2 = WritePrimitivesDataGenerator(scale_factor=0.01, output_dir=output_dir, verbose=False)
             gen2.generate()
 
             # File should not have been regenerated (same mtime)
-            assert test_file.stat().st_mtime == original_mtime
+            assert test_file.stat().st_mtime == frozen_mtime
 
     def test_files_regenerated_when_scale_factor_changes(self):
         """Test that bulk load files are regenerated when scale factor changes."""
@@ -383,14 +454,16 @@ class TestConcurrentGeneration:
             test_file = output_dir / "write_primitives_auxiliary" / "csv_small_1k.csv"
             original_mtime = test_file.stat().st_mtime
 
-            time.sleep(0.1)
+            # Freeze mtime to avoid real sleeps while preserving regeneration check.
+            frozen_mtime = original_mtime - 1
+            os.utime(test_file, (frozen_mtime, frozen_mtime))
 
             # Second generator should detect files exist and skip generation
             gen2 = WritePrimitivesDataGenerator(scale_factor=0.01, output_dir=output_dir, verbose=False)
             gen2.generate()
 
             # File should not have been regenerated
-            assert test_file.stat().st_mtime == original_mtime
+            assert test_file.stat().st_mtime == frozen_mtime
 
     def test_force_regenerate_bypasses_existing_files(self):
         """Test that force_regenerate regenerates files even if they exist."""
@@ -408,7 +481,9 @@ class TestConcurrentGeneration:
             test_file = output_dir / "write_primitives_auxiliary" / "csv_small_1k.csv"
             original_mtime = test_file.stat().st_mtime
 
-            time.sleep(0.1)
+            # Freeze mtime to avoid sleep while asserting forced regeneration.
+            frozen_mtime = original_mtime - 1
+            os.utime(test_file, (frozen_mtime, frozen_mtime))
 
             # Force regenerate
             gen2 = WritePrimitivesDataGenerator(
@@ -417,7 +492,7 @@ class TestConcurrentGeneration:
             gen2.generate()
 
             # File should have been regenerated (different mtime)
-            assert test_file.stat().st_mtime > original_mtime
+            assert test_file.stat().st_mtime > frozen_mtime
 
 
 @pytest.mark.medium  # Tests generate TPC-H data, taking 2-3s each

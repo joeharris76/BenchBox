@@ -1,18 +1,29 @@
 import io
-from unittest.mock import MagicMock, patch
+import sys
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from click.testing import CliRunner
 
+import benchbox.cli.commands.run  # noqa: F401  ensure the module is loaded
+import benchbox.cli.main  # noqa: F401
 from benchbox.cli.main import cli
 from benchbox.utils.printing import get_console, quiet_console, set_quiet
+
+# Several __init__.py files re-export names that shadow their submodules
+# (e.g. benchbox.cli.commands exports the Click command ``run``, and
+# benchbox.cli exports the function ``main``).  patch() walks the attribute
+# chain and finds the re-exported object instead of the module, so we grab
+# the real modules via sys.modules.
+_run_mod = sys.modules["benchbox.cli.commands.run"]
+_main_mod = sys.modules["benchbox.cli.main"]
 
 pytestmark = pytest.mark.fast
 
 
-def test_quiet_mode_suppresses_all_output():
+def test_quiet_mode_suppresses_decorative_output_generate_phase():
     runner = CliRunner()
-    # Use data-only to avoid requiring any external database dependencies
+    # Use data-only phase to avoid requiring a live DuckDB execution
     result = runner.invoke(
         cli,
         [
@@ -27,7 +38,15 @@ def test_quiet_mode_suppresses_all_output():
         ],
     )
     assert result.exit_code == 0, result.output
-    assert result.output.strip() == ""
+    # Decorative output must be suppressed; only bare filepaths (if any) allowed
+    assert "Benchmark completed" not in result.output
+    assert "Initializing" not in result.output
+    # Each non-empty line must look like a file path, not a status message
+    for line in result.output.splitlines():
+        if line.strip():
+            assert line.strip().startswith("/") or "benchmark_runs" in line, (
+                f"Unexpected non-path output in quiet mode: {line!r}"
+            )
 
 
 def test_default_mode_outputs_messages():
@@ -118,3 +137,85 @@ def test_quiet_console_proxy_delegates_when_not_quiet():
         assert "visible message" in capture.get()
     finally:
         set_quiet(False)
+
+
+def _invoke_run_quiet_with_export(quiet: bool):
+    """Invoke `benchbox run` with mocked export returning a known filepath."""
+    from benchbox.core.schemas import DatabaseConfig
+
+    mock_result = Mock()
+    mock_result.validation_status = "PASSED"
+    mock_result.execution_id = "test-exec-id"
+
+    database_config = DatabaseConfig(type="duckdb", name="DuckDB")
+    mock_db_manager = MagicMock()
+    mock_db_manager.create_config.return_value = database_config
+
+    mock_bench_manager = MagicMock()
+    mock_bench_manager.benchmarks = {
+        "tpch": {
+            "display_name": "TPC-H",
+            "class": Mock(),
+            "description": "TPC-H",
+            "estimated_time_range": (1, 5),
+        }
+    }
+    mock_bench_manager.validate_scale_factor = Mock()
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute_benchmark.return_value = mock_result
+    mock_orchestrator.directory_manager.get_result_path.return_value = "/tmp/test.json"
+    mock_orchestrator.directory_manager.results_dir = "/tmp"
+
+    runner = CliRunner()
+    args = [
+        "run",
+        "--platform",
+        "duckdb",
+        "--benchmark",
+        "tpch",
+        "--scale",
+        "0.01",
+        "--non-interactive",
+        "--phases",
+        "power",
+    ]
+    if quiet:
+        args.append("--quiet")
+
+    with (
+        patch.object(_run_mod, "DatabaseManager", return_value=mock_db_manager),
+        patch.object(_run_mod, "BenchmarkManager", return_value=mock_bench_manager),
+        patch.object(_run_mod, "BenchmarkOrchestrator", return_value=mock_orchestrator),
+        patch.object(_run_mod, "SystemProfiler"),
+        patch.object(_main_mod, "get_config_manager") as mock_cfg,
+        patch.object(_run_mod, "_execute_orchestrated_run", return_value=mock_result),
+        patch.object(_run_mod, "_export_orchestrated_result", return_value={"json": "/tmp/result.json"}),
+        patch.object(_run_mod, "_render_post_run_charts"),
+        patch("benchbox.cli.preferences.save_last_run_config"),
+    ):
+        mock_cfg.return_value.get.side_effect = lambda key, default=None: default
+        return runner.invoke(cli, args)
+
+
+def test_quiet_mode_emits_result_filepath_to_stdout():
+    """--quiet must print the exported filepath to stdout (machine-readable)."""
+    result = _invoke_run_quiet_with_export(quiet=True)
+    assert result.exit_code == 0, result.output
+    assert "/tmp/result.json" in result.output
+
+
+def test_quiet_mode_suppresses_decorative_output():
+    """--quiet must not emit status messages or formatted labels."""
+    result = _invoke_run_quiet_with_export(quiet=True)
+    assert result.exit_code == 0, result.output
+    assert "Benchmark completed" not in result.output
+    assert "JSON:" not in result.output
+
+
+def test_normal_mode_does_not_double_print_filepath():
+    """Normal mode must not print the bare filepath before the formatted label line."""
+    result = _invoke_run_quiet_with_export(quiet=False)
+    assert result.exit_code == 0, result.output
+    # The path should appear once (inside the formatted label), not as a bare extra line
+    assert result.output.count("/tmp/result.json") == 1

@@ -7,10 +7,13 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(".."))
 sys.path.insert(0, os.path.abspath("_static"))
 sys.path.insert(0, os.path.abspath("_extensions"))
+
+DOCS_ROOT = Path(__file__).parent
 
 # Import and register Cobalt2 Pygments style
 try:
@@ -38,9 +41,8 @@ try:
 except ImportError:
     # Fallback: read from pyproject.toml if benchbox not importable
     import re
-    from pathlib import Path
 
-    _pyproject = Path(__file__).parent.parent / "pyproject.toml"
+    _pyproject = DOCS_ROOT.parent / "pyproject.toml"
     if _pyproject.exists():
         _match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', _pyproject.read_text())
         release = _match.group(1) if _match else "0.0.0"
@@ -150,6 +152,16 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_project"]
 
 language = "en"
+
+# -- Options for linkcheck builder -------------------------------------------
+_linkcheck_ignore_file = DOCS_ROOT / "linkcheck_ignore.txt"
+linkcheck_ignore = []
+if _linkcheck_ignore_file.exists():
+    linkcheck_ignore = [
+        line.strip()
+        for line in _linkcheck_ignore_file.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

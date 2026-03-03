@@ -203,7 +203,7 @@ class TestResultBuilder:
         assert result.total_rows_loaded == 6001215 + 1500000
         assert result.data_loading_time == 1.5  # 1500ms -> 1.5s
         assert "lineitem" in result.table_statistics
-        assert result.table_statistics["lineitem"] == 6001215
+        assert result.table_statistics["lineitem"] == {"rows": 6001215, "load_time_ms": 1000}
 
     def test_build_with_execution_phases(self) -> None:
         """Test that execution phases are built correctly."""

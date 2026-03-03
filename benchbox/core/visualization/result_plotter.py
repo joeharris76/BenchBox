@@ -41,6 +41,7 @@ class NormalizedResult:
     source_path: Path | None = None
     raw: dict[str, Any] = field(default_factory=dict)
     execution_mode: str | None = None
+    power_at_size: float | None = None
 
 
 class ResultPlotter:
@@ -238,6 +239,11 @@ class ResultPlotter:
             for q in normalized.queries
         ]
 
+        tpc_metrics = (data.get("summary") or {}).get("tpc_metrics") or {}
+        power_at_size = tpc_metrics.get("power_at_size")
+        if power_at_size is not None:
+            power_at_size = float(power_at_size)
+
         return NormalizedResult(
             benchmark=normalized.benchmark,
             platform=platform,
@@ -252,6 +258,7 @@ class ResultPlotter:
             source_path=source_path,
             raw=data,
             execution_mode=normalized.execution_mode,
+            power_at_size=power_at_size,
         )
 
     @staticmethod
@@ -310,11 +317,14 @@ class ResultPlotter:
             source_path=None,
             raw={},
             execution_mode=execution_mode,
+            power_at_size=getattr(result, "power_at_size", None),
         )
 
     # ---------------------------------------------------------------- Utilities
     def _suggest_chart_types(self) -> list[str]:
         types = ["performance_bar"]
+        if any(result.power_at_size is not None for result in self.results):
+            types.append("power_bar")
         if any(result.cost_total is not None for result in self.results):
             types.append("cost_scatter")
         if any(result.queries for result in self.results):

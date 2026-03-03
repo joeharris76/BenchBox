@@ -64,34 +64,32 @@ def cleanup_results(results_dir: Path) -> Generator[Path, None, None]:
 # ============================================================================
 
 
+def _platform_config(platform: str) -> dict[str, Any]:
+    """Factory for standard platform test configurations."""
+    return {"platform": platform, "benchmark": "tpch", "scale": "0.01"}
+
+
+def _dry_run_config(platform: str, dry_run_dir: Path) -> dict[str, Any]:
+    """Factory for cloud platform dry-run test configurations."""
+    return {**_platform_config(platform), "dry_run": str(dry_run_dir)}
+
+
 @pytest.fixture
 def duckdb_config() -> dict[str, Any]:
     """Default configuration for DuckDB platform tests."""
-    return {
-        "platform": "duckdb",
-        "benchmark": "tpch",
-        "scale": "0.01",
-    }
+    return _platform_config("duckdb")
 
 
 @pytest.fixture
 def sqlite_config() -> dict[str, Any]:
     """Default configuration for SQLite platform tests."""
-    return {
-        "platform": "sqlite",
-        "benchmark": "tpch",
-        "scale": "0.01",
-    }
+    return _platform_config("sqlite")
 
 
 @pytest.fixture
 def datafusion_config() -> dict[str, Any]:
     """Default configuration for DataFusion platform tests."""
-    return {
-        "platform": "datafusion",
-        "benchmark": "tpch",
-        "scale": "0.01",
-    }
+    return _platform_config("datafusion")
 
 
 @pytest.fixture
@@ -167,31 +165,19 @@ def clickhouse_env(clickhouse_stub_dir: Path) -> dict[str, str]:
 @pytest.fixture
 def pandas_df_config() -> dict[str, Any]:
     """Default configuration for Pandas DataFrame platform tests."""
-    return {
-        "platform": "pandas-df",
-        "benchmark": "tpch",
-        "scale": "0.01",
-    }
+    return _platform_config("pandas-df")
 
 
 @pytest.fixture
 def polars_df_config() -> dict[str, Any]:
     """Default configuration for Polars DataFrame platform tests."""
-    return {
-        "platform": "polars-df",
-        "benchmark": "tpch",
-        "scale": "0.01",
-    }
+    return _platform_config("polars-df")
 
 
 @pytest.fixture
 def dask_df_config() -> dict[str, Any]:
     """Default configuration for Dask DataFrame platform tests."""
-    return {
-        "platform": "dask-df",
-        "benchmark": "tpch",
-        "scale": "0.01",
-    }
+    return _platform_config("dask-df")
 
 
 # ============================================================================
@@ -202,56 +188,31 @@ def dask_df_config() -> dict[str, Any]:
 @pytest.fixture
 def snowflake_dry_run_config(dry_run_dir: Path) -> dict[str, Any]:
     """Configuration for Snowflake dry-run tests."""
-    return {
-        "platform": "snowflake",
-        "benchmark": "tpch",
-        "scale": "0.01",
-        "dry_run": str(dry_run_dir),
-    }
+    return _dry_run_config("snowflake", dry_run_dir)
 
 
 @pytest.fixture
 def bigquery_dry_run_config(dry_run_dir: Path) -> dict[str, Any]:
     """Configuration for BigQuery dry-run tests."""
-    return {
-        "platform": "bigquery",
-        "benchmark": "tpch",
-        "scale": "0.01",
-        "dry_run": str(dry_run_dir),
-    }
+    return _dry_run_config("bigquery", dry_run_dir)
 
 
 @pytest.fixture
 def redshift_dry_run_config(dry_run_dir: Path) -> dict[str, Any]:
     """Configuration for Redshift dry-run tests."""
-    return {
-        "platform": "redshift",
-        "benchmark": "tpch",
-        "scale": "0.01",
-        "dry_run": str(dry_run_dir),
-    }
+    return _dry_run_config("redshift", dry_run_dir)
 
 
 @pytest.fixture
 def athena_dry_run_config(dry_run_dir: Path) -> dict[str, Any]:
     """Configuration for Athena dry-run tests."""
-    return {
-        "platform": "athena",
-        "benchmark": "tpch",
-        "scale": "0.01",
-        "dry_run": str(dry_run_dir),
-    }
+    return _dry_run_config("athena", dry_run_dir)
 
 
 @pytest.fixture
 def databricks_dry_run_config(dry_run_dir: Path) -> dict[str, Any]:
     """Configuration for Databricks dry-run tests."""
-    return {
-        "platform": "databricks",
-        "benchmark": "tpch",
-        "scale": "0.01",
-        "dry_run": str(dry_run_dir),
-    }
+    return _dry_run_config("databricks", dry_run_dir)
 
 
 # ============================================================================

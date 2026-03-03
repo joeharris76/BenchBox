@@ -18,19 +18,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
+from benchbox.base import BaseBenchmark
 from benchbox.core.tsbs_devops.generator import TSBSDevOpsDataGenerator
 from benchbox.core.tsbs_devops.queries import TSBSDevOpsQueryManager
 from benchbox.core.tsbs_devops.schema import (
     TSBS_DEVOPS_SCHEMA,
     get_create_tables_sql,
 )
-from benchbox.utils.verbosity import VerbosityMixin, compute_verbosity
 
 if TYPE_CHECKING:
     from benchbox.core.connection import DatabaseConnection
 
 
-class TSBSDevOpsBenchmark(VerbosityMixin):
+class TSBSDevOpsBenchmark(BaseBenchmark):
     """TSBS DevOps benchmark implementation.
 
     Implements Time Series Benchmark Suite for DevOps monitoring workloads:
@@ -100,14 +100,18 @@ class TSBSDevOpsBenchmark(VerbosityMixin):
             force_regenerate: Force data regeneration
             **kwargs: Additional options
         """
-        if scale_factor <= 0:
-            raise ValueError(f"scale_factor must be positive, got {scale_factor}")
-
-        self.scale_factor = scale_factor
-        self.output_dir = (
+        resolved_output_dir = (
             Path(output_dir)
             if output_dir
             else Path.cwd() / "benchmark_runs" / "datagen" / f"tsbs_devops_{scale_factor}"
+        )
+        super().__init__(
+            scale_factor=scale_factor,
+            output_dir=resolved_output_dir,
+            verbose=verbose,
+            quiet=quiet,
+            force_regenerate=force_regenerate,
+            **kwargs,
         )
         self.seed = seed
 
@@ -116,9 +120,6 @@ class TSBSDevOpsBenchmark(VerbosityMixin):
         self._version = "1.0"
         self._description = "Time Series Benchmark Suite for DevOps monitoring workloads"
 
-        # Initialize verbosity
-        verbosity_settings = compute_verbosity(verbose, quiet)
-        self.apply_verbosity(verbosity_settings)
         self.logger = logging.getLogger("benchbox.core.tsbs_devops.benchmark")
 
         # Create data generator

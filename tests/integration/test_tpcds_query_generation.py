@@ -8,9 +8,9 @@ This implementation is based on the TPC-DS specification.
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -23,58 +23,14 @@ class TestTPCDSIntegrationMinimal:
     """Simplified integration tests for TPC-DS C tool wrapper."""
 
     @pytest.fixture(scope="class")
-    def shared_benchmark_data(self):
-        """Generate data once and share across all tests in the class."""
-        benchmark = TPCDSBenchmark(scale_factor=1.0)
-        data_files = benchmark.generate_data()
-        return benchmark, data_files
+    def tpcds_benchmark(self):
+        """Create one reusable benchmark instance for API-level integration checks."""
+        return TPCDSBenchmark(scale_factor=1.0)
 
-    @pytest.fixture
-    def temp_dir(self):
-        """Create a temporary directory for test files."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            yield Path(temp_dir)
-
-    def test_end_to_end_workflow(self, shared_benchmark_data):
-        """Test complete TPC-DS workflow with C tools - comprehensive test."""
-        benchmark, data_files = shared_benchmark_data
-
-        # 1. Test benchmark info
-        info = benchmark.get_benchmark_info()
-        assert info["name"] == "TPC-DS"
-        assert info["scale_factor"] == 1.0
-        assert "c_tools_info" in info
-        assert "available_tables" in info
-        assert "available_queries" in info
-
-        # 2. Test schema
-        schema = benchmark.get_schema()
-        assert isinstance(schema, dict)
-        assert len(schema) > 0
-
-        # 3. Test available tables
-        tables = benchmark.get_available_tables()
-        assert len(tables) > 0
-
-        # 4. Test available queries
-        available_queries = benchmark.get_available_queries()
-        assert len(available_queries) == 99
-
-        # 5. Test all queries
-        queries = benchmark.get_queries()
-        assert len(queries) > 0
-        assert isinstance(queries, dict)
-
-        # 6. Test specific query access
-        query1 = benchmark.get_query(1)
-        assert isinstance(query1, str)
-        assert len(query1) > 0
-
-        # 7. Test data generation (already generated via fixture)
-        assert len(data_files) > 0
-        # Verify files exist and are not empty - data_files is list[Path]
+    @staticmethod
+    def _assert_generated_files_exist(data_files: list[Path] | list[list[Path]]) -> None:
+        """Validate generated file references from TPC-DS data generation."""
         for file_path_or_list in data_files:
-            # Handle both Path and list[Path] entries
             if isinstance(file_path_or_list, list):
                 for file_path in file_path_or_list:
                     assert file_path.exists(), f"File {file_path} should exist"
@@ -83,6 +39,40 @@ class TestTPCDSIntegrationMinimal:
                 file_path = Path(file_path_or_list)
                 assert file_path.exists(), f"File {file_path} should exist"
                 assert file_path.stat().st_size > 0, f"File {file_path} should not be empty"
+
+    def test_end_to_end_workflow(self, tpcds_benchmark):
+        """Test complete TPC-DS workflow with C tools - comprehensive test."""
+
+        # 1. Test benchmark info
+        info = tpcds_benchmark.get_benchmark_info()
+        assert info["name"] == "TPC-DS"
+        assert info["scale_factor"] == 1.0
+        assert "c_tools_info" in info
+        assert "available_tables" in info
+        assert "available_queries" in info
+
+        # 2. Test schema
+        schema = tpcds_benchmark.get_schema()
+        assert isinstance(schema, dict)
+        assert len(schema) > 0
+
+        # 3. Test available tables
+        tables = tpcds_benchmark.get_available_tables()
+        assert len(tables) > 0
+
+        # 4. Test available queries
+        available_queries = tpcds_benchmark.get_available_queries()
+        assert len(available_queries) == 99
+
+        # 5. Test all queries
+        queries = tpcds_benchmark.get_queries()
+        assert len(queries) > 0
+        assert isinstance(queries, dict)
+
+        # 6. Test specific query access
+        query1 = tpcds_benchmark.get_query(1)
+        assert isinstance(query1, str)
+        assert len(query1) > 0
 
     def test_c_tool_integration_workflow(self):
         """Test C tool integration workflow."""
@@ -123,47 +113,25 @@ class TestTPCDSIntegrationMinimal:
         assert "select" in query1.lower() or "with" in query1.lower()
         assert "select" in query2.lower() or "with" in query2.lower()
 
-    def test_data_generation_integration(self, shared_benchmark_data):
-        """Test data generation integration."""
-        benchmark, data_files = shared_benchmark_data
-
-        # Test data generation (returns list[Path] from benchmark.generate_data())
+    @pytest.mark.slow
+    @pytest.mark.stress
+    def test_data_generation_integration(self):
+        """Run one full-fidelity TPC-DS data generation path in stress lane."""
+        benchmark = TPCDSBenchmark(scale_factor=1.0)
+        data_files = benchmark.generate_data()
         assert len(data_files) > 0
+        self._assert_generated_files_exist(data_files)
 
-        # Check that files exist and are not empty
-        for file_path_or_list in data_files:
-            # Handle both Path and list[Path] entries
-            if isinstance(file_path_or_list, list):
-                for file_path in file_path_or_list:
-                    assert file_path.exists(), f"Data file {file_path} should exist"
-                    assert file_path.stat().st_size > 0, f"Data file {file_path} should not be empty"
-            else:
-                file_path = Path(file_path_or_list)
-                assert file_path.exists(), f"Data file {file_path} should exist"
-                assert file_path.stat().st_size > 0, f"Data file {file_path} should not be empty"
-
-    def test_scale_factor_integration(self, shared_benchmark_data):
+    def test_scale_factor_integration(self, tpcds_benchmark):
         """Test scale factor integration."""
-        benchmark, data_files = shared_benchmark_data
 
         # Test that benchmark respects scale factor
-        assert benchmark.scale_factor == 1.0
-        assert len(data_files) > 0
-
-        # Verify data files were generated - data_files is list[Path]
-        for file_path_or_list in data_files:
-            # Handle both Path and list[Path] entries
-            if isinstance(file_path_or_list, list):
-                for file_path in file_path_or_list:
-                    assert file_path.exists(), f"File {file_path} should exist"
-            else:
-                file_path = Path(file_path_or_list)
-                assert file_path.exists(), f"File {file_path} should exist"
+        assert tpcds_benchmark.scale_factor == 1.0
+        info = tpcds_benchmark.get_benchmark_info()
+        assert info["scale_factor"] == 1.0
 
     def test_error_handling_integration(self):
         """Test error handling integration."""
-        from unittest.mock import patch
-
         benchmark = TPCDSBenchmark()
 
         # Test query error handling
@@ -251,8 +219,6 @@ class TestTPCDSIntegrationMinimal:
 
     def test_performance_integration(self):
         """Test performance integration."""
-        from unittest.mock import patch
-
         benchmark = TPCDSBenchmark()
 
         # Test query access performance

@@ -333,4 +333,4 @@ Table 'lineitem' already exists
 - [Deployment Modes Guide](deployment-modes.md) - Platform deployment architecture
 - [Platform Selection Guide](platform-selection-guide.md) - Choose the right platform
 - [Getting Started](../usage/getting-started.md) - Quick start guide
-- [LakeSail Documentation](https://lakesail.com/docs) - Official LakeSail Sail documentation
+- [LakeSail Documentation](https://lakesail.com) - Official LakeSail documentation portal

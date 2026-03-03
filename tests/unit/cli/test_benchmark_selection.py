@@ -415,6 +415,7 @@ class TestTwoPhaseSelectionFlow:
             "write_primitives",
             "transaction_primitives",
             "metadata_primitives",
+            "ai_primitives",
         ]
 
     def test_prompt_category_selection_returns_category(self):

@@ -477,8 +477,8 @@ Generate charts from benchmark results.
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `result_files` | string | Yes | - | Comma-separated list of result filenames |
-| `chart_type` | string | No | "performance_bar" | Chart type: performance_bar, distribution_box, query_heatmap, query_histogram, cost_scatter, time_series, comparison_bar, diverging_bar, summary_box |
-| `template` | string | No | None | Template: default, flagship, head_to_head, trends, cost_optimization, comparison |
+| `chart_type` | string | No | "performance_bar" | Chart type: performance_bar, power_bar, distribution_box, query_heatmap, query_histogram, cost_scatter, time_series, comparison_bar, diverging_bar, summary_box, percentile_ladder, normalized_speedup, stacked_phase, sparkline_table, cdf_chart, rank_table |
+| `template` | string | No | None | Template: default, flagship, head_to_head, trends, cost_optimization, comparison, latency_deep_dive, regression_triage, executive_summary |
 | `output_dir` | string | No | None | Output directory (relative to charts dir) |
 | `format` | string | No | "ascii" | Output format: 'ascii' for terminal-friendly text output |
 

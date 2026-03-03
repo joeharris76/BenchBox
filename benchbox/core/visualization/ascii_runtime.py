@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 from benchbox.core.visualization.ascii import (
@@ -49,6 +50,28 @@ def _render_performance_bar(results: list, options: Any, metadata: dict[str, Any
         data=bar_data,
         title="Performance Comparison",
         metric_label="Execution Time (ms)",
+        options=options,
+        metadata=metadata,
+    )
+    return chart.render()
+
+
+def _render_power_bar(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+    bar_data: list[BarData] = [
+        BarData(label=r.platform, value=float(r.power_at_size)) for r in results if r.power_at_size is not None
+    ]
+    if not bar_data:
+        return None
+    # Higher Power@Size = better performance; mark accordingly (descending sort)
+    sorted_data = sorted(bar_data, key=lambda x: x.value, reverse=True)
+    sorted_data[0].is_best = True
+    if len(sorted_data) > 1:
+        sorted_data[-1].is_worst = True
+
+    chart = ASCIIBarChart(
+        data=bar_data,
+        title="Power@Size Comparison",
+        metric_label="Power@Size",
         options=options,
         metadata=metadata,
     )
@@ -414,6 +437,7 @@ def _render_rank_table(results: list, options: Any, metadata: dict[str, Any]) ->
 
 _CHART_TYPE_DISPATCH: dict[str, Any] = {
     "performance_bar": _render_performance_bar,
+    "power_bar": _render_power_bar,
     "distribution_box": _render_distribution_box,
     "query_heatmap": _render_query_heatmap,
     "query_histogram": _render_query_histogram,
@@ -442,6 +466,15 @@ def _extract_platform_query_timings(results: list) -> list[tuple[str, list[float
     return platform_queries
 
 
+def _natural_sort_key(s: str) -> tuple[float, str]:
+    """Sort key for natural ordering of query IDs (e.g. Q1, Q2, ... Q10)."""
+    match = re.match(r"^(\D*)(\d+)(.*)$", s)
+    if match:
+        prefix, num, suffix = match.groups()
+        return (float(num), prefix + suffix)
+    return (float("inf"), s)
+
+
 def _build_query_matrix(results: list) -> tuple[list[str], list[str], list[list[float]]]:
     platforms = [r.platform for r in results]
     query_ids: list[str] = []
@@ -453,6 +486,8 @@ def _build_query_matrix(results: list) -> tuple[list[str], list[str], list[list[
                 platform_timings[result.platform][query.query_id] = float(query.execution_time_ms)
                 if query.query_id not in query_ids:
                     query_ids.append(query.query_id)
+
+    query_ids.sort(key=_natural_sort_key)
 
     matrix: list[list[float]] = []
     for qid in query_ids:

@@ -17,6 +17,7 @@ import pytest
 from click.testing import CliRunner
 
 from benchbox.cli.app import cli
+from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 
 pytestmark = [
     pytest.mark.fast,
@@ -29,6 +30,20 @@ pytestmark = [
 
 class TestCompareCommand:
     """Test the compare CLI command."""
+
+    @staticmethod
+    def _set_loaded_result_pair(mock_load):
+        mock_baseline = MagicMock(benchmark_name="TPC-H", platform="DuckDB", scale_factor=0.01)
+        mock_current = MagicMock(benchmark_name="TPC-H", platform="DuckDB", scale_factor=0.01)
+        mock_load.side_effect = [(mock_baseline, {}), (mock_current, {})]
+
+    @staticmethod
+    def _write_empty_compare_inputs(tmpdir: str) -> tuple[Path, Path]:
+        baseline_path = Path(tmpdir) / "baseline.json"
+        current_path = Path(tmpdir) / "current.json"
+        baseline_path.write_text("{}")
+        current_path.write_text("{}")
+        return baseline_path, current_path
 
     def test_compare_command_exists(self):
         """Test that the compare command is available."""
@@ -69,22 +84,7 @@ class TestCompareCommand:
     def test_compare_two_files_success(self, mock_exporter_class, mock_load):
         """Test successful comparison of two result files."""
         runner = CliRunner()
-
-        # Mock loaded results
-        mock_baseline = MagicMock()
-        mock_baseline.benchmark_name = "TPC-H"
-        mock_baseline.platform = "DuckDB"
-        mock_baseline.scale_factor = 0.01
-
-        mock_current = MagicMock()
-        mock_current.benchmark_name = "TPC-H"
-        mock_current.platform = "DuckDB"
-        mock_current.scale_factor = 0.01
-
-        mock_load.side_effect = [
-            (mock_baseline, {}),
-            (mock_current, {}),
-        ]
+        self._set_loaded_result_pair(mock_load)
 
         # Mock comparison result
         mock_exporter = MagicMock()
@@ -104,12 +104,7 @@ class TestCompareCommand:
         mock_exporter_class.return_value = mock_exporter
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            baseline_path = Path(tmpdir) / "baseline.json"
-            current_path = Path(tmpdir) / "current.json"
-
-            baseline_path.write_text("{}")
-            current_path.write_text("{}")
-
+            baseline_path, current_path = self._write_empty_compare_inputs(tmpdir)
             result = runner.invoke(cli, ["compare", str(baseline_path), str(current_path)])
 
             assert result.exit_code == 0
@@ -120,21 +115,7 @@ class TestCompareCommand:
     def test_compare_with_regression_detection(self, mock_exporter_class, mock_load):
         """Test comparison with regression detection and exit code."""
         runner = CliRunner()
-
-        mock_baseline = MagicMock()
-        mock_baseline.benchmark_name = "TPC-H"
-        mock_baseline.platform = "DuckDB"
-        mock_baseline.scale_factor = 0.01
-
-        mock_current = MagicMock()
-        mock_current.benchmark_name = "TPC-H"
-        mock_current.platform = "DuckDB"
-        mock_current.scale_factor = 0.01
-
-        mock_load.side_effect = [
-            (mock_baseline, {}),
-            (mock_current, {}),
-        ]
+        self._set_loaded_result_pair(mock_load)
 
         # Mock comparison with regression
         mock_exporter = MagicMock()
@@ -163,12 +144,7 @@ class TestCompareCommand:
         mock_exporter_class.return_value = mock_exporter
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            baseline_path = Path(tmpdir) / "baseline.json"
-            current_path = Path(tmpdir) / "current.json"
-
-            baseline_path.write_text("{}")
-            current_path.write_text("{}")
-
+            baseline_path, current_path = self._write_empty_compare_inputs(tmpdir)
             result = runner.invoke(
                 cli, ["compare", str(baseline_path), str(current_path), "--fail-on-regression", "10%"]
             )
@@ -184,15 +160,9 @@ class TestCompareCommand:
             baseline_path = Path(tmpdir) / "baseline.json"
             current_path = Path(tmpdir) / "current.json"
 
-            # Create minimal valid result files
-            baseline_data = {
-                "schema_version": "1.0",
-                "benchmark": {"id": "tpch", "name": "TPC-H"},
-                "execution": {"timestamp": "2024-01-01T00:00:00", "platform": "DuckDB"},
-                "configuration": {"scale_factor": 0.01},
-                "results": {"queries": {"details": []}},
-            }
-            current_data = baseline_data.copy()
+            # Create minimal valid v2 result files
+            baseline_data = make_v2_result_dict(version="2.0", query_time_ms=100, total_ms=100)
+            current_data = make_v2_result_dict(version="2.0", query_time_ms=100, total_ms=100)
 
             baseline_path.write_text(json.dumps(baseline_data))
             current_path.write_text(json.dumps(current_data))
@@ -212,12 +182,7 @@ class TestCompareCommand:
         runner = CliRunner()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            baseline_path = Path(tmpdir) / "baseline.json"
-            current_path = Path(tmpdir) / "current.json"
-
-            baseline_path.write_text("{}")
-            current_path.write_text("{}")
-
+            baseline_path, current_path = self._write_empty_compare_inputs(tmpdir)
             result = runner.invoke(
                 cli, ["compare", str(baseline_path), str(current_path), "--fail-on-regression", "invalid"]
             )
@@ -240,22 +205,7 @@ class TestCompareCommand:
     def test_compare_with_include_plans_flag(self, mock_compare_plans, mock_exporter_class, mock_load):
         """Test comparison with --include-plans flag."""
         runner = CliRunner()
-
-        # Mock loaded results
-        mock_baseline = MagicMock()
-        mock_baseline.benchmark_name = "TPC-H"
-        mock_baseline.platform = "DuckDB"
-        mock_baseline.scale_factor = 0.01
-
-        mock_current = MagicMock()
-        mock_current.benchmark_name = "TPC-H"
-        mock_current.platform = "DuckDB"
-        mock_current.scale_factor = 0.01
-
-        mock_load.side_effect = [
-            (mock_baseline, {}),
-            (mock_current, {}),
-        ]
+        self._set_loaded_result_pair(mock_load)
 
         # Mock comparison result
         mock_exporter = MagicMock()
@@ -286,12 +236,7 @@ class TestCompareCommand:
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            baseline_path = Path(tmpdir) / "baseline.json"
-            current_path = Path(tmpdir) / "current.json"
-
-            baseline_path.write_text("{}")
-            current_path.write_text("{}")
-
+            baseline_path, current_path = self._write_empty_compare_inputs(tmpdir)
             result = runner.invoke(cli, ["compare", str(baseline_path), str(current_path), "--include-plans"])
 
             assert result.exit_code == 0
@@ -305,21 +250,7 @@ class TestCompareCommand:
     def test_compare_include_plans_no_plans_available(self, mock_compare_plans, mock_exporter_class, mock_load):
         """Test --include-plans when result files have no captured plans."""
         runner = CliRunner()
-
-        mock_baseline = MagicMock()
-        mock_baseline.benchmark_name = "TPC-H"
-        mock_baseline.platform = "DuckDB"
-        mock_baseline.scale_factor = 0.01
-
-        mock_current = MagicMock()
-        mock_current.benchmark_name = "TPC-H"
-        mock_current.platform = "DuckDB"
-        mock_current.scale_factor = 0.01
-
-        mock_load.side_effect = [
-            (mock_baseline, {}),
-            (mock_current, {}),
-        ]
+        self._set_loaded_result_pair(mock_load)
 
         mock_exporter = MagicMock()
         mock_exporter.compare_results.return_value = {
@@ -335,12 +266,7 @@ class TestCompareCommand:
         mock_compare_plans.return_value = None
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            baseline_path = Path(tmpdir) / "baseline.json"
-            current_path = Path(tmpdir) / "current.json"
-
-            baseline_path.write_text("{}")
-            current_path.write_text("{}")
-
+            baseline_path, current_path = self._write_empty_compare_inputs(tmpdir)
             result = runner.invoke(cli, ["compare", str(baseline_path), str(current_path), "--include-plans"])
 
             assert result.exit_code == 0
@@ -412,22 +338,20 @@ class TestResultFileDiscovery:
             tmppath = Path(tmpdir)
 
             # Create valid v2.0 result file
-            valid_result = {
-                "version": "2.0",
-                "run": {
-                    "id": "abc123",
-                    "timestamp": "2025-12-15T10:30:00",
-                    "total_duration_ms": 1000,
-                    "query_time_ms": 500,
-                },
-                "benchmark": {"id": "tpc_h", "name": "TPC-H Benchmark", "scale_factor": 0.01},
-                "platform": {"name": "DuckDB"},
-                "summary": {
-                    "queries": {"total": 1, "passed": 1, "failed": 0},
-                    "timing": {"total_ms": 500, "avg_ms": 500, "min_ms": 500, "max_ms": 500},
-                },
-                "queries": [{"id": "1", "ms": 500.0, "rows": 4}],
-            }
+            valid_result = make_v2_result_dict(
+                version="2.0",
+                benchmark_id="tpc_h",
+                benchmark_name="TPC-H Benchmark",
+                platform="DuckDB",
+                execution_id="abc123",
+                timestamp="2025-12-15T10:30:00",
+                query_time_ms=500,
+                total_queries=1,
+                passed_queries=1,
+                failed_queries=0,
+                total_ms=500,
+                queries=[{"id": "1", "ms": 500.0, "rows": 4}],
+            )
             (tmppath / "valid_result.json").write_text(json.dumps(valid_result))
 
             # Create invalid file (no version - could be v1.x or just invalid)
@@ -472,22 +396,19 @@ class TestResultFileDiscovery:
 
             # Create v2.0 files with different timestamps
             for i, ts in enumerate(["2025-12-13", "2025-12-15", "2025-12-14"]):
-                result = {
-                    "version": "2.0",
-                    "run": {
-                        "id": f"run{i}",
-                        "timestamp": f"{ts}T10:00:00",
-                        "total_duration_ms": 1000,
-                        "query_time_ms": 500,
-                    },
-                    "benchmark": {"id": "tpch", "name": "TPC-H", "scale_factor": 1.0},
-                    "platform": {"name": "DuckDB"},
-                    "summary": {
-                        "queries": {"total": 1, "passed": 1, "failed": 0},
-                        "timing": {"total_ms": 500, "avg_ms": 500, "min_ms": 500, "max_ms": 500},
-                    },
-                    "queries": [{"id": "1", "ms": 500.0, "rows": 4}],
-                }
+                result = make_v2_result_dict(
+                    version="2.0",
+                    platform="DuckDB",
+                    execution_id=f"run{i}",
+                    timestamp=f"{ts}T10:00:00",
+                    scale_factor=1.0,
+                    query_time_ms=500,
+                    total_queries=1,
+                    passed_queries=1,
+                    failed_queries=0,
+                    total_ms=500,
+                    queries=[{"id": "1", "ms": 500.0, "rows": 4}],
+                )
                 (tmppath / f"result_{i}.json").write_text(json.dumps(result))
 
             results = _discover_result_files_with_metadata(search_dirs=[tmppath])

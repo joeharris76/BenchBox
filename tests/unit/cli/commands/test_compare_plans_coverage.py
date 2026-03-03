@@ -82,18 +82,36 @@ class _Results:
         self.phases = {"power": _Phase([_Exec(qid, qp) for qid in ids])}
 
 
-class _BR:
-    _sequence = []
-
-    @staticmethod
-    def from_dict(_d):
-        if _BR._sequence:
-            return _BR._sequence.pop(0)
-        return _Results()
-
-
 def _write_json(path: Path) -> None:
     path.write_text(json.dumps({"schema_version": "1.0"}), encoding="utf-8")
+
+
+def _make_load_seq(*results_list):
+    """Return a load_result_file stub that yields each _Results in order."""
+    seq = list(results_list)
+
+    def _load(_p):
+        return (seq.pop(0), {})
+
+    return _load
+
+
+def test_compare_plans_uses_load_result_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """compare-plans must use load_result_file for both runs."""
+    p1 = tmp_path / "r1.json"
+    p2 = tmp_path / "r2.json"
+    _write_json(p1)
+    _write_json(p2)
+    calls = []
+
+    def _spy(_p):
+        calls.append(_p)
+        return (_Results(), {})
+
+    monkeypatch.setattr(cp, "load_result_file", _spy)
+    monkeypatch.setattr(cp, "generate_plan_comparison_summary", lambda *_a, **_k: _Summary())
+    CliRunner().invoke(cp.compare_plans, ["--run1", str(p1), "--run2", str(p2), "--summary"])
+    assert len(calls) == 2
 
 
 def test_compare_plans_summary_mode_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -103,8 +121,7 @@ def test_compare_plans_summary_mode_writes_file(monkeypatch: pytest.MonkeyPatch,
     _write_json(p1)
     _write_json(p2)
 
-    _BR._sequence = [_Results(), _Results()]
-    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+    monkeypatch.setattr(cp, "load_result_file", _make_load_seq(_Results(), _Results()))
     monkeypatch.setattr(cp, "generate_plan_comparison_summary", lambda *_a, **_k: _Summary())
 
     result = CliRunner().invoke(
@@ -121,8 +138,7 @@ def test_compare_plans_no_common_queries_exits(monkeypatch: pytest.MonkeyPatch, 
     _write_json(p1)
     _write_json(p2)
 
-    _BR._sequence = [_Results(ids=("q1",)), _Results(ids=("q2",))]
-    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+    monkeypatch.setattr(cp, "load_result_file", _make_load_seq(_Results(ids=("q1",)), _Results(ids=("q2",))))
 
     result = CliRunner().invoke(cp.compare_plans, ["--run1", str(p1), "--run2", str(p2)])
     assert result.exit_code == 1
@@ -135,8 +151,7 @@ def test_compare_plans_threshold_success_message(monkeypatch: pytest.MonkeyPatch
     _write_json(p1)
     _write_json(p2)
 
-    _BR._sequence = [_Results(ids=("q1", "q2")), _Results(ids=("q1", "q2"))]
-    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+    monkeypatch.setattr(cp, "load_result_file", _make_load_seq(_Results(ids=("q1", "q2")), _Results(ids=("q1", "q2"))))
     monkeypatch.setattr(cp, "compare_query_plans", lambda *_a, **_k: _Cmp(similarity=_Sim(0.99)))
 
     result = CliRunner().invoke(cp.compare_plans, ["--run1", str(p1), "--run2", str(p2), "--threshold", "0.95"])
@@ -150,8 +165,11 @@ def test_compare_plans_specific_query_missing_plan_warns(monkeypatch: pytest.Mon
     _write_json(p1)
     _write_json(p2)
 
-    _BR._sequence = [_Results(ids=("q1",), with_plans=False), _Results(ids=("q1",), with_plans=True)]
-    monkeypatch.setattr(cp, "BenchmarkResults", _BR)
+    monkeypatch.setattr(
+        cp,
+        "load_result_file",
+        _make_load_seq(_Results(ids=("q1",), with_plans=False), _Results(ids=("q1",), with_plans=True)),
+    )
 
     result = CliRunner().invoke(cp.compare_plans, ["--run1", str(p1), "--run2", str(p2), "--query-id", "q1"])
     assert result.exit_code == 0

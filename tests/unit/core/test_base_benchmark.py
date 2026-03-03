@@ -11,6 +11,7 @@ import pytest
 
 from benchbox.core.base_benchmark import BaseBenchmark  # Adjust import path as needed
 from benchbox.core.results.models import BenchmarkResults
+from benchbox.core.results.result_factory import build_enhanced_benchmark_result
 
 # Mark all tests in this file as unit tests
 pytestmark = [pytest.mark.unit, pytest.mark.fast]
@@ -309,8 +310,7 @@ class TestMinimalResultHelper:
         assert result.platform == "duckdb"
         assert result.validation_status == "FAILED"
         assert result.validation_details == {"error": "boom"}
-        # Note: duration_seconds is not propagated by create_minimal_benchmark_result
-        # (it's calculated from query_results which are empty for minimal results)
+        assert result.duration_seconds == 2.5
         assert result.execution_metadata["result_type"] == "minimal"
         assert result.execution_metadata["status"] == "FAILED"
         assert result.execution_metadata["reason"] == "test"
@@ -334,6 +334,113 @@ class TestMinimalResultHelper:
         assert result.execution_metadata["result_type"] == "minimal"
         assert result.execution_metadata["status"] == "INTERRUPTED"
         assert result.execution_metadata["benchmark_id"] == "mock_benchmark"
+
+
+def test_create_minimal_benchmark_result_propagates_duration_seconds(base_benchmark):
+    """Explicit duration should be preserved in the resulting BenchmarkResults."""
+
+    result = base_benchmark.create_minimal_benchmark_result(
+        validation_status="FAILED",
+        duration_seconds=3.25,
+    )
+
+    assert isinstance(result, BenchmarkResults)
+    assert result.duration_seconds == 3.25
+
+
+def test_create_enhanced_benchmark_result_per_table_timings(base_benchmark):
+    """per_table_timings kwarg should map total_ms into per-table load_time_ms."""
+
+    result = base_benchmark.create_enhanced_benchmark_result(
+        platform="duckdb",
+        query_results=[],
+        duration_seconds=2.0,
+        data_loading_time=2.0,
+        table_statistics={"lineitem": 6000000, "orders": 1500000},
+        per_table_timings={
+            "lineitem": {"total_ms": 1800},
+            "orders": {"total_ms": 200},
+        },
+    )
+
+    assert isinstance(result, BenchmarkResults)
+    assert result.table_statistics["lineitem"] == {"rows": 6000000, "load_time_ms": 1800}
+    assert result.table_statistics["orders"] == {"rows": 1500000, "load_time_ms": 200}
+    assert result.data_loading_time == 2.0
+
+
+def test_create_enhanced_benchmark_result_per_table_timings_missing_table(base_benchmark):
+    """Tables absent from per_table_timings should default load_time_ms to 0 (omitted)."""
+
+    result = base_benchmark.create_enhanced_benchmark_result(
+        platform="duckdb",
+        query_results=[],
+        duration_seconds=1.0,
+        data_loading_time=1.0,
+        table_statistics={"lineitem": 6000000, "nation": 25},
+        per_table_timings={"lineitem": {"total_ms": 950}},
+    )
+
+    # lineitem has timing — emitted as dict
+    assert result.table_statistics["lineitem"] == {"rows": 6000000, "load_time_ms": 950}
+    # nation has no timing — load_time_ms=0 → only rows emitted
+    assert result.table_statistics["nation"] == {"rows": 25}
+
+
+def test_create_enhanced_benchmark_result_per_table_timings_float_format(base_benchmark):
+    """Non-dict timing values (e.g. fabric_spark legacy) should not raise; load_time_ms defaults to 0."""
+
+    result = base_benchmark.create_enhanced_benchmark_result(
+        platform="fabric_spark",
+        query_results=[],
+        duration_seconds=1.0,
+        data_loading_time=1.0,
+        table_statistics={"sales": 100000},
+        per_table_timings={"sales": 1.5},  # float, not dict — pre-fix fabric_spark format
+    )
+
+    assert result.table_statistics["sales"] == {"rows": 100000}  # no load_time_ms — graceful fallback
+
+
+def test_result_factory_build_enhanced_benchmark_result_matches_base_behavior(base_benchmark):
+    """Shared result factory should preserve BaseBenchmark's enhanced-result behavior."""
+
+    kwargs = {
+        "platform": "duckdb",
+        "query_results": [],
+        "duration_seconds": 2.5,
+        "execution_metadata": {"mode": "load_only", "benchmark_id": "mock"},
+        "table_statistics": {"lineitem": 6000000, "orders": 1500000},
+        "per_table_timings": {"lineitem": {"total_ms": 2000}, "orders": {"total_ms": 500}},
+        "data_loading_time": 2.5,
+    }
+
+    result_from_method = base_benchmark.create_enhanced_benchmark_result(**kwargs)
+    result_from_factory = build_enhanced_benchmark_result(benchmark=base_benchmark, **kwargs)
+
+    assert isinstance(result_from_factory, BenchmarkResults)
+    assert result_from_factory.duration_seconds == result_from_method.duration_seconds
+    assert result_from_factory.data_loading_time == result_from_method.data_loading_time
+    assert result_from_factory.table_statistics == result_from_method.table_statistics
+    assert result_from_factory.execution_metadata.get("mode") == "load_only"
+    assert result_from_factory.execution_metadata.get("benchmark_id") == "mock"
+
+
+def test_result_factory_build_enhanced_handles_non_dict_per_table_timings(base_benchmark):
+    """Shared result factory should gracefully handle legacy non-dict per-table timing values."""
+
+    result = build_enhanced_benchmark_result(
+        benchmark=base_benchmark,
+        platform="fabric_spark",
+        query_results=[],
+        duration_seconds=1.0,
+        data_loading_time=1.0,
+        table_statistics={"sales": 100000},
+        per_table_timings={"sales": 1.5},
+    )
+
+    assert isinstance(result, BenchmarkResults)
+    assert result.table_statistics["sales"] == {"rows": 100000}
 
 
 if __name__ == "__main__":

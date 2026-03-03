@@ -15,6 +15,8 @@ import pytest
 from benchbox import AMPLab
 from benchbox.core.amplab.benchmark import AMPLabBenchmark
 
+from .fixtures.benchmark_test_mixin import BenchmarkTestMixin
+
 
 @pytest.mark.amplab
 class TestAMPLab:
@@ -247,13 +249,25 @@ class TestAMPLab:
 
 
 @pytest.mark.amplab
-class TestAMPLabBenchmarkDirectly:
+class TestAMPLabBenchmarkDirectly(BenchmarkTestMixin):
     """Test AMPLabBenchmark class directly for better coverage."""
+
+    benchmark_class = AMPLabBenchmark
+    sample_query_id = "1"
+    sample_table = "rankings"
+    sample_sql = "SELECT * FROM rankings"
+    sample_csv_filename = "rankings.csv"
+    sample_csv_content = "url1|1|100\nurl2|2|200\n"
 
     @pytest.fixture
     def amplab_benchmark(self, small_scale_factor: float, temp_dir: Path) -> AMPLabBenchmark:
         """Create an AMPLabBenchmark instance for testing."""
         return AMPLabBenchmark(scale_factor=small_scale_factor, output_dir=temp_dir)
+
+    @pytest.fixture
+    def benchmark_instance(self, amplab_benchmark: AMPLabBenchmark) -> AMPLabBenchmark:
+        """Alias for the mixin's benchmark_instance fixture."""
+        return amplab_benchmark
 
     def test_init_with_default_output_dir(self) -> None:
         """Test benchmark initialization with default output directory."""
@@ -285,84 +299,6 @@ class TestAMPLabBenchmarkDirectly:
             mock_generate.assert_called_once_with(["rankings"])
             assert result == {"rankings": "/path/to/rankings.csv"}
             assert amplab_benchmark.tables == result
-
-    def test_execute_query_direct_connection(self, amplab_benchmark: AMPLabBenchmark) -> None:
-        """Test execute_query with direct database connection."""
-        mock_connection = Mock()
-        mock_cursor = Mock()
-        mock_cursor.fetchall.return_value = [("result1",), ("result2",)]
-        mock_connection.execute.return_value = mock_cursor
-
-        with patch.object(amplab_benchmark, "get_query") as mock_get_query:
-            mock_get_query.return_value = "SELECT * FROM rankings"
-
-            result = amplab_benchmark.execute_query("1", mock_connection)
-
-            mock_get_query.assert_called_once_with("1", params=None)
-            mock_connection.execute.assert_called_once_with("SELECT * FROM rankings")
-            mock_cursor.fetchall.assert_called_once()
-            assert result == [("result1",), ("result2",)]
-
-    def test_execute_query_cursor_connection(self, amplab_benchmark: AMPLabBenchmark) -> None:
-        """Test execute_query with cursor-based connection."""
-        mock_connection = Mock()
-        mock_cursor = Mock()
-        mock_cursor.fetchall.return_value = [("result1",), ("result2",)]
-        mock_connection.cursor.return_value = mock_cursor
-        delattr(mock_connection, "execute")  # Remove execute method to force cursor path
-
-        with patch.object(amplab_benchmark, "get_query") as mock_get_query:
-            mock_get_query.return_value = "SELECT * FROM rankings"
-
-            result = amplab_benchmark.execute_query("1", mock_connection, {"param": "value"})
-
-            mock_get_query.assert_called_once_with("1", params={"param": "value"})
-            mock_connection.cursor.assert_called_once()
-            mock_cursor.execute.assert_called_once_with("SELECT * FROM rankings")
-            mock_cursor.fetchall.assert_called_once()
-            assert result == [("result1",), ("result2",)]
-
-    def test_execute_query_unsupported_connection(self, amplab_benchmark: AMPLabBenchmark) -> None:
-        """Test execute_query with unsupported connection type."""
-        mock_connection = Mock()
-        delattr(mock_connection, "execute")
-        delattr(mock_connection, "cursor")
-
-        with patch.object(amplab_benchmark, "get_query") as mock_get_query:
-            mock_get_query.return_value = "SELECT * FROM rankings"
-
-            with pytest.raises(ValueError, match="Unsupported connection type"):
-                amplab_benchmark.execute_query("1", mock_connection)
-
-    def test_load_data_to_database_no_data(self, amplab_benchmark: AMPLabBenchmark) -> None:
-        """Test load_data_to_database when no data has been generated."""
-        mock_connection = Mock()
-
-        with pytest.raises(ValueError, match="No data generated"):
-            amplab_benchmark.load_data_to_database(mock_connection)
-
-    def test_load_data_to_database_executescript(self, amplab_benchmark: AMPLabBenchmark) -> None:
-        """Test load_data_to_database with executescript support."""
-        # Set up mock data
-        with tempfile.TemporaryDirectory() as temp_dir:
-            csv_file = Path(temp_dir) / "rankings.csv"
-            csv_file.write_text("url1|1|100\nurl2|2|200\n")
-
-            amplab_benchmark.tables = {"rankings": str(csv_file)}
-
-            mock_connection = Mock()
-            mock_connection.executescript = Mock()
-            mock_connection.executemany = Mock()
-            mock_connection.commit = Mock()
-
-            with patch.object(amplab_benchmark, "get_create_tables_sql") as mock_get_sql:
-                mock_get_sql.return_value = "CREATE TABLE rankings (...);"
-
-                amplab_benchmark.load_data_to_database(mock_connection)
-
-                mock_connection.executescript.assert_called_once()
-                mock_connection.executemany.assert_called()
-                mock_connection.commit.assert_called_once()
 
     def test_load_data_to_database_cursor_mode(self, amplab_benchmark: AMPLabBenchmark) -> None:
         """Test load_data_to_database with cursor mode."""

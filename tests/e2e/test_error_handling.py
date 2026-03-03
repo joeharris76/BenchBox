@@ -5,11 +5,28 @@ Tests validate that the CLI correctly handles invalid inputs and error condition
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from click.testing import CliRunner
 
-from tests.integration._cli_e2e_utils import run_cli_command
+from benchbox.cli.main import cli
+from tests.integration._cli_e2e_utils import run_cli_command as run_cli_subprocess_command
+
+_CLI_RUNNER = CliRunner()
+
+
+def run_cli_command(args: Sequence[str], *, use_subprocess: bool = False) -> SimpleNamespace:
+    """Run CLI in-process by default to reduce subprocess startup cost."""
+    if use_subprocess:
+        result = run_cli_subprocess_command(list(args))
+        return SimpleNamespace(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+
+    result = _CLI_RUNNER.invoke(cli, list(args), env={"BENCHBOX_NON_INTERACTIVE": "true"})
+    return SimpleNamespace(returncode=result.exit_code, stdout=result.output, stderr="")
+
 
 # ============================================================================
 # Missing Parameter Tests

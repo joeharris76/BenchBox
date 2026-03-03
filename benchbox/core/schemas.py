@@ -96,6 +96,7 @@ class RunConfig(BaseModel):
     driver_runtime_path: Optional[str] = None
     driver_runtime_python_executable: Optional[str] = None
     driver_auto_install: bool = False
+    driver_auto_install_used: bool = False
     verbose: bool = False
     verbose_level: int = 0
     verbose_enabled: bool = False
@@ -290,6 +291,7 @@ class DatabaseConfig(BaseModel):
     driver_runtime_path: Optional[str] = None
     driver_runtime_python_executable: Optional[str] = None
     driver_auto_install: bool = False
+    driver_auto_install_used: bool = False
     execution_mode: Optional[Literal["sql", "dataframe", "data_only"]] = None
 
     @field_validator("type")

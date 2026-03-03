@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from benchbox.utils.cloud_storage import CloudStorageGeneratorMixin, create_path_handler
 from benchbox.utils.compression_mixin import CompressionMixin
@@ -55,6 +57,16 @@ class TPCDSDataGenerator(
         """
         # Extract data organization config before passing kwargs to super
         self._data_organization_config = kwargs.pop("data_organization", None)
+        if self._data_organization_config is None:
+            raw_config = os.getenv("BENCHBOX_DATA_ORGANIZATION_CONFIG_JSON")
+            if raw_config:
+                try:
+                    from benchbox.core.data_organization.config import DataOrganizationConfig
+
+                    self._data_organization_config = DataOrganizationConfig.from_dict(json.loads(raw_config))
+                except Exception:
+                    # Keep startup resilient for unrelated runs with stale env.
+                    self._data_organization_config = None
 
         # Initialize compression mixin
         super().__init__(**kwargs)
@@ -229,16 +241,21 @@ class TPCDSDataGenerator(
         # Run native dsdgen to generate data directly in target directory
         self._run_dsdgen_native(target_dir)
 
+        # Apply data organization (sorted Parquet export) directly from raw .dat
+        # files to avoid attempting CSV reads on compressed artifacts.
+        if self._data_organization_config is not None:
+            raw_table_paths = self._gather_existing_table_files(target_dir, use_compression=False)
+            table_paths = raw_table_paths
+            table_paths = self._apply_data_organization(target_dir, table_paths)
+            self._write_manifest(target_dir, table_paths)
+            return table_paths
+
         # If compression is enabled, normalize any raw .dat files by compressing
         self._compress_raw_dat_files(target_dir)
 
         table_paths = self._gather_existing_table_files(target_dir)
         if self.should_use_compression() and table_paths and self.verbose:
             emit(f"\n📦 Generated {len(table_paths)} tables with streaming {self.compression_type} compression")
-
-        # Apply data organization (sorted Parquet export) if configured
-        if self._data_organization_config is not None:
-            table_paths = self._apply_data_organization(target_dir, table_paths)
 
         # Validate file format consistency at the very end
         self._validate_file_format_consistency(target_dir)
@@ -269,12 +286,14 @@ class TPCDSDataGenerator(
         from benchbox.core.data_organization.sorting import SortedParquetWriter
 
         config = self._data_organization_config
-        writer = SortedParquetWriter(config)
+        writer = SortedParquetWriter(config, schema_registry=self._build_schema_registry())
         result = dict(table_paths)
 
         for table_name, source_files in table_paths.items():
             sort_columns = config.get_sort_columns_for_table(table_name)
-            if not sort_columns:
+            partition_columns = config.get_partition_columns_for_table(table_name)
+            cluster_columns = config.get_cluster_columns_for_table(table_name)
+            if not sort_columns and not partition_columns and not cluster_columns:
                 continue
 
             parquet_path = writer.write_sorted_parquet(
@@ -285,6 +304,24 @@ class TPCDSDataGenerator(
             result[table_name] = [parquet_path]
 
         return result
+
+    def _build_schema_registry(self) -> dict[str, dict[str, Any]]:
+        """Build table schema mapping for sorted writer column resolution."""
+        from benchbox.core.tpcds.schema import TABLES
+
+        schema_registry: dict[str, dict[str, Any]] = {}
+        for table in TABLES:
+            schema_registry[table.name.lower()] = {
+                "name": table.name.lower(),
+                "columns": [
+                    {
+                        "name": col.name,
+                        "type": col.get_sql_type(),
+                    }
+                    for col in table.columns
+                ],
+            }
+        return schema_registry
 
     def _prepare_output_dir(self, output_dir: Path | None) -> Path:
         """Validate dsdgen availability and prepare the output directory.

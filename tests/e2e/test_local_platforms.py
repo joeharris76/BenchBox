@@ -125,46 +125,6 @@ class TestDuckDBE2E:
 
         assert result.returncode == 0, f"CLI failed: {result.stdout}"
 
-    @pytest.mark.e2e
-    @pytest.mark.e2e_local
-    @pytest.mark.e2e_quick
-    @pytest.mark.duckdb
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "duckdb",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-        # Check artifacts were generated
-        artifacts = list(output_dir.glob("*"))
-        assert artifacts, "No artifacts generated"
-
-        # Check for expected file types
-        json_files = list(output_dir.glob("*.json"))
-        yaml_files = list(output_dir.glob("*.yaml"))
-        assert json_files or yaml_files, "No JSON or YAML artifacts generated"
-
-
-# ============================================================================
-# SQLite E2E Tests
-# ============================================================================
-
 
 class TestSQLiteE2E:
     """E2E tests for SQLite platform."""
@@ -172,6 +132,7 @@ class TestSQLiteE2E:
     @pytest.mark.e2e
     @pytest.mark.e2e_local
     @pytest.mark.slow
+    @pytest.mark.stress
     @pytest.mark.sqlite
     @pytest.mark.tpch
     def test_tpch_full_execution(self, tmp_path: Path) -> None:
@@ -187,6 +148,26 @@ class TestSQLiteE2E:
         result = run_benchmark(config, timeout=E2E_BENCHMARK_TIMEOUT)
 
         assert result.returncode == 0, f"CLI failed with:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+
+    @pytest.mark.e2e
+    @pytest.mark.e2e_local
+    @pytest.mark.e2e_quick
+    @pytest.mark.sqlite
+    @pytest.mark.tpch
+    def test_tpch_query_subset_smoke(self, tmp_path: Path) -> None:
+        """Run a minimal SQLite execution path while full coverage lives in stress."""
+        config = {
+            "platform": "sqlite",
+            "benchmark": "tpch",
+            "scale": "0.01",
+            "queries": "Q1",
+            "force": "all",
+            "platform_options": {"database_name": tmp_path.name},
+        }
+
+        result = run_benchmark(config, timeout=300)
+
+        assert result.returncode == 0, f"CLI failed: {result.stdout}"
 
     @pytest.mark.e2e
     @pytest.mark.e2e_local
@@ -207,37 +188,6 @@ class TestSQLiteE2E:
         result = run_benchmark(config, timeout=300)
 
         assert result.returncode == 0, f"CLI failed: {result.stdout}"
-
-    @pytest.mark.e2e
-    @pytest.mark.e2e_local
-    @pytest.mark.e2e_quick
-    @pytest.mark.sqlite
-    def test_dry_run_generates_artifacts(self, tmp_path: Path) -> None:
-        """Test dry-run mode generates expected artifacts."""
-        output_dir = tmp_path / "dry_run"
-        output_dir.mkdir()
-
-        result = run_cli_command(
-            [
-                "run",
-                "--platform",
-                "sqlite",
-                "--benchmark",
-                "tpch",
-                "--scale",
-                "0.01",
-                "--dry-run",
-                str(output_dir),
-            ]
-        )
-
-        assert result.returncode == 0, f"Dry run failed: {result.stdout}"
-        assert "Dry run completed" in result.stdout
-
-
-# ============================================================================
-# DataFusion E2E Tests
-# ============================================================================
 
 
 class TestDataFusionE2E:
@@ -428,3 +378,4 @@ def test_dry_run_parametrized(tmp_path: Path, platform: str, benchmark_name: str
     # Verify artifacts exist
     artifacts = list(output_dir.glob("*"))
     assert artifacts, f"No artifacts generated for {platform}/{benchmark_name}"
+    assert list(output_dir.glob("*.json")) or list(output_dir.glob("*.yaml"))

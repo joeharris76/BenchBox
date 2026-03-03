@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -72,6 +73,71 @@ ASCII_FILL_PATTERNS: tuple[str, ...] = ("#", "=", "-", ".", "+", "x", "o", "*")
 # Per-series legend markers for no-color differentiation (8 entries to match DEFAULT_PALETTE)
 SERIES_MARKERS: tuple[str, ...] = ("■", "◆", "▲", "●", "◇", "▽", "○", "□")
 ASCII_SERIES_MARKERS: tuple[str, ...] = ("#", "*", "+", "o", "x", "^", "~", "=")
+
+
+TRUNCATION_MARKER = "\u25b8"  # ▸
+
+
+def outlier_severity_markers(value: float, scale_max: float) -> str:
+    """Return 1-4 ``▸`` characters indicating how far *value* exceeds *scale_max*.
+
+    Thresholds are logarithmic:
+        ≤ 2×  → ▸
+        ≤ 5×  → ▸▸
+        ≤ 10× → ▸▸▸
+        > 10× → ▸▸▸▸
+    """
+    if scale_max <= 0 or value <= scale_max:
+        return ""
+    ratio = value / scale_max
+    if ratio > 10:
+        n = 4
+    elif ratio > 5:
+        n = 3
+    elif ratio > 2:
+        n = 2
+    else:
+        n = 1
+    return TRUNCATION_MARKER * n
+
+
+def compute_percentile_linear(values: Sequence[float], percentile: float, *, presorted: bool = False) -> float:
+    """Compute percentile using linear interpolation between adjacent ranks."""
+    if not values:
+        return 0.0
+    sorted_vals = values if presorted else sorted(values)
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+
+    rank = (percentile / 100) * (len(sorted_vals) - 1)
+    lower_idx = math.floor(rank)
+    upper_idx = math.ceil(rank)
+    if lower_idx == upper_idx:
+        return sorted_vals[lower_idx]
+
+    lower_weight = upper_idx - rank
+    upper_weight = rank - lower_idx
+    return (sorted_vals[lower_idx] * lower_weight) + (sorted_vals[upper_idx] * upper_weight)
+
+
+def robust_p95(values: Sequence[float]) -> float:
+    """Return nearest-rank P95 with positive-tail fallback for zero-heavy data."""
+    if not values:
+        return 0.0
+
+    sorted_vals = sorted(values)
+    p95_idx = max(0, int(len(sorted_vals) * 0.95) - 1)
+    p95 = sorted_vals[p95_idx]
+
+    # Nearest-rank can collapse to zero with many zeros + sparse positives.
+    # Recompute P95 on the positive tail only.
+    if p95 <= 0:
+        positive_vals = [v for v in sorted_vals if v > 0]
+        if not positive_vals:
+            return p95
+        pos_p95_idx = max(0, int(len(positive_vals) * 0.95) - 1)
+        p95 = positive_vals[pos_p95_idx]
+    return p95
 
 
 class ColorMode(Enum):
@@ -289,10 +355,9 @@ class ASCIIChartOptions:
     def get_effective_width(self) -> int:
         """Get effective chart width, constrained to reasonable bounds."""
         if self.width is not None:
-            return min(120, max(40, self.width))
+            return min(140, max(40, self.width))
         if self._capabilities:
-            # Constrain to 40-120 chars for readability
-            return min(120, max(40, self._capabilities.width - 2))
+            return min(140, max(40, self._capabilities.width - 2))
         return 78
 
     def get_block_chars(self) -> str:

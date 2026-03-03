@@ -21,7 +21,7 @@ from benchbox.tsbs_devops import TSBSDevOps
 
 from . import platforms
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 # Perform version consistency check on import (but don't fail - just warn)
 try:
@@ -136,6 +136,7 @@ def __getattr__(name: str) -> type[BaseBenchmark] | ModuleType:
     except ImportError:
         # Fallback to simple error if version utils not available
         def create_import_error(benchmark_name, missing_dependencies=None, original_error=None):
+            """Create a minimal import error when rich dependency reporting is unavailable."""
             return ImportError(f"Could not import {benchmark_name}")
 
     if name == "platforms":

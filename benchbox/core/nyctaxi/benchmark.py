@@ -20,19 +20,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
+from benchbox.base import BaseBenchmark
 from benchbox.core.nyctaxi.downloader import NYCTaxiDataDownloader
 from benchbox.core.nyctaxi.queries import NYCTaxiQueryManager
 from benchbox.core.nyctaxi.schema import (
     NYC_TAXI_SCHEMA,
     get_create_tables_sql,
 )
-from benchbox.utils.verbosity import VerbosityMixin, compute_verbosity
 
 if TYPE_CHECKING:
     from benchbox.core.connection import DatabaseConnection
 
 
-class NYCTaxiBenchmark(VerbosityMixin):
+class NYCTaxiBenchmark(BaseBenchmark):
     """NYC Taxi OLAP benchmark implementation.
 
     Uses real NYC TLC trip data for OLAP analytics workloads:
@@ -104,16 +104,21 @@ class NYCTaxiBenchmark(VerbosityMixin):
         Raises:
             ValueError: If scale_factor is not positive or year is invalid
         """
-        if scale_factor <= 0:
-            raise ValueError(f"scale_factor must be positive, got {scale_factor}")
-
         if year not in self.AVAILABLE_YEARS:
             raise ValueError(f"year must be in {self.AVAILABLE_YEARS[0]}-{self.AVAILABLE_YEARS[-1]}, got {year}")
 
-        self.scale_factor = scale_factor
-        self.output_dir = (
+        resolved_output_dir = (
             Path(output_dir) if output_dir else Path.cwd() / "benchmark_runs" / "datagen" / f"nyctaxi_{scale_factor}"
         )
+        super().__init__(
+            scale_factor=scale_factor,
+            output_dir=resolved_output_dir,
+            verbose=verbose,
+            quiet=quiet,
+            force_regenerate=force_regenerate,
+            **kwargs,
+        )
+
         self.year = year
         self.months = months
         self.seed = seed
@@ -124,9 +129,6 @@ class NYCTaxiBenchmark(VerbosityMixin):
         self._version = "1.0"
         self._description = "NYC Taxi & Limousine Commission trip data for OLAP analytics"
 
-        # Initialize verbosity
-        verbosity_settings = compute_verbosity(verbose, quiet)
-        self.apply_verbosity(verbosity_settings)
         self.logger = logging.getLogger("benchbox.core.nyctaxi.benchmark")
 
         # Create data downloader

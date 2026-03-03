@@ -11,7 +11,6 @@ import pytest
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
 
-@pytest.mark.requires_zstd
 class TestTPCDSStreamingPerformance:
     """Performance comparison tests for streaming compression vs traditional approach.
 

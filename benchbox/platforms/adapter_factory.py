@@ -221,6 +221,7 @@ def _get_dataframe_adapter(platform: str, **config: Any) -> Any:
     driver_version = config.pop("driver_version", None) or config.pop("driver_version_requested", None)
     driver_version_resolved = config.pop("driver_version_resolved", None)
     driver_auto_install = bool(config.pop("driver_auto_install", False))
+    config.pop("driver_auto_install_used", None)  # consumed; resolution tracks this
 
     platform_info = PlatformRegistry.get_platform_info(platform)
     package_hint = driver_package or (platform_info.driver_package if platform_info else None)
@@ -266,7 +267,7 @@ def _get_dataframe_adapter(platform: str, **config: Any) -> Any:
     adapter.driver_runtime_strategy = resolution.runtime_strategy
     adapter.driver_runtime_path = resolution.runtime_path
     adapter.driver_runtime_python_executable = resolution.runtime_python_executable
-    adapter.driver_auto_install_used = resolution.auto_install_used or driver_auto_install
+    adapter.driver_auto_install_used = resolution.auto_install_used
 
     return adapter
 

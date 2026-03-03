@@ -21,49 +21,35 @@ class TestAWSGlueAdapterInitialization:
 
     def test_missing_s3_staging_dir_raises_error(self):
         """Test error when s3_staging_dir is not provided."""
-        with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.aws import AWSGlueAdapter
+        from benchbox.platforms.aws import AWSGlueAdapter
 
-            with pytest.raises(ConfigurationError, match="s3_staging_dir"):
-                AWSGlueAdapter(
-                    job_role="arn:aws:iam::123456789012:role/GlueRole",
-                )
+        with pytest.raises(ConfigurationError, match="s3_staging_dir"):
+            AWSGlueAdapter(
+                job_role="arn:aws:iam::123456789012:role/GlueRole",
+            )
 
     def test_missing_job_role_raises_error(self):
         """Test error when job_role is not provided."""
-        with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.aws import AWSGlueAdapter
+        from benchbox.platforms.aws import AWSGlueAdapter
 
-            with pytest.raises(ConfigurationError, match="job_role"):
-                AWSGlueAdapter(
-                    s3_staging_dir="s3://my-bucket/benchbox-data",
-                )
+        with pytest.raises(ConfigurationError, match="job_role"):
+            AWSGlueAdapter(
+                s3_staging_dir="s3://my-bucket/benchbox-data",
+            )
 
     def test_invalid_s3_path_raises_error(self):
         """Test error when s3_staging_dir has invalid format."""
-        with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
-        ):
-            from benchbox.platforms.aws import AWSGlueAdapter
+        from benchbox.platforms.aws import AWSGlueAdapter
 
-            with pytest.raises(ConfigurationError, match="Invalid S3"):
-                AWSGlueAdapter(
-                    s3_staging_dir="/local/path",
-                    job_role="arn:aws:iam::123456789012:role/GlueRole",
-                )
+        with pytest.raises(ConfigurationError, match="Invalid S3"):
+            AWSGlueAdapter(
+                s3_staging_dir="/local/path",
+                job_role="arn:aws:iam::123456789012:role/GlueRole",
+            )
 
     def test_valid_configuration(self):
         """Test valid configuration initializes correctly."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -86,8 +72,6 @@ class TestAWSGlueAdapterInitialization:
     def test_default_values(self):
         """Test default configuration values."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -113,8 +97,6 @@ class TestAWSGlueAdapterPlatformInfo:
     def test_get_platform_info(self):
         """Test get_platform_info returns correct information."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -139,8 +121,6 @@ class TestAWSGlueAdapterPlatformInfo:
     def test_get_dialect(self):
         """Test get_dialect returns spark."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -161,7 +141,6 @@ class TestAWSGlueAdapterConnection:
     def test_create_connection_success(self):
         """Test successful connection creation."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.aws.glue_adapter.boto3") as mock_boto3,
         ):
@@ -191,7 +170,6 @@ class TestAWSGlueAdapterSchema:
     def test_create_schema_new_database(self):
         """Test creating a new Glue database."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.aws.glue_adapter.boto3") as mock_boto3,
         ):
@@ -230,7 +208,6 @@ class TestAWSGlueAdapterSchema:
     def test_create_schema_existing_database(self):
         """Test creating schema when database already exists."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.aws.glue_adapter.boto3") as mock_boto3,
         ):
@@ -260,8 +237,6 @@ class TestAWSGlueAdapterDataLoading:
     def test_load_data_existing_tables(self):
         """Test load_data skips upload when tables exist."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging_instance = MagicMock()
@@ -286,7 +261,6 @@ class TestAWSGlueAdapterDataLoading:
     def test_load_data_new_tables(self):
         """Test load_data uploads tables when they don't exist."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.aws.glue_adapter.boto3") as mock_boto3,
         ):
@@ -369,8 +343,6 @@ class TestAWSGlueAdapterTuning:
     def test_apply_platform_optimizations(self):
         """Test apply_platform_optimizations returns empty list."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -389,8 +361,6 @@ class TestAWSGlueAdapterTuning:
     def test_apply_primary_keys(self):
         """Test apply_primary_keys returns empty list (not supported)."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -409,8 +379,6 @@ class TestAWSGlueAdapterTuning:
     def test_configure_for_benchmark(self):
         """Test configure_for_benchmark doesn't raise."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -454,8 +422,6 @@ class TestAWSGlueAdapterFromConfig:
     def test_from_config_basic(self):
         """Test from_config creates adapter with basic config."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -478,8 +444,6 @@ class TestAWSGlueAdapterFromConfig:
     def test_from_config_generates_database_name(self):
         """Test from_config generates database name when not provided."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
         ):
             mock_staging.from_uri.return_value = MagicMock()
@@ -506,8 +470,6 @@ class TestAWSGlueAdapterClose:
     def test_close_logs_dpu_hours(self):
         """Test close method logs DPU usage."""
         with (
-            patch("benchbox.platforms.aws.glue_adapter.BOTO3_AVAILABLE", True),
-            patch("benchbox.platforms.aws.glue_adapter.boto3", MagicMock()),
             patch("benchbox.platforms.aws.glue_adapter.CloudSparkStaging") as mock_staging,
             patch("benchbox.platforms.aws.glue_adapter.logger") as mock_logger,
         ):
