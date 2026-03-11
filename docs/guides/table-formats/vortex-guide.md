@@ -197,7 +197,7 @@ For production benchmarks, we recommend Parquet. For exploration and DuckDB-spec
 
 ```bash
 # Install vortex Python library
-uv add vortex
+uv add vortex-data
 ```
 
 ### Running Benchmarks
@@ -207,7 +207,7 @@ uv add vortex
 benchbox convert --input ./data --format vortex
 
 # Run benchmark with Vortex on DuckDB
-benchbox run --platform duckdb --benchmark tpch --format vortex --scale 1
+benchbox run --platform duckdb --benchmark tpch --table-format vortex --scale 1
 ```
 
 ### Reading Vortex Files

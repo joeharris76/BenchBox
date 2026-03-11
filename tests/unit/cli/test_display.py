@@ -17,7 +17,10 @@ from rich.console import Console
 from benchbox.cli.display import StandardDisplays
 from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, QueryResult, SystemProfile
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestStandardDisplays:

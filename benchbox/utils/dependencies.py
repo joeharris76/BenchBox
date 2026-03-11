@@ -8,6 +8,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import sys
 from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -39,6 +40,13 @@ def is_development_install() -> bool:
     # Check if we're in site-packages (package install)
     # Default to dev install if uncertain
     return "site-packages" not in str(package_path)
+
+
+@lru_cache(maxsize=1)
+def is_uv_tool_environment() -> bool:
+    """Detect whether BenchBox is running inside a uv tool virtual environment."""
+    normalized_executable = str(Path(sys.executable)).replace("\\", "/").lower()
+    return "/uv/tools/" in normalized_executable
 
 
 # Map platform names to their pyproject.toml extra names
@@ -99,6 +107,11 @@ def get_install_command(extra: str) -> str:
     resolved_extra = PLATFORM_TO_EXTRA.get(extra.lower(), extra)
 
     if is_development_install():
+        if is_uv_tool_environment():
+            # uv tool environments are isolated from project .venv state.
+            # Target the running interpreter explicitly so users install
+            # into the same environment that executes `benchbox`.
+            return f'uv pip install --python "{sys.executable}" "benchbox[{resolved_extra}]"'
         return f"uv sync --extra {resolved_extra}"
     else:
         return f'uv pip install "benchbox[{resolved_extra}]"'

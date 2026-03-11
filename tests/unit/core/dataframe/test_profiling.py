@@ -34,7 +34,10 @@ from benchbox.core.dataframe.profiling import (
     track_memory,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueryExecutionProfile:

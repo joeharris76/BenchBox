@@ -140,7 +140,7 @@ customer.vortex
 
 **Installation:**
 ```bash
-uv add vortex
+uv add vortex-data
 ```
 
 **Usage:**
@@ -633,7 +633,7 @@ benchmark_runs/
 ### Conversion Fails with "vortex not installed"
 
 ```bash
-uv add vortex
+uv add vortex-data
 ```
 
 ### Conversion Fails with "deltalake not installed"

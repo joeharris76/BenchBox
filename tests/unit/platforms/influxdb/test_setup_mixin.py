@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.platforms.influxdb.setup import InfluxDBSetupMixin
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Adapter(InfluxDBSetupMixin):

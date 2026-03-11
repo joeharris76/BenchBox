@@ -11,6 +11,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
+pytestmark = pytest.mark.medium
+
+
 # Include the project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

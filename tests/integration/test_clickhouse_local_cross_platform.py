@@ -13,6 +13,12 @@ import pytest
 from benchbox.core.clickbench.benchmark import ClickBenchBenchmark
 from benchbox.platforms.clickhouse import ClickHouseAdapter
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
+
 # Skip all tests if chdb is not available
 chdb = pytest.importorskip("chdb")
 

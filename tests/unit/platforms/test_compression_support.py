@@ -12,7 +12,10 @@ import pytest
 
 from benchbox.utils.compression import CompressionManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPlatformCompressionSupport:

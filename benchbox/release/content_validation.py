@@ -301,8 +301,9 @@ class ContentViolation:
             Severity.SUGGESTION: "💡",
         }
         prefix = severity_prefix.get(self.severity, "")
+        display_path = self.file_path.as_posix()
         return (
-            f"{prefix} {self.file_path}:{self.line_number}:{self.column}: "
+            f"{prefix} {display_path}:{self.line_number}:{self.column}: "
             f"'{self.matched_text}' [{self.category}]\n"
             f"   {self.context}\n"
             f"   → {self.suggestion}"
@@ -370,7 +371,7 @@ def _should_skip_file(file_path: Path, repo_root: Path) -> bool:
     except ValueError:
         return True  # File outside repo
 
-    rel_str = str(rel_path)
+    rel_str = rel_path.as_posix()
     for exclude in VALIDATION_EXCLUDES:
         if rel_str.startswith(exclude):
             return True
@@ -392,7 +393,7 @@ def _get_file_exceptions(file_path: Path, repo_root: Path) -> set[str]:
     except ValueError:
         return set()
 
-    rel_str = str(rel_path)
+    rel_str = rel_path.as_posix()
     excepted_categories: set[str] = set()
 
     for pattern, categories in VALIDATED_EXCEPTIONS.items():

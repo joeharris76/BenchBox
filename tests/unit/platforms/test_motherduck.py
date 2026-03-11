@@ -6,14 +6,17 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from benchbox.core.config_inheritance import resolve_dialect_for_query_translation
 from benchbox.core.platform_registry import PlatformRegistry
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestMotherDuckRegistration:
@@ -138,6 +141,39 @@ class TestMotherDuckAdapter:
         assert metadata["dialect"] == "duckdb"
         assert metadata["database"] == "test_db"
         assert metadata["inherits_from"] == "duckdb"
+
+    def test_create_external_tables_uses_duckdb_view_registration(self, tmp_path):
+        """MotherDuck should reuse DuckDB external-view registration logic."""
+        from benchbox.platforms.motherduck import MotherDuckAdapter
+
+        adapter = MotherDuckAdapter(token="test-token")
+        parquet_path = tmp_path / "customer.parquet"
+        parquet_path.touch()
+
+        benchmark = Mock()
+        benchmark.tables = {"customer": parquet_path}
+        benchmark.get_table_loading_order.return_value = ["customer"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (3,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        table_stats, _, per_table_timings = adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert adapter.supports_external_tables is True
+        assert table_stats == {"customer": 3}
+        assert per_table_timings is None
+        assert any("CREATE VIEW customer AS SELECT * FROM read_parquet(" in sql for sql in executed_sql)
 
 
 class TestMotherDuckAdapterFactory:

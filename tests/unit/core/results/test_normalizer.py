@@ -11,6 +11,11 @@ from benchbox.core.results.normalizer import (
 )
 from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestDetectSchemaVersion:
     """Tests for detect_schema_version function."""

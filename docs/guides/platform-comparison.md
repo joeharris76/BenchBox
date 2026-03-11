@@ -17,6 +17,56 @@ BenchBox provides a unified comparison interface supporting:
 - **File-Based Comparisons**: Compare previously saved result files
 - **Performance Visualization**: Generate charts and reports automatically
 
+## Same Data, Different Engines
+
+A key BenchBox design principle: benchmark data is generated once as Parquet files and shared across all platforms. When you compare DuckDB, DataFusion, SQLite, and Polars at the same scale factor, every engine reads from the same Parquet dataset. This eliminates data variability and ensures performance differences reflect the engines themselves.
+
+```bash
+# All three commands read the same generated Parquet files
+benchbox run --platform duckdb --benchmark tpch --scale 1 -o results/duckdb.json
+benchbox run --platform datafusion --benchmark tpch --scale 1 -o results/datafusion.json
+benchbox run --platform polars-df --benchmark tpch --scale 1 -o results/polars.json
+
+# Compare the results
+benchbox compare results/duckdb.json results/datafusion.json results/polars.json
+```
+
+Data is generated on the first run and cached in `benchmark_runs/<benchmark>/sf<scale>/data/`. Subsequent runs at the same scale factor reuse the cached data automatically.
+
+### External Table Mode (`--table-mode external`)
+
+Use `--table-mode external` when you want engines to query staged files directly instead of materializing into native tables:
+
+```bash
+# Native (default): materialize into platform-managed tables
+benchbox run --platform duckdb --benchmark tpch --scale 1 --table-mode native
+
+# External: register views/external tables over staged files
+benchbox run --platform duckdb --benchmark tpch --scale 1 --table-mode external
+```
+
+Key rules:
+- `native` remains the default.
+- `external` is incompatible with `--tuning tuned`.
+- Cloud platforms still upload/stage data in object storage during load; they skip COPY/CTAS materialization in external mode.
+
+Current external-mode mechanisms:
+
+| Platform | External Mechanism |
+|----------|--------------------|
+| DuckDB / MotherDuck | `CREATE VIEW` over `read_parquet(...)` / `read_csv(...)` / `delta_scan(...)` |
+| DataFusion / Polars | Direct file scan path (`create_external_tables` delegates to existing scan loader) |
+| Athena | External table registration over S3 Parquet (CTAS bypass) |
+| Snowflake | External stage + `CREATE EXTERNAL TABLE` |
+| BigQuery | `CREATE EXTERNAL TABLE ... OPTIONS(uris=[...])` over GCS |
+| Redshift | Spectrum external schema + external table over S3 |
+| Databricks | `CREATE TABLE ... USING PARQUET LOCATION ...` |
+| ClickHouse Cloud | `CREATE VIEW ... AS SELECT * FROM s3()/gcs()` |
+| Trino / Presto | `CREATE TABLE ... WITH (external_location, format='PARQUET')` |
+| Azure Synapse | PolyBase external data source/file format + `CREATE EXTERNAL TABLE` |
+
+Unsupported: SQLite and PostgreSQL.
+
 ## Quick Start
 
 ### List Available Platforms

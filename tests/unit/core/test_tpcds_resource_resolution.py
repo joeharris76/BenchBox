@@ -13,7 +13,10 @@ from benchbox.core.tpcds.c_tools import (
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 from benchbox.utils.tpc_compilation import get_precompiled_bundle_root
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _require_precompiled_bundle() -> Path:

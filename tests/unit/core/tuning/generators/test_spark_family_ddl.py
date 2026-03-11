@@ -14,6 +14,8 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
+import pytest
+
 from benchbox.core.tuning import TuningColumn
 from benchbox.core.tuning.ddl_generator import ColumnDefinition
 from benchbox.core.tuning.generators.spark_family import (
@@ -23,6 +25,11 @@ from benchbox.core.tuning.generators.spark_family import (
     ParquetDDLGenerator,
 )
 from benchbox.core.tuning.interface import TableTuning
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDeltaDDLGeneratorBasics:

@@ -17,6 +17,8 @@ from benchbox.core.amplab.benchmark import AMPLabBenchmark
 
 from .fixtures.benchmark_test_mixin import BenchmarkTestMixin
 
+pytestmark = pytest.mark.medium
+
 
 @pytest.mark.amplab
 class TestAMPLab:

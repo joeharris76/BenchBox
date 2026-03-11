@@ -8,7 +8,10 @@ from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.platforms.base import PlatformAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _MinimalBenchmark:

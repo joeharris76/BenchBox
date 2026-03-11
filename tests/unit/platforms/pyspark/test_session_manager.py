@@ -10,7 +10,10 @@ import pytest
 from benchbox.platforms.pyspark import session as session_module
 from benchbox.platforms.pyspark.session import SparkConfigurationError, SparkSessionManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _patch_classmethod(monkeypatch: pytest.MonkeyPatch, attr: str, func):

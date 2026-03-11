@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.monitoring import PerformanceMonitor, ResourceMonitor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 def test_resource_monitor_initialization():

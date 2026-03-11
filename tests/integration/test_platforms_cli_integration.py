@@ -6,9 +6,13 @@ import pytest
 
 from tests.integration._cli_e2e_utils import run_cli_command
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_command_help():
     """Test that platforms command shows help correctly."""
     result = run_cli_command(["platforms", "--help"])
@@ -27,7 +31,6 @@ def test_platforms_command_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_list_command():
     """Test that platforms list command executes successfully."""
     result = run_cli_command(["platforms", "list"])
@@ -40,7 +43,6 @@ def test_platforms_list_command():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_list_help():
     """Test that platforms list shows help correctly."""
     result = run_cli_command(["platforms", "list", "--help"])
@@ -52,7 +54,6 @@ def test_platforms_list_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_status_all():
     """Test that platforms status command works without arguments."""
     result = run_cli_command(["platforms", "status"])
@@ -63,7 +64,6 @@ def test_platforms_status_all():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_status_specific():
     """Test that platforms status shows info for specific platform."""
     result = run_cli_command(["platforms", "status", "duckdb"])
@@ -75,7 +75,6 @@ def test_platforms_status_specific():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_status_help():
     """Test that platforms status shows help correctly."""
     result = run_cli_command(["platforms", "status", "--help"])
@@ -85,7 +84,6 @@ def test_platforms_status_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_check_command():
     """Test that platforms check command executes successfully."""
     result = run_cli_command(["platforms", "check"])
@@ -98,7 +96,6 @@ def test_platforms_check_command():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_check_help():
     """Test that platforms check shows help correctly."""
     result = run_cli_command(["platforms", "check", "--help"])
@@ -109,7 +106,6 @@ def test_platforms_check_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_enable_help():
     """Test that platforms enable shows help correctly."""
     result = run_cli_command(["platforms", "enable", "--help"])
@@ -120,7 +116,6 @@ def test_platforms_enable_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_disable_help():
     """Test that platforms disable shows help correctly."""
     result = run_cli_command(["platforms", "disable", "--help"])
@@ -130,7 +125,6 @@ def test_platforms_disable_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_install_help():
     """Test that platforms install shows help correctly."""
     result = run_cli_command(["platforms", "install", "--help"])
@@ -141,7 +135,6 @@ def test_platforms_install_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_setup_help():
     """Test that platforms setup shows help correctly."""
     result = run_cli_command(["platforms", "setup", "--help"])
@@ -153,7 +146,6 @@ def test_platforms_setup_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_install_specific():
     """Test that platforms install provides guidance for specific platform."""
     result = run_cli_command(["platforms", "install", "duckdb"])
@@ -164,7 +156,6 @@ def test_platforms_install_specific():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_command_appears_in_main_help():
     """Test that platforms command is listed in main CLI help."""
     result = run_cli_command(["--help"])
@@ -175,7 +166,6 @@ def test_platforms_command_appears_in_main_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_platforms_check_specific_platform():
     """Test checking a specific platform that should be available."""
     result = run_cli_command(["platforms", "check", "duckdb"])

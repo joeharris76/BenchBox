@@ -12,7 +12,10 @@ from click.testing import CliRunner
 
 mod = importlib.import_module("benchbox.cli.commands.show_plan")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Exec:

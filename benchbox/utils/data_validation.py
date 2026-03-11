@@ -466,7 +466,7 @@ class BenchmarkDataValidator:
             return False
 
     def _validate_with_manifest(self, data_dir: Path, manifest: dict) -> DataValidationResult:
-        from benchbox.utils.datagen_manifest import get_table_files
+        from benchbox.utils.datagen_manifest import compute_entry_size, get_table_files
 
         tables_validated: dict[str, bool] = {}
         missing_tables: list[str] = []
@@ -495,7 +495,7 @@ class BenchmarkDataValidator:
                         issues.append(f"Invalid manifest entry for {table_name}")
                         continue
                     fp = data_dir / rel
-                    if (not fp.exists()) or fp.stat().st_size != size:
+                    if (not fp.exists()) or compute_entry_size(fp) != size:
                         table_ok = False
                         issues.append(f"File missing or size mismatch: {rel}")
                     file_size_info[rel] = size
@@ -527,7 +527,7 @@ class BenchmarkDataValidator:
                         issues.append(f"Invalid manifest entry for {table_name}")
                         continue
                     fp = data_dir / rel
-                    if (not fp.exists()) or fp.stat().st_size != size or size == 0:
+                    if (not fp.exists()) or compute_entry_size(fp) != size or size == 0:
                         table_ok = False
                         issues.append(f"Missing/empty file {rel}")
                     file_size_info[rel] = max(size, 0)

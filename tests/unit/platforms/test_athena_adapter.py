@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.core.exceptions import ConfigurationError
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestAthenaAdapterConfigurationValidation:
@@ -228,6 +231,13 @@ class TestAthenaAdapter:
         assert adapter.workgroup == "primary"
         assert adapter.database == "default"
         assert adapter.catalog == "AwsDataCatalog"
+
+    def test_external_table_capability_declared(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Athena should explicitly declare external-table support."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket")
+        assert adapter.supports_external_tables is True
 
     def test_initialization_with_staging_root(self, mock_boto3, mock_pyathena, mock_aws_credentials):
         """Test initialization with s3 staging root."""
@@ -491,6 +501,70 @@ class TestAthenaAdapter:
         assert "STORED AS TEXTFILE" in converted.upper()
         assert "s3://test-bucket/data/test_db_staging/lineitem/" in converted
 
+    def test_create_external_tables_bypasses_ctas_conversion(
+        self, mock_boto3, mock_pyathena, mock_aws_credentials, tmp_path
+    ):
+        """External mode should upload/register without invoking CTAS conversion."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket", s3_prefix="data", database="test_db")
+        parquet_file = tmp_path / "lineitem.parquet"
+        parquet_file.write_bytes(b"PAR1")
+
+        mock_connection = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (123,)
+        mock_connection.cursor.return_value = mock_cursor
+        mock_s3 = MagicMock()
+
+        with (
+            patch.object(adapter, "_get_s3_client", return_value=mock_s3),
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [parquet_file]}),
+            patch.object(
+                adapter,
+                "_build_external_table_statements",
+                return_value={
+                    "lineitem": "CREATE EXTERNAL TABLE IF NOT EXISTS lineitem (id INT) STORED AS PARQUET LOCATION 's3://test-bucket/data/test_db/lineitem/'"
+                },
+            ),
+            patch.object(adapter, "_convert_staging_to_parquet") as mock_ctas_conversion,
+        ):
+            stats, _, per_table_timings = adapter.create_external_tables(
+                benchmark=MagicMock(), connection=mock_connection, data_dir=tmp_path
+            )
+
+        assert stats == {"lineitem": 123}
+        assert per_table_timings is None
+        mock_ctas_conversion.assert_not_called()
+        mock_s3.upload_file.assert_called_once()
+        assert any("CREATE EXTERNAL TABLE" in str(call.args[0]).upper() for call in mock_cursor.execute.call_args_list)
+
+    def test_load_data_parquet_mode_keeps_ctas_conversion(self, mock_boto3, mock_pyathena, mock_aws_credentials):
+        """Native parquet mode should continue to use CTAS staging conversion path."""
+        from benchbox.platforms.athena import AthenaAdapter
+
+        adapter = AthenaAdapter(s3_bucket="test-bucket", s3_prefix="data", database="test_db")
+        mock_connection = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_s3 = MagicMock()
+
+        with (
+            patch.object(adapter, "_get_s3_client", return_value=mock_s3),
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [MagicMock()]}),
+            patch.object(adapter, "_upload_files_to_s3", return_value=(100, 1)),
+            patch.object(
+                adapter, "_convert_staging_to_parquet", return_value={"lineitem": 100}
+            ) as mock_ctas_conversion,
+        ):
+            stats, _, per_table_timings = adapter.load_data(
+                benchmark=MagicMock(), connection=mock_connection, data_dir=MagicMock()
+            )
+
+        assert stats == {"lineitem": 100}
+        assert per_table_timings is None
+        mock_ctas_conversion.assert_called_once()
+
 
 class TestAthenaAdapterExecution:
     """Tests for Athena query execution and error handling."""
@@ -684,3 +758,39 @@ class TestAthenaAdapterRegistration:
         athena_deps = DEPENDENCY_GROUPS["athena"]
         assert "pyathena" in athena_deps.packages
         assert "boto3" in athena_deps.packages
+
+    def test_validate_external_table_requirements_raises_without_s3_bucket(self):
+        """Athena must expose validate_external_table_requirements as a contract."""
+        with (
+            patch.dict("sys.modules", {"boto3": MagicMock()}),
+            patch.dict(
+                "sys.modules",
+                {
+                    "pyathena": MagicMock(connect=MagicMock()),
+                    "pyathena.cursor": MagicMock(Cursor=MagicMock()),
+                },
+            ),
+        ):
+            from benchbox.platforms.athena import AthenaAdapter
+
+            adapter = AthenaAdapter.__new__(AthenaAdapter)
+            adapter.s3_bucket = None
+            with pytest.raises(ValueError, match="S3 bucket|s3_bucket"):
+                adapter.validate_external_table_requirements()
+
+    def test_validate_external_table_requirements_passes_with_s3_bucket(self):
+        with (
+            patch.dict("sys.modules", {"boto3": MagicMock()}),
+            patch.dict(
+                "sys.modules",
+                {
+                    "pyathena": MagicMock(connect=MagicMock()),
+                    "pyathena.cursor": MagicMock(Cursor=MagicMock()),
+                },
+            ),
+        ):
+            from benchbox.platforms.athena import AthenaAdapter
+
+            adapter = AthenaAdapter.__new__(AthenaAdapter)
+            adapter.s3_bucket = "my-bucket"
+            adapter.validate_external_table_requirements()  # Should not raise

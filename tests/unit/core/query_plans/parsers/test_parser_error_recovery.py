@@ -9,7 +9,10 @@ import pytest
 from benchbox.core.errors import PlanParseError
 from benchbox.core.query_plans.parsers.duckdb import DuckDBQueryPlanParser
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestFormatDetection:

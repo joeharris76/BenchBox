@@ -15,7 +15,10 @@ import pytest
 
 from benchbox.platforms.base.data_loading import DuckDBNativeHandler
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_pipe_file(tmp_path: Path, filename: str, lines: list[str]) -> Path:

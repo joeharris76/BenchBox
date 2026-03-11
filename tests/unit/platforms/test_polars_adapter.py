@@ -7,7 +7,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,7 +21,11 @@ except ImportError:
     pl = None
 
 
-pytestmark = pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars not installed")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars not installed"),
+]
 
 
 class TestPolarsAdapterBasics:
@@ -72,6 +76,30 @@ class TestPolarsAdapterBasics:
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = PolarsAdapter(working_dir=tmpdir)
             assert adapter.get_target_dialect() == "dataframe"
+
+    def test_external_table_capability_declared(self):
+        """Polars should explicitly declare external table support."""
+        from benchbox.platforms.polars_platform import PolarsAdapter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = PolarsAdapter(working_dir=tmpdir)
+            assert adapter.supports_external_tables is True
+
+    def test_create_external_tables_delegates_to_load_data(self):
+        """External mode should reuse existing Polars load_data path."""
+        from benchbox.platforms.polars_platform import PolarsAdapter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = PolarsAdapter(working_dir=tmpdir)
+            benchmark = MagicMock()
+            connection = MagicMock()
+            expected = ({"lineitem": 100}, 0.3, {"lineitem": {"total_ms": 300.0}})
+
+            with patch.object(adapter, "load_data", return_value=expected) as mock_load_data:
+                result = adapter.create_external_tables(benchmark, connection, Path(tmpdir))
+
+            assert result == expected
+            mock_load_data.assert_called_once_with(benchmark, connection, Path(tmpdir))
 
 
 class TestPolarsAdapterFromConfig:

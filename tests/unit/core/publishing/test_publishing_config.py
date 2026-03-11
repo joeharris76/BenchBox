@@ -15,7 +15,10 @@ from benchbox.core.publishing.config import (
     StorageProvider,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestStorageProvider:

@@ -13,6 +13,11 @@ import pytest
 
 from benchbox.core.amplab.generator import AMPLabDataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def temp_dir():
@@ -22,7 +27,6 @@ def temp_dir():
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestAMPLabDataGenerator:
     """Test AMPLab data generator basic functionality."""
 
@@ -180,7 +184,6 @@ class TestAMPLabDataGenerator:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestGeneratorExtended:
     """Advanced tests for AMPLab data generator."""
 

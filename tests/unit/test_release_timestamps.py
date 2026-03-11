@@ -19,8 +19,12 @@ from benchbox.release.workflow import (
     calculate_release_timestamp,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
-@pytest.mark.fast
+
 class TestCalculateReleaseTimestamp:
     """Test calculate_release_timestamp() function."""
 
@@ -109,7 +113,6 @@ class TestCalculateReleaseTimestamp:
         assert result_dt.second == 0
 
 
-@pytest.mark.fast
 class TestNormalizeTimestamps:
     """Test _normalize_timestamps() function."""
 

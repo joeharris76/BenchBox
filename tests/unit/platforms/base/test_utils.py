@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.platforms.base import is_non_interactive
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FakeStdin:

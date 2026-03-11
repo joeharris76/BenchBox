@@ -5,6 +5,12 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:
@@ -14,7 +20,6 @@ from benchbox.utils import dependency_validation
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestDependencyValidation:
     """Ensure dependency validation remains aligned with the lock file."""
 

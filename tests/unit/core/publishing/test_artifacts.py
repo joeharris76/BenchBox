@@ -17,7 +17,10 @@ from benchbox.core.publishing.artifacts import (
     ArtifactType,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestArtifactType:

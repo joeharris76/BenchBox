@@ -121,6 +121,7 @@ class DataFusionAdapter(PlatformAdapter):
     """Apache DataFusion platform adapter with optimized bulk loading and execution."""
 
     driver_isolation_capability = DriverIsolationCapability.SUPPORTED
+    supports_external_tables = True
 
     # Process-wide lock bookkeeping keyed by working-dir lock file path.
     # This ensures ownership/reentrancy is shared across adapter instances.
@@ -683,19 +684,18 @@ class DataFusionAdapter(PlatformAdapter):
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
     ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
-        """Load data into DataFusion using CSV or Parquet format.
+        """Load data into DataFusion.
 
-        DataFusion supports two loading modes:
-        1. CSV mode: Direct loading of CSV files via CREATE EXTERNAL TABLE
-        2. Parquet mode: Convert CSV to Parquet first for 10-50x query performance
+        Supports CSV, Parquet, Delta Lake, and Iceberg formats.
+        Directory-based formats (delta/iceberg) are auto-detected from the file path.
         """
         from benchbox.platforms.base.data_loading import DataSourceResolver
 
         start_time = mono_time()
         self.log_operation_start("Data loading", f"format: {self.data_format}")
 
-        # Resolve data source
-        resolver = DataSourceResolver()
+        # Resolve data source (pass platform name for correct format preference)
+        resolver = DataSourceResolver(platform_name=self.platform_name.lower())
         data_source = resolver.resolve(benchmark, data_dir)
 
         if not data_source or not data_source.tables:
@@ -716,8 +716,14 @@ class DataFusionAdapter(PlatformAdapter):
             # Normalize table name to lowercase
             table_name_lower = table_name.lower()
 
-            if self.data_format == "parquet":
-                # Convert CSV to Parquet and load
+            # Detect directory-based table formats (delta/iceberg)
+            dir_format = self._detect_directory_format(file_paths)
+
+            if dir_format == "delta":
+                row_count = self._load_table_delta(connection, table_name_lower, file_paths[0])
+            elif dir_format == "iceberg":
+                row_count = self._load_table_iceberg(connection, table_name_lower, file_paths[0])
+            elif self.data_format == "parquet":
                 row_count = self._load_table_parquet(connection, table_name_lower, file_paths, data_dir)
             else:
                 # Load CSV directly
@@ -742,6 +748,12 @@ class DataFusionAdapter(PlatformAdapter):
         )
 
         return table_stats, total_duration, per_table_timings
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Alias external-table mode to DataFusion's existing external registration path."""
+        return self.load_data(benchmark, connection, data_dir)
 
     def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
         """Build DataFusion CTAS SQL used by PlatformAdapter.apply_ctas_sort.
@@ -883,13 +895,147 @@ class DataFusionAdapter(PlatformAdapter):
         return sql_type
 
     def _load_table_parquet(self, connection: Any, table_name: str, file_paths: list[Path], data_dir: Path) -> int:
-        """Load table by converting CSV to Parquet first, then loading.
+        """Load table as Parquet, converting from CSV/TBL if needed.
 
-        Preserves column names from schema. PyArrow handles trailing delimiters correctly.
+        If the input files are already Parquet, registers them directly.
+        Otherwise, converts CSV/TBL to Parquet first, preserving column names from schema.
         """
         import pyarrow as pa
-        import pyarrow.csv as csv
         import pyarrow.parquet as pq
+
+        # Check if input files are already Parquet
+        input_is_parquet = all(self._is_parquet_file(fp) for fp in file_paths)
+
+        if input_is_parquet:
+            return self._register_parquet_files(connection, table_name, file_paths)
+
+        return self._convert_and_register_parquet(connection, table_name, file_paths, pa, pq)
+
+    def _is_parquet_file(self, file_path: Path) -> bool:
+        """Check if a file is Parquet by extension (stripping compression suffixes)."""
+        name = file_path.name
+        # Strip known compression suffixes
+        for suffix in (".zst", ".gz", ".bz2", ".lz4", ".snappy"):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        return name.endswith(".parquet")
+
+    def _register_parquet_files(self, connection: Any, table_name: str, file_paths: list[Path]) -> int:
+        """Register pre-existing Parquet files directly with DataFusion."""
+        import pyarrow.parquet as pq
+
+        if len(file_paths) == 1:
+            parquet_path = str(file_paths[0])
+            self.log_very_verbose(f"Registering existing Parquet file for {table_name}: {parquet_path}")
+            row_count = pq.read_metadata(file_paths[0]).num_rows
+            connection.register_parquet(table_name, parquet_path)
+            return row_count
+
+        # Multiple parquet files: concatenate into single file in working directory
+        import pyarrow as pa
+
+        self.log_very_verbose(f"Concatenating {len(file_paths)} Parquet files for {table_name}")
+        tables = []
+        for fp in file_paths:
+            tables.append(pq.read_table(fp))
+        combined = pa.concat_tables(tables)
+
+        parquet_file = self.working_dir / f"{table_name}.parquet"
+        self.working_dir.mkdir(exist_ok=True)
+        pq.write_table(combined, parquet_file, compression="snappy")
+        connection.register_parquet(table_name, str(parquet_file))
+        return combined.num_rows
+
+    @staticmethod
+    def _detect_directory_format(file_paths: list[Path]) -> str | None:
+        """Detect if file paths point to a directory-based table format.
+
+        Returns 'delta', 'iceberg', or None for file-based formats.
+        """
+        if len(file_paths) != 1:
+            return None
+        path = file_paths[0]
+        if not path.is_dir():
+            return None
+        if (path / "_delta_log").is_dir():
+            return "delta"
+        if (path / "metadata").is_dir():
+            return "iceberg"
+        return None
+
+    def _load_table_delta(self, connection: Any, table_name: str, table_path: Path) -> int:
+        """Load a Delta Lake table into DataFusion via deltalake + PyArrow."""
+        try:
+            from deltalake import DeltaTable
+        except ImportError as e:
+            raise RuntimeError(
+                "Delta Lake support requires the 'deltalake' package. "
+                "Install it with: uv add deltalake --optional table-formats"
+            ) from e
+
+        self.log_very_verbose(f"Loading Delta Lake table for {table_name}: {table_path}")
+        delta_table = DeltaTable(str(table_path))
+        arrow_table = delta_table.to_pyarrow_table()
+
+        batches = arrow_table.to_batches()
+        if batches:
+            connection.register_record_batches(table_name, [batches])
+        else:
+            # Empty table — register with schema but no data
+            import pyarrow as pa
+
+            empty_batch = pa.RecordBatch.from_pydict(
+                {name: [] for name in arrow_table.schema.names},
+                schema=arrow_table.schema,
+            )
+            connection.register_record_batches(table_name, [[empty_batch]])
+
+        self.log_very_verbose(f"Registered Delta table {table_name}: {arrow_table.num_rows:,} rows")
+        return arrow_table.num_rows
+
+    def _load_table_iceberg(self, connection: Any, table_name: str, table_path: Path) -> int:
+        """Load an Iceberg table into DataFusion via pyiceberg + PyArrow."""
+        try:
+            from pyiceberg.catalog.sql import SqlCatalog
+        except ImportError as e:
+            raise RuntimeError(
+                "Iceberg support requires the 'pyiceberg' package. "
+                "Install it with: uv add pyiceberg --optional table-formats"
+            ) from e
+
+        self.log_very_verbose(f"Loading Iceberg table for {table_name}: {table_path}")
+
+        # Use a file-based SQLite catalog pointing at the table's warehouse
+        catalog = SqlCatalog(
+            "benchbox",
+            uri=f"sqlite:///{table_path}/catalog.db",
+            warehouse=str(table_path.parent),
+        )
+
+        ice_table = catalog.load_table(f"default.{table_name}")
+        arrow_table = ice_table.scan().to_arrow()
+
+        batches = arrow_table.to_batches()
+        if batches:
+            connection.register_record_batches(table_name, [batches])
+        else:
+            import pyarrow as pa
+
+            empty_batch = pa.RecordBatch.from_pydict(
+                {name: [] for name in arrow_table.schema.names},
+                schema=arrow_table.schema,
+            )
+            connection.register_record_batches(table_name, [[empty_batch]])
+
+        self.log_very_verbose(f"Registered Iceberg table {table_name}: {arrow_table.num_rows:,} rows")
+        return arrow_table.num_rows
+
+    def _convert_and_register_parquet(
+        self, connection: Any, table_name: str, file_paths: list[Path], pa: Any, pq: Any
+    ) -> int:
+        """Convert CSV/TBL files to Parquet and register with DataFusion."""
+        import pyarrow.csv as csv
 
         # Store parquet files directly in working directory
         parquet_dir = self.working_dir

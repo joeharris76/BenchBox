@@ -28,13 +28,16 @@ except ImportError:
 
 
 # Skip all tests if Delta Lake not available
-pytestmark = pytest.mark.skipif(
-    not DELTA_AVAILABLE or not PYARROW_AVAILABLE,
-    reason="Delta Lake or PyArrow not installed",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(
+        not DELTA_AVAILABLE or not PYARROW_AVAILABLE,
+        reason="Delta Lake or PyArrow not installed",
+    ),
+]
 
 
-@pytest.mark.fast
 class TestDeltaLakeMaintenanceAvailability:
     """Tests for Delta Lake maintenance availability."""
 
@@ -84,7 +87,6 @@ class TestDeltaLakeMaintenanceAvailability:
         assert len(missing) == 0
 
 
-@pytest.mark.fast
 class TestDeltaLakeInsert:
     """Tests for Delta Lake insert operations."""
 
@@ -184,7 +186,6 @@ class TestDeltaLakeInsert:
         assert result.rows_affected == 0
 
 
-@pytest.mark.fast
 class TestDeltaLakeDelete:
     """Tests for Delta Lake delete operations."""
 
@@ -262,7 +263,6 @@ class TestDeltaLakeDelete:
         assert result.rows_affected == 0
 
 
-@pytest.mark.fast
 class TestDeltaLakeUpdate:
     """Tests for Delta Lake update operations."""
 
@@ -305,7 +305,6 @@ class TestDeltaLakeUpdate:
         assert statuses.count("updated") == 2
 
 
-@pytest.mark.fast
 class TestDeltaLakeMerge:
     """Tests for Delta Lake merge (upsert) operations."""
 
@@ -348,7 +347,6 @@ class TestDeltaLakeMerge:
         assert "Diana" in names
 
 
-@pytest.mark.fast
 class TestDeltaLakeMaintenanceResult:
     """Tests for Delta Lake maintenance result timing."""
 
@@ -369,7 +367,6 @@ class TestDeltaLakeMaintenanceResult:
         assert result.duration >= 0
 
 
-@pytest.mark.fast
 class TestDeltaLakeDataFrameConversion:
     """Tests for DataFrame type conversion."""
 

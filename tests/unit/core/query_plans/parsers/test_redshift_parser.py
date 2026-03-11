@@ -7,7 +7,10 @@ import pytest
 from benchbox.core.query_plans.parsers.redshift import RedshiftQueryPlanParser
 from benchbox.core.results.query_plan_models import JoinType, LogicalOperatorType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # Test fixtures - Redshift EXPLAIN output samples

@@ -9,6 +9,11 @@ import pytest
 from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 from tests.integration._cli_e2e_utils import run_cli_command
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 def make_v2_result_data(
     benchmark_name: str = "Test Benchmark",
@@ -43,7 +48,6 @@ def make_v2_result_data(
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_export_command_help():
     """Test that export command shows help correctly."""
     result = run_cli_command(["export", "--help"])
@@ -59,7 +63,6 @@ def test_export_command_help():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_export_command_no_args_shows_guidance():
     """Test export with no arguments shows usage guidance."""
     result = run_cli_command(["export"])

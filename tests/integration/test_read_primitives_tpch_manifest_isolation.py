@@ -19,6 +19,11 @@ from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 from benchbox.core.read_primitives.generator import ReadPrimitivesDataGenerator
 from benchbox.core.tpch.generator import TPCHDataGenerator
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 @pytest.mark.integration
 class TestPrimitivesTpchManifestIsolation:

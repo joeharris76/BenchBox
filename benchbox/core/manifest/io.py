@@ -108,6 +108,7 @@ def _parse_v2(data: dict) -> ManifestV2:
                     converted_at=f.get("converted_at"),
                     compression=f.get("compression"),
                     row_groups=f.get("row_groups"),
+                    is_directory=bool(f.get("is_directory", False)),
                     conversion_options=f.get("conversion_options", {}),
                 )
                 for f in files
@@ -281,6 +282,8 @@ def _manifest_v2_to_dict(manifest: ManifestV2) -> dict:
                     value = getattr(f, attr, None)
                     if value is not None and value:
                         file_dict[attr] = value
+                if f.is_directory:
+                    file_dict["is_directory"] = True
                 file_dicts.append(file_dict)
 
             formats_dict[format_name] = file_dicts

@@ -20,14 +20,17 @@ ls benchmark_runs/results/
 # tpch_duckdb_sf0.01_20251212_143021.json
 ```
 
-### Specify Formats
+### Export to Other Formats
 
 ```bash
-# Export JSON (default)
-benchbox run --platform duckdb --benchmark tpch --format json
+# Export most recent result to CSV
+benchbox export --last --format csv
 
-# Export multiple formats
-benchbox run --platform duckdb --benchmark tpch --format json,csv,html
+# Export to multiple formats
+benchbox export --last --format csv --format html
+
+# Export a specific result file
+benchbox export benchmark_runs/results/tpch_duckdb_sf0.01_20251212_143021.json --format csv --format html
 ```
 
 ### Custom Output Directory
@@ -261,10 +264,10 @@ total_duration_ms,45230
 HTML export generates a standalone report with formatted tables.
 
 ```bash
-# Generate HTML report
-benchbox run --platform duckdb --benchmark tpch --format html
+# Generate HTML report from most recent result
+benchbox export --last --format html
 
-# Or export an existing result
+# Export a specific result file to HTML
 benchbox export benchmark_runs/results/tpch_duckdb_sf0.01_20251212_143021.json --format html
 ```
 
@@ -429,11 +432,7 @@ Results are anonymized by default to remove sensitive information:
 
 ### Disable Anonymization
 
-```bash
-# For internal use only
-benchbox run --platform snowflake --benchmark tpch \
-  --no-anonymize
-```
+Anonymization can be configured programmatically via the Python API:
 
 ### Anonymization Config
 

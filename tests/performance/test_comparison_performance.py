@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from benchbox.core.query_plans.comparison import QueryPlanComparator
 from benchbox.core.results.query_plan_models import (
     LogicalOperator,
     LogicalOperatorType,
     QueryPlanDAG,
 )
+
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
 
 
 def _build_chain_plan(length: int) -> QueryPlanDAG:

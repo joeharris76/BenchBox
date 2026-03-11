@@ -15,7 +15,10 @@ from benchbox.core.publishing.permalink import (
     PermalinkRegistry,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPermalink:

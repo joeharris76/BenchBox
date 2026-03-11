@@ -17,7 +17,10 @@ from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 from benchbox.core.tpcds.c_tools import TPCDSError
 from benchbox.tpcds import TPCDS
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.tpcds

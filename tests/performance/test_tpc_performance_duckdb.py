@@ -13,10 +13,16 @@ import time
 
 import duckdb
 import psutil
+import pytest
 
 from benchbox.core.tpc_compliance import TPCOfficialMetrics
 from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 from benchbox.core.tpch.benchmark import TPCHBenchmark
+
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
 
 
 class TestTPCPerformanceDuckDB:

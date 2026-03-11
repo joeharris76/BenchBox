@@ -19,7 +19,10 @@ import pytest
 
 from benchbox.platforms.trino import TrinoAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTrinoAdapter:
@@ -568,6 +571,81 @@ class TestTrinoAdapter:
             assert "customer" in table_stats
             assert table_stats["customer"] == 2
 
+        finally:
+            temp_path.unlink()
+
+    def test_external_table_mode_requires_staging_root(self):
+        """External mode should require staging_root configuration."""
+        try:
+            adapter = TrinoAdapter(host="trino-coordinator.example.com", catalog="hive", schema="analytics")
+        except ImportError:
+            pytest.skip("Trino drivers not installed")
+
+        with pytest.raises(ValueError, match="requires --platform-option staging_root"):
+            adapter.validate_external_table_requirements()
+
+    def test_create_external_tables_generates_location_sql(self):
+        """External mode should create tables with external_location and parquet format."""
+        try:
+            adapter = TrinoAdapter(
+                host="trino-coordinator.example.com",
+                catalog="hive",
+                schema="analytics",
+                staging_root="s3://benchbox/staging",
+            )
+        except ImportError:
+            pytest.skip("Trino drivers not installed")
+
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (9,)
+
+        benchmark = Mock()
+        benchmark.tables = {"orders": [Path("/tmp/orders.parquet")]}
+        benchmark.get_schema.return_value = {
+            "orders": {
+                "columns": [
+                    {"name": "o_orderkey", "type": "BIGINT"},
+                    {"name": "o_totalprice", "type": "DECIMAL(15,2)"},
+                ]
+            }
+        }
+
+        stats, _, _ = adapter.create_external_tables(benchmark, mock_connection, Path("/tmp"))
+
+        assert stats["orders"] == 9
+        executed_sql = " ".join(call.args[0] for call in mock_cursor.execute.call_args_list)
+        assert "CREATE TABLE hive.analytics.orders" in executed_sql
+        assert "external_location = 's3://benchbox/staging/orders/'" in executed_sql
+        assert "format = 'PARQUET'" in executed_sql
+
+    def test_load_data_does_not_invoke_external_registration(self):
+        """Native load_data path should remain independent from external registration."""
+        try:
+            adapter = TrinoAdapter(host="trino-coordinator.example.com", catalog="memory", schema="default")
+        except ImportError:
+            pytest.skip("Trino drivers not installed")
+
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write("1,test\n")
+            temp_path = Path(f.name)
+
+        mock_benchmark = Mock()
+        mock_benchmark.tables = {"orders": str(temp_path)}
+
+        try:
+            with patch.object(
+                adapter,
+                "create_external_tables",
+                side_effect=AssertionError("native load_data should not call create_external_tables"),
+            ):
+                stats, _, _ = adapter.load_data(mock_benchmark, mock_connection, Path("/tmp"))
+            assert stats["orders"] == 1
         finally:
             temp_path.unlink()
 

@@ -26,6 +26,12 @@ from benchbox.core.validation.query_validation import QueryValidator
 from tests.e2e.utils import is_dataframe_available, is_gpu_available, is_platform_available
 from tests.integration._cli_e2e_utils import run_cli_command
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.stress,
+]
+
+
 # Local SQL platforms with in-process execution paths.
 LOCAL_SQL_PLATFORMS: tuple[str, ...] = ("duckdb", "sqlite", "datafusion")
 ALL_BENCHMARKS: tuple[str, ...] = tuple(list_benchmark_ids())

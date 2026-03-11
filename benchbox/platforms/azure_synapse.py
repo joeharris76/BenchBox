@@ -44,6 +44,7 @@ class AzureSynapseAdapter(PlatformAdapter):
     """Azure Synapse Analytics platform adapter with cloud data warehouse optimizations."""
 
     driver_isolation_capability = DriverIsolationCapability.NOT_FEASIBLE
+    supports_external_tables = True
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -229,6 +230,7 @@ class AzureSynapseAdapter(PlatformAdapter):
             "storage_account",
             "container",
             "storage_path",
+            "staging_root",
             "storage_sas_token",
             "storage_account_key",
             "storage_credential",
@@ -673,15 +675,287 @@ class AzureSynapseAdapter(PlatformAdapter):
 
         return table_stats
 
+    def validate_external_table_requirements(self) -> None:
+        """Validate prerequisites for Synapse external table mode."""
+        if not self.storage_account or not self.container:
+            raise ValueError(
+                "Azure Synapse external mode requires blob storage configuration "
+                "(set --platform-option staging_root=abfss://container@account.dfs.core.windows.net/path "
+                "or provide storage_account + container options)."
+            )
+
+    @staticmethod
+    def _map_external_column_type(column_type: str) -> str:
+        """Map benchmark schema types to Synapse external table-compatible types."""
+        normalized = str(column_type).strip().upper()
+        if not normalized:
+            return "VARCHAR(8000)"
+        if normalized.startswith(("DECIMAL", "NUMERIC", "VARCHAR", "CHAR")):
+            return normalized
+        if "BIGINT" in normalized:
+            return "BIGINT"
+        if "SMALLINT" in normalized:
+            return "SMALLINT"
+        if "INT" in normalized:
+            return "INT"
+        if "DOUBLE" in normalized or "FLOAT" in normalized:
+            return "FLOAT"
+        if "REAL" in normalized:
+            return "REAL"
+        if "DATE" in normalized:
+            return "DATE"
+        if "TIMESTAMP" in normalized or "DATETIME" in normalized:
+            return "DATETIME2"
+        if "BOOLEAN" in normalized or normalized == "BOOL":
+            return "BIT"
+        return "VARCHAR(8000)"
+
+    def _build_external_column_definitions(self, benchmark: Any, table_name: str) -> str:
+        """Build Synapse external table column definitions from benchmark schema."""
+        if not hasattr(benchmark, "get_schema"):
+            raise ValueError(
+                f"Benchmark schema metadata unavailable for '{table_name}'. "
+                "Azure Synapse external mode requires benchmark.get_schema()."
+            )
+
+        schema = benchmark.get_schema() or {}
+        table_schema = schema.get(table_name) or schema.get(table_name.lower()) or schema.get(table_name.upper())
+        if not table_schema:
+            raise ValueError(f"No schema definition found for table '{table_name}'.")
+
+        columns = table_schema.get("columns", [])
+        if not columns:
+            raise ValueError(f"No columns found in schema definition for table '{table_name}'.")
+
+        column_defs = []
+        for column in columns:
+            column_name = str(column.get("name", "")).strip()
+            if not column_name:
+                continue
+            mapped_type = self._map_external_column_type(str(column.get("type", "")))
+            column_defs.append(f"[{column_name}] {mapped_type}")
+
+        if not column_defs:
+            raise ValueError(f"No valid column definitions were generated for table '{table_name}'.")
+
+        return ", ".join(column_defs)
+
+    @staticmethod
+    def _normalize_existing_files(file_paths: Any) -> list[Path]:
+        """Normalize file inputs to existing, non-empty local paths."""
+        normalized_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        valid_files: list[Path] = []
+        for file_path in normalized_paths:
+            path = Path(file_path)
+            if path.exists() and path.stat().st_size > 0:
+                valid_files.append(path)
+        return valid_files
+
+    def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
+        """Resolve benchmark data files from benchmark tables or manifest."""
+        if hasattr(benchmark, "tables") and benchmark.tables:
+            return benchmark.tables
+
+        data_files = None
+        try:
+            manifest_path = Path(data_dir) / "_datagen_manifest.json"
+            if manifest_path.exists():
+                with open(manifest_path) as f:
+                    manifest = json.load(f)
+                tables = manifest.get("tables") or {}
+                mapping = {}
+                for table, entries in tables.items():
+                    if entries:
+                        chunk_paths = []
+                        for entry in entries:
+                            rel = entry.get("path")
+                            if rel:
+                                chunk_paths.append(Path(data_dir) / rel)
+                        if chunk_paths:
+                            mapping[table] = chunk_paths
+                if mapping:
+                    data_files = mapping
+        except Exception as e:
+            self.logger.debug(f"Manifest fallback failed: {e}")
+
+        if not data_files:
+            raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
+        return data_files
+
+    def _upload_external_parquet_to_blob(self, table_name: str, files: list[Path]) -> str:
+        """Upload Parquet files for external mode and return Synapse LOCATION path."""
+        try:
+            from azure.storage.blob import BlobServiceClient
+
+            if self.storage_sas_token:
+                account_url = f"https://{self.storage_account}.blob.core.windows.net"
+                blob_service = BlobServiceClient(account_url=account_url, credential=self.storage_sas_token)
+            elif self.storage_account_key:
+                connection_string = (
+                    f"DefaultEndpointsProtocol=https;"
+                    f"AccountName={self.storage_account};"
+                    f"AccountKey={self.storage_account_key};"
+                    f"EndpointSuffix=core.windows.net"
+                )
+                blob_service = BlobServiceClient.from_connection_string(connection_string)
+            else:
+                from azure.identity import DefaultAzureCredential
+
+                account_url = f"https://{self.storage_account}.blob.core.windows.net"
+                blob_service = BlobServiceClient(account_url=account_url, credential=DefaultAzureCredential())
+
+            container_client = blob_service.get_container_client(self.container)
+            table_name_lower = table_name.lower()
+            relative_prefix = f"{self.storage_path}/{self.database.lower()}_external/{table_name_lower}".strip("/")
+
+            for file_path in files:
+                blob_name = f"{relative_prefix}/{file_path.name}"
+                with open(file_path, "rb") as data:
+                    container_client.upload_blob(name=blob_name, data=data, overwrite=True)
+
+            return f"/{relative_prefix}/"
+
+        except ImportError:
+            raise ImportError(
+                "Azure Storage SDK required for external mode uploads. "
+                "Install with: pip install azure-storage-blob azure-identity"
+            ) from None
+
+    def _resolve_external_credential_name(self, cursor: Any) -> str | None:
+        """Create/resolve a database scoped credential for external data source."""
+        if self.storage_credential:
+            return self.storage_credential
+
+        if self.storage_sas_token:
+            credential_name = "BENCHBOX_EXTERNAL_SAS_CRED"
+            escaped_sas = self.storage_sas_token.replace("'", "''")
+            cursor.execute(
+                f"""
+                IF NOT EXISTS (SELECT 1 FROM sys.database_scoped_credentials WHERE name = '{credential_name}')
+                BEGIN
+                    CREATE DATABASE SCOPED CREDENTIAL [{credential_name}]
+                    WITH IDENTITY = 'SHARED ACCESS SIGNATURE', SECRET = '{escaped_sas}'
+                END
+                """
+            )
+            return credential_name
+
+        if self.storage_account_key:
+            credential_name = "BENCHBOX_EXTERNAL_KEY_CRED"
+            escaped_key = self.storage_account_key.replace("'", "''")
+            cursor.execute(
+                f"""
+                IF NOT EXISTS (SELECT 1 FROM sys.database_scoped_credentials WHERE name = '{credential_name}')
+                BEGIN
+                    CREATE DATABASE SCOPED CREDENTIAL [{credential_name}]
+                    WITH IDENTITY = '{self.storage_account}', SECRET = '{escaped_key}'
+                END
+                """
+            )
+            return credential_name
+
+        return None
+
+    def _setup_external_table_primitives(self, cursor: Any) -> tuple[str, str]:
+        """Ensure external data source and file format exist for PolyBase tables."""
+        self._setup_external_data_source(cursor)
+
+        data_source_name = "BENCHBOX_EXTERNAL_SOURCE"
+        file_format_name = "BENCHBOX_PARQUET_FORMAT"
+        credential_name = self._resolve_external_credential_name(cursor)
+        location = f"abfss://{self.container}@{self.storage_account}.dfs.core.windows.net"
+
+        credential_clause = f", CREDENTIAL = [{credential_name}]" if credential_name else ""
+        cursor.execute(
+            f"""
+            IF NOT EXISTS (SELECT 1 FROM sys.external_data_sources WHERE name = '{data_source_name}')
+            BEGIN
+                CREATE EXTERNAL DATA SOURCE [{data_source_name}]
+                WITH (
+                    TYPE = HADOOP,
+                    LOCATION = '{location}'
+                    {credential_clause}
+                )
+            END
+            """
+        )
+
+        cursor.execute(
+            f"""
+            IF NOT EXISTS (SELECT 1 FROM sys.external_file_formats WHERE name = '{file_format_name}')
+            BEGIN
+                CREATE EXTERNAL FILE FORMAT [{file_format_name}] WITH (FORMAT_TYPE = PARQUET)
+            END
+            """
+        )
+
+        return data_source_name, file_format_name
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Register PolyBase external tables over uploaded Parquet files."""
+        self.validate_external_table_requirements()
+
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+        cursor = connection.cursor()
+
+        try:
+            data_files = self._resolve_data_files(benchmark, data_dir)
+            data_source_name, file_format_name = self._setup_external_table_primitives(cursor)
+
+            for table_name, file_paths in data_files.items():
+                table_name_lower = table_name.lower()
+                parquet_files = [
+                    path for path in self._normalize_existing_files(file_paths) if path.suffix.lower() == ".parquet"
+                ]
+                if not parquet_files:
+                    raise ValueError(
+                        f"Azure Synapse external mode requires Parquet files for table '{table_name_lower}'. "
+                        "No Parquet sources were found."
+                    )
+
+                location = self._upload_external_parquet_to_blob(table_name_lower, parquet_files)
+                columns = self._build_external_column_definitions(benchmark, table_name_lower)
+                qualified_table = f"[{self.schema}].[{table_name_lower}]"
+
+                cursor.execute(f"DROP EXTERNAL TABLE IF EXISTS {qualified_table}")
+                cursor.execute(
+                    f"""
+                    CREATE EXTERNAL TABLE {qualified_table}
+                    ({columns})
+                    WITH (
+                        LOCATION = '{location}',
+                        DATA_SOURCE = [{data_source_name}],
+                        FILE_FORMAT = [{file_format_name}]
+                    )
+                    """
+                )
+                cursor.execute(f"SELECT COUNT(*) FROM {qualified_table}")
+                result = cursor.fetchone()
+                table_stats[table_name_lower] = int(result[0]) if result else 0
+
+        finally:
+            cursor.close()
+
+        total_time = elapsed_seconds(start_time)
+        return table_stats, total_time, None
+
     def _setup_external_data_source(self, cursor: Any) -> None:
         """Set up external data source for COPY operations."""
-        # Create master key if not exists (required for credentials)
+        import secrets
+
+        # Create master key if not exists (required for credentials).
+        # Generate a random password per session to avoid hardcoded secrets.
+        master_key_password = secrets.token_urlsafe(32)
+        escaped_password = master_key_password.replace("'", "''")
         try:
             cursor.execute(
-                """
+                f"""
                 IF NOT EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = '##MS_DatabaseMasterKey##')
                 BEGIN
-                    CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'BenchBox#Temp123!'
+                    CREATE MASTER KEY ENCRYPTION BY PASSWORD = '{escaped_password}'
                 END
             """
             )
@@ -1100,6 +1374,7 @@ def _build_synapse_config(
         "auth_method": merged_options.get("auth_method"),
         "storage_account": merged_options.get("storage_account"),
         "container": merged_options.get("container"),
+        "staging_root": merged_options.get("staging_root"),
         "storage_sas_token": merged_options.get("storage_sas_token"),
         "benchmark": overrides.get("benchmark"),
         "scale_factor": overrides.get("scale_factor"),

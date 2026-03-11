@@ -9,6 +9,7 @@ Documentation for testing BenchBox functionality, including live integration tes
 
 ## Test Documentation
 
+- [Pytest xdist Safety](../development/pytest-xdist-safety.md) - Why BenchBox caps local xdist workers and how to validate changes
 - [Live Integration Tests](live-integration-tests.md) - Running integration tests against live database platforms
 
 ## Test Categories
@@ -72,6 +73,7 @@ See [Live Integration Tests](live-integration-tests.md) for detailed setup instr
 
 - [Development Guide](../development/development.md) - Development environment setup
 - [Testing Guide](../development/testing.md) - Test organization and strategies
+- [Pytest xdist Safety](../development/pytest-xdist-safety.md) - xdist root cause, cap behavior, and validation checklist
 - [CI/CD Integration](../advanced/ci-cd-integration.md) - Automated testing workflows
 
 ```{toctree}

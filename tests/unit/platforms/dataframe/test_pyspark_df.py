@@ -30,12 +30,14 @@ from benchbox.platforms.pyspark import (
 )
 
 pytestmark = [
-    pytest.mark.fast,
+    pytest.mark.unit,
+    pytest.mark.medium,
     pytest.mark.skipif(
         sys.platform == "win32",
         reason="PySpark tests skipped on Windows - Hadoop requires winutils.exe setup",
     ),
 ]
+
 
 # Ensure compatible Java is configured at import time
 # This allows skipif decorators to evaluate correctly
@@ -113,7 +115,6 @@ class TestPySparkDataFrameAdapter:
         """Test context creation."""
         ctx = adapter.create_context()
 
-        assert ctx is not None
         assert ctx.platform == "PySpark"
         assert ctx.family == "expression"
 
@@ -129,7 +130,7 @@ class TestPySparkDataFrameAdapter:
 
         # Access spark property to trigger creation
         session = adapter.spark
-        assert session is not None
+        assert hasattr(session, "sql"), "SparkSession should have sql method"
         assert adapter._spark is not None
 
         # Close should stop session
@@ -144,7 +145,7 @@ class TestPySparkDataFrameAdapter:
         ) as adapter:
             # Session should be available
             session = adapter.spark
-            assert session is not None
+            assert hasattr(session, "sql"), "SparkSession should have sql method"
             assert adapter._spark is not None
 
         # After context manager exit, session should be stopped
@@ -163,7 +164,7 @@ class TestPySparkDataFrameAdapter:
         # But version should be available
         info = adapter.get_platform_info()
         assert "version" in info
-        assert info["version"] is not None
+        assert isinstance(info["version"], str) and len(info["version"]) > 0
 
         # Session should still NOT be created (lazy)
         assert adapter._spark is None
@@ -190,50 +191,42 @@ class TestPySparkExpressionMethods:
         expr = adapter.col("amount")
 
         # PySpark returns Column type
-        assert expr is not None
         assert hasattr(expr, "alias")
 
     def test_lit_integer(self, adapter):
         """Test lit() with integer value."""
         expr = adapter.lit(100)
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_lit_string(self, adapter):
         """Test lit() with string value."""
         expr = adapter.lit("test")
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_lit_float(self, adapter):
         """Test lit() with float value."""
         expr = adapter.lit(3.14)
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_cast_date(self, adapter):
         """Test cast_date() method."""
         expr = adapter.cast_date(adapter.col("date_str"))
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_cast_string(self, adapter):
         """Test cast_string() method."""
         expr = adapter.cast_string(adapter.col("number"))
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_date_sub(self, adapter):
         """Test date_sub() method."""
         expr = adapter.date_sub(adapter.col("date"), 7)
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_date_add(self, adapter):
         """Test date_add() method."""
         expr = adapter.date_add(adapter.col("date"), 30)
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
 
 @pytest.mark.skipif(_SKIP_PYSPARK, reason=_SKIP_REASON)
@@ -253,47 +246,47 @@ class TestPySparkAggregationMethods:
     def test_sum(self, adapter):
         """Test sum() method."""
         expr = adapter.sum("amount")
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_mean(self, adapter):
         """Test mean() method."""
         expr = adapter.mean("amount")
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_count(self, adapter):
         """Test count() method."""
         expr = adapter.count("amount")
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_count_star(self, adapter):
         """Test count() method without column (COUNT(*))."""
         expr = adapter.count()
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_min(self, adapter):
         """Test min() method."""
         expr = adapter.min("amount")
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_max(self, adapter):
         """Test max() method."""
         expr = adapter.max("amount")
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_when(self, adapter):
         """Test when() conditional method."""
         when_expr = adapter.when(adapter.col("amount") > adapter.lit(100))
-        assert when_expr is not None
+        assert hasattr(when_expr, "alias")
 
     def test_concat_str(self, adapter):
         """Test concat_str() method."""
         expr = adapter.concat_str("first", "last", separator=" ")
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_concat_str_no_separator(self, adapter):
         """Test concat_str() method without separator."""
         expr = adapter.concat_str("first", "last")
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
     def test_aggregation_in_groupby(self, adapter):
         """Test aggregation methods work in group_by operations."""
@@ -385,7 +378,6 @@ class TestPySparkDataLoading:
         result = adapter.collect(test_df)
 
         # collect() should return the same DataFrame (Spark is always lazy)
-        assert result is not None
         assert adapter.get_row_count(result) == 3
 
     def test_get_row_count(self, adapter):
@@ -433,8 +425,7 @@ class TestPySparkWindowFunctions:
             order_by=[("value", True)],
             partition_by=["category"],
         )
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
         # Apply the expression
         result = test_df.select(
@@ -452,8 +443,7 @@ class TestPySparkWindowFunctions:
             order_by=[("value", True)],
             partition_by=["category"],
         )
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
         result = test_df.select(
             adapter.col("category"),
@@ -467,8 +457,7 @@ class TestPySparkWindowFunctions:
             order_by=[("value", True)],
             partition_by=["category"],
         )
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
         result = test_df.select(
             adapter.col("category"),
@@ -482,8 +471,7 @@ class TestPySparkWindowFunctions:
             column="value",
             partition_by=["category"],
         )
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
         result = test_df.select(
             adapter.col("category"),
@@ -502,8 +490,7 @@ class TestPySparkWindowFunctions:
             column="value",
             partition_by=["category"],
         )
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
         result = test_df.select(
             adapter.col("category"),
@@ -517,8 +504,7 @@ class TestPySparkWindowFunctions:
             column="value",
             partition_by=["category"],
         )
-
-        assert expr is not None
+        assert hasattr(expr, "alias")
 
         result = test_df.select(
             adapter.col("category"),
@@ -740,7 +726,6 @@ class TestPySparkSpecificFeatures:
 
         plan = adapter.explain(filtered, mode="simple")
 
-        assert plan is not None
         assert len(plan) > 0
         # Plan should mention filter
         assert "Filter" in plan or "filter" in plan.lower()
@@ -778,7 +763,6 @@ class TestPySparkSpecificFeatures:
 
         first = adapter._get_first_row(test_df)
 
-        assert first is not None
         assert len(first) == 2
         assert first[0] == 1
 
@@ -822,7 +806,7 @@ class TestPySparkSpecificFeatures:
         assert "shuffle_partitions" in summary
         assert "aqe_enabled" in summary
         assert "spark_version" in summary
-        assert summary["spark_version"] is not None
+        assert isinstance(summary["spark_version"], str) and len(summary["spark_version"]) > 0
 
 
 @pytest.mark.skipif(_SKIP_PYSPARK, reason=_SKIP_REASON)

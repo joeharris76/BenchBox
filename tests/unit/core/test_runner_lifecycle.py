@@ -19,7 +19,10 @@ from benchbox.core.validation import ValidationResult
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _mk_system_profile():
@@ -223,6 +226,221 @@ def test_load_only_mode_uses_dataframe_adapter_path(tmp_path):
 
     assert adapter_instance.run_called is True
     assert res is expected
+
+
+@pytest.mark.unit
+def test_load_only_external_mode_requires_adapter_support(tmp_path):
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        test_execution_type="load_only",
+        options={"table_mode": "external"},
+    )
+    db = DatabaseConfig(type="duckdb", name="test")
+    bench = MagicMock()
+    bench.output_dir = tmp_path
+    bench.tables = None
+    bench.generate_data = MagicMock()
+
+    class DummyAdapter:
+        platform_name = "duckdb"
+        supports_external_tables = False
+
+        def create_connection(self, **kwargs):  # pragma: no cover - simple mock
+            return Mock()
+
+        def close_connection(self, _conn):  # pragma: no cover - simple mock
+            return None
+
+        def create_schema(self, benchmark, connection):
+            raise AssertionError("create_schema should not be called for unsupported external mode")
+
+        def load_data(self, benchmark, connection, data_dir):
+            raise AssertionError("load_data should not be called for unsupported external mode")
+
+    adapter_instance = DummyAdapter()
+
+    with (
+        patch("benchbox.core.runner.runner.get_platform_adapter", return_value=adapter_instance),
+        pytest.raises(RuntimeError, match="does not support --table-mode external"),
+    ):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": "test.duckdb"},
+            phases=LifecyclePhases(generate=False, load=True, execute=False),
+            output_root=str(tmp_path),
+            benchmark_instance=bench,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("database_type", "platform_name"),
+    [
+        ("sqlite", "SQLite"),
+        ("postgresql", "PostgreSQL"),
+    ],
+)
+def test_load_only_external_mode_reports_platform_specific_unsupported_errors(
+    tmp_path, database_type: str, platform_name: str
+):
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        test_execution_type="load_only",
+        options={"table_mode": "external"},
+    )
+    db = DatabaseConfig(type=database_type, name=f"{database_type}_test")
+    bench = MagicMock()
+    bench.output_dir = tmp_path
+    bench.tables = None
+    bench.generate_data = MagicMock()
+
+    class DummyAdapter:
+        supports_external_tables = False
+
+        @property
+        def platform_name(self):
+            return platform_name
+
+        def create_connection(self, **kwargs):  # pragma: no cover - simple mock
+            return Mock()
+
+        def close_connection(self, _conn):  # pragma: no cover - simple mock
+            return None
+
+    with (
+        patch("benchbox.core.runner.runner.get_platform_adapter", return_value=DummyAdapter()),
+        pytest.raises(RuntimeError, match=f"Platform '{platform_name}' does not support --table-mode external"),
+    ):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={},
+            phases=LifecyclePhases(generate=False, load=True, execute=False),
+            output_root=str(tmp_path),
+            benchmark_instance=bench,
+        )
+
+
+@pytest.mark.unit
+def test_load_only_external_mode_invokes_adapter_runtime_validation_hook(tmp_path):
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        test_execution_type="load_only",
+        options={"table_mode": "external"},
+    )
+    db = DatabaseConfig(type="duckdb", name="test")
+    bench = MagicMock()
+    bench.output_dir = tmp_path
+    bench.tables = None
+    bench.generate_data = MagicMock()
+
+    def _create_enhanced(platform, query_results, **kwargs):
+        dur = kwargs.get("duration_seconds", 0.0)
+        return make_benchmark_results(
+            benchmark_name="TPC-H",
+            platform=platform,
+            execution_id="eid",
+            duration_seconds=dur,
+            total_queries=len(query_results),
+            query_definitions={},
+            total_execution_time=dur,
+            execution_phases=kwargs.get("phases"),
+            test_execution_type="load_only",
+        )
+
+    bench.create_enhanced_benchmark_result = _create_enhanced
+
+    class DummyAdapter:
+        platform_name = "duckdb"
+        supports_external_tables = True
+
+        def __init__(self):
+            self.validated_external = False
+            self.external_created = False
+
+        def create_connection(self, **kwargs):  # pragma: no cover - simple mock
+            return Mock()
+
+        def close_connection(self, _conn):  # pragma: no cover - simple mock
+            return None
+
+        def validate_external_table_requirements(self):
+            self.validated_external = True
+
+        def create_schema(self, benchmark, connection):
+            raise AssertionError("create_schema should not be called in external table mode")
+
+        def load_data(self, benchmark, connection, data_dir):
+            raise AssertionError("load_data should not be called in external table mode")
+
+        def create_external_tables(self, benchmark, connection, data_dir):
+            self.external_created = True
+            return {"table1": 10}, 0.2, None
+
+    adapter_instance = DummyAdapter()
+
+    with patch("benchbox.core.runner.runner.get_platform_adapter", return_value=adapter_instance):
+        res = run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": "test.duckdb"},
+            phases=LifecyclePhases(generate=False, load=True, execute=False),
+            output_root=str(tmp_path),
+            benchmark_instance=bench,
+        )
+
+    assert adapter_instance.validated_external is True
+    assert adapter_instance.external_created is True
+    assert isinstance(res, BenchmarkResults)
+
+
+@pytest.mark.unit
+def test_load_only_external_mode_surfaces_adapter_validation_guidance(tmp_path):
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        test_execution_type="load_only",
+        options={"table_mode": "external"},
+    )
+    db = DatabaseConfig(type="bigquery", name="test")
+    bench = MagicMock()
+    bench.output_dir = tmp_path
+    bench.tables = None
+    bench.generate_data = MagicMock()
+
+    class DummyAdapter:
+        platform_name = "BigQuery"
+        supports_external_tables = True
+
+        def create_connection(self, **kwargs):  # pragma: no cover - simple mock
+            return Mock()
+
+        def close_connection(self, _conn):  # pragma: no cover - simple mock
+            return None
+
+        def validate_external_table_requirements(self):
+            raise ValueError("BigQuery external mode requires a GCS bucket")
+
+    with (
+        patch("benchbox.core.runner.runner.get_platform_adapter", return_value=DummyAdapter()),
+        pytest.raises(ValueError, match="requires a GCS bucket"),
+    ):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={},
+            phases=LifecyclePhases(generate=False, load=True, execute=False),
+            output_root=str(tmp_path),
+            benchmark_instance=bench,
+        )
 
 
 @pytest.mark.unit
@@ -959,3 +1177,234 @@ def test_representative_benchmarks_standard_path(benchmark_id: str, tmp_path: Pa
     assert adapter.called is True
     assert adapter.kwargs is not None
     assert result.total_queries == 1
+
+
+@pytest.mark.unit
+def test_standard_path_propagates_table_mode_to_adapter(tmp_path: Path) -> None:
+    """When table_mode=external with load+execute, adapter.table_mode must be set."""
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        scale_factor=0.01,
+        test_execution_type="power",
+        options={"table_mode": "external"},
+    )
+    db = DatabaseConfig(type="duckdb", name="duckdb")
+    bench = MagicMock()
+    bench.output_dir = tmp_path
+    bench.tables = None
+    bench.generate_data = MagicMock()
+
+    class DummyAdapter:
+        platform_name = "duckdb"
+        supports_external_tables = True
+        table_mode = "native"  # default
+
+        def __init__(self):
+            self.run_benchmark_called = False
+            self.table_mode_at_run = None
+
+        def run_benchmark(self, benchmark, **kwargs):
+            self.run_benchmark_called = True
+            self.table_mode_at_run = self.table_mode
+            return bench.create_enhanced_benchmark_result(
+                platform="duckdb",
+                query_results=[],
+                duration_seconds=0.0,
+                execution_metadata={"mode": "standard"},
+            )
+
+    bench.create_enhanced_benchmark_result = lambda platform, query_results, **kwargs: make_benchmark_results(
+        benchmark_name="TPC-H",
+        platform=platform,
+        execution_id="eid",
+        query_definitions={},
+        test_execution_type="power",
+    )
+
+    adapter = DummyAdapter()
+
+    with patch("benchbox.core.runner.runner._ensure_data_generated", return_value=False):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": str(tmp_path / "test.duckdb")},
+            phases=LifecyclePhases(generate=False, load=False, execute=True),
+            benchmark_instance=bench,
+            platform_adapter=adapter,
+        )
+
+    assert adapter.run_benchmark_called is True
+    assert adapter.table_mode_at_run == "external", (
+        "Runner must propagate table_mode='external' to adapter before calling run_benchmark"
+    )
+
+
+@pytest.mark.unit
+def test_standard_path_propagates_conversion_settings_to_adapter(tmp_path: Path) -> None:
+    """Conversion settings should be included in adapter run_config kwargs."""
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        scale_factor=0.01,
+        test_execution_type="power",
+        options={
+            "table_format": "parquet",
+            "table_format_compression": "zstd",
+            "table_format_partition_cols": ["region"],
+        },
+    )
+    db = DatabaseConfig(type="duckdb", name="duckdb")
+    bench = MagicMock()
+    bench.output_dir = tmp_path
+    bench.tables = None
+    bench.generate_data = MagicMock()
+
+    class DummyAdapter:
+        platform_name = "duckdb"
+
+        def __init__(self):
+            self.kwargs = None
+
+        def run_benchmark(self, benchmark, **kwargs):
+            self.kwargs = kwargs
+            return bench.create_enhanced_benchmark_result(
+                platform="duckdb",
+                query_results=[],
+                duration_seconds=0.0,
+                execution_metadata={"mode": "standard"},
+            )
+
+    bench.create_enhanced_benchmark_result = lambda platform, query_results, **kwargs: make_benchmark_results(
+        benchmark_name="TPC-H",
+        platform=platform,
+        execution_id="eid",
+        query_definitions={},
+        test_execution_type="power",
+    )
+
+    adapter = DummyAdapter()
+
+    with patch("benchbox.core.runner.runner._ensure_data_generated", return_value=False):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": str(tmp_path / "test.duckdb")},
+            phases=LifecyclePhases(generate=False, load=False, execute=True),
+            benchmark_instance=bench,
+            platform_adapter=adapter,
+        )
+
+    assert adapter.kwargs is not None
+    assert adapter.kwargs.get("table_format") == "parquet"
+    assert adapter.kwargs.get("table_format_compression") == "zstd"
+    assert adapter.kwargs.get("table_format_partition_cols") == ["region"]
+
+
+@pytest.mark.unit
+def test_unsupported_table_format_fails_fast(tmp_path):
+    """Platform that doesn't support the requested table format should fail immediately."""
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        test_execution_type="power",
+        options={"table_format": "ducklake"},
+    )
+
+    bench = MagicMock(spec=BaseBenchmark)
+    bench.name = "TPC-H"
+    bench.scale_factor = 0.01
+    bench.tables = {"lineitem": [Path("lineitem.tbl")]}
+    bench.output_dir = str(tmp_path)
+    bench.generate_data = MagicMock()
+    bench.get_queries = MagicMock(return_value={"Q1": "SELECT 1"})
+
+    adapter = MagicMock()
+    adapter.platform_name = "DataFusion"
+
+    db_cfg = DatabaseConfig(name="test-datafusion", type="datafusion")
+
+    with pytest.raises(RuntimeError, match="does not support table format 'ducklake'"):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db_cfg,
+            system_profile=_mk_system_profile(),
+            platform_config={"database_path": str(tmp_path / "test.db")},
+            phases=LifecyclePhases(generate=False, load=False, execute=True),
+            benchmark_instance=bench,
+            platform_adapter=adapter,
+        )
+
+
+@pytest.mark.unit
+def test_bigquery_external_delta_without_biglake_connection_fails_fast(tmp_path):
+    """BigQuery external Delta should fail before execution when BigLake config is missing."""
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        test_execution_type="power",
+        options={"table_mode": "external", "table_format": "delta"},
+    )
+
+    bench = MagicMock(spec=BaseBenchmark)
+    bench.name = "TPC-H"
+    bench.scale_factor = 0.01
+    bench.tables = {"lineitem": [Path("lineitem")]}
+    bench.output_dir = str(tmp_path)
+    bench.generate_data = MagicMock()
+    bench.get_queries = MagicMock(return_value={"Q1": "SELECT 1"})
+
+    class DummyAdapter:
+        platform_name = "BigQuery"
+        staging_root = "gs://benchbox-bucket/prefix"
+
+    db_cfg = DatabaseConfig(name="test-bigquery", type="bigquery")
+
+    with pytest.raises(RuntimeError, match="does not support table format 'delta'"):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db_cfg,
+            system_profile=_mk_system_profile(),
+            platform_config={},
+            phases=LifecyclePhases(generate=False, load=False, execute=True),
+            benchmark_instance=bench,
+            platform_adapter=DummyAdapter(),
+        )
+
+
+@pytest.mark.unit
+def test_snowflake_external_iceberg_without_volume_fails_fast(tmp_path):
+    """Snowflake external Iceberg should fail before execution when external volume config is missing."""
+    cfg = BenchmarkConfig(
+        name="tpch",
+        display_name="TPC-H",
+        test_execution_type="power",
+        options={"table_mode": "external", "table_format": "iceberg"},
+    )
+
+    bench = MagicMock(spec=BaseBenchmark)
+    bench.name = "TPC-H"
+    bench.scale_factor = 0.01
+    bench.tables = {"lineitem": [Path("lineitem")]}
+    bench.output_dir = str(tmp_path)
+    bench.generate_data = MagicMock()
+    bench.get_queries = MagicMock(return_value={"Q1": "SELECT 1"})
+
+    class DummyAdapter:
+        platform_name = "Snowflake"
+        staging_root = "s3://benchbox-bucket/prefix"
+
+    db_cfg = DatabaseConfig(name="test-snowflake", type="snowflake")
+
+    with pytest.raises(RuntimeError, match="does not support table format 'iceberg'"):
+        run_benchmark_lifecycle(
+            benchmark_config=cfg,
+            database_config=db_cfg,
+            system_profile=_mk_system_profile(),
+            platform_config={},
+            phases=LifecyclePhases(generate=False, load=False, execute=True),
+            benchmark_instance=bench,
+            platform_adapter=DummyAdapter(),
+        )

@@ -30,7 +30,10 @@ from benchbox.core.dataframe.validation import (
     validate_row_count,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestValidationResult:

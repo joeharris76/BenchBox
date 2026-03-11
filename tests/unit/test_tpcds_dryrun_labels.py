@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.cli.dryrun import DryRunExecutor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _mk_benchmark_mock():

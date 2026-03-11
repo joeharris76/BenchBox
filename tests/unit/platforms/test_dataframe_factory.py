@@ -25,7 +25,10 @@ from benchbox.platforms import (
     list_available_dataframe_platforms,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGetDataFrameAdapter:

@@ -5,13 +5,17 @@ and a relative -TEMPLATE path pointing into query_variants/ when a variant
 template exists only under that subdirectory.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from benchbox.core.tpcds.c_tools import DSQGenBinary
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _fake_completed(stdout: str = "SELECT 1\n"):
@@ -67,15 +71,18 @@ def test_dsqgen_uses_main_directory_for_variants(tmp_path, monkeypatch):
     # Act: generate a variant query by passing composite id '1a'
     sql = dsq.generate("1a", seed=22, scale_factor=1.0, dialect="ansi")
 
-    # Assert: command uses a short symlink for -DIRECTORY (avoids dsqgen path buffer overflow)
-    assert "-DIRECTORY" in captured_cmd
-    dir_idx = captured_cmd.index("-DIRECTORY") + 1
+    # dsqgen uses '/' option prefix on Windows, '-' on Unix (r_params.c OPTION_START)
+    _opt = "/" if sys.platform == "win32" else "-"
+
+    # Assert: command uses a short path for -DIRECTORY (avoids dsqgen path buffer overflow)
+    assert f"{_opt}DIRECTORY" in captured_cmd
+    dir_idx = captured_cmd.index(f"{_opt}DIRECTORY") + 1
     tmpl_dir = Path(captured_cmd[dir_idx])
-    # The -DIRECTORY is a temp symlink named 'q' pointing to templates_dir
+    # The -DIRECTORY is a temp copy named 'q' of templates_dir
     assert tmpl_dir.name == "q"
 
-    assert "-TEMPLATE" in captured_cmd
-    tpl_idx = captured_cmd.index("-TEMPLATE") + 1
+    assert f"{_opt}TEMPLATE" in captured_cmd
+    tpl_idx = captured_cmd.index(f"{_opt}TEMPLATE") + 1
     tpl_arg = captured_cmd[tpl_idx]
     # For variants, the template path should use ../ to access sibling directory
     assert tpl_arg == "../query_variants/query1a.tpl"

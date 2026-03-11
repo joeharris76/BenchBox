@@ -4,10 +4,15 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 INDEX_PATH = Path("index.html")
 
 
-@pytest.mark.fast
 @pytest.mark.unit
 @pytest.mark.skipif(not INDEX_PATH.exists(), reason="index.html not present (not in public release)")
 def test_index_page_describes_dependencies_accurately():

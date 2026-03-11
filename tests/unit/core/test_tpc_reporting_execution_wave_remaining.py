@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import types
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,7 +42,10 @@ from benchbox.core.tpch.throughput_test import (
     TPCHThroughputTestConfig,
 )
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @dataclass
@@ -411,6 +415,7 @@ def test_tpch_throughput_and_maintenance_core_paths(monkeypatch: pytest.MonkeyPa
     assert maint_result.failed_operations == 1
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="TPC-DS dsdgen binary is not supported on Windows")
 def test_tpcds_dsdgen_runner_error_and_fallback_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     class DummyRunner(DsdgenRunnerMixin):
         def __init__(self):
@@ -487,6 +492,7 @@ def test_tpcds_dsdgen_runner_error_and_fallback_paths(monkeypatch: pytest.Monkey
         runner._run_parallel_file_based_dsdgen(out)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="TPC-DS dsqgen binary is unstable on Windows CI")
 def test_tpcds_c_tools_and_dsqgen_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     # _resolve_tpcds_tool_and_template_paths fallback path.
     fake_compiler = SimpleNamespace(precompiled_base=None)

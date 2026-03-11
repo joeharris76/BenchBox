@@ -7,7 +7,10 @@ import pytest
 
 from benchbox.platforms.dataframe import iceberg_maintenance as im
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.skipif(not (im.ICEBERG_AVAILABLE and im.PYARROW_AVAILABLE), reason="PyIceberg/PyArrow not installed")

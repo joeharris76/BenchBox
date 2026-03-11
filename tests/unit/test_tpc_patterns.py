@@ -34,7 +34,10 @@ from benchbox.core.tpc_patterns import (
 )
 
 # Mark all tests in this file as unit tests
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockDatabaseConnection:

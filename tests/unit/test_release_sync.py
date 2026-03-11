@@ -11,6 +11,8 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from benchbox.release.workflow import (
     ALLOWED_ROOT_FILES,
     CLEANUP_PATTERNS,
@@ -27,6 +29,11 @@ from benchbox.release.workflow import (
     get_syncable_files,
     should_transform,
 )
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGetSyncableFiles:

@@ -14,6 +14,11 @@ import pytest
 from benchbox import TransactionPrimitives
 from benchbox.core.transaction_primitives.benchmark import OperationResult
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.duckdb
@@ -225,7 +230,6 @@ class TestTransactionPrimitivesDuckDBLifecycle:
 @pytest.mark.integration
 @pytest.mark.duckdb
 @pytest.mark.transaction_primitives
-@pytest.mark.fast
 class TestTransactionPrimitivesQuickSanity:
     """Quick sanity tests for Transaction Primitives - fast smoke tests."""
 

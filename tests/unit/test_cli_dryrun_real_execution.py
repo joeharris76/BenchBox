@@ -12,7 +12,10 @@ import pytest
 from benchbox.cli.dryrun import DryRunExecutor
 from benchbox.platforms.duckdb import DuckDBAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPlatformAdapterDryRun:

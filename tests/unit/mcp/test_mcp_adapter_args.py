@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.fast,
     pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+"),
 ]

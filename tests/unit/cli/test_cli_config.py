@@ -15,6 +15,11 @@ import yaml
 
 from benchbox.cli.config import BenchBoxConfig, ConfigManager
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def temp_dir():
@@ -24,7 +29,6 @@ def temp_dir():
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchBoxConfig:
     """Test BenchBoxConfig model."""
 
@@ -79,7 +83,6 @@ class TestBenchBoxConfig:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestConfigManager:
     """Test ConfigManager functionality."""
 
@@ -294,7 +297,6 @@ class TestConfigManager:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestConfigManagerEdgeCases:
     """Test ConfigManager edge cases and error handling."""
 

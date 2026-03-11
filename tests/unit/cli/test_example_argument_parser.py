@@ -10,7 +10,11 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Import the ExampleArgumentParser - handle import errors gracefully
 try:

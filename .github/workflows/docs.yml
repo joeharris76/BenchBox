@@ -128,6 +128,9 @@ jobs:
     - name: Check example file syntax
       run: uv run python scripts/check_example_syntax.py
 
+    - name: Validate visualization screenshot sync
+      run: uv run python scripts/validate_visualization_images.py
+
   # Check for broken links
   # Blocking: curated ignore list handles known flaky hosts
   linkcheck:

@@ -29,7 +29,10 @@ from benchbox.core.dataframe.benchmark_suite import (
 )
 
 # Mark all tests in this module as unit tests (fast)
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
 
 
 class TestBenchmarkConfig:

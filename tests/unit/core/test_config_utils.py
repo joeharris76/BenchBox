@@ -22,7 +22,10 @@ from benchbox.core.config_utils import (
     validate_numeric_config,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDeepMergeDicts:
@@ -255,7 +258,8 @@ class TestBuildPlatformAdapterConfig:
         assert result["memory_limit"] == "8GB"
         assert result["force_recreate"] is True
         assert "database_path" in result
-        assert "benchmark_runs/databases" in result["database_path"]
+        db_path = Path(result["database_path"])
+        assert "benchmark_runs" in db_path.parts and "databases" in db_path.parts
         assert "tpch_sf1" in result["database_path"]
 
     def test_build_databricks_config_from_namespace(self):

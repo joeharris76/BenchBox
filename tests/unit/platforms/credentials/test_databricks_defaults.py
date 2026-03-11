@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.platforms.databricks.credentials import setup_databricks_credentials
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDatabricksCredentialDefaults:

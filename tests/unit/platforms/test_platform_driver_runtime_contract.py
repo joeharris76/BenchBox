@@ -10,7 +10,10 @@ from benchbox.platforms.base.adapter import (
 )
 from benchbox.utils.runtime_env import DriverResolution, ensure_driver_version
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # --------------------------------------------------------------------------- #

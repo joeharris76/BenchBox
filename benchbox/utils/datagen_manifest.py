@@ -33,6 +33,33 @@ PathLike = Union[str, Path, "CloudPath"]
 MANIFEST_FILENAME = "_datagen_manifest.json"
 
 
+def compute_entry_size(path: Path) -> int:
+    """Compute the manifest-compatible size of a file or directory.
+
+    For regular files, returns ``path.stat().st_size`` (the byte count).
+    For directories (used by Delta, Iceberg, DuckLake, partitioned Parquet),
+    returns the recursive sum of all contained files — matching exactly how
+    converters compute ``size_bytes`` at write time.
+
+    Note:
+        Symlinks are followed (``stat()`` not ``lstat()``), consistent with
+        how converters write data. Symlinks pointing outside the directory
+        tree will be included in the sum.
+
+    Args:
+        path: A local filesystem path (file or directory).
+
+    Returns:
+        Size in bytes.
+
+    Raises:
+        FileNotFoundError: If *path* does not exist.
+    """
+    if path.is_dir():
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    return path.stat().st_size
+
+
 def _is_subpath(candidate: Path, parent: Path) -> bool:
     """Return whether candidate is inside parent."""
     try:

@@ -18,7 +18,10 @@ from benchbox.core.multiregion.config import (
     get_region,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestRegion:

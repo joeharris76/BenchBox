@@ -13,7 +13,10 @@ import pytest
 
 from benchbox.platforms.duckdb import DuckDBAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # ---------------------------------------------------------------------------

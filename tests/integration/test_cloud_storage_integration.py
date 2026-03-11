@@ -14,6 +14,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
+
 pytest.importorskip("pandas")
 
 # Check for cloudpathlib availability

@@ -15,7 +15,10 @@ from benchbox.platforms.datafusion_query_transformer import (
     transform_query_for_datafusion,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # Representative qgen -d output for the 4 affected queries (simplified but structurally accurate)

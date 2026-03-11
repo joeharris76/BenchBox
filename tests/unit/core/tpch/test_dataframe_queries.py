@@ -20,7 +20,10 @@ from benchbox.core.tpch.dataframe_queries import (
     list_query_ids,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCHQueryRegistry:
@@ -28,15 +31,14 @@ class TestTPCHQueryRegistry:
 
     def test_registry_exists(self):
         """Test that the registry exists and has queries."""
-        assert TPCH_DATAFRAME_QUERIES is not None
         assert len(TPCH_DATAFRAME_QUERIES) > 0
 
     def test_registry_name(self):
         """Test the registry has correct benchmark name."""
         assert TPCH_DATAFRAME_QUERIES.benchmark == "TPC-H DataFrame"
 
-    def test_get_tpch_dataframe_queries(self):
-        """Test getting the registry via function."""
+    def test_get_tpch_dataframe_queries_returns_same_registry(self):
+        """Test getting the registry via function returns the singleton."""
         registry = get_tpch_dataframe_queries()
         assert registry is TPCH_DATAFRAME_QUERIES
 
@@ -83,7 +85,6 @@ class TestRegisteredQueries:
     def test_query_exists(self, query_id: str):
         """Test that expected queries are registered."""
         query = get_query(query_id)
-        assert query is not None
         assert isinstance(query, DataFrameQuery)
 
     def test_get_nonexistent_query_raises(self):
@@ -108,12 +109,12 @@ class TestQ1PricingSummary:
     def test_q1_has_expression_impl(self):
         """Test Q1 has expression implementation."""
         query = get_query("Q1")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
     def test_q1_has_pandas_impl(self):
         """Test Q1 has pandas implementation."""
         query = get_query("Q1")
-        assert query.pandas_impl is not None
+        assert query.has_pandas_impl()
 
 
 class TestQ3ShippingPriority:
@@ -131,7 +132,7 @@ class TestQ3ShippingPriority:
     def test_q3_has_expression_impl(self):
         """Test Q3 has expression implementation."""
         query = get_query("Q3")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ4OrderPriority:
@@ -147,7 +148,7 @@ class TestQ4OrderPriority:
     def test_q4_has_expression_impl(self):
         """Test Q4 has expression implementation."""
         query = get_query("Q4")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ5LocalSupplier:
@@ -163,7 +164,7 @@ class TestQ5LocalSupplier:
     def test_q5_has_expression_impl(self):
         """Test Q5 has expression implementation."""
         query = get_query("Q5")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ6ForecastingRevenue:
@@ -181,12 +182,12 @@ class TestQ6ForecastingRevenue:
     def test_q6_has_expression_impl(self):
         """Test Q6 has expression implementation."""
         query = get_query("Q6")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
     def test_q6_has_pandas_impl(self):
         """Test Q6 has pandas implementation."""
         query = get_query("Q6")
-        assert query.pandas_impl is not None
+        assert query.has_pandas_impl()
 
 
 class TestQ10ReturnedItems:
@@ -203,7 +204,7 @@ class TestQ10ReturnedItems:
     def test_q10_has_expression_impl(self):
         """Test Q10 has expression implementation."""
         query = get_query("Q10")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ12ShippingModes:
@@ -220,7 +221,7 @@ class TestQ12ShippingModes:
     def test_q12_has_expression_impl(self):
         """Test Q12 has expression implementation."""
         query = get_query("Q12")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ14PromotionEffect:
@@ -237,7 +238,7 @@ class TestQ14PromotionEffect:
     def test_q14_has_expression_impl(self):
         """Test Q14 has expression implementation."""
         query = get_query("Q14")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ7VolumeShipping:
@@ -254,7 +255,7 @@ class TestQ7VolumeShipping:
     def test_q7_has_expression_impl(self):
         """Test Q7 has expression implementation."""
         query = get_query("Q7")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ8NationalMarketShare:
@@ -271,7 +272,7 @@ class TestQ8NationalMarketShare:
     def test_q8_has_expression_impl(self):
         """Test Q8 has expression implementation."""
         query = get_query("Q8")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ9ProductTypeProfit:
@@ -288,7 +289,7 @@ class TestQ9ProductTypeProfit:
     def test_q9_has_expression_impl(self):
         """Test Q9 has expression implementation."""
         query = get_query("Q9")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ13CustomerDistribution:
@@ -305,7 +306,7 @@ class TestQ13CustomerDistribution:
     def test_q13_has_expression_impl(self):
         """Test Q13 has expression implementation."""
         query = get_query("Q13")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ18LargeVolumeCustomer:
@@ -323,7 +324,7 @@ class TestQ18LargeVolumeCustomer:
     def test_q18_has_expression_impl(self):
         """Test Q18 has expression implementation."""
         query = get_query("Q18")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ19DiscountedRevenue:
@@ -341,7 +342,7 @@ class TestQ19DiscountedRevenue:
     def test_q19_has_expression_impl(self):
         """Test Q19 has expression implementation."""
         query = get_query("Q19")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ2MinimumCostSupplier:
@@ -359,7 +360,7 @@ class TestQ2MinimumCostSupplier:
     def test_q2_has_expression_impl(self):
         """Test Q2 has expression implementation."""
         query = get_query("Q2")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ11ImportantStock:
@@ -376,7 +377,7 @@ class TestQ11ImportantStock:
     def test_q11_has_expression_impl(self):
         """Test Q11 has expression implementation."""
         query = get_query("Q11")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ15TopSupplier:
@@ -393,7 +394,7 @@ class TestQ15TopSupplier:
     def test_q15_has_expression_impl(self):
         """Test Q15 has expression implementation."""
         query = get_query("Q15")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ16PartsSupplierRelationship:
@@ -410,7 +411,7 @@ class TestQ16PartsSupplierRelationship:
     def test_q16_has_expression_impl(self):
         """Test Q16 has expression implementation."""
         query = get_query("Q16")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ17SmallQuantityOrderRevenue:
@@ -428,7 +429,7 @@ class TestQ17SmallQuantityOrderRevenue:
     def test_q17_has_expression_impl(self):
         """Test Q17 has expression implementation."""
         query = get_query("Q17")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ20PotentialPartPromotion:
@@ -445,7 +446,7 @@ class TestQ20PotentialPartPromotion:
     def test_q20_has_expression_impl(self):
         """Test Q20 has expression implementation."""
         query = get_query("Q20")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ21SuppliersKeptOrdersWaiting:
@@ -463,7 +464,7 @@ class TestQ21SuppliersKeptOrdersWaiting:
     def test_q21_has_expression_impl(self):
         """Test Q21 has expression implementation."""
         query = get_query("Q21")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQ22GlobalSalesOpportunity:
@@ -480,7 +481,7 @@ class TestQ22GlobalSalesOpportunity:
     def test_q22_has_expression_impl(self):
         """Test Q22 has expression implementation."""
         query = get_query("Q22")
-        assert query.expression_impl is not None
+        assert query.has_expression_impl()
 
 
 class TestQueryFamilySupport:
@@ -490,7 +491,7 @@ class TestQueryFamilySupport:
         """Test that all registered queries have expression implementation."""
         for query_id in list_query_ids():
             query = get_query(query_id)
-            assert query.expression_impl is not None, f"{query_id} missing expression_impl"
+            assert query.has_expression_impl(), f"{query_id} missing expression_impl"
 
     def test_q1_supports_both_families(self):
         """Test Q1 supports both pandas and expression families."""

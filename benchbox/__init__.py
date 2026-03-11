@@ -11,6 +11,11 @@ from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Type, Union
 
+# __version__ must be defined before `from . import platforms` because the
+# platforms import chain can circle back to benchbox.cli.app which reads
+# benchbox.__version__ at module level.
+__version__ = "0.1.5"
+
 from benchbox.base import BaseBenchmark
 from benchbox.nyctaxi import NYCTaxi
 from benchbox.tpcds import TPCDS
@@ -20,8 +25,6 @@ from benchbox.tpchavoc import TPCHavoc
 from benchbox.tsbs_devops import TSBSDevOps
 
 from . import platforms
-
-__version__ = "0.1.4"
 
 # Perform version consistency check on import (but don't fail - just warn)
 try:

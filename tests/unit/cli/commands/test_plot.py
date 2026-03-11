@@ -9,7 +9,10 @@ from click.testing import CliRunner
 
 from benchbox.cli.commands.plot import plot
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FakeDF:

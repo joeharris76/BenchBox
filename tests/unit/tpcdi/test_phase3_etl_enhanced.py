@@ -12,7 +12,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # BatchProcessingTask lacks __lt__ method needed for heapq on Windows
 IS_WINDOWS = sys.platform == "win32"

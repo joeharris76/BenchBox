@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.tpcds import parameter_extractor as pe
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_extract_common_params_primary_keys() -> None:

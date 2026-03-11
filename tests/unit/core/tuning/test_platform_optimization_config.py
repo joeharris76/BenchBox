@@ -10,7 +10,10 @@ from benchbox.core.tuning.interface import (
     UnifiedTuningConfiguration,
 )
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_platform_optimization_defaults_include_sorted_ingestion_and_databricks_strategy() -> None:

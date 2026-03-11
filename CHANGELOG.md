@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-03-10
+
+### Added
+
+- **Textcharts standalone library** - Extracted all 15 ASCII chart types and base rendering
+  primitives into an independent `textcharts` package under `packages/textcharts/`. The library
+  has its own `pyproject.toml`, README with chart gallery and API reference, and zero BenchBox
+  dependencies. Clean standalone names (`BarChart`, `Histogram`, `Heatmap`, etc.) are exported
+  alongside BenchBox-compatible aliases. BenchBox now depends on textcharts as a path dependency
+  with compatibility shims preserving existing import paths.
+- **Open table format loading** - Added runtime loading support for external table formats
+  (Delta Lake, Iceberg, Hudi) through adapter-level `load_table` implementations for Spark
+  mixin platforms, cloud SQL platforms, and Snowflake/ClickHouse adapters. Format support is
+  gated on adapter configuration so it is only available on platforms that implement it.
+- **Expanded format capability registry** - Registered format capabilities for Hudi,
+  Presto/Trino, Snowflake, ClickHouse, Redshift, BigQuery, and Spark-based platforms including
+  cloud lakehouse variants (EMR, Dataproc, Glue, Fabric Spark, Synapse Spark, Dataproc
+  Serverless). Removed registrations for platforms without actual loading code (including
+  LakeSail for delta/iceberg/hudi).
+- **Mutation testing** - Added `mutmut` mutation testing targeting 5 critical modules
+  (`duckdb.py`, `adapter.py`, `runner.py`, `chart_generator.py`, `run.py`) with a
+  `make mutation-test` Makefile target for manual quality reviews.
+
+### Fixed
+
+- **Format capability registry accuracy** - Normalized platform display names to match registry
+  keys and removed platforms from format registrations where adapter code has no actual loading
+  implementation.
+- **CLI recursive import** - Fixed a circular lazy-import in the benchmarks module that caused a
+  `RecursionError` on CLI startup.
+- **CoffeeShop SA2 query** - Corrected `group_by` column name from `'name'` to
+  `'product_name'`.
+- **Textcharts API migration** - Migrated to textcharts v0.1.2 API after breaking changes,
+  renamed `ASCII*`-prefixed classes across 10 source and test files, removed 3 unused deprecated
+  factory imports, and regenerated golden snapshots for neutralized defaults.
+- **pytest-xdist worker title patch** - Tightened the xdist worker title monkeypatch to prevent
+  test pollution across parallel workers.
+- **Comprehensive Windows CI compatibility** - Fixed 80+ Windows test failures spanning path
+  separators (`.as_posix()` for forward-slash comparison), file encoding (`encoding="utf-8"`
+  for `write_text()`), numpy int32 overflow on 64-bit multiplication, Rich Console width on
+  headless CI, Python ABI tag format differences (`.pyd` vs `.so`), `Path.touch()` vs
+  `time.time()` mocking, NTFS directory `st_size` returning 0, Windows CWD locks preventing
+  temp directory cleanup, and `shutil.copytree` replacing symlinks for TPC-DS template setup.
+- **TPC-DS dsqgen Windows option prefix** - Fixed dsqgen invocation on Windows where the binary
+  expects `/` option prefixes instead of `-` (`OPTION_START` in `r_params.c`), and switched to
+  relative paths to stay under dsqgen's 80-char `PARAM_MAX_LEN` buffer.
+- **Missing `tpcds.idx` distribution file** - Added the required TPC-DS distribution index file
+  to Windows binary packages (both x86_64 and ARM64).
+- **Throughput test timer resolution** - Used `time.perf_counter()` for throughput duration
+  calculation to avoid zero-duration results from low-resolution `time.time()` on Windows.
+
+### Changed
+
+- **Test suite quality overhaul** - Deleted 13 hollow coverage-theater test files and replaced
+  them with behavior-verifying tests for DuckDB, SQLite, and DataFusion adapters. Replaced mock
+  credential tests with real file-based tests. Strengthened 150 `is-not-None` assertions across
+  5 test files, replaced hollow `isinstance` assertions with behavioral checks, and swapped
+  `MagicMock` for `SimpleNamespace` on attribute-only objects. Removed per-file coverage
+  enforcement in favor of a suite-wide 60% threshold.
+- **~316 rendering tests migrated to textcharts** - Pure chart-rendering tests moved from
+  BenchBox's test suite to the standalone textcharts library, with shim import smoke tests
+  retained in BenchBox to verify re-export paths.
+- **Pytest lane restructure** - Converted test lanes from implicit timing heuristics to explicit
+  source markers with measured-timing-based rebucketing. Restored a lightweight fast lane,
+  serialized stress tests, re-laned cloud adapter tests to `slow+cloud_import`, and documented
+  pytest-xdist safety requirements.
+- **Chart subtitle simplified** - Migrated chart subtitle storage from a metadata dict to a
+  plain string, removing an unnecessary layer of indirection.
+- **Verbose logging extracted** - Moved verbose logging configuration from `run.py` into a
+  dedicated `cli/verbose_logging.py` module.
+- **Visualization constants** - Extracted magic numbers into named constants across
+  visualization modules.
+
 ## [0.1.4] - 2026-03-03
 
 ### Added

@@ -9,6 +9,11 @@ import pytest
 
 from benchbox.core.schemas import ExecutionContext
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestExecutionContextDefaults:
     """Test ExecutionContext default values."""

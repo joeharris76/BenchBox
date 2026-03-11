@@ -8,7 +8,10 @@ import pytest
 from benchbox.core.tpcds.benchmark.runner import TPCDSBenchmark
 from benchbox.core.validation import ValidationResult
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

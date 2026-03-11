@@ -27,6 +27,11 @@ from benchbox.cli.tuning_resolver import (
     resolve_tuning,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def mock_console():
@@ -42,7 +47,6 @@ def config_manager():
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTuningMode:
     """Test TuningMode enum."""
 
@@ -55,7 +59,6 @@ class TestTuningMode:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTuningSource:
     """Test TuningSource enum."""
 
@@ -70,7 +73,6 @@ class TestTuningSource:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTuningResolution:
     """Test TuningResolution dataclass."""
 
@@ -119,7 +121,6 @@ class TestTuningResolution:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestGetTuningTemplatePaths:
     """Test get_tuning_template_paths function."""
 
@@ -149,7 +150,6 @@ class TestGetTuningTemplatePaths:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestListAvailableTuningTemplates:
     """Test list_available_tuning_templates function."""
 
@@ -197,7 +197,6 @@ class TestListAvailableTuningTemplates:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestResolveTuning:
     """Test resolve_tuning function."""
 
@@ -335,7 +334,6 @@ class TestResolveTuning:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestDisplayFunctions:
     """Test display functions."""
 
@@ -405,7 +403,6 @@ class TestDisplayFunctions:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestEnvironmentVariableSupport:
     """Test BENCHBOX_TUNING_PATH environment variable support."""
 
@@ -446,7 +443,6 @@ class TestEnvironmentVariableSupport:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestMockedFilesystem:
     """Tests using mocked filesystem to avoid dependency on examples/tunings."""
 
@@ -553,7 +549,6 @@ class TestMockedFilesystem:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestDisplayTuningShowNullSafety:
     """Test display_tuning_show handles None config correctly."""
 

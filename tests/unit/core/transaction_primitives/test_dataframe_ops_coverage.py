@@ -12,7 +12,10 @@ from benchbox.core.transaction_primitives.dataframe_operations import (
     TransactionOperationType,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class FakeMaintenanceOps:

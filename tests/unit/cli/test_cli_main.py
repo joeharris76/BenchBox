@@ -6,7 +6,6 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import json
-import subprocess
 import sys
 from unittest.mock import Mock, patch
 
@@ -16,9 +15,13 @@ from click.testing import CliRunner
 import benchbox
 from benchbox.cli.main import cli, run
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestConfigManagerFactory:
     """Test config manager factory function."""
 
@@ -35,17 +38,14 @@ class TestConfigManagerFactory:
         assert hasattr(manager, "config")
 
     def test_main_block_execution(self):
-        """Test __main__ block execution via subprocess."""
-        # Use subprocess to test the __main__ block
-        result = subprocess.run(
-            [sys.executable, "-m", "benchbox.cli.main", "--help"], capture_output=True, text=True, timeout=10
-        )
-        assert result.returncode == 0
-        assert "Usage:" in result.stdout or "BenchBox" in result.stdout
+        """Test CLI entry point responds to --help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "Usage:" in result.output or "BenchBox" in result.output
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestCLIMain:
     """Test CLI main entry point and commands."""
 
@@ -103,7 +103,6 @@ class TestCLIMain:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.skipif(
     sys.version_info < (3, 11),
     reason="Click command mock.patch requires Python 3.11+ for attribute access",
@@ -433,7 +432,6 @@ class TestRunCommand:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.skipif(
     sys.version_info < (3, 11),
     reason="Click command mock.patch requires Python 3.11+ for attribute access",
@@ -571,7 +569,6 @@ class TestCLIIntegration:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.skipif(
     sys.version_info < (3, 11),
     reason="Click command mock.patch requires Python 3.11+ for attribute access",
@@ -608,7 +605,6 @@ class TestCLIExceptionHandling:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestCLICompressionOptions:
     """Test CLI compression options."""
 

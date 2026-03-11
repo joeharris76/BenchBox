@@ -225,6 +225,7 @@ class FormatConversionOrchestrator:
                     converted_at=result.converted_at,
                     compression=result.conversion_options.get("compression"),
                     row_groups=result.metadata.get("row_groups"),
+                    is_directory=output_file.is_dir(),
                     conversion_options=result.conversion_options,
                 )
                 converted_files.append(file_entry)
@@ -232,7 +233,7 @@ class FormatConversionOrchestrator:
             # Update format in manifest
             table_formats.formats[target_format] = converted_files
 
-        # Update format preference to prefer converted format
-        if target_format not in manifest.format_preference:
-            # Insert at beginning to make it the preferred format
-            manifest.format_preference.insert(0, target_format)
+        # Update format preference to prefer converted format (always move to position 0)
+        if target_format in manifest.format_preference:
+            manifest.format_preference.remove(target_format)
+        manifest.format_preference.insert(0, target_format)

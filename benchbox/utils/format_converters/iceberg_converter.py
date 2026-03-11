@@ -145,12 +145,18 @@ class IcebergConverter(BaseFormatConverter):
             source_files, schema, progress_callback, progress_start=0.0, progress_end=0.6
         )
 
+        # PyArrow's CSV reader ignores nullability constraints, producing all-nullable
+        # columns. Re-apply the declared schema so field nullability matches what
+        # Iceberg expects on write.
+        combined_table = combined_table.cast(arrow_schema)
+
         # Get column names for metadata
         column_names = [col["name"] for col in schema["columns"]]
 
         # Determine output path - Iceberg uses a directory
         source_dir = source_files[0].parent
         output_dir = opts.output_dir if opts.output_dir else source_dir
+        output_dir = Path(output_dir).resolve()
         iceberg_table_path = output_dir / table_name
         iceberg_table_path.mkdir(parents=True, exist_ok=True)
 

@@ -13,7 +13,11 @@ import pytest
 
 from benchbox.platforms.databricks import DatabricksAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 @pytest.fixture(autouse=True)
@@ -479,6 +483,59 @@ class TestDatabricksAdapter:
 
         finally:
             temp_path.unlink()
+
+    @patch("benchbox.platforms.databricks.adapter.databricks_sql")
+    def test_create_external_tables_uses_parquet_location(self, mock_databricks_sql):
+        """External mode should register LOCATION-based Parquet tables."""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = [("test_schema", "orders", False)]
+        mock_cursor.fetchone.return_value = (123,)
+
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".parquet", delete=False) as f:
+            f.write(b"PAR1")
+            parquet_path = Path(f.name)
+
+        benchmark = Mock()
+        benchmark.tables = {"orders": str(parquet_path)}
+
+        try:
+            adapter = DatabricksAdapter(
+                server_hostname="test.cloud.databricks.com",
+                http_path="/sql/1.0/warehouses/test",
+                access_token="test_token",
+                catalog="test_catalog",
+                schema="test_schema",
+                staging_root="dbfs:/Volumes/workspace/tmp",
+            )
+
+            assert adapter.supports_external_tables is True
+
+            stats, load_time, _ = adapter.create_external_tables(benchmark, mock_connection, Path("dbfs:/tmp/data"))
+
+            assert stats["ORDERS"] == 123
+            assert load_time >= 0
+
+            execute_calls = [str(call) for call in mock_cursor.execute.call_args_list]
+            assert any("CREATE TABLE ORDERS USING PARQUET LOCATION" in call for call in execute_calls)
+            assert all("COPY INTO" not in call for call in execute_calls)
+        finally:
+            parquet_path.unlink()
+
+    @patch("benchbox.platforms.databricks.adapter.databricks_sql")
+    def test_external_table_mode_requires_staging_configuration(self, mock_databricks_sql):
+        """External mode should require explicit staging configuration."""
+        adapter = DatabricksAdapter(
+            server_hostname="test.cloud.databricks.com",
+            http_path="/sql/1.0/warehouses/test",
+            access_token="test_token",
+            catalog="test_catalog",
+            schema="test_schema",
+        )
+
+        with pytest.raises(ValueError, match="requires cloud staging"):
+            adapter.validate_external_table_requirements()
 
     @patch("benchbox.platforms.databricks.adapter.databricks_sql")
     def test_configure_for_benchmark_olap(self, mock_databricks_sql):

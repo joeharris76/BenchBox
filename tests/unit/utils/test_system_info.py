@@ -16,7 +16,10 @@ from benchbox.utils.system_info import (
     get_system_info,
 )
 
-pytestmark = pytest.mark.medium  # System info tests profile the machine (~2s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestSystemInfo:

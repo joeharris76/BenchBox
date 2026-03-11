@@ -14,7 +14,10 @@ import pytest
 
 from benchbox.cli.config import ConfigManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTuningConfigurationValidation:

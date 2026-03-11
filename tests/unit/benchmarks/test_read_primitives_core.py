@@ -27,7 +27,10 @@ from benchbox.core.read_primitives.schema import (
 )
 from benchbox.read_primitives import ReadPrimitives
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.unit

@@ -6,7 +6,10 @@ from benchbox.cli.execution_pipeline import ExecutionContext, ExecutionEngine
 from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_benchmark_config() -> BenchmarkConfig:

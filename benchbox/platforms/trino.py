@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from benchbox.core.benchmark_mixins import CursorValidationQueryExecutionMixin
 from benchbox.core.sql_utils import normalize_table_name_in_sql
+from benchbox.platforms.base.external_table_mixin import HiveExternalTableMixin
 from benchbox.utils.clock import elapsed_seconds, mono_time
 
 from .base.data_loading import DataSourceResolver, FileFormatRegistry
@@ -58,7 +59,7 @@ except ImportError:
     BasicAuthentication = None
 
 
-class TrinoAdapter(CursorValidationQueryExecutionMixin, PlatformAdapter):
+class TrinoAdapter(CursorValidationQueryExecutionMixin, HiveExternalTableMixin, PlatformAdapter):
     """Trino platform adapter for distributed SQL query execution.
 
     Trino is a distributed SQL query engine designed for interactive analytics
@@ -79,6 +80,7 @@ class TrinoAdapter(CursorValidationQueryExecutionMixin, PlatformAdapter):
     """
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -744,6 +746,9 @@ class TrinoAdapter(CursorValidationQueryExecutionMixin, PlatformAdapter):
             if path.exists() and path.stat().st_size > 0:
                 valid_files.append(path)
         return valid_files
+
+    # External table methods (validate, map types, build columns, build location,
+    # create_external_tables) are provided by HiveExternalTableMixin.
 
     def _escape_insert_value(self, value: str) -> str:
         """Format a CSV field as a Trino literal for INSERT VALUES."""

@@ -1259,8 +1259,38 @@ def get_platform_format_recommendation(platform: str) -> tuple[str | None, str]:
     return ("parquet", "Parquet is a widely compatible format")
 
 
-def prompt_data_format(platform: str) -> tuple[str | None, str | None]:
-    """Prompt for data format selection with platform-aware recommendations.
+def prompt_table_mode(default_mode: str = "native") -> str:
+    """Prompt for table mode selection in interactive runs.
+
+    Args:
+        default_mode: Default mode to preselect ("native" or "external")
+
+    Returns:
+        Selected table mode ("native" or "external")
+    """
+    from rich.prompt import Prompt
+
+    normalized_default = default_mode.strip().lower() if default_mode else "native"
+    if normalized_default not in {"native", "external"}:
+        normalized_default = "native"
+
+    console.print("\n[bold cyan]Table Mode[/bold cyan]")
+    console.print("[dim]Choose how benchmark data is exposed to the platform.[/dim]")
+    native_default = " (default)" if normalized_default == "native" else ""
+    external_default = " (default)" if normalized_default == "external" else ""
+    console.print(f"  1. native{native_default} - materialized tables loaded into the database")
+    console.print(f"  2. external{external_default} - external table/view references over source files")
+
+    default_choice = "1" if normalized_default == "native" else "2"
+    choice = Prompt.ask("Select table mode", choices=["1", "2"], default=default_choice)
+    selected_mode = "native" if choice == "1" else "external"
+
+    console.print(f"[green]✓ Table mode: {selected_mode}[/green]")
+    return selected_mode
+
+
+def prompt_table_format(platform: str) -> tuple[str | None, str | None]:
+    """Prompt for table format selection with platform-aware recommendations.
 
     Args:
         platform: Selected platform name

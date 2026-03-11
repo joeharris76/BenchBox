@@ -13,7 +13,10 @@ from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN
 
 mod = importlib.import_module("benchbox.platforms.dataframe.dask_df")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FakeDaskDF:

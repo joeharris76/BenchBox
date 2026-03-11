@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.utils.format_selection import FormatSelector
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestFormatSelector:
@@ -57,9 +60,9 @@ class TestFormatSelector:
         selector = FormatSelector()
         with pytest.raises(ValueError, match="not supported"):
             selector.select_format(
-                platform_name="datafusion",
+                platform_name="clickhouse",
                 available_formats=["tbl", "delta"],
-                user_preference="delta",  # DataFusion doesn't support Delta
+                user_preference="delta",  # ClickHouse doesn't support Delta
             )
 
     def test_select_format_no_formats_available(self):

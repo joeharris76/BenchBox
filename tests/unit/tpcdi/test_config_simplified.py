@@ -23,6 +23,12 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 pytest.importorskip("pandas")
 
 from benchbox.core.tpcdi.config import (
@@ -34,7 +40,6 @@ from benchbox.core.tpcdi.config import (
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestTPCDIConfig:
     """Test TPCDIConfig functionality."""
@@ -360,7 +365,6 @@ class TestTPCDIConfig:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestConfigConvenienceFunctions:
     """Test configuration convenience functions."""
@@ -409,7 +413,6 @@ class TestConfigConvenienceFunctions:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestConfigLogging:
     """Test configuration logging setup."""

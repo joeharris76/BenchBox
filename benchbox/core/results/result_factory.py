@@ -70,6 +70,11 @@ def build_enhanced_benchmark_result(
                 tuning_mode=run_cfg.get("tuning_mode"),
                 tuning_config=run_cfg.get("tuning_config"),
                 platform_options=run_cfg.get("platform_options"),
+                table_mode=run_cfg.get("table_mode"),
+                external_format=run_cfg.get("external_format"),
+                table_format=run_cfg.get("table_format"),
+                table_format_compression=run_cfg.get("table_format_compression"),
+                table_format_partition_cols=run_cfg.get("table_format_partition_cols"),
             )
         )
 

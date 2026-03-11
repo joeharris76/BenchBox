@@ -135,6 +135,7 @@ class DryRunExecutor:
                 result.platform_config = {"data_only": True}
             else:
                 platform_config = self._get_platform_config(database_config, system_profile, benchmark_config)
+                platform_config["dry_run"] = True  # Suppress DB validation during dry run
                 result.platform_config = platform_config
 
                 try:
@@ -697,6 +698,10 @@ class DryRunExecutor:
             return {"_error": f"# Failed to extract DataFrame queries: {e}"}
 
     def _generate_schema_sql(self, benchmark, config: BenchmarkConfig) -> Optional[str]:
+        table_mode = config.options.get("table_mode", "native")
+        if table_mode == "external":
+            return self._generate_external_schema_sql(benchmark, config)
+
         try:
             if hasattr(benchmark, "get_create_tables_sql"):
                 unified_config = config.options.get("unified_tuning_configuration")
@@ -720,6 +725,42 @@ class DryRunExecutor:
                 return None
         except Exception as e:
             raise Exception(f"Schema SQL generation failed: {e}")
+
+    def _generate_external_schema_sql(self, benchmark, config: BenchmarkConfig) -> Optional[str]:
+        """Generate CREATE VIEW preview for external table mode.
+
+        Shows the scan expressions that will be used at runtime (e.g.
+        ``iceberg_scan()``, ``delta_scan()``, ``read_parquet()``).
+        """
+        table_format = config.options.get("table_format") or getattr(config, "table_format", None)
+
+        scan_fn_map = {
+            "iceberg": "iceberg_scan",
+            "delta": "delta_scan",
+            "parquet": "read_parquet",
+            "vortex": "read_vortex",
+        }
+        scan_fn = scan_fn_map.get(table_format or "parquet", "read_parquet")
+
+        # Try to get table names from schema
+        schema: dict | None = None
+        if hasattr(benchmark, "get_schema"):
+            raw = benchmark.get_schema()
+            if isinstance(raw, dict):
+                schema = raw
+            elif isinstance(raw, list):
+                # Some benchmarks return list[dict] with "name" keys
+                schema = {t["name"]: t for t in raw if isinstance(t, dict) and "name" in t}
+
+        if not schema:
+            return f"-- External mode ({table_format or 'parquet'}): schema not available for preview"
+
+        lines = [f"-- External table mode: views using {scan_fn}()", ""]
+        for table_name in schema:
+            lines.append(f"CREATE VIEW {table_name} AS\n    SELECT * FROM {scan_fn}('<data_dir>/{table_name}');")
+            lines.append("")
+
+        return "\n".join(lines)
 
     def _generate_dataframe_schema(self, benchmark, config: BenchmarkConfig) -> Optional[str]:
         """Generate Polars-native schema representation for DataFrame mode.

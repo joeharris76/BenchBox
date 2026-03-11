@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from benchbox.core.tuning import TuningColumn
 from benchbox.core.tuning.ddl_generator import (
     BaseDDLGenerator,
@@ -22,6 +24,11 @@ from benchbox.core.tuning.ddl_generator import (
     TuningClauses,
 )
 from benchbox.core.tuning.interface import TableTuning
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestColumnDefinition:

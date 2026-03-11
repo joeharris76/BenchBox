@@ -15,7 +15,10 @@ from benchbox.core.analysis.comparison import (
 )
 from benchbox.core.results.models import BenchmarkResults
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def create_mock_result(

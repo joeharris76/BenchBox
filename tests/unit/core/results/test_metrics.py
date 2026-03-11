@@ -11,7 +11,10 @@ from benchbox.core.results.metrics import (
     TPCMetricsCalculator,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCMetricsCalculator:

@@ -14,9 +14,13 @@ import pytest
 
 from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 @pytest.mark.integration
-@pytest.mark.fast
 class TestReadPrimitivesIdentifyRegression:
     """Test that identify=True doesn't break Read Primitives queries."""
 

@@ -62,6 +62,7 @@ class DataFrameWriteTuningType(str, Enum):
     REPARTITION = "repartition"  # Number of output files
     COMPRESSION = "compression"  # Compression codec
     DICTIONARY_ENCODING = "dictionary_encoding"  # Column encoding
+    DATA_PAGE_VERSION = "data_page_version"  # Parquet data page version
 
 
 class PartitionStrategy(str, Enum):
@@ -178,6 +179,9 @@ class DataFrameWriteConfiguration:
             Useful for low-cardinality string columns.
         skip_dictionary_columns: Columns to skip dictionary encoding.
             Useful for high-cardinality ID columns.
+        data_page_version: Parquet data page serialization version.
+            "1.0" (default) compresses levels and values together.
+            "2.0" stores levels separately, enabling page-level skipping.
     """
 
     partition_by: list[PartitionColumn] = field(default_factory=list)
@@ -189,6 +193,7 @@ class DataFrameWriteConfiguration:
     compression_level: int | None = None
     dictionary_columns: list[str] = field(default_factory=list)
     skip_dictionary_columns: list[str] = field(default_factory=list)
+    data_page_version: Literal["1.0", "2.0"] | None = None
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
@@ -252,6 +257,8 @@ class DataFrameWriteConfiguration:
             result["dictionary_columns"] = self.dictionary_columns
         if self.skip_dictionary_columns:
             result["skip_dictionary_columns"] = self.skip_dictionary_columns
+        if self.data_page_version is not None:
+            result["data_page_version"] = self.data_page_version
 
         return result
 
@@ -291,6 +298,7 @@ class DataFrameWriteConfiguration:
             compression_level=data.get("compression_level"),
             dictionary_columns=data.get("dictionary_columns", []),
             skip_dictionary_columns=data.get("skip_dictionary_columns", []),
+            data_page_version=data.get("data_page_version"),
         )
 
     def is_default(self) -> bool:
@@ -305,6 +313,7 @@ class DataFrameWriteConfiguration:
             and self.compression_level is None
             and not self.dictionary_columns
             and not self.skip_dictionary_columns
+            and self.data_page_version is None
         )
 
     def get_enabled_types(self) -> set[DataFrameWriteTuningType]:
@@ -327,6 +336,8 @@ class DataFrameWriteConfiguration:
             enabled.add(DataFrameWriteTuningType.COMPRESSION)
         if self.dictionary_columns or self.skip_dictionary_columns:
             enabled.add(DataFrameWriteTuningType.DICTIONARY_ENCODING)
+        if self.data_page_version is not None:
+            enabled.add(DataFrameWriteTuningType.DATA_PAGE_VERSION)
 
         return enabled
 

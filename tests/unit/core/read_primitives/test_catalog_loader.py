@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.core.read_primitives.catalog import PrimitiveQuery, PrimitivesCatalogError, load_primitives_catalog
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPrimitiveQueryDataclass:

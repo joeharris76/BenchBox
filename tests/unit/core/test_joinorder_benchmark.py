@@ -8,7 +8,10 @@ from benchbox.core.benchmark_loader import get_benchmark_instance
 from benchbox.core.joinorder.benchmark import JoinOrderBenchmark
 from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_system_profile() -> SystemProfile:

@@ -29,7 +29,10 @@ from benchbox.core.tpcds.streams import (
 )
 
 # Mark all tests in this file as unit tests
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPermutationMode:

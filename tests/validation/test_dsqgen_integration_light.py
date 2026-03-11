@@ -11,6 +11,9 @@ import pytest
 
 from benchbox.core.tpcds.c_tools import DSQGenBinary
 
+pytestmark = pytest.mark.fast
+
+
 
 @pytest.mark.validation
 def test_dsqgen_binary_discovery_and_execution():

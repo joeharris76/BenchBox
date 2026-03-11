@@ -18,7 +18,10 @@ import pytest
 from benchbox.core.base_benchmark import BaseBenchmark
 from benchbox.platforms.sqlite import SQLiteAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBaseBenchmarkProperties:

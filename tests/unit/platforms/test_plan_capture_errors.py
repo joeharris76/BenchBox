@@ -11,7 +11,10 @@ import pytest
 from benchbox.core.errors import PlanCaptureError
 from benchbox.platforms.base.adapter import PlatformAdapter
 
-pytestmark = pytest.mark.medium  # Plan capture tests have timeouts (~2s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class DummyAdapter(PlatformAdapter):

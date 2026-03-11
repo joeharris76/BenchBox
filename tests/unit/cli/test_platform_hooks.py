@@ -7,7 +7,10 @@ from benchbox.cli.platform_hooks import PlatformHookRegistry, PlatformOptionErro
 from benchbox.core.schemas import DatabaseConfig
 from benchbox.utils.runtime_env import DriverResolution
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_clickhouse_platform_options_defaults():

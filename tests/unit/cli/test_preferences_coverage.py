@@ -10,7 +10,10 @@ import pytest
 
 prefs = importlib.import_module("benchbox.cli.preferences")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_safe_yaml_load_valid_and_invalid_types(tmp_path: Path) -> None:
@@ -45,13 +48,14 @@ def test_last_run_save_load_clear_cycle(monkeypatch: pytest.MonkeyPatch, tmp_pat
         scale=0.01,
         tuning_mode="tuned",
         phases=["load", "power"],
-        additional_options={"x_opt": "1"},
+        additional_options={"x_opt": "1", "table_mode": "external"},
     )
 
     loaded = prefs.load_last_run_config()
     assert loaded is not None
     assert loaded["database"] == "duckdb"
     assert loaded["x_opt"] == "1"
+    assert loaded["table_mode"] == "external"
 
     prefs.clear_last_run_config()
     assert prefs.load_last_run_config() is None
@@ -98,12 +102,14 @@ def test_format_last_run_summary_paths_and_age(monkeypatch: pytest.MonkeyPatch, 
         "scale": 0.1,
         "tuning_mode": str(tune),
         "phases": ["load", "power"],
+        "table_mode": "external",
         "concurrency": 4,
         "timestamp": (datetime.now() - timedelta(minutes=2)).isoformat(),
     }
     out = prefs.format_last_run_summary(config)
     assert "TPCH on DUCKDB" in out
     assert "custom config" in out
+    assert "tables: external" in out
     assert "4 streams" in out
 
 

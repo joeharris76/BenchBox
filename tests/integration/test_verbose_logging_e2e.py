@@ -6,7 +6,14 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import unittest
 
+import pytest
+
 from tests.integration._cli_e2e_utils import run_cli_command
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
 
 
 class TestVerboseLoggingE2E(unittest.TestCase):

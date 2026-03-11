@@ -1,5 +1,6 @@
 """Tests for format converter base classes."""
 
+import gzip
 import tempfile
 from pathlib import Path
 
@@ -15,7 +16,10 @@ from benchbox.utils.format_converters.base import (
     SchemaError,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestConversionOptions:
@@ -417,6 +421,77 @@ class TestBaseFormatConverterValidation:
 
             count = converter.count_rows([shard1, shard2])
             assert count == 3
+
+    def test_read_tbl_files_handles_trailing_delimiter(self, converter):
+        """read_tbl_files should parse rows that end with a trailing delimiter."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            tbl_file = temp_path / "test.tbl"
+            tbl_file.write_text("1|Alice|\n2|Bob|\n")
+
+            schema = {
+                "columns": [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "name", "type": "VARCHAR(100)"},
+                ]
+            }
+
+            table = converter.read_tbl_files([tbl_file], schema)
+            assert table.num_rows == 2
+            assert table.column_names == ["id", "name"]
+            assert table["id"].to_pylist() == [1, 2]
+            assert table["name"].to_pylist() == ["Alice", "Bob"]
+
+    def test_read_tbl_files_handles_missing_trailing_delimiter(self, converter):
+        """read_tbl_files should parse rows that do not end with a trailing delimiter."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            tbl_file = temp_path / "test.tbl"
+            tbl_file.write_text("1|Alice\n2|Bob\n")
+
+            schema = {
+                "columns": [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "name", "type": "VARCHAR(100)"},
+                ]
+            }
+
+            table = converter.read_tbl_files([tbl_file], schema)
+            assert table.num_rows == 2
+            assert table.column_names == ["id", "name"]
+            assert table["id"].to_pylist() == [1, 2]
+            assert table["name"].to_pylist() == ["Alice", "Bob"]
+
+    def test_read_tbl_files_handles_gzip_compressed_tbl(self, converter):
+        """read_tbl_files should parse gzip-compressed TBL input."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            tbl_file = temp_path / "test.tbl.gz"
+            with gzip.open(tbl_file, "wt", encoding="utf-8") as f:
+                f.write("1|Alice\n2|Bob\n")
+
+            schema = {
+                "columns": [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "name", "type": "VARCHAR(100)"},
+                ]
+            }
+
+            table = converter.read_tbl_files([tbl_file], schema)
+            assert table.num_rows == 2
+            assert table.column_names == ["id", "name"]
+            assert table["id"].to_pylist() == [1, 2]
+            assert table["name"].to_pylist() == ["Alice", "Bob"]
+
+    def test_count_rows_handles_gzip_compressed_tbl(self, converter):
+        """count_rows should read compressed sources used by conversion validation."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            tbl_file = temp_path / "test.tbl.gz"
+            with gzip.open(tbl_file, "wt", encoding="utf-8") as f:
+                f.write("1|Alice\n\n2|Bob\n")
+
+            assert converter.count_rows([tbl_file]) == 2
 
     def test_detect_source_format_tbl(self, converter):
         """Test source format detection for TBL files."""

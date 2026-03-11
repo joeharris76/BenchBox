@@ -17,6 +17,12 @@ import pytest
 
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # Skip marker for tests that require Unix-like shell execution
 skip_windows_shell = pytest.mark.skipif(
     sys.platform == "win32",
@@ -32,7 +38,6 @@ def temp_dir():
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTPCDSDataGenerator:
     """Test TPC-DS data generator basic functionality."""
 
@@ -189,7 +194,6 @@ class TestTPCDSDataGenerator:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestGeneratorExtended:
     """Advanced tests for TPC-DS data generator."""
 

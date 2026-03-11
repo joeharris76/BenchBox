@@ -9,7 +9,10 @@ import pytest
 from benchbox.platforms.dataframe import modin_df as mod
 from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FakeRay:

@@ -66,6 +66,7 @@ class AthenaAdapter(PlatformAdapter):
     """
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -785,6 +786,100 @@ class AthenaAdapter(PlatformAdapter):
             cursor.close()
 
         return table_stats, total_time, None
+
+    def validate_external_table_requirements(self) -> None:
+        """Validate required S3 configuration for external table mode."""
+        if not self.s3_bucket:
+            raise ValueError(
+                "Athena external mode requires S3 bucket configuration. "
+                "Set --platform-option s3_bucket=your-bucket or "
+                "--platform-option staging_root=s3://your-bucket/path."
+            )
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Upload Parquet files and register Athena external tables without CTAS conversion."""
+        self.validate_external_table_requirements()
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+
+        s3_client = self._get_s3_client()
+        cursor = connection.cursor()
+        try:
+            data_files = self._resolve_data_files(benchmark, data_dir)
+            external_table_sql = self._build_external_table_statements(benchmark)
+
+            for table_name, file_paths in data_files.items():
+                table_name_lower = table_name.lower()
+                parquet_files = self._normalize_parquet_files(file_paths)
+                if not parquet_files:
+                    raise ValueError(
+                        f"Athena external mode requires Parquet source files for table '{table_name_lower}'. "
+                        "Generate or convert data to Parquet before using --table-mode external."
+                    )
+
+                self._upload_external_parquet_files_to_s3(s3_client, table_name_lower, parquet_files)
+
+                create_table_sql = external_table_sql.get(table_name_lower)
+                if not create_table_sql:
+                    raise ValueError(f"No CREATE TABLE statement found for table '{table_name_lower}'")
+
+                try:
+                    cursor.execute(create_table_sql)
+                except Exception as exc:
+                    if "already exists" in str(exc).lower():
+                        cursor.execute(f"DROP TABLE IF EXISTS {table_name_lower}")
+                        cursor.execute(create_table_sql)
+                    else:
+                        raise
+
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name_lower}")
+                result = cursor.fetchone()
+                table_stats[table_name_lower] = int(result[0]) if result else 0
+
+        finally:
+            cursor.close()
+
+        total_time = elapsed_seconds(start_time)
+        return table_stats, total_time, None
+
+    def _normalize_parquet_files(self, file_paths: Any) -> list[Path]:
+        """Normalize file inputs to existing local Parquet files."""
+        valid_files = self._normalize_existing_files(file_paths)
+        return [path for path in valid_files if path.suffix.lower() == ".parquet"]
+
+    def _upload_external_parquet_files_to_s3(
+        self,
+        s3_client: Any,
+        table_name_lower: str,
+        parquet_files: list[Path],
+    ) -> None:
+        """Upload Parquet files to the external table S3 prefix."""
+        s3_table_path = f"{self.s3_prefix}/{self.database}/{table_name_lower}/"
+        for file_path in parquet_files:
+            s3_key = f"{s3_table_path}{file_path.name}"
+            try:
+                s3_client.upload_file(str(file_path), self.s3_bucket, s3_key)
+                self.logger.debug(f"Uploaded {file_path.name} to s3://{self.s3_bucket}/{s3_key}")
+            except Exception as exc:
+                self.logger.error(f"Failed to upload {file_path}: {exc}")
+                raise
+
+    def _build_external_table_statements(self, benchmark: Any) -> dict[str, str]:
+        """Build CREATE EXTERNAL TABLE SQL statements keyed by normalized table name."""
+        schema_sql = self._create_schema_with_tuning(benchmark, source_dialect="duckdb")
+        statements = [stmt.strip() for stmt in schema_sql.split(";") if stmt.strip()]
+        table_sql: dict[str, str] = {}
+
+        for statement in statements:
+            normalized = self._normalize_table_name_in_sql(statement)
+            table_name = self._extract_table_name(normalized)
+            if not table_name:
+                continue
+            table_sql[table_name.lower()] = self._convert_to_external_table(normalized, is_staging=False)
+
+        return table_sql
 
     def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
         """Resolve benchmark data files from benchmark tables or manifest."""

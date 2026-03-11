@@ -23,6 +23,12 @@ from .common import (
     install_emr_serverless_stub,
 )  # fmt: skip
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
+
 # ---------------------------------------------------------------------------
 # AWS Athena Spark Tests
 # ---------------------------------------------------------------------------

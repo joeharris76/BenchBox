@@ -166,7 +166,7 @@ Iceberg supports several partition transforms:
 The REST catalog is the most portable option, working across engines:
 
 ```bash
-benchbox run --platform spark --format iceberg --catalog rest
+benchbox run --platform spark --table-format iceberg --platform-option catalog=rest
 ```
 
 ### AWS Glue
@@ -174,7 +174,7 @@ benchbox run --platform spark --format iceberg --catalog rest
 For AWS-native workflows with Athena, EMR:
 
 ```bash
-benchbox run --platform spark --format iceberg --catalog glue
+benchbox run --platform spark --table-format iceberg --platform-option catalog=glue
 ```
 
 ### Hive Metastore
@@ -182,7 +182,7 @@ benchbox run --platform spark --format iceberg --catalog glue
 For Spark/Hadoop ecosystems:
 
 ```bash
-benchbox run --platform spark --format iceberg --catalog hive
+benchbox run --platform spark --table-format iceberg --platform-option catalog=hive
 ```
 
 ### Nessie
@@ -190,7 +190,7 @@ benchbox run --platform spark --format iceberg --catalog hive
 For git-like versioning (experimental):
 
 ```bash
-benchbox run --platform spark --format iceberg --catalog nessie
+benchbox run --platform spark --table-format iceberg --platform-option catalog=nessie
 ```
 
 | Catalog | Use Case | BenchBox Support |
@@ -211,15 +211,15 @@ A key Iceberg benefit: load data with Spark, query with Trino (or vice versa).
 ```bash
 # 1. Generate and load data with Spark
 benchbox run --platform spark --benchmark tpch --scale 10 \
-  --format iceberg --phases load
+  --table-format iceberg --phases load
 
 # 2. Run queries with Trino (same Iceberg tables)
 benchbox run --platform trino --benchmark tpch --scale 10 \
-  --format iceberg --phases power
+  --table-format iceberg --phases power
 
 # 3. Run queries with Athena (same tables via Glue)
 benchbox run --platform athena --benchmark tpch --scale 10 \
-  --format iceberg --phases power
+  --table-format iceberg --phases power
 ```
 
 ### Ensuring Consistent Results

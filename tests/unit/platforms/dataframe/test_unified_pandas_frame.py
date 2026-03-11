@@ -21,7 +21,10 @@ from benchbox.platforms.dataframe.unified_pandas_frame import (
     _is_dataframe,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # =============================================================================

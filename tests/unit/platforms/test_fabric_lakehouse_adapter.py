@@ -11,7 +11,10 @@ import benchbox.platforms.fabric_lakehouse as lakehouse_module
 from benchbox.core.exceptions import ConfigurationError, ReadOnlyPlatformError
 from benchbox.platforms.fabric_lakehouse import FabricLakehouseAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()

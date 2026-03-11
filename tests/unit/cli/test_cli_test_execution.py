@@ -15,10 +15,12 @@ from benchbox.cli.main import cli
 from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.medium  # CLI execution tests spawn subprocesses (2-5s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
-@pytest.mark.medium
 @pytest.mark.xdist_group("cli_phase_validation")
 class TestCLITestExecution:
     """Test CLI test execution functionality."""

@@ -15,6 +15,9 @@ import pytest
 
 from benchbox.core.tpch.queries import QGenBinary, TPCHQueries
 
+pytestmark = pytest.mark.fast
+
+
 
 class TestQGenBinaryIntegration:
     """Test QGen binary integration and validation."""
@@ -198,13 +201,15 @@ class TestQGenBinaryIntegration:
 
         # Should still work after changing working directory
         original_cwd = os.getcwd()
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
                 os.chdir(tmpdir)
                 result2 = qgen.generate(1, seed=88888)
                 assert result == result2
-        finally:
-            os.chdir(original_cwd)
+            finally:
+                # Restore CWD before TemporaryDirectory cleanup —
+                # on Windows, the CWD holds a lock that prevents deletion.
+                os.chdir(original_cwd)
 
     def test_qgen_environment_isolation(self):
         """Test qgen environment isolation."""

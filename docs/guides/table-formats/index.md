@@ -85,9 +85,11 @@ If you're benchmarking Databricks, use Delta Lake. If you're on Trino or Starbur
 **For format comparison benchmarks**: Run both and compare using the CLI:
 
 ```bash
-# See Format Conversion Reference for full CLI options
-benchbox run --platform duckdb --benchmark tpch --format parquet
-benchbox run --platform duckdb --benchmark tpch --format vortex
+# Default run uses Parquet
+benchbox run --platform duckdb --benchmark tpch
+
+# Convert to Vortex inline, then benchmark
+benchbox run --platform duckdb --benchmark tpch --table-format vortex
 ```
 
 For complete conversion examples, see [Format Conversion Reference: Quick Start](../../advanced/format-conversion.md#quick-start).

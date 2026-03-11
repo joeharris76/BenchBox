@@ -37,7 +37,10 @@ from benchbox.core.dataframe.tuning.write_config import (
     SortColumn,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSchemaMapper:
@@ -1124,6 +1127,52 @@ class TestFormatConverterWithWriteConfig:
 
             assert status == ConversionStatus.SUCCESS
             assert parquet_path.exists()
+
+    def test_convert_with_data_page_version(self):
+        """Test CSV conversion with data_page_version set to 2.0."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            csv_path = tmpdir / "test.csv"
+            csv_path.write_text("id,value\n1,a\n2,b\n")
+
+            parquet_path = tmpdir / "test.parquet"
+
+            write_config = DataFrameWriteConfiguration(
+                data_page_version="2.0",
+            )
+
+            status, row_count = FormatConverter.convert_csv_to_parquet(
+                source_path=csv_path,
+                target_path=parquet_path,
+                delimiter=",",
+                write_config=write_config,
+            )
+
+            assert status == ConversionStatus.SUCCESS
+            assert parquet_path.exists()
+            assert row_count == 2
+
+    def test_build_write_kwargs_data_page_version(self):
+        """Test _build_write_kwargs includes data_page_version only when set."""
+        import pyarrow as pa
+
+        table = pa.table({"id": [1, 2], "value": ["a", "b"]})
+
+        # Without data_page_version
+        config_none = DataFrameWriteConfiguration()
+        kwargs = FormatConverter._build_write_kwargs("zstd", config_none, table)
+        assert "data_page_version" not in kwargs
+
+        # With data_page_version v1.0
+        config_v1 = DataFrameWriteConfiguration(data_page_version="1.0")
+        kwargs = FormatConverter._build_write_kwargs("zstd", config_v1, table)
+        assert kwargs["data_page_version"] == "1.0"
+
+        # With data_page_version v2.0
+        config_v2 = DataFrameWriteConfiguration(data_page_version="2.0")
+        kwargs = FormatConverter._build_write_kwargs("zstd", config_v2, table)
+        assert kwargs["data_page_version"] == "2.0"
 
     def test_convert_skips_invalid_sort_column(self):
         """Test that non-existent sort columns are skipped."""

@@ -18,7 +18,10 @@ from benchbox.core.tpcdi.worker_pool_examples import (
     streaming_parallel_processing,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FetchOne:

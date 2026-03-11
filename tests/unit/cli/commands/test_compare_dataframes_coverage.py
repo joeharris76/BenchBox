@@ -13,8 +13,8 @@ from click.testing import CliRunner
 cdf = importlib.import_module("benchbox.cli.commands.compare_dataframes")
 
 pytestmark = [
-    pytest.mark.fast,
     pytest.mark.unit,
+    pytest.mark.fast,
     pytest.mark.filterwarnings("ignore::DeprecationWarning"),
 ]
 

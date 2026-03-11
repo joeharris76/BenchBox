@@ -12,7 +12,10 @@ from benchbox.core.nl2sql.queries import (
     QueryDifficulty,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestNL2SQLQuery:

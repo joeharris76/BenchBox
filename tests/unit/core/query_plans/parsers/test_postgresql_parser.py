@@ -9,7 +9,10 @@ import pytest
 from benchbox.core.query_plans.parsers.postgresql import PostgreSQLQueryPlanParser
 from benchbox.core.results.query_plan_models import JoinType, LogicalOperatorType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # Test fixtures - PostgreSQL EXPLAIN (FORMAT JSON) output samples

@@ -8,12 +8,10 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import contextlib
 import sqlite3
 import sys
 import tempfile
-
-# Windows has different permission semantics - chmod doesn't work as expected
-IS_WINDOWS = sys.platform == "win32"
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -21,7 +19,14 @@ import pytest
 
 pytest.importorskip("pandas")
 
-import contextlib
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
+
+# Windows has different permission semantics - chmod doesn't work as expected
+IS_WINDOWS = sys.platform == "win32"
 
 from benchbox.amplab import AMPLab
 from benchbox.clickbench import ClickBench
@@ -42,7 +47,6 @@ def temp_dir():
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestDatabaseConnectionErrors:
     """Test database connection error handling."""
 
@@ -95,7 +99,6 @@ class TestDatabaseConnectionErrors:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkInitializationErrors:
     """Test benchmark initialization error handling."""
 
@@ -169,7 +172,6 @@ class TestBenchmarkInitializationErrors:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestDataGenerationErrors:
     """Test data generation error handling."""
 
@@ -234,7 +236,6 @@ class TestDataGenerationErrors:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestQueryExecutionErrors:
     """Test query execution error handling."""
 
@@ -284,7 +285,6 @@ class TestQueryExecutionErrors:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestFileSystemEdgeCases:
     """Test file system edge cases and error conditions."""
 
@@ -328,7 +328,6 @@ class TestFileSystemEdgeCases:
                 # Expected for some special character combinations
                 pass
 
-    @pytest.mark.medium  # Concurrent data generation is inherently slow
     def test_concurrent_file_access(self, temp_dir):
         """Test handling of concurrent file access conflicts."""
         import threading
@@ -406,7 +405,6 @@ class TestFileSystemEdgeCases:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestResourceExhaustionScenarios:
     """Test resource exhaustion scenarios."""
 
@@ -456,7 +454,6 @@ class TestResourceExhaustionScenarios:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestParameterValidationEdgeCases:
     """Test parameter validation edge cases."""
 
@@ -517,11 +514,9 @@ class TestParameterValidationEdgeCases:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestRecoveryAndCleanupScenarios:
     """Test error recovery and cleanup scenarios."""
 
-    @pytest.mark.medium  # Data generation is inherently slow
     def test_partial_data_generation_recovery(self, temp_dir):
         """Test recovery from partial data generation failures."""
         benchmark = WritePrimitives(scale_factor=0.01, output_dir=temp_dir)

@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any
+import warnings
+from datetime import datetime
+from typing import Any, Protocol
 
 from benchbox.core.visualization.ascii import (
-    ASCIIBarChart,
-    ASCIIBoxPlot,
-    ASCIIHeatmap,
-    ASCIILineChart,
-    ASCIIQueryHistogram,
-    ASCIIScatterPlot,
+    BarChart,
+    BoxPlot,
+    Heatmap,
+    Histogram,
+    LineChart,
+    ScatterPlot,
 )
 from benchbox.core.visualization.ascii.bar_chart import BarData
 from benchbox.core.visualization.ascii.box_plot import BoxPlotSeries
@@ -20,25 +22,81 @@ from benchbox.core.visualization.ascii.histogram import HistogramBar
 from benchbox.core.visualization.ascii.line_chart import LinePoint
 from benchbox.core.visualization.ascii.scatter_plot import ScatterPoint
 
+# Percentage change within ±STABLE_THRESHOLD is classified as "stable" (no meaningful regression or improvement).
+# 2% accounts for typical run-to-run variance in OLAP benchmarks at SF≥1.
+_STABLE_THRESHOLD_PCT = 2.0
+
+# Number of best/worst queries shown in summary boxes.
+# 3 balances signal density vs. noise — enough to spot patterns, few enough to scan quickly.
+_SUMMARY_QUERY_COUNT = 3
+
+_SUBTITLE_KEYS = frozenset({"benchmark", "scale_factor", "platform_version", "tuning"})
+_SUMMARY_LABELS = {
+    "primary_label": "Geo Mean",
+    "secondary_label": "Median",
+    "total_label": "Total",
+    "count_label": "Queries",
+}
+
+
+class QueryResultLike(Protocol):
+    """Minimal query contract required by ASCII runtime renderers."""
+
+    query_id: str
+    execution_time_ms: float | None
+
+
+class NormalizedResultLike(Protocol):
+    """Minimal normalized result contract required by ASCII runtime renderers."""
+
+    platform: str
+    total_time_ms: float | None
+    power_at_size: float | None
+    queries: list[QueryResultLike]
+    cost_total: float | None
+    timestamp: datetime | None
+    success_rate: float | None
+    raw: dict[str, Any] | None
+
 
 def render_ascii_chart_from_results(
-    results: list,
+    results: list[NormalizedResultLike],
     chart_type: str,
     options: Any,
     metadata: dict[str, Any] | None = None,
+    subtitle: str | None = None,
 ) -> str | None:
     """Render one chart from normalized results.
 
     Returns rendered chart string, or None when the chart is not applicable.
+
+    Args:
+        results: Normalized benchmark results.
+        chart_type: Chart type key (e.g., "performance_bar").
+        options: ChartOptions instance.
+        metadata: Deprecated — use subtitle instead. If provided without
+            subtitle, it is converted via build_chart_subtitle().
+        subtitle: Pre-formatted subtitle string for chart display.
     """
-    metadata = metadata or {}
+    if subtitle is None and metadata:
+        warnings.warn(
+            "render_ascii_chart_from_results(metadata=) is deprecated, use subtitle= instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from benchbox.core.visualization.utils import build_chart_subtitle
+
+        # Filter to recognized subtitle keys before forwarding
+        subtitle_kwargs = {k: v for k, v in metadata.items() if k in _SUBTITLE_KEYS}
+        subtitle = build_chart_subtitle(**subtitle_kwargs)
+
     handler = _CHART_TYPE_DISPATCH.get(chart_type)
     if handler is None:
         return None
-    return handler(results, options, metadata)
+    return handler(results, options, subtitle)
 
 
-def _render_performance_bar(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_performance_bar(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     bar_data: list[BarData] = [BarData(label=r.platform, value=r.total_time_ms or 0) for r in results]
     if bar_data:
         sorted_data = sorted(bar_data, key=lambda x: x.value)
@@ -46,17 +104,17 @@ def _render_performance_bar(results: list, options: Any, metadata: dict[str, Any
         if len(sorted_data) > 1:
             sorted_data[-1].is_worst = True
 
-    chart = ASCIIBarChart(
+    chart = BarChart(
         data=bar_data,
         title="Performance Comparison",
         metric_label="Execution Time (ms)",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_power_bar(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_power_bar(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     bar_data: list[BarData] = [
         BarData(label=r.platform, value=float(r.power_at_size)) for r in results if r.power_at_size is not None
     ]
@@ -68,17 +126,17 @@ def _render_power_bar(results: list, options: Any, metadata: dict[str, Any]) -> 
     if len(sorted_data) > 1:
         sorted_data[-1].is_worst = True
 
-    chart = ASCIIBarChart(
+    chart = BarChart(
         data=bar_data,
         title="Power@Size Comparison",
         metric_label="Power@Size",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_distribution_box(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_distribution_box(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     series_data: list[BoxPlotSeries] = []
     for r in results:
         timings = [q.execution_time_ms for q in r.queries if q.execution_time_ms is not None]
@@ -87,33 +145,33 @@ def _render_distribution_box(results: list, options: Any, metadata: dict[str, An
     if not series_data:
         return None
 
-    chart = ASCIIBoxPlot(
+    chart = BoxPlot(
         series=series_data,
         title="Query Time Distribution",
         y_label="Execution Time (ms)",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_query_heatmap(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_query_heatmap(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     platforms, query_ids, matrix = _build_query_matrix(results)
     if not query_ids:
         return None
-    chart = ASCIIHeatmap(
+    chart = Heatmap(
         matrix=matrix,
         row_labels=query_ids,
         col_labels=platforms,
         title="Query Execution Heatmap",
         value_label="ms",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_query_histogram(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_query_histogram(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     query_timings: dict[tuple[str, str], list[float]] = {}
     platforms_in_results = [r.platform for r in results]
     use_platform = len(set(platforms_in_results)) > 1
@@ -128,33 +186,33 @@ def _render_query_histogram(results: list, options: Any, metadata: dict[str, Any
     for (platform, query_id), timings in query_timings.items():
         mean_latency = sum(timings) / len(timings)
         histogram_data.append(
-            HistogramBar(query_id=query_id, latency_ms=mean_latency, platform=platform if use_platform else None)
+            HistogramBar(label=query_id, value=mean_latency, platform=platform if use_platform else None)
         )
     if not histogram_data:
         return None
 
     query_means: dict[str, list[float]] = {}
     for bar in histogram_data:
-        query_means.setdefault(bar.query_id, []).append(bar.latency_ms)
+        query_means.setdefault(bar.label, []).append(bar.value)
     avg_by_query = {qid: sum(v) / len(v) for qid, v in query_means.items()}
     if avg_by_query:
         best_qid = min(avg_by_query, key=avg_by_query.get)  # type: ignore[arg-type]
         worst_qid = max(avg_by_query, key=avg_by_query.get)  # type: ignore[arg-type]
         for bar in histogram_data:
-            bar.is_best = bar.query_id == best_qid
-            bar.is_worst = bar.query_id == worst_qid
+            bar.is_best = bar.label == best_qid
+            bar.is_worst = bar.label == worst_qid
 
-    chart = ASCIIQueryHistogram(
+    chart = Histogram(
         data=histogram_data,
         title="Query Latency Histogram",
         y_label="Execution Time (ms)",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_cost_scatter(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_cost_scatter(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     scatter_data: list[ScatterPoint] = []
     for r in results:
         total_time = r.total_time_ms or 0
@@ -164,18 +222,18 @@ def _render_cost_scatter(results: list, options: Any, metadata: dict[str, Any]) 
     if not scatter_data:
         return None
 
-    chart = ASCIIScatterPlot(
+    chart = ScatterPlot(
         points=scatter_data,
         title="Cost vs Performance",
         x_label="Cost (USD)",
         y_label="Queries per Hour",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_time_series(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_time_series(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     line_data: list[LinePoint] = []
     for i, r in enumerate(results):
         total_time = r.total_time_ms or 0
@@ -184,21 +242,21 @@ def _render_time_series(results: list, options: Any, metadata: dict[str, Any]) -
     if not line_data:
         return None
 
-    chart = ASCIILineChart(
+    chart = LineChart(
         points=line_data,
         title="Performance Trend",
         x_label="Run",
         y_label="Execution Time (ms)",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_comparison_bar(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_comparison_bar(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     if len(results) != 2:
         return None
-    from benchbox.core.visualization.ascii.comparison_bar import ASCIIComparisonBar, ComparisonBarData
+    from benchbox.core.visualization.ascii.comparison_bar import ComparisonBar, ComparisonBarData
 
     baseline, comparison = results
     b_map = {q.query_id: q.execution_time_ms for q in baseline.queries if q.execution_time_ms is not None}
@@ -217,20 +275,20 @@ def _render_comparison_bar(results: list, options: Any, metadata: dict[str, Any]
         )
         for qid in shared_queries
     ]
-    chart = ASCIIComparisonBar(
+    chart = ComparisonBar(
         data=data,
         title=f"{baseline.platform} vs {comparison.platform}",
         metric_label="Execution Time (ms)",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_diverging_bar(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
+def _render_diverging_bar(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
     if len(results) != 2:
         return None
-    from benchbox.core.visualization.ascii.diverging_bar import ASCIIDivergingBar, DivergingBarData
+    from benchbox.core.visualization.ascii.diverging_bar import DivergingBar, DivergingBarData
 
     baseline, comparison = results
     b_map = {q.query_id: q.execution_time_ms for q in baseline.queries if q.execution_time_ms is not None}
@@ -246,17 +304,17 @@ def _render_diverging_bar(results: list, options: Any, metadata: dict[str, Any])
         pct = ((cv - bv) / bv * 100) if bv > 0 else 0
         data.append(DivergingBarData(label=qid, pct_change=pct))
 
-    chart = ASCIIDivergingBar(
+    chart = DivergingBar(
         data=data,
         title=f"{baseline.platform} vs {comparison.platform}: Changes",
         options=options,
-        metadata=metadata,
+        subtitle=subtitle,
     )
     return chart.render()
 
 
-def _render_summary_box(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
-    from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox
+def _render_summary_box(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
+    from benchbox.core.visualization.ascii.summary_box import SummaryBox
 
     if len(results) == 2:
         stats = _build_comparison_summary_stats(results)
@@ -265,11 +323,11 @@ def _render_summary_box(results: list, options: Any, metadata: dict[str, Any]) -
     else:
         return None
 
-    chart = ASCIISummaryBox(stats=stats, options=options, metadata=metadata)
+    chart = SummaryBox(stats=stats, options=options, subtitle=subtitle)
     return chart.render()
 
 
-def _build_comparison_summary_stats(results: list) -> Any:
+def _build_comparison_summary_stats(results: list[NormalizedResultLike]) -> Any:
     from benchbox.core.visualization.ascii.summary_box import SummaryStats
 
     baseline, comparison = results
@@ -288,27 +346,28 @@ def _build_comparison_summary_stats(results: list) -> Any:
         pct = ((cv - bv) / bv * 100) if bv > 0 else 0
         changes.append((qid, pct))
 
-    n_improved = sum(1 for _, p in changes if p < -2)
-    n_regressed = sum(1 for _, p in changes if p > 2)
+    n_improved = sum(1 for _, p in changes if p < -_STABLE_THRESHOLD_PCT)
+    n_regressed = sum(1 for _, p in changes if p > _STABLE_THRESHOLD_PCT)
     n_stable = len(changes) - n_improved - n_regressed
     sorted_changes = sorted(changes, key=lambda x: x[1])
-    best = [(q, p) for q, p in sorted_changes if p < 0][:3]
-    worst = [(q, p) for q, p in reversed(sorted_changes) if p > 0][:3]
+    best = [(q, p) for q, p in sorted_changes if p < 0][:_SUMMARY_QUERY_COUNT]
+    worst = [(q, p) for q, p in reversed(sorted_changes) if p > 0][:_SUMMARY_QUERY_COUNT]
 
     return SummaryStats(
         title=f"{baseline.platform} vs {comparison.platform} Summary",
-        geo_mean_baseline_ms=b_geo,
-        geo_mean_comparison_ms=c_geo,
-        total_time_baseline_ms=baseline.total_time_ms,
-        total_time_comparison_ms=comparison.total_time_ms,
+        primary_baseline=b_geo,
+        primary_comparison=c_geo,
+        total_baseline=baseline.total_time_ms,
+        total_comparison=comparison.total_time_ms,
         baseline_name=baseline.platform,
         comparison_name=comparison.platform,
-        num_queries=len(shared),
+        num_items=len(shared),
         num_improved=n_improved,
         num_stable=n_stable,
         num_regressed=n_regressed,
-        best_queries=best,
-        worst_queries=worst,
+        best_items=best,
+        worst_items=worst,
+        **_SUMMARY_LABELS,
     )
 
 
@@ -323,48 +382,49 @@ def _build_single_summary_stats(result: Any) -> Any:
     )
     return SummaryStats(
         title=f"{result.platform} Summary",
-        geo_mean_ms=geo,
-        total_time_ms=result.total_time_ms,
-        num_queries=len(result.queries),
-        best_queries=sorted_by_time[:3],
-        worst_queries=sorted_by_time[-3:][::-1] if len(sorted_by_time) > 3 else [],
+        primary_value=geo,
+        total_value=result.total_time_ms,
+        num_items=len(result.queries),
+        best_items=sorted_by_time[:_SUMMARY_QUERY_COUNT],
+        worst_items=sorted_by_time[-_SUMMARY_QUERY_COUNT:][::-1] if len(sorted_by_time) > _SUMMARY_QUERY_COUNT else [],
+        **_SUMMARY_LABELS,
     )
 
 
-def _render_percentile_ladder(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
-    from benchbox.core.visualization.ascii.percentile_ladder import from_query_results
+def _render_percentile_ladder(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
+    from benchbox.core.visualization.ascii.percentile_ladder import from_series
 
     platform_queries = _extract_platform_query_timings(results)
     if not platform_queries:
         return None
-    chart = from_query_results(
+    chart = from_series(
         platform_queries,
         title="Percentile Latency by Platform",
         metric_label="ms",
         options=options,
     )
-    chart.metadata = metadata
+    chart.subtitle = subtitle
     return chart.render()
 
 
-def _render_normalized_speedup(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
-    from benchbox.core.visualization.ascii.normalized_speedup import from_normalized_results
+def _render_normalized_speedup(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
+    from benchbox.core.visualization.ascii.normalized_speedup import from_ratios
 
     platform_times = [(r.platform, r.total_time_ms) for r in results if r.total_time_ms and r.total_time_ms > 0]
     if len(platform_times) < 2:
         return None
-    chart = from_normalized_results(
+    chart = from_ratios(
         platform_times,
         baseline="slowest",
         title="Normalized Performance",
         options=options,
     )
-    chart.metadata = metadata
+    chart.subtitle = subtitle
     return chart.render()
 
 
-def _render_stacked_phase(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
-    from benchbox.core.visualization.ascii.stacked_bar import ASCIIStackedBar, StackedBarData, StackedBarSegment
+def _render_stacked_phase(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
+    from benchbox.core.visualization.ascii.stacked_bar import StackedBar, StackedBarData, StackedBarSegment
 
     data: list[StackedBarData] = []
     for r in results:
@@ -376,12 +436,18 @@ def _render_stacked_phase(results: list, options: Any, metadata: dict[str, Any])
     if not data:
         return None
 
-    chart = ASCIIStackedBar(data=data, title="Phase Breakdown by Platform", options=options, metadata=metadata)
+    chart = StackedBar(
+        data=data,
+        title="Phase Breakdown by Platform",
+        options=options,
+        subtitle=subtitle,
+        metric_label="ms",
+    )
     return chart.render()
 
 
-def _render_sparkline_table(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
-    from benchbox.core.visualization.ascii.sparkline_table import from_metrics
+def _render_sparkline_table(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
+    from benchbox.core.visualization.ascii.sparkline_table import from_data as sparkline_from_data
 
     platforms = [r.platform for r in results]
     if not platforms:
@@ -400,38 +466,38 @@ def _render_sparkline_table(results: list, options: Any, metadata: dict[str, Any
         success = {r.platform: float((r.success_rate or 0) * 100.0) for r in results}
         metrics.append(("Success(%)", success, True))
 
-    chart = from_metrics(platforms=platforms, metrics=metrics, title="Platform Comparison Overview", options=options)
-    chart.metadata = metadata
+    chart = sparkline_from_data(rows=platforms, metrics=metrics, title="Platform Comparison Overview", options=options)
+    chart.subtitle = subtitle
     return chart.render()
 
 
-def _render_cdf_chart(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
-    from benchbox.core.visualization.ascii.cdf_chart import from_query_results
+def _render_cdf_chart(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
+    from benchbox.core.visualization.ascii.cdf_chart import from_series as cdf_from_series
 
     platform_queries = _extract_platform_query_timings(results)
     if not platform_queries:
         return None
 
-    chart = from_query_results(platform_queries, title="Cumulative Distribution of Query Latency", options=options)
-    chart.metadata = metadata
+    chart = cdf_from_series(platform_queries, title="Cumulative Distribution of Query Latency", options=options)
+    chart.subtitle = subtitle
     return chart.render()
 
 
-def _render_rank_table(results: list, options: Any, metadata: dict[str, Any]) -> str | None:
-    from benchbox.core.visualization.ascii.rank_table import from_heatmap_data
+def _render_rank_table(results: list[NormalizedResultLike], options: Any, subtitle: str | None) -> str | None:
+    from benchbox.core.visualization.ascii.rank_table import from_matrix
 
     platforms, query_ids, matrix = _build_query_matrix(results)
     if not query_ids or not platforms:
         return None
 
-    chart = from_heatmap_data(
+    chart = from_matrix(
         matrix=matrix,
-        queries=query_ids,
-        platforms=platforms,
+        items=query_ids,
+        groups=platforms,
         title="Query Rankings (1st = fastest)",
         options=options,
     )
-    chart.metadata = metadata
+    chart.subtitle = subtitle
     return chart.render()
 
 
@@ -455,7 +521,7 @@ _CHART_TYPE_DISPATCH: dict[str, Any] = {
 }
 
 
-def _extract_platform_query_timings(results: list) -> list[tuple[str, list[float]]]:
+def _extract_platform_query_timings(results: list[NormalizedResultLike]) -> list[tuple[str, list[float]]]:
     platform_queries: list[tuple[str, list[float]]] = []
     for result in results:
         values = [
@@ -475,7 +541,7 @@ def _natural_sort_key(s: str) -> tuple[float, str]:
     return (float("inf"), s)
 
 
-def _build_query_matrix(results: list) -> tuple[list[str], list[str], list[list[float]]]:
+def _build_query_matrix(results: list[NormalizedResultLike]) -> tuple[list[str], list[str], list[list[float]]]:
     platforms = [r.platform for r in results]
     query_ids: list[str] = []
     platform_timings: dict[str, dict[str, float]] = {}

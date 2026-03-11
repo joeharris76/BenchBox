@@ -31,7 +31,10 @@ import pytest
 from benchbox.core.tpch.generator import TPCHDataGenerator
 
 # Mark all tests in this file as unit tests
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCHDataGeneratorBasic(unittest.TestCase):

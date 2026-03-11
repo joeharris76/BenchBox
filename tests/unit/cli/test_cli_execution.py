@@ -15,9 +15,13 @@ from benchbox.core.schemas import BenchmarkConfig, QueryResult
 from benchbox.utils.printing import quiet_console
 from tests.conftest import make_benchmark_results
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkExecutor:
     """Test BenchmarkExecutor class."""
 
@@ -52,7 +56,6 @@ class TestBenchmarkExecutor:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkExecutorExecution:
     """Test benchmark execution functionality."""
 
@@ -166,7 +169,6 @@ class TestBenchmarkExecutorExecution:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkExecutorDisplayInfo:
     """Test display execution info functionality."""
 
@@ -252,7 +254,6 @@ class TestBenchmarkExecutorDisplayInfo:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkExecutorDisplayResults:
     """Test display results summary functionality."""
 
@@ -430,7 +431,6 @@ class TestBenchmarkExecutorDisplayResults:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkExecutorIntegration:
     """Test integration scenarios for BenchmarkExecutor."""
 
@@ -488,7 +488,6 @@ class TestBenchmarkExecutorIntegration:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkExecutorEdgeCases:
     """Test edge cases and error conditions."""
 
@@ -593,7 +592,6 @@ class TestBenchmarkExecutorEdgeCases:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkExecutorResultCreation:
     """Test minimal result creation edge cases."""
 

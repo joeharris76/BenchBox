@@ -27,7 +27,10 @@ from benchbox.core.publishing.publisher import (
     PublishResult,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPublishResult:

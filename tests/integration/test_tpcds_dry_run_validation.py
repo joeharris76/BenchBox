@@ -13,8 +13,15 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from unittest.mock import Mock, patch
 
+import pytest
+
 from benchbox.cli.dryrun import DryRunExecutor
 from benchbox.platforms.duckdb import DuckDBAdapter
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
 
 
 class TestTPCDSDryRunValidation:

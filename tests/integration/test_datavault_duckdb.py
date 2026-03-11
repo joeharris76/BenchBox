@@ -21,6 +21,11 @@ from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpch.schema import TABLES
 from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.datavault

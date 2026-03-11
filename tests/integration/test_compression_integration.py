@@ -15,6 +15,11 @@ from benchbox.cli.benchmarks import BenchmarkConfig
 from benchbox.core.ssb.benchmark import SSBBenchmark
 from benchbox.utils.compression import ZSTD_AVAILABLE, CompressionManager
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 class TestCompressionIntegration:
     """Integration tests for compression across the system."""

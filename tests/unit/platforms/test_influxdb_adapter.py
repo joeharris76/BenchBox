@@ -19,7 +19,10 @@ from benchbox.platforms.influxdb import InfluxDBAdapter
 from benchbox.platforms.influxdb._dependencies import INFLUXDB_AVAILABLE
 from benchbox.platforms.influxdb.client import InfluxDBConnection
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestInfluxDBAdapterInitialization:

@@ -8,7 +8,10 @@ from benchbox.core.tpcds.dist_parser import (
     TPCDSDistributionParser,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_dist_parser_parses_minimal_dst_file():

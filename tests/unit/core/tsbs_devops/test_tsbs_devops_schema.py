@@ -15,7 +15,10 @@ from benchbox.core.tsbs_devops.schema import (
     get_table_columns,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSchemaDefinition:

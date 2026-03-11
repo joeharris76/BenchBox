@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.fast
+
+
 # Default maximum number of lines for a module before the guardrails trigger.
 MAX_LINES_DEFAULT = 1_200
 

@@ -12,7 +12,10 @@ import pytest
 from benchbox.cli.benchmarks import BenchmarkManager
 from benchbox.core.schemas import BenchmarkConfig
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBenchmarkFiltering:

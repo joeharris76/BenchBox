@@ -14,7 +14,10 @@ import pytest
 
 from benchbox.platforms.duckdb import DuckDBAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDuckDBAdapter:
@@ -44,6 +47,190 @@ class TestDuckDBAdapter:
             assert adapter.memory_limit == "4GB"
             assert adapter.thread_limit is None
             assert adapter.enable_progress_bar is False
+
+    def test_create_external_tables_uses_read_parquet_views(self, tmp_path):
+        """External mode should create views over read_parquet() sources."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        parquet_path = tmp_path / "lineitem.parquet"
+        parquet_path.touch()
+        benchmark = Mock()
+        benchmark.tables = {"lineitem": parquet_path}
+        benchmark.get_table_loading_order.return_value = ["lineitem"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (17,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        table_stats, _, per_table_timings = adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert adapter.supports_external_tables is True
+        assert table_stats == {"lineitem": 17}
+        assert per_table_timings is None
+        assert any("CREATE VIEW lineitem AS SELECT * FROM read_parquet(" in sql for sql in executed_sql)
+        assert adapter.external_format == "parquet"
+
+    def test_create_external_tables_uses_delta_scan_for_delta_sources(self, tmp_path):
+        """Delta directories should be mapped to delta_scan() views."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        delta_table_dir = tmp_path / "lineitem_delta"
+        (delta_table_dir / "_delta_log").mkdir(parents=True)
+
+        benchmark = Mock()
+        benchmark.tables = {"lineitem": delta_table_dir}
+        benchmark.get_table_loading_order.return_value = ["lineitem"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (9,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        table_stats, _, _ = adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert table_stats == {"lineitem": 9}
+        assert "INSTALL delta" in executed_sql
+        assert "LOAD delta" in executed_sql
+        assert any("delta_scan(" in sql for sql in executed_sql)
+        assert adapter.external_format == "delta"
+
+    def test_create_external_tables_detects_tbl_format(self, tmp_path):
+        """TBL text files should set external_format to 'tbl'."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        tbl_path = tmp_path / "lineitem.tbl"
+        tbl_path.write_text("1|data|here\n")
+
+        benchmark = Mock()
+        benchmark.tables = {"lineitem": tbl_path}
+        benchmark.get_table_loading_order.return_value = ["lineitem"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (5,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        table_stats, _, _ = adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert table_stats == {"lineitem": 5}
+        assert any("read_csv(" in sql for sql in executed_sql)
+        assert adapter.external_format == "tbl"
+
+    def test_create_external_tables_uses_read_vortex_views(self, tmp_path):
+        """External mode should create views over read_vortex() sources."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        vortex_path = tmp_path / "customer.vortex"
+        vortex_path.touch()
+        benchmark = Mock()
+        benchmark.tables = {"customer": vortex_path}
+        benchmark.get_table_loading_order.return_value = ["customer"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (11,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        table_stats, _, _ = adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert table_stats == {"customer": 11}
+        assert "INSTALL vortex" in executed_sql
+        assert "LOAD vortex" in executed_sql
+        assert any("CREATE VIEW customer AS SELECT * FROM read_vortex(" in sql for sql in executed_sql)
+        assert adapter.external_format == "vortex"
+
+    def test_create_external_tables_vortex_extension_failure_is_explicit(self, tmp_path):
+        """A missing vortex DuckDB extension should raise a clear external-mode error."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        vortex_path = tmp_path / "customer.vortex"
+        vortex_path.touch()
+        benchmark = Mock()
+        benchmark.tables = {"customer": vortex_path}
+        benchmark.get_table_loading_order.return_value = ["customer"]
+
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            sql_text = str(sql)
+            if sql_text == "INSTALL vortex":
+                raise RuntimeError("extension install failed")
+            result = Mock()
+            result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        with pytest.raises(RuntimeError, match="requires the DuckDB vortex extension"):
+            adapter.create_external_tables(benchmark, connection, tmp_path)
+
+    def test_create_external_tables_vortex_probe_failure_gives_clear_error(self, tmp_path):
+        """When read_vortex probe fails, adapter should raise a clear RuntimeError (no repair)."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        vortex_path = tmp_path / "customer.vortex"
+        vortex_path.touch()
+        benchmark = Mock()
+        benchmark.tables = {"customer": vortex_path}
+        benchmark.get_table_loading_order.return_value = ["customer"]
+
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            sql_text = str(sql)
+            if sql_text.startswith("SELECT * FROM read_vortex(") and "LIMIT 1" in sql_text:
+                raise RuntimeError("Invalid Input Error: Expected 2 buffers, got 3")
+            result = Mock()
+            result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        with pytest.raises(RuntimeError, match="DuckDB cannot read these Vortex files"):
+            adapter.create_external_tables(benchmark, connection, tmp_path)
 
     def test_from_config_with_output_dir_places_db_under_databases(self, tmp_path):
         """Auto-generated DB path should use a databases/ subdirectory for output_dir."""
@@ -1260,3 +1447,107 @@ class TestDuckDBAdapter:
                 pytest.fail(f"_execute_tpcds_power_test method should be available: {e}")
             except Exception as e:
                 pytest.fail(f"_execute_tpcds_power_test should not raise exceptions during normal execution: {e}")
+
+    def test_create_external_tables_uses_iceberg_scan_for_iceberg_sources(self, tmp_path):
+        """Iceberg directories (with metadata/) should be mapped to iceberg_scan() views."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        iceberg_table_dir = tmp_path / "lineitem_iceberg"
+        (iceberg_table_dir / "metadata").mkdir(parents=True)
+
+        benchmark = Mock()
+        benchmark.tables = {"lineitem": iceberg_table_dir}
+        benchmark.get_table_loading_order.return_value = ["lineitem"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (42,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        table_stats, _, _ = adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert table_stats == {"lineitem": 42}
+        assert "INSTALL iceberg" in executed_sql
+        assert "LOAD iceberg" in executed_sql
+        assert any("iceberg_scan(" in sql for sql in executed_sql)
+        assert any("CREATE VIEW lineitem AS SELECT * FROM iceberg_scan(" in sql for sql in executed_sql)
+        assert adapter.external_format == "iceberg"
+
+    def test_create_external_tables_iceberg_extension_loaded_once(self, tmp_path):
+        """Iceberg extension should only be installed/loaded once for multiple tables."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        for name in ("lineitem", "orders"):
+            table_dir = tmp_path / f"{name}_iceberg"
+            (table_dir / "metadata").mkdir(parents=True)
+
+        benchmark = Mock()
+        benchmark.tables = {
+            "lineitem": tmp_path / "lineitem_iceberg",
+            "orders": tmp_path / "orders_iceberg",
+        }
+        benchmark.get_table_loading_order.return_value = ["lineitem", "orders"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (1,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert executed_sql.count("INSTALL iceberg") == 1
+        assert executed_sql.count("LOAD iceberg") == 1
+
+    def test_create_external_tables_delta_not_confused_with_iceberg(self, tmp_path):
+        """A directory with _delta_log/ should use delta_scan, not iceberg_scan."""
+        with patch("benchbox.platforms.duckdb.duckdb"):
+            adapter = DuckDBAdapter()
+
+        # Directory has _delta_log — should be detected as Delta, not Iceberg
+        delta_dir = tmp_path / "lineitem_delta"
+        (delta_dir / "_delta_log").mkdir(parents=True)
+        (delta_dir / "metadata").mkdir(parents=True)  # Also has metadata/ — Delta wins
+
+        benchmark = Mock()
+        benchmark.tables = {"lineitem": delta_dir}
+        benchmark.get_table_loading_order.return_value = ["lineitem"]
+
+        executed_sql: list[str] = []
+        connection = Mock()
+
+        def _execute(sql, *args, **kwargs):
+            executed_sql.append(str(sql))
+            result = Mock()
+            if str(sql).strip().upper().startswith("SELECT COUNT(*)"):
+                result.fetchone.return_value = (1,)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        connection.execute.side_effect = _execute
+
+        adapter.create_external_tables(benchmark, connection, tmp_path)
+
+        assert any("delta_scan(" in sql for sql in executed_sql)
+        assert not any("iceberg_scan(" in sql for sql in executed_sql)
+        assert adapter.external_format == "delta"

@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.core.tpcdi.benchmark import TPCDIBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_benchmark(tmp_path: Path) -> TPCDIBenchmark:

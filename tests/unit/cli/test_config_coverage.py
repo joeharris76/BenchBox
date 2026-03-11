@@ -10,7 +10,10 @@ import pytest
 
 cfg = importlib.import_module("benchbox.cli.config")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_environment_overrides_apply_and_warn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,8 +52,10 @@ def test_directory_manager_paths_and_cleanup(tmp_path: Path) -> None:
 
     old_file = dm.results_dir / "old.json"
     old_file.write_text("{}", encoding="utf-8")
-    with patch("time.time", return_value=1_000_000):
-        old_file.touch()
+    # Set the file's mtime to a very old timestamp so it's always older than cutoff
+    import os as _os
+
+    _os.utime(old_file, (0, 0))
     cleaned = dm.clean_old_files(max_age_days=0)
     assert str(old_file) in cleaned
 

@@ -13,7 +13,11 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # ---------------------------------------------------------------------------
 # Polars-backed context helpers
@@ -83,42 +87,50 @@ class TestAMPLabDataFrameQueriesExecution:
     def test_q1_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q1_expression_impl
 
-        assert q1_expression_impl(ctx) is not None
+        result = q1_expression_impl(ctx)
+        assert result.columns, "Q1 expression should return a result with columns"
 
     def test_q1a_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q1a_expression_impl
 
-        assert q1a_expression_impl(ctx) is not None
+        result = q1a_expression_impl(ctx)
+        assert result.columns, "Q1a expression should return a result with columns"
 
     def test_q2_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q2_expression_impl
 
-        assert q2_expression_impl(ctx) is not None
+        result = q2_expression_impl(ctx)
+        assert result.columns, "Q2 expression should return a result with columns"
 
     def test_q2a_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q2a_expression_impl
 
-        assert q2a_expression_impl(ctx) is not None
+        result = q2a_expression_impl(ctx)
+        assert result.columns, "Q2a expression should return a result with columns"
 
     def test_q3_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q3_expression_impl
 
-        assert q3_expression_impl(ctx) is not None
+        result = q3_expression_impl(ctx)
+        assert result.columns, "Q3 expression should return a result with columns"
 
     def test_q3a_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q3a_expression_impl
 
-        assert q3a_expression_impl(ctx) is not None
+        result = q3a_expression_impl(ctx)
+        assert result.columns, "Q3a expression should return a result with columns"
 
     def test_q4_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q4_expression_impl
 
-        assert q4_expression_impl(ctx) is not None
+        result = q4_expression_impl(ctx)
+        assert result.columns, "Q4 expression should return a result with columns"
 
     def test_q5_expression(self, ctx):
         from benchbox.core.amplab.dataframe_queries.queries import q5_expression_impl
 
-        assert q5_expression_impl(ctx) is not None
+        result = q5_expression_impl(ctx)
+        assert result.columns, "Q5 expression should return a result with columns"
 
     def test_q1_pandas(self, ctx):
         """AMPLab Q1 pandas — use pandas DataFrames via a simple context."""
@@ -134,7 +146,8 @@ class TestAMPLabDataFrameQueriesExecution:
             def get_table(self, name: str) -> Any:
                 return {"rankings": rankings}[name.lower()]
 
-        assert q1_pandas_impl(PdCtx()) is not None
+        result = q1_pandas_impl(PdCtx())
+        assert hasattr(result, "columns"), "Q1 pandas should return a DataFrame"
 
     def test_q1a_pandas(self, ctx):
         import pandas as pd
@@ -147,7 +160,8 @@ class TestAMPLabDataFrameQueriesExecution:
             def get_table(self, name: str) -> Any:
                 return {"rankings": rankings}[name.lower()]
 
-        assert q1a_pandas_impl(PdCtx()) is not None
+        result = q1a_pandas_impl(PdCtx())
+        assert hasattr(result, "columns"), "Q1a pandas should return a DataFrame"
 
 
 # ===================================================================
@@ -250,67 +264,67 @@ class TestSSBDataFrameQueriesExecution:
     def test_q1_1_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q1_1_expression_impl
 
-        assert q1_1_expression_impl(ctx) is not None
+        assert q1_1_expression_impl(ctx).columns
 
     def test_q1_2_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q1_2_expression_impl
 
-        assert q1_2_expression_impl(ctx) is not None
+        assert q1_2_expression_impl(ctx).columns
 
     def test_q1_3_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q1_3_expression_impl
 
-        assert q1_3_expression_impl(ctx) is not None
+        assert q1_3_expression_impl(ctx).columns
 
     def test_q2_1_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q2_1_expression_impl
 
-        assert q2_1_expression_impl(ctx) is not None
+        assert q2_1_expression_impl(ctx).columns
 
     def test_q2_2_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q2_2_expression_impl
 
-        assert q2_2_expression_impl(ctx) is not None
+        assert q2_2_expression_impl(ctx).columns
 
     def test_q2_3_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q2_3_expression_impl
 
-        assert q2_3_expression_impl(ctx) is not None
+        assert q2_3_expression_impl(ctx).columns
 
     def test_q3_1_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q3_1_expression_impl
 
-        assert q3_1_expression_impl(ctx) is not None
+        assert q3_1_expression_impl(ctx).columns
 
     def test_q3_2_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q3_2_expression_impl
 
-        assert q3_2_expression_impl(ctx) is not None
+        assert q3_2_expression_impl(ctx).columns
 
     def test_q3_3_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q3_3_expression_impl
 
-        assert q3_3_expression_impl(ctx) is not None
+        assert q3_3_expression_impl(ctx).columns
 
     def test_q3_4_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q3_4_expression_impl
 
-        assert q3_4_expression_impl(ctx) is not None
+        assert q3_4_expression_impl(ctx).columns
 
     def test_q4_1_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q4_1_expression_impl
 
-        assert q4_1_expression_impl(ctx) is not None
+        assert q4_1_expression_impl(ctx).columns
 
     def test_q4_2_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q4_2_expression_impl
 
-        assert q4_2_expression_impl(ctx) is not None
+        assert q4_2_expression_impl(ctx).columns
 
     def test_q4_3_expression(self, ctx):
         from benchbox.core.ssb.dataframe_queries.queries import q4_3_expression_impl
 
-        assert q4_3_expression_impl(ctx) is not None
+        assert q4_3_expression_impl(ctx).columns
 
 
 # ===================================================================
@@ -368,57 +382,57 @@ class TestCoffeeShopDataFrameQueriesExecution:
     def test_sa1_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import sa1_expression_impl
 
-        assert sa1_expression_impl(ctx) is not None
+        assert sa1_expression_impl(ctx).columns
 
     def test_sa2_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import sa2_expression_impl
 
-        assert sa2_expression_impl(ctx) is not None
+        assert sa2_expression_impl(ctx).columns
 
     def test_sa3_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import sa3_expression_impl
 
-        assert sa3_expression_impl(ctx) is not None
+        assert sa3_expression_impl(ctx).columns
 
     def test_sa4_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import sa4_expression_impl
 
-        assert sa4_expression_impl(ctx) is not None
+        assert sa4_expression_impl(ctx).columns
 
     def test_sa5_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import sa5_expression_impl
 
-        assert sa5_expression_impl(ctx) is not None
+        assert sa5_expression_impl(ctx).columns
 
     def test_pr1_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import pr1_expression_impl
 
-        assert pr1_expression_impl(ctx) is not None
+        assert pr1_expression_impl(ctx).columns
 
     def test_pr2_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import pr2_expression_impl
 
-        assert pr2_expression_impl(ctx) is not None
+        assert pr2_expression_impl(ctx).columns
 
     def test_tr1_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import tr1_expression_impl
 
-        assert tr1_expression_impl(ctx) is not None
+        assert tr1_expression_impl(ctx).columns
 
     def test_tm1_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import tm1_expression_impl
 
-        assert tm1_expression_impl(ctx) is not None
+        assert tm1_expression_impl(ctx).columns
 
     def test_qc1_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import qc1_expression_impl
 
-        assert qc1_expression_impl(ctx) is not None
+        assert qc1_expression_impl(ctx).columns
 
     def test_qc2_expression(self, ctx):
         from benchbox.core.coffeeshop.dataframe_queries.queries import qc2_expression_impl
 
-        assert qc2_expression_impl(ctx) is not None
+        assert qc2_expression_impl(ctx).columns
 
 
 # ===================================================================
@@ -779,7 +793,7 @@ class TestMetadataPrimitivesDataFrameOperations:
             PYSPARK_METADATA_CAPABILITIES,
             DATAFUSION_METADATA_CAPABILITIES,
         ]:
-            assert caps.platform_name is not None
+            assert len(caps.platform_name) > 0
             assert isinstance(caps.supports_schema_introspection, bool)
 
     def test_manager_init(self):

@@ -10,7 +10,10 @@ import pytest
 from benchbox.core.aiml_functions.functions import AIMLFunctionCategory
 from benchbox.core.aiml_functions.queries import AIMLQuery, AIMLQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAIMLQuery:
@@ -42,8 +45,8 @@ class TestAIMLQuery:
                 "databricks": "SELECT ai_analyze_sentiment(col) FROM tbl",
             },
         )
-        assert query.get_query("snowflake") is not None
-        assert query.get_query("databricks") is not None
+        assert "SELECT" in query.get_query("snowflake").upper()
+        assert "SELECT" in query.get_query("databricks").upper()
         assert query.get_query("bigquery") is None
 
     def test_get_query_case_insensitive(self):
@@ -56,8 +59,8 @@ class TestAIMLQuery:
             description="Test",
             platform_queries={"snowflake": "SELECT 1"},
         )
-        assert query.get_query("Snowflake") is not None
-        assert query.get_query("SNOWFLAKE") is not None
+        assert "SELECT" in query.get_query("Snowflake").upper()
+        assert "SELECT" in query.get_query("SNOWFLAKE").upper()
 
     def test_defaults(self):
         """Should have sensible defaults."""
@@ -109,7 +112,7 @@ class TestAIMLQueryManager:
     def test_get_query(self, manager):
         """Should get query by ID."""
         query = manager.get_query("sentiment_single")
-        assert query is not None
+        assert isinstance(query, AIMLQuery)
         assert query.query_id == "sentiment_single"
         assert query.category == AIMLFunctionCategory.SENTIMENT
 
@@ -160,69 +163,61 @@ class TestAIMLQueryContent:
 
     def test_sentiment_queries_exist(self, manager):
         """Should have sentiment analysis queries."""
-        assert manager.get_query("sentiment_single") is not None
-        assert manager.get_query("sentiment_batch") is not None
-        assert manager.get_query("sentiment_aggregation") is not None
+        assert isinstance(manager.get_query("sentiment_single"), AIMLQuery)
+        assert isinstance(manager.get_query("sentiment_batch"), AIMLQuery)
+        assert isinstance(manager.get_query("sentiment_aggregation"), AIMLQuery)
 
     def test_classification_queries_exist(self, manager):
         """Should have classification queries."""
-        assert manager.get_query("classification_single") is not None
-        assert manager.get_query("classification_batch") is not None
+        assert isinstance(manager.get_query("classification_single"), AIMLQuery)
+        assert isinstance(manager.get_query("classification_batch"), AIMLQuery)
 
     def test_summarization_queries_exist(self, manager):
         """Should have summarization queries."""
-        assert manager.get_query("summarization_single") is not None
-        assert manager.get_query("summarization_batch") is not None
+        assert isinstance(manager.get_query("summarization_single"), AIMLQuery)
+        assert isinstance(manager.get_query("summarization_batch"), AIMLQuery)
 
     def test_completion_queries_exist(self, manager):
         """Should have completion queries."""
-        assert manager.get_query("completion_simple") is not None
-        assert manager.get_query("completion_with_context") is not None
+        assert isinstance(manager.get_query("completion_simple"), AIMLQuery)
+        assert isinstance(manager.get_query("completion_with_context"), AIMLQuery)
 
     def test_embedding_queries_exist(self, manager):
         """Should have embedding queries."""
-        assert manager.get_query("embedding_single") is not None
-        assert manager.get_query("embedding_batch") is not None
+        assert isinstance(manager.get_query("embedding_single"), AIMLQuery)
+        assert isinstance(manager.get_query("embedding_batch"), AIMLQuery)
 
     def test_translation_queries_exist(self, manager):
         """Should have translation queries."""
-        assert manager.get_query("translation_single") is not None
-        assert manager.get_query("translation_batch") is not None
+        assert isinstance(manager.get_query("translation_single"), AIMLQuery)
+        assert isinstance(manager.get_query("translation_batch"), AIMLQuery)
 
     def test_extraction_queries_exist(self, manager):
         """Should have extraction queries."""
-        assert manager.get_query("extraction_single") is not None
+        assert isinstance(manager.get_query("extraction_single"), AIMLQuery)
 
     def test_snowflake_query_syntax(self, manager):
         """Should have valid Snowflake syntax."""
         query = manager.get_query("sentiment_single")
-        assert query is not None
         sql = query.get_query("snowflake")
-        assert sql is not None
         assert "SNOWFLAKE.CORTEX.SENTIMENT" in sql
 
     def test_databricks_query_syntax(self, manager):
         """Should have valid Databricks syntax."""
         query = manager.get_query("sentiment_single")
-        assert query is not None
         sql = query.get_query("databricks")
-        assert sql is not None
         assert "ai_analyze_sentiment" in sql
 
     def test_batch_queries_have_limits(self, manager):
         """Should have LIMIT in batch queries."""
         batch_query = manager.get_query("sentiment_batch")
-        assert batch_query is not None
         sql = batch_query.get_query("snowflake")
-        assert sql is not None
         assert "LIMIT" in sql.upper()
 
     def test_queries_reference_sample_tables(self, manager):
         """Should reference expected sample tables."""
         query = manager.get_query("sentiment_single")
-        assert query is not None
         sql = query.get_query("snowflake")
-        assert sql is not None
         assert "aiml_sample_data" in sql.lower()
 
 

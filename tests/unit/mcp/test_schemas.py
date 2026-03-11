@@ -28,6 +28,11 @@ from benchbox.mcp.schemas import (
     validate_scale_factor,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestValidateQueryId:
     """Tests for validate_query_id function."""

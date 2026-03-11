@@ -207,7 +207,7 @@ adapter = TrinoAdapter(
 
 ```bash
 benchbox run --platform trino --benchmark tpch \
-  --show-query-plans
+  --capture-plans
 ```
 
 Trino provides detailed EXPLAIN output including:

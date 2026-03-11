@@ -15,7 +15,10 @@ import pytest
 
 from benchbox.core.dataframe.query import QueryCategory
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCDSQueryRegistry:

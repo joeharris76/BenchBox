@@ -10,7 +10,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Python 3.11+ required for Click command mock.patch attribute access
 PYTHON_311_PLUS = sys.version_info >= (3, 11)

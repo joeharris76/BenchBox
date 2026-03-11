@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.core.ai_primitives.queries import AIQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAIQueryManager:

@@ -15,6 +15,12 @@ from benchbox.utils.config_helpers import (
     create_sample_execution_config,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # ---------------------------------------------------------------------------
 # Helper: mock config manager
 # ---------------------------------------------------------------------------

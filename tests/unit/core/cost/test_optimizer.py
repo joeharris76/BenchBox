@@ -16,7 +16,10 @@ from benchbox.core.cost.optimizer import (
     SavingsEstimate,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSavingsEstimate:

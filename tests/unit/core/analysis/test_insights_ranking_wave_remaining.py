@@ -30,7 +30,10 @@ from benchbox.core.analysis.ranking import (
     rank_platforms,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _metrics(value: float) -> PerformanceMetrics:

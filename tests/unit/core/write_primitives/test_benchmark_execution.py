@@ -20,7 +20,10 @@ import pytest
 
 from benchbox.core.write_primitives.benchmark import OperationResult, WritePrimitivesBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestOperationResult:

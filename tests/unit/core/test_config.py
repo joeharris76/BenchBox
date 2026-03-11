@@ -20,7 +20,10 @@ from benchbox.core.schemas import (
     SystemProfile,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueryResult:

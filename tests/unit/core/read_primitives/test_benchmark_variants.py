@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBenchmarkVariantIntegration:

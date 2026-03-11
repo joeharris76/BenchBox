@@ -7,7 +7,10 @@ import pytest
 from benchbox.cli.execution_pipeline import BenchmarkLoadingStage
 from benchbox.core.schemas import BenchmarkConfig
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_pipeline_uses_core_benchmark_loader():

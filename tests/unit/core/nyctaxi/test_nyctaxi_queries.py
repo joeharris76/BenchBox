@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.core.nyctaxi.queries import QUERIES, NYCTaxiQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueriesDefinition:

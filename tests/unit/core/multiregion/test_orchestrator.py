@@ -16,7 +16,10 @@ from benchbox.core.multiregion.orchestrator import (
     RegionBenchmarkResult,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestRegionBenchmarkResult:

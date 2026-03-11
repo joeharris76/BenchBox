@@ -17,7 +17,10 @@ from benchbox.core.ai_primitives.benchmark import (
     AIQueryResult,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAIPrimitivesBenchmark:

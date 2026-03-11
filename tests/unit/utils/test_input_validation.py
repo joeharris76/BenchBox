@@ -36,7 +36,10 @@ from benchbox.utils.input_validation import (
     validate_sql_identifier,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestValidateSqlIdentifier:

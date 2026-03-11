@@ -25,6 +25,11 @@ from benchbox.core.dataframe.tuning.write_config import (
     validate_write_config_for_platform,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestSortColumn:
     """Tests for SortColumn dataclass."""
@@ -122,6 +127,7 @@ class TestDataFrameWriteConfiguration:
         assert config.repartition_count is None
         assert config.compression == "zstd"
         assert config.compression_level is None
+        assert config.data_page_version is None
         assert config.is_default()
 
     def test_with_sort_by(self) -> None:
@@ -175,6 +181,20 @@ class TestDataFrameWriteConfiguration:
         config = DataFrameWriteConfiguration(compression="gzip", compression_level=6)
         assert config.compression_level == 6
 
+    def test_data_page_version(self) -> None:
+        """Test data_page_version field accepts valid values."""
+        config_v1 = DataFrameWriteConfiguration(data_page_version="1.0")
+        assert config_v1.data_page_version == "1.0"
+        assert not config_v1.is_default()
+
+        config_v2 = DataFrameWriteConfiguration(data_page_version="2.0")
+        assert config_v2.data_page_version == "2.0"
+        assert not config_v2.is_default()
+
+        config_none = DataFrameWriteConfiguration(data_page_version=None)
+        assert config_none.data_page_version is None
+        assert config_none.is_default()
+
 
 class TestDataFrameWriteConfigurationSerialization:
     """Tests for DataFrameWriteConfiguration serialization."""
@@ -197,6 +217,12 @@ class TestDataFrameWriteConfigurationSerialization:
         )
         result = config.to_dict()
         assert result == {"partition_by": [{"name": "o_orderdate", "strategy": "date_month"}]}
+
+    def test_to_dict_with_data_page_version(self) -> None:
+        """Test serialization includes data_page_version when set."""
+        config = DataFrameWriteConfiguration(data_page_version="2.0")
+        result = config.to_dict()
+        assert result == {"data_page_version": "2.0"}
 
     def test_to_dict_full(self) -> None:
         """Test serialization with all options."""
@@ -250,6 +276,7 @@ class TestDataFrameWriteConfigurationSerialization:
             "compression_level": 5,
             "dictionary_columns": ["l_comment"],
             "skip_dictionary_columns": ["l_orderkey"],
+            "data_page_version": "1.0",
         }
         config = DataFrameWriteConfiguration.from_dict(data)
 
@@ -262,6 +289,7 @@ class TestDataFrameWriteConfigurationSerialization:
         assert config.compression_level == 5
         assert config.dictionary_columns == ["l_comment"]
         assert config.skip_dictionary_columns == ["l_orderkey"]
+        assert config.data_page_version == "1.0"
 
 
 class TestGetEnabledTypes:
@@ -295,6 +323,12 @@ class TestGetEnabledTypes:
         config = DataFrameWriteConfiguration(compression_level=6)
         types = config.get_enabled_types()
         assert DataFrameWriteTuningType.COMPRESSION in types
+
+    def test_with_data_page_version(self) -> None:
+        """Test DATA_PAGE_VERSION type is enabled."""
+        config = DataFrameWriteConfiguration(data_page_version="2.0")
+        types = config.get_enabled_types()
+        assert DataFrameWriteTuningType.DATA_PAGE_VERSION in types
 
 
 class TestPlatformCapabilities:
@@ -384,3 +418,29 @@ class TestDataFrameWriteTuningType:
         assert DataFrameWriteTuningType.REPARTITION.value == "repartition"
         assert DataFrameWriteTuningType.COMPRESSION.value == "compression"
         assert DataFrameWriteTuningType.DICTIONARY_ENCODING.value == "dictionary_encoding"
+        assert DataFrameWriteTuningType.DATA_PAGE_VERSION.value == "data_page_version"
+
+
+class TestConversionOptionsDataPageVersionValidation:
+    """Runtime validation for ConversionOptions.data_page_version field."""
+
+    def test_valid_data_page_versions(self):
+        from benchbox.utils.format_converters.base import ConversionOptions
+
+        opts_1 = ConversionOptions(data_page_version="1.0")
+        assert opts_1.data_page_version == "1.0"
+
+        opts_2 = ConversionOptions(data_page_version="2.0")
+        assert opts_2.data_page_version == "2.0"
+
+    def test_none_is_valid(self):
+        from benchbox.utils.format_converters.base import ConversionOptions
+
+        opts = ConversionOptions(data_page_version=None)
+        assert opts.data_page_version is None
+
+    def test_invalid_data_page_version_raises(self):
+        from benchbox.utils.format_converters.base import ConversionOptions
+
+        with pytest.raises(ValueError, match="Invalid data_page_version"):
+            ConversionOptions(data_page_version="3.0")

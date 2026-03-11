@@ -7,7 +7,10 @@ import pytest
 import benchbox.core.tpcdi.generator.sql as sql_mod
 from benchbox.core.tpcdi.generator.sql import TPCDISQLGenerator
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Cursor:

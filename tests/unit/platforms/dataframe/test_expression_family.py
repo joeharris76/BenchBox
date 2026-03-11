@@ -22,7 +22,10 @@ from benchbox.platforms.dataframe.expression_family import (
 )
 from benchbox.platforms.dataframe.unified_frame import UnifiedLazyFrame
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockExpressionAdapter(ExpressionFamilyAdapter[dict, dict, str]):

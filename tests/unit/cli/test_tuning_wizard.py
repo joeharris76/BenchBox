@@ -11,7 +11,10 @@ import pytest
 t = importlib.import_module("benchbox.cli.tuning")
 TuningType = importlib.import_module("benchbox.core.tuning.interface").TuningType
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _DummyConfig:

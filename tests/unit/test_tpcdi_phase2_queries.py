@@ -18,7 +18,11 @@ from unittest.mock import Mock
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 pytest.importorskip("pandas")
 

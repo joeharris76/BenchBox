@@ -12,7 +12,11 @@ import pytest
 
 from benchbox.core.dataframe.query import QueryCategory
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 ALL_QUERY_IDS = [f"Q{i}" for i in range(1, 23)]
 

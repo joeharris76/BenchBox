@@ -41,6 +41,24 @@ make test-all
 uv run -- python -m pytest
 ```
 
+## Pytest xdist Safety
+
+BenchBox uses pytest-xdist for local development, but local worker counts are
+not left fully unconstrained on macOS.
+
+- BenchBox caps pytest-xdist to a safe worker count **before** xdist starts.
+- On macOS, the current default cap is **2 workers**.
+- If you request `-n 4` or `-n 8`, BenchBox may rewrite that request and print
+  a warning explaining the effective cap.
+- Use `BENCHBOX_MAX_XDIST_WORKERS` only for deliberate local experiments.
+
+This is not an arbitrary slowdown. It prevents a proven machine-lockup mode
+caused by worker oversubscription plus native-library thread pools.
+
+See [Pytest xdist Safety](pytest-xdist-safety.md) for the root-cause analysis,
+the validation matrix, and the checklist to follow when editing test
+infrastructure.
+
 ## Test Organization
 
 The suite contains **3576+ tests** organized into:

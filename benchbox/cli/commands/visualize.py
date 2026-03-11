@@ -29,8 +29,7 @@ def _render_ascii_charts(
     """Render ASCII charts to console using ResultPlotter for normalization."""
     from rich.text import Text
 
-    from benchbox.core.visualization.ascii.base import ASCIIChartOptions
-    from benchbox.core.visualization.ascii_runtime import render_ascii_chart_from_results
+    from benchbox.core.visualization.ascii_api import ChartOptions, render_ascii_chart_from_results
 
     def print_ansi(content: str) -> None:
         """Print string with ANSI codes through Rich console."""
@@ -63,15 +62,15 @@ def _render_ascii_charts(
         console.print(f"[yellow]Provided result count: {len(results)}[/yellow]")
         ctx.exit(1)
 
-    opts = ASCIIChartOptions(use_color=use_color, use_unicode=use_unicode, theme=theme)
+    opts = ChartOptions(use_color=use_color, use_unicode=use_unicode, theme=theme)
 
-    from benchbox.core.visualization.utils import extract_chart_metadata
+    from benchbox.core.visualization.utils import extract_chart_subtitle
 
-    metadata = extract_chart_metadata(results)
+    subtitle = extract_chart_subtitle(results)
 
     for chart_type in types_to_render:
         try:
-            content = render_ascii_chart_from_results(results, chart_type, options=opts, metadata=metadata)
+            content = render_ascii_chart_from_results(results, chart_type, options=opts, subtitle=subtitle)
             if content:
                 print_ansi(content)
                 console.print()

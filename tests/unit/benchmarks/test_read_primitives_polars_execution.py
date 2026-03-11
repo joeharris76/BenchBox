@@ -36,8 +36,11 @@ from benchbox.core.read_primitives.dataframe_queries import (
 )
 
 pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
     pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars not installed"),
 ]
+
 
 # All queries that should execute on expression-family platforms right now.
 EXPRESSION_SKIP_SET = {q.upper() for q in SKIP_FOR_EXPRESSION_FAMILY} | {q.upper() for q in SKIP_FOR_DATAFRAME}

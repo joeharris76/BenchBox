@@ -9,6 +9,8 @@ import pytest
 
 from benchbox.core.results.models import BenchmarkResults
 
+pytestmark = pytest.mark.medium
+
 
 def _make_results(benchmark_name: str, scale: float) -> BenchmarkResults:
     return BenchmarkResults(

@@ -13,6 +13,9 @@ from pathlib import Path
 import duckdb
 import pytest
 
+pytestmark = pytest.mark.medium
+
+
 pytest.importorskip("pandas")
 
 from benchbox import TPCDI

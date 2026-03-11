@@ -6,6 +6,11 @@ from benchbox.platforms.databricks import DatabricksAdapter
 
 from .common import create_smoke_benchmark, install_databricks_stub, run_smoke_benchmark
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.platform_smoke

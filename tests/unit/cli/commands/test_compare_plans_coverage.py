@@ -13,7 +13,10 @@ from click.testing import CliRunner
 
 cp = importlib.import_module("benchbox.cli.commands.compare_plans")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @dataclass

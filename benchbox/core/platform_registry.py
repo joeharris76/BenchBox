@@ -93,6 +93,7 @@ class PlatformRegistry:
     _adapters: dict[str, type[PlatformAdapter]] = {}
     _availability_cache: Optional[dict[str, bool]] = None
     _platform_metadata: dict[str, dict[str, Any]] = {}
+    _auto_registered: bool = False
 
     # Platform name aliases mapping user-friendly names to canonical names
     _platform_aliases: dict[str, str] = {
@@ -1193,6 +1194,19 @@ class PlatformRegistry:
         return metadata
 
     @classmethod
+    def _ensure_registered(cls) -> None:
+        """Lazily trigger auto_register_platforms() on first registry access.
+
+        This avoids eagerly importing every platform adapter (and their heavy
+        native dependencies like chdb/polars/datafusion/duckdb) at module load
+        time.  Instead, the imports are deferred until something actually queries
+        the registry, which most unit tests never do.
+        """
+        if not cls._auto_registered:
+            cls._auto_registered = True
+            auto_register_platforms()
+
+    @classmethod
     def register_adapter(cls, platform_name: str, adapter_class: type[PlatformAdapter]) -> None:
         """Register a platform adapter class.
 
@@ -1220,6 +1234,7 @@ class PlatformRegistry:
         Raises:
             ValueError: If platform is not registered
         """
+        cls._ensure_registered()
         # Resolve aliases to canonical name
         canonical_name = cls.resolve_platform_name(platform_name)
 
@@ -1260,6 +1275,7 @@ class PlatformRegistry:
         Returns:
             List of registered platform names
         """
+        cls._ensure_registered()
         return list(cls._adapters.keys())
 
     @classmethod
@@ -1315,6 +1331,7 @@ class PlatformRegistry:
         Returns:
             Dictionary mapping platform names to availability status
         """
+        cls._ensure_registered()
         if cls._availability_cache is not None:
             return cls._availability_cache.copy()
 
@@ -1377,6 +1394,7 @@ class PlatformRegistry:
         Returns:
             Platform information or None if not found
         """
+        cls._ensure_registered()
         if not cls._platform_metadata:
             cls._platform_metadata = cls._build_platform_metadata()
 
@@ -1458,6 +1476,7 @@ class PlatformRegistry:
         Returns:
             List of platform names in the category
         """
+        cls._ensure_registered()
         if not cls._platform_metadata:
             cls._platform_metadata = cls._build_platform_metadata()
 
@@ -1477,6 +1496,7 @@ class PlatformRegistry:
         Returns:
             List of platform names in the specified tier
         """
+        cls._ensure_registered()
         if not cls._platform_metadata:
             cls._platform_metadata = cls._build_platform_metadata()
 
@@ -2117,5 +2137,8 @@ def auto_register_platforms() -> None:
         pass
 
 
-# Auto-register platforms on module import
-auto_register_platforms()
+# NOTE: auto_register_platforms() is no longer called at module level.
+# It is deferred to first access via PlatformRegistry._ensure_registered()
+# to avoid eagerly loading ~600 MB of native libraries (chdb, polars,
+# datafusion, duckdb, databend_driver) into every xdist worker process.
+# See: https://github.com/benchbox/benchbox/issues/XXXX

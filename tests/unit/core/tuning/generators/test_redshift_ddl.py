@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from benchbox.core.tuning import TuningColumn
 from benchbox.core.tuning.ddl_generator import ColumnDefinition, ColumnNullability
 from benchbox.core.tuning.generators.redshift import (
@@ -26,6 +28,11 @@ from benchbox.core.tuning.generators.redshift import (
     recommend_encoding,
 )
 from benchbox.core.tuning.interface import TableTuning
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestColumnEncodingRecommendation:

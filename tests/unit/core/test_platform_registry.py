@@ -12,7 +12,10 @@ import pytest
 from benchbox.core.platform_registry import PlatformRegistry
 from benchbox.core.schemas import LibraryInfo
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPlatformRegistry:

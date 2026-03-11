@@ -19,7 +19,10 @@ from benchbox.core.results.query_normalizer import (
     normalize_query_results,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_canonical_query_run_type_constants_are_defined() -> None:

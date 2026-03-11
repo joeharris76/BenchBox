@@ -21,7 +21,10 @@ from benchbox.core.gpu.capabilities import (
     get_gpu_capabilities,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGPUVendor:

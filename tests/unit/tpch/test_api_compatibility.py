@@ -14,7 +14,10 @@ from benchbox import TPCH
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpch.queries import TPCHQueries
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestAPICompatibility:
@@ -31,8 +34,8 @@ class TestAPICompatibility:
 
         # Original signature: get_query(query_id)
         sql = queries.get_query(1)
-        assert isinstance(sql, str)
         assert len(sql) > 50
+        assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_get_query_enhanced_signature(self):
         """Test that enhanced get_query() signature works."""
@@ -40,8 +43,8 @@ class TestAPICompatibility:
 
         # Enhanced signature: get_query(query_id, seed=None, scale_factor=1.0)
         sql = queries.get_query(1, seed=12345, scale_factor=1.0)
-        assert isinstance(sql, str)
         assert len(sql) > 50
+        assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_benchmark_integration_compatibility(self):
         """Test integration with TPCHBenchmark class."""
@@ -49,13 +52,13 @@ class TestAPICompatibility:
 
         # Test original get_query method
         sql = benchmark.get_query(1)
-        assert isinstance(sql, str)
         assert len(sql) > 50
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # Test enhanced get_query method
         sql_enhanced = benchmark.get_query(1, seed=12345)
-        assert isinstance(sql_enhanced, str)
         assert len(sql_enhanced) > 50
+        assert "select" in sql_enhanced.lower() or "with" in sql_enhanced.lower()
 
     def test_benchmark_get_parameterized_query_compatibility(self):
         """Test TPCHBenchmark get_parameterized_query compatibility."""
@@ -63,18 +66,18 @@ class TestAPICompatibility:
 
         # Test old signature: get_query(query_id, params=None, dialect="standard")
         sql_old = benchmark.get_query(1, params=None, dialect="standard")
-        assert isinstance(sql_old, str)
         assert len(sql_old) > 50
+        assert "select" in sql_old.lower() or "with" in sql_old.lower()
 
         # Test new signature: get_query(query_id, seed=None, scale_factor=None)
         sql_new = benchmark.get_query(1, seed=12345, scale_factor=1.0)
-        assert isinstance(sql_new, str)
         assert len(sql_new) > 50
+        assert "select" in sql_new.lower() or "with" in sql_new.lower()
 
         # Test mixed signature
         sql_mixed = benchmark.get_query(1, params=None, seed=12345)
-        assert isinstance(sql_mixed, str)
         assert len(sql_mixed) > 50
+        assert "select" in sql_mixed.lower() or "with" in sql_mixed.lower()
 
     def test_top_level_tpch_compatibility(self):
         """Test top-level TPCH class compatibility."""
@@ -82,13 +85,13 @@ class TestAPICompatibility:
 
         # Test original signature
         sql = tpch.get_query(1)
-        assert isinstance(sql, str)
         assert len(sql) > 50
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # Test enhanced signature
         sql_enhanced = tpch.get_query(1, seed=12345, scale_factor=1.0)
-        assert isinstance(sql_enhanced, str)
         assert len(sql_enhanced) > 50
+        assert "select" in sql_enhanced.lower() or "with" in sql_enhanced.lower()
 
     def test_top_level_tpch_parameterized_query_compatibility(self):
         """Test top-level TPCH get_parameterized_query compatibility."""
@@ -96,13 +99,13 @@ class TestAPICompatibility:
 
         # Test old style call with params=None
         sql_old = tpch.get_query(1, params=None, dialect="duckdb")
-        assert isinstance(sql_old, str)
         assert len(sql_old) > 50
+        assert "select" in sql_old.lower() or "with" in sql_old.lower()
 
         # Test new style call
         sql_new = tpch.get_query(1, seed=12345, dialect="duckdb")
-        assert isinstance(sql_new, str)
         assert len(sql_new) > 50
+        assert "select" in sql_new.lower() or "with" in sql_new.lower()
 
     def test_deprecated_params_parameter_ignored(self):
         """Test that deprecated params parameter is properly ignored."""
@@ -122,15 +125,15 @@ class TestAPICompatibility:
 
         # Test positional arguments
         sql1 = tpch.get_query(1)
-        assert isinstance(sql1, str)
+        assert "select" in sql1.lower() or "with" in sql1.lower()
 
         # Test keyword arguments
         sql2 = tpch.get_query(query_id=1, seed=123)
-        assert isinstance(sql2, str)
+        assert "select" in sql2.lower() or "with" in sql2.lower()
 
         # Test mixed arguments
         sql3 = tpch.get_query(1, seed=123, scale_factor=1.0)
-        assert isinstance(sql3, str)
+        assert "select" in sql3.lower() or "with" in sql3.lower()
 
     def test_scale_factor_inheritance_from_benchmark(self):
         """Test that benchmark scale factor is inherited when not specified."""
@@ -139,13 +142,13 @@ class TestAPICompatibility:
 
         # Query should inherit scale factor from benchmark
         sql = benchmark.get_query(1)
-        assert isinstance(sql, str)
         assert len(sql) > 50
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # Explicit scale factor should override benchmark scale factor
         sql_override = benchmark.get_query(1, scale_factor=0.5)
-        assert isinstance(sql_override, str)
         assert len(sql_override) > 50
+        assert "select" in sql_override.lower() or "with" in sql_override.lower()
 
     def test_benchmark_get_queries_compatibility(self):
         """Test that get_queries() method still works."""
@@ -163,8 +166,8 @@ class TestAPICompatibility:
 
         # Values should be SQL strings
         for sql in queries.values():
-            assert isinstance(sql, str)
             assert len(sql) > 50
+            assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_import_paths_compatibility(self):
         """Test that existing import paths still work."""
@@ -210,11 +213,11 @@ class TestAPICompatibility:
 
         # get_query should return string
         sql = tpch.get_query(1)
-        assert isinstance(sql, str)
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # get_parameterized_query should return string
         sql_param = tpch.get_query(1)
-        assert isinstance(sql_param, str)
+        assert "select" in sql_param.lower() or "with" in sql_param.lower()
 
         # get_queries should return dict
         queries = tpch.get_queries()
@@ -230,9 +233,9 @@ class TestAPICompatibility:
         sql_standard = tpch.get_query(1, dialect="standard")
 
         # All should be valid SQL strings
-        assert isinstance(sql_duckdb, str)
-        assert isinstance(sql_postgres, str)
-        assert isinstance(sql_standard, str)
         assert len(sql_duckdb) > 50
+        assert "select" in sql_duckdb.lower() or "with" in sql_duckdb.lower()
         assert len(sql_postgres) > 50
+        assert "select" in sql_postgres.lower() or "with" in sql_postgres.lower()
         assert len(sql_standard) > 50
+        assert "select" in sql_standard.lower() or "with" in sql_standard.lower()

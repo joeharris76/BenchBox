@@ -23,6 +23,11 @@ from benchbox.core.dataframe.maintenance_interface import (
     get_maintenance_operations_for_platform,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestDataFrameMaintenanceCapabilities:
     """Tests for DataFrameMaintenanceCapabilities."""

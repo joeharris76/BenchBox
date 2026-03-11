@@ -14,6 +14,12 @@ from unittest.mock import Mock
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
+
 pytest.importorskip("pandas")
 
 from benchbox.core.tpcdi.financial_data import FinancialDataPatterns

@@ -261,6 +261,11 @@ def format_last_run_summary(config: dict[str, Any]) -> str:
         phases_str = "+".join(phases)
         parts.append(f"phases: {phases_str}")
 
+    # Table mode (only include when non-default)
+    table_mode = str(config.get("table_mode", "native") or "native").lower()
+    if table_mode != "native":
+        parts.append(f"tables: {table_mode}")
+
     # Concurrency
     concurrency = config.get("concurrency", 1)
     if concurrency > 1:

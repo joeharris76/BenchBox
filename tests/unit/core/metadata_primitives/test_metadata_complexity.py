@@ -44,7 +44,10 @@ from benchbox.core.metadata_primitives.ddl import (
     supports_views,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # =============================================================================

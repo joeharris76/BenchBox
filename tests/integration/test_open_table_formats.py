@@ -19,6 +19,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import duckdb
@@ -27,6 +28,12 @@ import pytest
 
 from benchbox.utils.format_converters.base import ConversionOptions
 from benchbox.utils.format_converters.parquet_converter import ParquetConverter
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 # =============================================================================
 # Test Data and Fixtures
@@ -390,6 +397,89 @@ class TestDeltaLakeFormatSmoke:
         assert "metaData" in action_types
         assert "add" in action_types
 
+    def test_delta_manifest_validation_reuse(self, tmp_path: Path, tpch_customer_tbl: Path, tpch_customer_schema: dict):
+        """After Delta conversion, manifest validation should pass for directory entries.
+
+        This is a regression test: directory-based format entries previously failed
+        validation because stat().st_size on a directory returns the inode size,
+        not the recursive file sum stored in size_bytes.
+        """
+        import json
+
+        from benchbox.utils.format_converters.delta_converter import DeltaConverter
+
+        converter = DeltaConverter()
+        result = converter.convert(
+            source_files=[tpch_customer_tbl],
+            table_name="customer",
+            schema=tpch_customer_schema,
+            options=ConversionOptions(output_dir=tmp_path),
+        )
+
+        assert result.success
+
+        # Build a manifest like the conversion orchestrator would
+        delta_dir = tmp_path / "customer"
+        manifest = {
+            "version": 2,
+            "benchmark": "tpch",
+            "scale_factor": 0.01,
+            "format_preference": ["delta"],
+            "tables": {
+                "customer": {
+                    "formats": {
+                        "delta": [
+                            {
+                                "path": "customer",
+                                "size_bytes": result.output_size_bytes,
+                                "row_count": result.row_count,
+                                "is_directory": True,
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+
+        manifest_path = tmp_path / "_datagen_manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        # Validate: compute_entry_size(delta_dir) should match result.output_size_bytes
+        from benchbox.utils.datagen_manifest import compute_entry_size
+
+        actual_size = compute_entry_size(delta_dir)
+        assert actual_size == result.output_size_bytes, (
+            f"compute_entry_size ({actual_size}) should match converter output_size_bytes ({result.output_size_bytes})"
+        )
+
+        # Full validation via _validate_manifest_if_present
+        from unittest.mock import Mock
+
+        from benchbox.core.runner.runner import _ensure_data_generated
+        from benchbox.core.schemas import BenchmarkConfig
+
+        config = BenchmarkConfig(
+            name="tpch",
+            display_name="TPC-H",
+            scale_factor=0.01,
+            compress_data=True,
+            compression_type="zstd",
+            compression_level=None,
+            options={},
+        )
+
+        class DummyBenchmark:
+            def __init__(self) -> None:
+                self.output_dir = tmp_path
+                self.tables = None
+                self.generate_data = Mock()
+
+        dummy = DummyBenchmark()
+        regenerated = _ensure_data_generated(dummy, config)
+
+        assert regenerated is False, "Data should be reused, not regenerated"
+        dummy.generate_data.assert_not_called()
+
 
 # =============================================================================
 # Phase 3: Apache Iceberg Format Smoke Tests
@@ -402,6 +492,7 @@ PYICEBERG_AVAILABLE = importlib.util.find_spec("pyiceberg") is not None
 
 @pytest.mark.integration
 @pytest.mark.skipif(not PYICEBERG_AVAILABLE, reason="pyiceberg package not installed")
+@pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg generates Unix-style paths incompatible with Windows")
 class TestIcebergFormatSmoke:
     """Smoke tests for Apache Iceberg format conversion."""
 

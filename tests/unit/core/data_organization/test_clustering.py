@@ -12,6 +12,11 @@ from benchbox.core.data_organization.clustering import (
     z_order_key,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestZOrderKey:
     def test_interleaves_two_dimensions(self):

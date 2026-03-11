@@ -21,7 +21,10 @@ from benchbox.core.dataframe.context import (
     DataFrameContextImpl,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class ConcreteContext(DataFrameContextImpl[dict]):

@@ -20,7 +20,10 @@ from benchbox.core.multiregion.transfer import (
     TransferTracker,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTransferDirection:

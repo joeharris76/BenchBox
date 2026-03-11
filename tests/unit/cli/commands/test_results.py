@@ -7,9 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 from click.testing import CliRunner
 
+import benchbox.utils.printing as printing
 from benchbox.cli.commands.results import results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture
@@ -27,7 +31,15 @@ def test_results_group_without_subcommand_shows_summary(cli_runner, monkeypatch)
     exporter.show_results_summary.assert_called_once_with()
 
 
-def test_show_cli_reconstructs_legacy_command(cli_runner, tmp_path):
+def test_show_cli_reconstructs_legacy_command(cli_runner, tmp_path, monkeypatch):
+    # Reset Rich console singleton so it binds to CliRunner's captured stdout,
+    # and ensure quiet mode is off so output is not suppressed.
+    # Use a wide console width to prevent Rich from truncating text inside Panels.
+    from rich.console import Console
+
+    monkeypatch.setattr(printing, "_STD_CONSOLE", Console(width=200))
+    monkeypatch.setattr(printing, "_QUIET", False)
+
     result_file = tmp_path / "result.json"
     result_file.write_text(
         json.dumps(
@@ -46,7 +58,10 @@ def test_show_cli_reconstructs_legacy_command(cli_runner, tmp_path):
     assert "--queries Q1,Q2" in result.output
 
 
-def test_show_cli_reports_missing_fields(cli_runner, tmp_path):
+def test_show_cli_reports_missing_fields(cli_runner, tmp_path, monkeypatch):
+    monkeypatch.setattr(printing, "_STD_CONSOLE", None)
+    monkeypatch.setattr(printing, "_QUIET", False)
+
     result_file = tmp_path / "bad.json"
     result_file.write_text(json.dumps({"platform": "duckdb"}))
 
@@ -55,7 +70,10 @@ def test_show_cli_reports_missing_fields(cli_runner, tmp_path):
     assert "Could not extract required fields" in result.output
 
 
-def test_show_cli_reports_invalid_json(cli_runner, tmp_path):
+def test_show_cli_reports_invalid_json(cli_runner, tmp_path, monkeypatch):
+    monkeypatch.setattr(printing, "_STD_CONSOLE", None)
+    monkeypatch.setattr(printing, "_QUIET", False)
+
     result_file = tmp_path / "invalid.json"
     result_file.write_text("{not valid json")
 

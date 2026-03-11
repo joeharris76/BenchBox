@@ -80,6 +80,7 @@ class ClickHouseCloudAdapter(ClickHouseAdapter):
     """
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         """Initialize ClickHouse Cloud adapter.
@@ -339,6 +340,220 @@ class ClickHouseCloudAdapter(ClickHouseAdapter):
             # Fall back to the inherited ClickHouse data loading (INSERT batching)
             return super().load_data(benchmark, connection, data_dir)
 
+    def validate_external_table_requirements(self) -> None:
+        """Validate cloud staging prerequisites for external table mode."""
+        if not getattr(self, "s3_staging_url", None) and not getattr(self, "gcs_staging_url", None):
+            raise ValueError(
+                "ClickHouse Cloud external mode requires cloud staging URL. "
+                "Set --platform-option s3_staging_url=s3://bucket/prefix/ or "
+                "--platform-option gcs_staging_url=gs://bucket/prefix/."
+            )
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Register external Parquet-backed views in ClickHouse Cloud."""
+        self.validate_external_table_requirements()
+        if getattr(self, "s3_staging_url", None):
+            return self._create_external_tables_via_s3(benchmark, connection, data_dir)
+        return self._create_external_tables_via_gcs(benchmark, connection, data_dir)
+
+    @staticmethod
+    def _normalize_external_file_inputs(file_paths: Any) -> tuple[list[Path], list[str]]:
+        """Split file paths into local files and cloud URIs."""
+        normalized_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        local_paths: list[Path] = []
+        cloud_uris: list[str] = []
+
+        for file_path in normalized_paths:
+            file_str = str(file_path)
+            if file_str.startswith(("s3://", "gs://", "https://")):
+                cloud_uris.append(file_str)
+                continue
+
+            path = Path(file_path)
+            if path.exists() and (path.is_dir() or path.stat().st_size > 0):
+                local_paths.append(path)
+
+        return local_paths, cloud_uris
+
+    def _create_external_tables_via_s3(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Create external views over S3-hosted Parquet data."""
+        try:
+            import boto3
+        except ImportError:
+            raise ImportError(
+                "boto3 is required for ClickHouse Cloud external mode with S3 staging.\nInstall with: uv add boto3"
+            ) from None
+
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+        data_files = self._resolve_cloud_data_files(benchmark, data_dir)
+        s3_bucket, s3_prefix = self._parse_s3_url(self.s3_staging_url)
+
+        s3_client_kwargs: dict[str, Any] = {}
+        if getattr(self, "s3_region", None):
+            s3_client_kwargs["region_name"] = self.s3_region
+        s3_client = boto3.client("s3", **s3_client_kwargs)
+
+        aws_key_id = os.environ.get("AWS_ACCESS_KEY_ID", "").replace("'", "''")
+        aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "").replace("'", "''")
+        if aws_key_id or aws_secret_key:
+            self.logger.warning(
+                "AWS credentials will be embedded in ClickHouse VIEW definitions and may "
+                "appear in server query logs. Consider using a named S3 connection instead."
+            )
+
+        for table_name, file_paths in data_files.items():
+            table_name_lower = table_name.lower()
+            local_paths, cloud_uris = self._normalize_external_file_inputs(file_paths)
+            iceberg_locals = [path for path in local_paths if path.is_dir() and (path / "metadata").is_dir()]
+            parquet_locals = [path for path in local_paths if path.suffix.lower() == ".parquet"]
+            parquet_cloud_uris = [
+                uri for uri in cloud_uris if uri.lower().endswith(".parquet") and uri.startswith("s3://")
+            ]
+            iceberg_cloud_uris = [uri for uri in cloud_uris if uri.startswith("s3://") and "/metadata" in uri]
+
+            if iceberg_locals:
+                table_prefix = f"{s3_prefix}{table_name_lower}/external/"
+                for local_path in iceberg_locals:
+                    for source_file in local_path.rglob("*"):
+                        if source_file.is_file():
+                            relative = source_file.relative_to(local_path)
+                            s3_client.upload_file(str(source_file), s3_bucket, f"{table_prefix}{relative.as_posix()}")
+                source_expr = f"iceberg('s3://{s3_bucket}/{table_prefix}', '{aws_key_id}', '{aws_secret_key}')"
+            elif iceberg_cloud_uris:
+                root = iceberg_cloud_uris[0].split("/metadata", 1)[0] + "/"
+                escaped_root = root.replace("'", "''")
+                source_expr = f"iceberg('{escaped_root}', '{aws_key_id}', '{aws_secret_key}')"
+            elif parquet_locals:
+                table_prefix = f"{s3_prefix}{table_name_lower}/external/"
+                for local_path in parquet_locals:
+                    s3_client.upload_file(str(local_path), s3_bucket, f"{table_prefix}{local_path.name}")
+                parquet_glob = f"s3://{s3_bucket}/{table_prefix}*.parquet"
+                escaped_glob = parquet_glob.replace("'", "''")
+                source_expr = f"s3('{escaped_glob}', '{aws_key_id}', '{aws_secret_key}', 'Parquet')"
+            elif parquet_cloud_uris:
+                # Derive a common prefix covering all cloud URIs for this table.
+                dirs = {uri.rsplit("/", 1)[0] for uri in parquet_cloud_uris}
+                if len(dirs) == 1:
+                    parquet_glob = dirs.pop() + "/*.parquet"
+                else:
+                    # Multiple directories: find the longest common prefix
+                    common = os.path.commonprefix(list(dirs)).rsplit("/", 1)[0]
+                    parquet_glob = common + "/**/*.parquet"
+                escaped_glob = parquet_glob.replace("'", "''")
+                source_expr = f"s3('{escaped_glob}', '{aws_key_id}', '{aws_secret_key}', 'Parquet')"
+            else:
+                raise ValueError(
+                    f"ClickHouse external mode requires Iceberg directories or Parquet files for table "
+                    f"'{table_name_lower}'. No supported sources were found."
+                )
+
+            create_view_sql = f"CREATE OR REPLACE VIEW {table_name_lower} AS SELECT * FROM {source_expr}"
+            connection.execute(create_view_sql)
+            count_result = connection.execute(f"SELECT COUNT(*) FROM {table_name_lower}")
+            table_stats[table_name_lower] = count_result[0][0] if count_result and count_result[0] else 0
+
+        total_time = elapsed_seconds(start_time)
+        metadata = {
+            "loading_method": "s3_external_views",
+            "s3_staging_url": self.s3_staging_url,
+        }
+        return table_stats, total_time, metadata
+
+    def _create_external_tables_via_gcs(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Create external views over GCS-hosted Parquet data."""
+        try:
+            from google.cloud import storage as gcs_storage
+        except ImportError:
+            raise ImportError(
+                "google-cloud-storage is required for ClickHouse Cloud external mode with GCS staging.\n"
+                "Install with: uv add google-cloud-storage"
+            ) from None
+
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+        data_files = self._resolve_cloud_data_files(benchmark, data_dir)
+        gcs_bucket_name, gcs_prefix = self._parse_gcs_url(self.gcs_staging_url)
+
+        gcs_client = gcs_storage.Client()
+        gcs_bucket = gcs_client.bucket(gcs_bucket_name)
+
+        gcs_hmac_key = os.environ.get("GCS_HMAC_ACCESS_KEY", "").replace("'", "''")
+        gcs_hmac_secret = os.environ.get("GCS_HMAC_SECRET", "").replace("'", "''")
+        if gcs_hmac_key or gcs_hmac_secret:
+            self.logger.warning(
+                "GCS HMAC credentials will be embedded in ClickHouse VIEW definitions and may "
+                "appear in server query logs. Consider using a named GCS connection instead."
+            )
+
+        for table_name, file_paths in data_files.items():
+            table_name_lower = table_name.lower()
+            local_paths, cloud_uris = self._normalize_external_file_inputs(file_paths)
+            iceberg_locals = [path for path in local_paths if path.is_dir() and (path / "metadata").is_dir()]
+            parquet_locals = [path for path in local_paths if path.suffix.lower() == ".parquet"]
+            parquet_cloud_uris = [
+                uri for uri in cloud_uris if uri.lower().endswith(".parquet") and uri.startswith("gs://")
+            ]
+            iceberg_cloud_uris = [uri for uri in cloud_uris if uri.startswith("gs://") and "/metadata" in uri]
+
+            if iceberg_locals:
+                table_prefix = f"{gcs_prefix}{table_name_lower}/external/"
+                for local_path in iceberg_locals:
+                    for source_file in local_path.rglob("*"):
+                        if source_file.is_file():
+                            relative = source_file.relative_to(local_path)
+                            blob = gcs_bucket.blob(f"{table_prefix}{relative.as_posix()}")
+                            blob.upload_from_filename(str(source_file))
+                root_url = f"https://storage.googleapis.com/{gcs_bucket_name}/{table_prefix}"
+                escaped_root_url = root_url.replace("'", "''")
+                source_expr = f"iceberg('{escaped_root_url}', '{gcs_hmac_key}', '{gcs_hmac_secret}')"
+            elif iceberg_cloud_uris:
+                root = iceberg_cloud_uris[0].split("/metadata", 1)[0] + "/"
+                root_url = root.replace("gs://", "https://storage.googleapis.com/")
+                escaped_root_url = root_url.replace("'", "''")
+                source_expr = f"iceberg('{escaped_root_url}', '{gcs_hmac_key}', '{gcs_hmac_secret}')"
+            elif parquet_locals:
+                table_prefix = f"{gcs_prefix}{table_name_lower}/external/"
+                for local_path in parquet_locals:
+                    blob = gcs_bucket.blob(f"{table_prefix}{local_path.name}")
+                    blob.upload_from_filename(str(local_path))
+                parquet_glob = f"https://storage.googleapis.com/{gcs_bucket_name}/{table_prefix}*.parquet"
+                escaped_glob = parquet_glob.replace("'", "''")
+                source_expr = f"gcs('{escaped_glob}', '{gcs_hmac_key}', '{gcs_hmac_secret}', 'Parquet')"
+            elif parquet_cloud_uris:
+                # Derive a common prefix covering all cloud URIs for this table.
+                dirs = {uri.rsplit("/", 1)[0] for uri in parquet_cloud_uris}
+                if len(dirs) == 1:
+                    cloud_prefix = dirs.pop()
+                else:
+                    cloud_prefix = os.path.commonprefix(list(dirs)).rsplit("/", 1)[0]
+                parquet_glob = cloud_prefix.replace("gs://", "https://storage.googleapis.com/") + "/*.parquet"
+                escaped_glob = parquet_glob.replace("'", "''")
+                source_expr = f"gcs('{escaped_glob}', '{gcs_hmac_key}', '{gcs_hmac_secret}', 'Parquet')"
+            else:
+                raise ValueError(
+                    f"ClickHouse external mode requires Iceberg directories or Parquet files for table "
+                    f"'{table_name_lower}'. No supported sources were found."
+                )
+
+            create_view_sql = f"CREATE OR REPLACE VIEW {table_name_lower} AS SELECT * FROM {source_expr}"
+            connection.execute(create_view_sql)
+            count_result = connection.execute(f"SELECT COUNT(*) FROM {table_name_lower}")
+            table_stats[table_name_lower] = count_result[0][0] if count_result and count_result[0] else 0
+
+        total_time = elapsed_seconds(start_time)
+        metadata = {
+            "loading_method": "gcs_external_views",
+            "gcs_staging_url": self.gcs_staging_url,
+        }
+        return table_stats, total_time, metadata
+
     def _resolve_cloud_data_files(self, benchmark, data_dir: Path) -> dict[str, list[Path]]:
         """Resolve data files for cloud staging upload.
 
@@ -350,15 +565,17 @@ class ClickHouseCloudAdapter(ClickHouseAdapter):
         """
         import json
 
-        if hasattr(benchmark, "tables") and benchmark.tables:
-            result = {}
-            for table, paths in benchmark.tables.items():
-                if not isinstance(paths, list):
-                    paths = [paths]
-                result[table] = [Path(p) for p in paths]
-            return result
+        from benchbox.platforms.base.data_loading import DataSourceResolver
 
-        # Try manifest fallback
+        resolver = DataSourceResolver(
+            platform_name=self.platform_name,
+            table_mode=getattr(self, "table_mode", "native"),
+            platform_config=getattr(self, "__dict__", None),
+        )
+        data_source = resolver.resolve(benchmark, data_dir)
+        if data_source and data_source.tables:
+            return {table: [Path(p) for p in paths] for table, paths in data_source.tables.items()}
+
         data_files = None
         try:
             manifest_path = Path(data_dir) / "_datagen_manifest.json"
@@ -378,13 +595,11 @@ class ClickHouseCloudAdapter(ClickHouseAdapter):
                             mapping[table] = chunk_paths
                 if mapping:
                     data_files = mapping
-                    self.logger.debug("Using data files from _datagen_manifest.json")
-        except Exception as e:
-            self.logger.debug(f"Manifest fallback failed: {e}")
+        except Exception as exc:
+            self.logger.debug(f"Manifest fallback failed: {exc}")
 
         if not data_files:
             raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
-
         return data_files
 
     def _load_data_via_s3(

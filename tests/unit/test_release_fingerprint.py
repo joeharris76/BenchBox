@@ -16,8 +16,12 @@ import pytest
 
 from benchbox.release.workflow import compute_source_fingerprint
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
-@pytest.mark.fast
+
 class TestComputeSourceFingerprint:
     """Test compute_source_fingerprint() function."""
 

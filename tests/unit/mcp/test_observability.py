@@ -23,6 +23,11 @@ from benchbox.mcp.observability import (
     setup_structured_logging,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestCorrelationId:
     """Tests for correlation ID management."""

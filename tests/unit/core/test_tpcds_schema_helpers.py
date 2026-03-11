@@ -2,7 +2,10 @@ import pytest
 
 from benchbox.core.tpcds.schema import Column, DataType, Table
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_column_get_sql_type_handles_sizes_and_defaults():

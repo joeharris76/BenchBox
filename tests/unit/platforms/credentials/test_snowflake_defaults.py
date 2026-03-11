@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.platforms.credentials.snowflake import setup_snowflake_credentials
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSnowflakeCredentialDefaults:

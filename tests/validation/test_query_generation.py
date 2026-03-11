@@ -12,6 +12,10 @@ import re
 from benchbox import TPCH
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpch.queries import TPCHQueries
+import pytest
+
+pytestmark = pytest.mark.medium
+
 
 
 class TestTPCHQueryGeneration:

@@ -16,7 +16,10 @@ from benchbox.core.tpcds.c_tools import DSQGenBinary
 from benchbox.core.tpcds.queries import TPCDSQueryManager
 from benchbox.platforms.base import PlatformAdapter
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
 
 
 class TestTPCDSDialectSwitch:

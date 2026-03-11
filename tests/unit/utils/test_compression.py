@@ -19,7 +19,10 @@ from benchbox.utils.compression import (
     ZstdCompressor,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestCompressionManager:

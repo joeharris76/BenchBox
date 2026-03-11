@@ -17,6 +17,8 @@ from benchbox.core.ssb.benchmark import SSBBenchmark
 
 from .fixtures.benchmark_test_mixin import BenchmarkTestMixin
 
+pytestmark = pytest.mark.medium
+
 
 @pytest.mark.ssb
 class TestSSB:

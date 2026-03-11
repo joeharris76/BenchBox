@@ -19,7 +19,10 @@ from benchbox.utils.path_utils import (
     get_results_path,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGetDefaultDataDirectory:

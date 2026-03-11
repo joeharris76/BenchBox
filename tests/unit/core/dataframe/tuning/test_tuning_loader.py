@@ -18,7 +18,10 @@ from benchbox.core.dataframe.tuning import (
     save_dataframe_tuning,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDataFrameTuningLoader:

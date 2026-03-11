@@ -18,7 +18,10 @@ from benchbox.core.tuning.metadata import (
     TuningMetadataManager,
 )
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Cursor:

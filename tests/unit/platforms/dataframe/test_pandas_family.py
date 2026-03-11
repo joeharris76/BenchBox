@@ -22,7 +22,10 @@ from benchbox.platforms.dataframe.pandas_family import (
     PandasFamilyContext,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockPandasAdapter(PandasFamilyAdapter[dict]):

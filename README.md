@@ -28,7 +28,7 @@ BenchBox _loosely_ follows [Semantic Versioning](https://semver.org/) using the 
 - **MINOR** when we add backward-compatible changes _OR significantly expand functionality_.
 - **PATCH** when we make bug fixes or documentation updates, _bug-fixes may not be backward-compatible_.
 
-Current release: v0.1.4. Check your installation with `benchbox --version`, which also reports metadata consistency diagnostics pulled from `pyproject.toml` and documentation markers.
+Current release: v0.1.5. Check your installation with `benchbox --version`, which also reports metadata consistency diagnostics pulled from `pyproject.toml` and documentation markers.
 
 **For Developers**: See [Release Automation Guide](release/RELEASE_AUTOMATION.md) for the automated release process with reproducible builds and timestamp normalization.
 
@@ -473,7 +473,7 @@ BenchBox provides a comprehensive command-line interface (CLI) for all benchmark
 | Command               | Purpose                   | Example                                                   |
 | --------------------- | ------------------------- | --------------------------------------------------------- |
 | `benchbox run`        | Execute benchmarks        | `benchbox run --platform duckdb --benchmark tpch`         |
-| `benchbox visualize`  | Generate result charts    | `benchbox visualize results.json --format ascii`          |
+| `benchbox visualize`  | Generate result charts    | `benchbox visualize results.json`                         |
 | `benchbox shell`      | Interactive SQL shell     | `benchbox shell --last --benchmark tpch`                  |
 | `benchbox platforms`  | Manage database platforms | `benchbox platforms list`                                 |
 | `benchbox check-deps` | Check dependencies        | `benchbox check-deps --platform databricks`               |
@@ -650,31 +650,30 @@ benchbox run --platform duckdb --benchmark tpch --scale 0.1 \
 - Reproducible runs with seed control
 
 **Output and Analysis:**
-- Multiple output formats: JSON, CSV, HTML
+- JSON results saved automatically; export to CSV/HTML via `benchbox export`
 - Dry-run mode for configuration preview
 - Verbose logging for debugging
-- Query plan analysis with `--show-query-plans`
+- Query plan capture with `--capture-plans`
 
 ### Visualizing Results
 
-BenchBox can generate charts from benchmark results in two formats:
+BenchBox generates ASCII charts directly in the terminal:
 
-**Interactive HTML Charts:**
 ```bash
-# Generate interactive HTML charts (opens in browser)
-benchbox visualize benchmark_runs/results/*.json --format html
+# Display charts in terminal
+benchbox visualize benchmark_runs/results/*.json
+
+# Without colors (for piping to files)
+benchbox visualize benchmark_runs/results/*.json --no-color
+
+# Without Unicode (for basic terminals)
+benchbox visualize benchmark_runs/results/*.json --no-unicode
 ```
 
-**ASCII Charts (Terminal-Friendly):**
+For HTML reports, use the export command:
+
 ```bash
-# Display charts directly in terminal
-benchbox visualize benchmark_runs/results/*.json --format ascii
-
-# ASCII without colors (for piping to files)
-benchbox visualize benchmark_runs/results/*.json --format ascii --no-color
-
-# ASCII without Unicode (for basic terminals)
-benchbox visualize benchmark_runs/results/*.json --format ascii --no-unicode
+benchbox export --last --format html
 ```
 
 **Chart Types Available:**
@@ -688,13 +687,13 @@ benchbox visualize benchmark_runs/results/*.json --format ascii --no-unicode
 **Examples:**
 ```bash
 # Specific chart type
-benchbox visualize results.json --format ascii --chart-type query_heatmap
+benchbox visualize results.json --chart-type query_heatmap
 
 # Multiple chart types
-benchbox visualize results.json --format ascii --chart-type performance_bar --chart-type distribution_box
+benchbox visualize results.json --chart-type performance_bar --chart-type distribution_box
 
 # All charts
-benchbox visualize results.json --format ascii --chart-type all
+benchbox visualize results.json --chart-type all
 ```
 
 ### Interactive vs Non-Interactive Mode

@@ -10,7 +10,10 @@ import pytest
 
 from benchbox.core.tpcds.generator.streaming import StreamingGenerationMixin
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _StreamingHarness(StreamingGenerationMixin):

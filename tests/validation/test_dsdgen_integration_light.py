@@ -12,6 +12,9 @@ import pytest
 
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
+pytestmark = pytest.mark.fast
+
+
 
 @pytest.mark.validation
 def test_dsdgen_generates_small_table_streaming():

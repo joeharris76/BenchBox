@@ -8,7 +8,10 @@ from benchbox.core.tpchavoc.variant_base import StaticSQLVariant, VariantGenerat
 from benchbox.core.tpchavoc.variant_sets import VARIANT_REGISTRY
 from benchbox.core.tpchavoc.variants import Q1_VARIANTS
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_registry_covers_all_queries():

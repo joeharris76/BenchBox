@@ -384,6 +384,8 @@ class FormatConverter:
         elif write_config.skip_dictionary_columns:
             all_cols = set(table.column_names)
             write_kwargs["use_dictionary"] = list(all_cols - set(write_config.skip_dictionary_columns))
+        if write_config.data_page_version is not None:
+            write_kwargs["data_page_version"] = write_config.data_page_version
 
         return write_kwargs
 

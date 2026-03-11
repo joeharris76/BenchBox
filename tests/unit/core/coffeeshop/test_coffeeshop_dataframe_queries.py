@@ -9,7 +9,11 @@ import pytest
 
 from benchbox.core.dataframe.query import QueryCategory
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 ALL_QUERY_IDS = ["SA1", "SA2", "SA3", "SA4", "SA5", "PR1", "PR2", "TR1", "TM1", "QC1", "QC2"]
 

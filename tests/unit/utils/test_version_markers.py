@@ -2,7 +2,10 @@ import importlib
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_validate_version_consistency_succeeds():

@@ -4,7 +4,10 @@ import pytest
 
 from benchbox.core.ssb.generator import SSBDataGenerator
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_ssb_generator_writes_manifest_and_no_raw_when_compressed(tmp_path: Path):

@@ -13,6 +13,11 @@ import pytest
 from benchbox.core.benchmark_loader import get_benchmark_instance
 from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
@@ -61,8 +66,9 @@ class TestPhasesDataReuse:
         import json
 
         # Create the fake data file first to get the correct size
-        fake_data = "fake data\n"
-        (data_dir / "customer.tbl").write_text(fake_data)
+        fake_data = b"fake data\n"
+        customer_path = data_dir / "customer.tbl"
+        customer_path.write_bytes(fake_data)
 
         manifest = {
             "version": 2,
@@ -72,7 +78,7 @@ class TestPhasesDataReuse:
             "tables": {
                 "customer": {
                     "formats": {
-                        "tbl": [{"path": "customer.tbl", "size_bytes": len(fake_data), "row_count": 1}],
+                        "tbl": [{"path": "customer.tbl", "size_bytes": customer_path.stat().st_size, "row_count": 1}],
                     }
                 },
             },
@@ -135,8 +141,9 @@ class TestPhasesDataReuse:
         import json
 
         # Create the fake data file first to get the correct size
-        fake_data = "fake data\n"
-        (data_dir / "customer.tbl").write_text(fake_data)
+        fake_data = b"fake data\n"
+        customer_path = data_dir / "customer.tbl"
+        customer_path.write_bytes(fake_data)
 
         manifest = {
             "version": 2,
@@ -146,7 +153,7 @@ class TestPhasesDataReuse:
             "tables": {
                 "customer": {
                     "formats": {
-                        "tbl": [{"path": "customer.tbl", "size_bytes": len(fake_data), "row_count": 1}],
+                        "tbl": [{"path": "customer.tbl", "size_bytes": customer_path.stat().st_size, "row_count": 1}],
                     }
                 },
             },
@@ -209,8 +216,9 @@ class TestPhasesDataReuse:
         from benchbox.core.runner.runner import LifecyclePhases, run_benchmark_lifecycle
 
         # Create the fake data file first to get the correct size
-        fake_data = "fake data\n"
-        (data_dir / "customer.tbl").write_text(fake_data)
+        fake_data = b"fake data\n"
+        customer_path = data_dir / "customer.tbl"
+        customer_path.write_bytes(fake_data)
 
         manifest = {
             "version": 2,
@@ -220,7 +228,7 @@ class TestPhasesDataReuse:
             "tables": {
                 "customer": {
                     "formats": {
-                        "tbl": [{"path": "customer.tbl", "size_bytes": len(fake_data), "row_count": 1}],
+                        "tbl": [{"path": "customer.tbl", "size_bytes": customer_path.stat().st_size, "row_count": 1}],
                     }
                 },
             },

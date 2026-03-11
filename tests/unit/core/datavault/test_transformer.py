@@ -7,7 +7,10 @@ import pytest
 
 from benchbox.core.datavault.etl.transformer import DataVaultETLTransformer
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDataVaultTransformer:

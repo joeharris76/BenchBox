@@ -11,7 +11,10 @@ import pytest
 import benchbox.platforms.clickhouse_cloud as cloud
 from benchbox.platforms.clickhouse_cloud import ClickHouseCloudAdapter, _build_clickhouse_cloud_config
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_from_config_maps_cloud_and_optional_fields() -> None:
@@ -332,6 +335,93 @@ def test_load_data_falls_back_to_default_when_no_staging() -> None:
     assert result[2] is None
 
 
+def test_external_mode_requires_staging_url() -> None:
+    """External mode should require S3 or GCS staging URL."""
+    adapter = ClickHouseCloudAdapter(host="h", password="p")
+    assert adapter.supports_external_tables is True
+
+    with pytest.raises(ValueError, match="requires cloud staging URL"):
+        adapter.validate_external_table_requirements()
+
+
+def test_create_external_tables_dispatches_to_s3() -> None:
+    """create_external_tables should dispatch to S3 helper when configured."""
+    adapter = ClickHouseCloudAdapter(host="h", password="p", s3_staging_url="s3://bucket/staging/")
+    mock_result = ({"orders": 100}, 1.0, {"loading_method": "s3_external_views"})
+
+    with patch.object(adapter, "_create_external_tables_via_s3", return_value=mock_result) as mock_s3:
+        result = adapter.create_external_tables(MagicMock(), MagicMock(), Path("/tmp"))
+
+    mock_s3.assert_called_once()
+    assert result[2]["loading_method"] == "s3_external_views"
+
+
+def test_create_external_tables_via_s3_builds_view_sql(tmp_path: Path) -> None:
+    """S3 external mode should upload Parquet files and register view SQL."""
+    adapter = ClickHouseCloudAdapter(host="h", password="p", s3_staging_url="s3://bucket/staging/")
+
+    parquet_file = tmp_path / "orders.parquet"
+    parquet_file.write_bytes(b"PAR1")
+
+    benchmark = MagicMock()
+    benchmark.tables = {"orders": [str(parquet_file)]}
+
+    connection = MagicMock()
+
+    def _execute(sql: str):
+        if sql.startswith("SELECT COUNT(*)"):
+            return [(17,)]
+        return []
+
+    connection.execute.side_effect = _execute
+
+    mock_s3_client = MagicMock()
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_s3_client
+
+    with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        stats, _, metadata = adapter._create_external_tables_via_s3(benchmark, connection, tmp_path)
+
+    assert stats["orders"] == 17
+    assert metadata["loading_method"] == "s3_external_views"
+    mock_s3_client.upload_file.assert_called_once()
+
+    executed_sql = " ".join(call.args[0] for call in connection.execute.call_args_list)
+    assert "CREATE OR REPLACE VIEW orders AS SELECT * FROM s3(" in executed_sql
+    assert "'Parquet'" in executed_sql
+
+
+def test_create_external_tables_via_s3_builds_iceberg_view_sql(tmp_path: Path) -> None:
+    """S3 external mode should register iceberg() views for Iceberg directories."""
+    adapter = ClickHouseCloudAdapter(host="h", password="p", s3_staging_url="s3://bucket/staging/")
+    iceberg_dir = tmp_path / "orders"
+    (iceberg_dir / "metadata").mkdir(parents=True)
+    (iceberg_dir / "metadata" / "v1.metadata.json").write_text("{}")
+
+    benchmark = MagicMock()
+    benchmark.tables = {"orders": [str(iceberg_dir)]}
+    connection = MagicMock()
+
+    def _execute(sql: str):
+        if sql.startswith("SELECT COUNT(*)"):
+            return [(4,)]
+        return []
+
+    connection.execute.side_effect = _execute
+
+    mock_s3_client = MagicMock()
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_s3_client
+
+    with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        stats, _, metadata = adapter._create_external_tables_via_s3(benchmark, connection, tmp_path)
+
+    assert stats["orders"] == 4
+    assert metadata["loading_method"] == "s3_external_views"
+    executed_sql = " ".join(call.args[0] for call in connection.execute.call_args_list)
+    assert "CREATE OR REPLACE VIEW orders AS SELECT * FROM iceberg(" in executed_sql
+
+
 # ---- S3 staging data loading tests ----
 
 
@@ -504,3 +594,53 @@ def test_resolve_cloud_data_files_raises_when_no_data(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="No data files found"):
         adapter._resolve_cloud_data_files(benchmark, tmp_path)
+
+
+def test_normalize_external_file_inputs_splits_cloud_and_local(tmp_path: Path) -> None:
+    """Verify _normalize_external_file_inputs correctly separates local and cloud URIs."""
+    local_file = tmp_path / "data.parquet"
+    local_file.write_bytes(b"\x00" * 10)
+    inputs = [str(local_file), "s3://bucket/data.parquet", "gs://bucket/data.parquet"]
+    local_paths, cloud_uris = ClickHouseCloudAdapter._normalize_external_file_inputs(inputs)
+    assert len(local_paths) == 1
+    assert len(cloud_uris) == 2
+    assert str(local_file) == str(local_paths[0])
+
+
+def test_s3_external_credential_warning_logged(tmp_path: Path, caplog) -> None:
+    """Credential embedding in VIEW SQL should produce a warning log."""
+    import logging
+    import os
+    import sys
+
+    adapter = ClickHouseCloudAdapter(
+        host="h",
+        password="p",
+        s3_staging_url="s3://test-bucket/prefix/",
+    )
+    parquet_file = tmp_path / "lineitem.parquet"
+    parquet_file.write_bytes(b"\x00" * 10)
+
+    benchmark = MagicMock()
+    benchmark.tables = {"lineitem": [str(parquet_file)]}
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = [(42,)]
+
+    env_patch = {
+        "AWS_ACCESS_KEY_ID": "AKIATEST",
+        "AWS_SECRET_ACCESS_KEY": "secret123",
+    }
+
+    # boto3 is imported inside the method, so we inject a mock into sys.modules
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = MagicMock()
+
+    with (
+        patch.dict(os.environ, env_patch),
+        patch.dict(sys.modules, {"boto3": mock_boto3}),
+        caplog.at_level(logging.WARNING),
+    ):
+        adapter._create_external_tables_via_s3(benchmark, mock_conn, tmp_path)
+
+    assert any("credentials will be embedded" in r.message.lower() for r in caplog.records)

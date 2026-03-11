@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+"),
+]
 
 
 # ---------------------------------------------------------------------------

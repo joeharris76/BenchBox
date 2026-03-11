@@ -15,7 +15,10 @@ from benchbox.core.nl2sql.evaluator import (
     structural_similarity,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSQLMatchType:

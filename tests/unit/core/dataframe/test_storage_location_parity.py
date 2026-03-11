@@ -17,7 +17,10 @@ import pytest
 from benchbox.core.dataframe.data_loader import DEFAULT_CACHE_DIR, DataCache
 from benchbox.utils.path_utils import get_benchmark_runs_dataframe_path, get_benchmark_runs_datagen_path
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestStorageLocationParity:
@@ -57,7 +60,7 @@ class TestStorageLocationParity:
         """BENCHBOX_CACHE_DIR environment variable should override the default."""
         with patch.dict("os.environ", {"BENCHBOX_CACHE_DIR": "/custom/cache"}):
             cache = DataCache()
-            assert str(cache.cache_dir) == "/custom/cache"
+            assert cache.cache_dir == Path("/custom/cache")
 
     def test_explicit_cache_dir_takes_precedence(self):
         """Explicit cache_dir parameter should take precedence over everything."""
@@ -90,9 +93,7 @@ class TestStorageLocationParity:
             cache_path = cache.get_cache_path(benchmark, sf, DataFormat.PARQUET)
             datagen_path = get_benchmark_runs_datagen_path(benchmark, sf)
             # cache_path must be strictly inside datagen_path
-            assert str(cache_path).startswith(str(datagen_path) + "/"), (
-                f"Expected {cache_path} to be under {datagen_path}"
-            )
+            assert cache_path.is_relative_to(datagen_path), f"Expected {cache_path} to be under {datagen_path}"
 
 
 class TestGlobalCacheOption:

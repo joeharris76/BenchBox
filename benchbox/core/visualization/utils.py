@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from benchbox.utils.scale_factor import format_scale_factor
+
 
 def slugify(text: str) -> str:
     """Convert text to a URL/filename-safe slug.
@@ -24,31 +26,66 @@ def slugify(text: str) -> str:
     return slug.strip("-") or "untitled"
 
 
-def extract_chart_metadata(results: list) -> dict[str, Any]:
-    """Extract chart metadata from results for subtitle display."""
-    metadata: dict[str, Any] = {}
+def build_chart_subtitle(
+    benchmark: str | None = None,
+    scale_factor: float | str | None = None,
+    platform_version: str | None = None,
+    tuning: str | None = None,
+) -> str | None:
+    """Build a pipe-separated subtitle from benchmark metadata.
+
+    Args:
+        benchmark: Benchmark name (e.g., "tpch"). Uppercased in output.
+        scale_factor: Scale factor — formatted via format_scale_factor if numeric.
+        platform_version: Platform name with version (e.g., "DuckDB 1.2.0").
+        tuning: Tuning mode label (e.g., "tuned").
+
+    Returns:
+        Pipe-separated subtitle string, or None if no parts are available.
+    """
+    parts: list[str] = []
+    if benchmark:
+        parts.append(benchmark.upper())
+    if scale_factor is not None:
+        parts.append(f"SF={format_scale_factor(float(scale_factor))}")
+    if platform_version:
+        parts.append(str(platform_version))
+    if tuning:
+        parts.append(str(tuning))
+    return " | ".join(parts) if parts else None
+
+
+def extract_chart_subtitle(results: list[Any]) -> str | None:
+    """Extract a subtitle string from normalized results for chart display."""
     if not results:
-        return metadata
+        return None
 
     r = results[0]
-    metadata["benchmark"] = r.benchmark
-    metadata["scale_factor"] = r.scale_factor
+    benchmark = getattr(r, "benchmark", None)
+    scale_factor = getattr(r, "scale_factor", None)
 
     # Extract platform version from raw result data
+    platform_version: str | None = None
     raw = getattr(r, "raw", {}) or {}
     platform_block = raw.get("platform") or raw.get("platform_info") or {}
     version = platform_block.get("version")
     if version:
         # Avoid "DuckDB 1.0.0 1.0.0" when the label was already disambiguated
         if version in r.platform:
-            metadata["platform_version"] = r.platform
+            platform_version = r.platform
         else:
-            metadata["platform_version"] = f"{r.platform} {version}"
+            platform_version = f"{r.platform} {version}"
 
     # Extract tuning config
+    tuning: str | None = None
     config_block = raw.get("config") or {}
-    tuning = config_block.get("tuning") or config_block.get("tuning_config")
-    if tuning:
-        metadata["tuning"] = tuning
+    tuning_val = config_block.get("tuning") or config_block.get("tuning_config")
+    if tuning_val:
+        tuning = str(tuning_val)
 
-    return metadata
+    return build_chart_subtitle(
+        benchmark=benchmark,
+        scale_factor=scale_factor,
+        platform_version=platform_version,
+        tuning=tuning,
+    )

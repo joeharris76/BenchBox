@@ -10,7 +10,10 @@ import pytest
 from benchbox.core.exceptions import ConfigurationError
 from benchbox.platforms.gcp import DataprocAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _adapter(**kwargs) -> DataprocAdapter:

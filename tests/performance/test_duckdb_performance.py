@@ -20,6 +20,11 @@ import pytest
 from benchbox.tpcds import TPCDS
 from benchbox.tpch import TPCH
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
 
 class MemoryMonitor:
     """Monitor memory usage during test execution."""

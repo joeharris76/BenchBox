@@ -27,6 +27,11 @@ import pytest
 from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 from benchbox.monitoring import PerformanceMonitor, PerformanceTracker
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
 
 @pytest.mark.slow  # Resource utilization thresholds are flaky depending on system load
 @pytest.mark.performance

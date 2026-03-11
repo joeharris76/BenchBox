@@ -19,7 +19,6 @@ from benchbox.base import BaseBenchmark
 from benchbox.core.connection import DatabaseConnection, DatabaseError
 
 # Mark all tests in this file as unit tests
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
 
 
 class MockBaseBenchmark(BaseBenchmark):
@@ -805,7 +804,6 @@ class MockBaseBenchmarkIntegration:
 
 
 # Test markers for pytest
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
 
 
 if __name__ == "__main__":

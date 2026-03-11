@@ -15,6 +15,11 @@ import pytest
 
 from benchbox.utils.printing import set_quiet
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture(autouse=True)
 def _ensure_quiet_off():
@@ -40,12 +45,10 @@ from benchbox.release.content_validation import (
     validate_file,
 )
 
+
 # =============================================================================
 # Dataclass Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestContentViolation:
     """Test ContentViolation dataclass."""
 
@@ -87,7 +90,6 @@ class TestContentViolation:
         assert "\U0001f4a1" in str(self._make_violation(Severity.SUGGESTION))  # light bulb
 
 
-@pytest.mark.fast
 class TestValidationResult:
     """Test ValidationResult dataclass."""
 
@@ -182,11 +184,10 @@ class TestValidationResult:
 def _violations_for_text(text: str, category: str, tmp_dir: Path) -> list[ContentViolation]:
     """Helper: run validate_file on in-memory text for a specific category."""
     path = tmp_dir / "test_input.md"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return validate_file(path, categories=[category])
 
 
-@pytest.mark.fast
 class TestPunctuationRules:
     """Test punctuation rule detection (ERROR severity)."""
 
@@ -214,7 +215,6 @@ class TestPunctuationRules:
         assert vs[0].line_number == 2
 
 
-@pytest.mark.fast
 class TestVagueClaimsRules:
     """Test vague claims rule detection (WARNING severity)."""
 
@@ -240,7 +240,6 @@ class TestVagueClaimsRules:
         assert len(vs) == 0
 
 
-@pytest.mark.fast
 class TestMarketingRules:
     """Test marketing language rule detection (WARNING severity)."""
 
@@ -266,7 +265,6 @@ class TestMarketingRules:
         assert len(vs) == 0
 
 
-@pytest.mark.fast
 class TestPlatformAdvocacyRules:
     """Test platform advocacy rule detection (ERROR severity)."""
 
@@ -292,7 +290,6 @@ class TestPlatformAdvocacyRules:
         assert len(vs) == 0
 
 
-@pytest.mark.fast
 class TestVoiceRules:
     """Test voice rule detection (WARNING severity)."""
 
@@ -318,7 +315,6 @@ class TestVoiceRules:
         assert len(vs) == 0
 
 
-@pytest.mark.fast
 class TestRestrictedVendorRules:
     """Test restricted vendor rule detection (WARNING severity)."""
 
@@ -339,7 +335,6 @@ class TestRestrictedVendorRules:
         assert len(vs) >= 1
 
 
-@pytest.mark.fast
 class TestHedgingRules:
     """Test hedging rule detection (SUGGESTION severity)."""
 
@@ -360,7 +355,6 @@ class TestHedgingRules:
         assert len(vs) == 0
 
 
-@pytest.mark.fast
 class TestClicheRules:
     """Test cliche rule detection (SUGGESTION severity)."""
 
@@ -384,9 +378,6 @@ class TestClicheRules:
 # =============================================================================
 # Helper Function Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestIsExampleLine:
     """Test _is_example_line() function."""
 
@@ -419,7 +410,6 @@ class TestIsExampleLine:
         assert _is_example_line(lines[0], lines, 0) is False
 
 
-@pytest.mark.fast
 class TestHasInlineIgnore:
     """Test _has_inline_ignore() function."""
 
@@ -464,7 +454,6 @@ class TestHasInlineIgnore:
         assert _has_inline_ignore(lines, 0, "marketing") is False
 
 
-@pytest.mark.fast
 class TestGetContext:
     """Test _get_context() function."""
 
@@ -490,9 +479,6 @@ class TestGetContext:
 # =============================================================================
 # File Exception Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestFileExceptions:
     """Test _get_file_exceptions() function."""
 
@@ -525,7 +511,6 @@ class TestFileExceptions:
         assert isinstance(exceptions, set)
 
 
-@pytest.mark.fast
 class TestShouldSkipFile:
     """Test _should_skip_file() function."""
 
@@ -551,16 +536,13 @@ class TestShouldSkipFile:
 # =============================================================================
 # Integration Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestValidateFile:
     """Test validate_file() end-to-end."""
 
     def test_detects_violations(self, tmp_path: Path):
         """Finds violations in a file with known bad content."""
         f = tmp_path / "test.md"
-        f.write_text(f"This has an em-dash{EM_DASH}here.\n")
+        f.write_text(f"This has an em-dash{EM_DASH}here.\n", encoding="utf-8")
 
         violations = validate_file(f, categories=["punctuation"])
         assert len(violations) >= 1
@@ -569,7 +551,7 @@ class TestValidateFile:
     def test_category_filtering(self, tmp_path: Path):
         """Only checks specified categories."""
         f = tmp_path / "test.md"
-        f.write_text("I think this is much faster and revolutionary.\n")
+        f.write_text("I think this is much faster and revolutionary.\n", encoding="utf-8")
 
         # Only check voice
         violations = validate_file(f, categories=["voice"])
@@ -583,7 +565,7 @@ class TestValidateFile:
         docs = repo / "docs" / "usage"
         docs.mkdir(parents=True)
         f = docs / "dialect-translation.md"
-        f.write_text("Oracle supports this dialect.\n")
+        f.write_text("Oracle supports this dialect.\n", encoding="utf-8")
 
         # Without repo_root: Oracle flagged
         vs_without = validate_file(f, categories=["restricted_vendor"])
@@ -602,12 +584,11 @@ class TestValidateFile:
     def test_clean_file_returns_empty(self, tmp_path: Path):
         """Clean file with no violations returns empty list."""
         f = tmp_path / "clean.md"
-        f.write_text("We found that DuckDB completed Q1 in 2.3 seconds at SF100.\n")
+        f.write_text("We found that DuckDB completed Q1 in 2.3 seconds at SF100.\n", encoding="utf-8")
         violations = validate_file(f)
         assert violations == []
 
 
-@pytest.mark.fast
 class TestValidateContent:
     """Test validate_content() end-to-end."""
 
@@ -615,8 +596,8 @@ class TestValidateContent:
         """Scans files matching glob patterns."""
         docs = tmp_path / "docs"
         docs.mkdir()
-        (docs / "page1.md").write_text(f"Has em-dash{EM_DASH}here.\n")
-        (docs / "page2.md").write_text("Clean content.\n")
+        (docs / "page1.md").write_text(f"Has em-dash{EM_DASH}here.\n", encoding="utf-8")
+        (docs / "page2.md").write_text("Clean content.\n", encoding="utf-8")
 
         result = validate_content(tmp_path, patterns=["docs/**/*.md"])
         assert result.files_checked == 2
@@ -627,7 +608,7 @@ class TestValidateContent:
         docs = tmp_path / "docs"
         docs.mkdir()
         for i in range(3):
-            (docs / f"page{i}.md").write_text("Clean.\n")
+            (docs / f"page{i}.md").write_text("Clean.\n", encoding="utf-8")
 
         result = validate_content(tmp_path, patterns=["docs/**/*.md"])
         assert result.files_checked == 3
@@ -637,8 +618,8 @@ class TestValidateContent:
         docs = tmp_path / "docs"
         build = docs / "_build"
         build.mkdir(parents=True)
-        (build / "output.md").write_text(f"Has em-dash{EM_DASH}here.\n")
-        (docs / "real.md").write_text("Clean.\n")
+        (build / "output.md").write_text(f"Has em-dash{EM_DASH}here.\n", encoding="utf-8")
+        (docs / "real.md").write_text("Clean.\n", encoding="utf-8")
 
         result = validate_content(tmp_path, patterns=["docs/**/*.md"])
         assert result.files_checked == 1  # Only real.md
@@ -649,7 +630,6 @@ class TestValidateContent:
         assert result.files_checked == 0  # No matching files in tmp_path
 
 
-@pytest.mark.fast
 class TestCheckContentForRelease:
     """Test check_content_for_release() end-to-end."""
 
@@ -662,7 +642,7 @@ class TestCheckContentForRelease:
         """Returns False when ERROR violations exist."""
         blog = tmp_path / "_blog"
         blog.mkdir()
-        (blog / "post.md").write_text(f"Has em-dash{EM_DASH}here and clearly superior claims.\n")
+        (blog / "post.md").write_text(f"Has em-dash{EM_DASH}here and clearly superior claims.\n", encoding="utf-8")
 
         result = check_content_for_release(tmp_path)
         assert result is False
@@ -671,7 +651,7 @@ class TestCheckContentForRelease:
         """auto_continue=True returns True despite violations."""
         blog = tmp_path / "_blog"
         blog.mkdir()
-        (blog / "post.md").write_text(f"Has em-dash{EM_DASH}here and clearly superior claims.\n")
+        (blog / "post.md").write_text(f"Has em-dash{EM_DASH}here and clearly superior claims.\n", encoding="utf-8")
 
         result = check_content_for_release(tmp_path, auto_continue=True)
         assert result is True
@@ -681,7 +661,7 @@ class TestCheckContentForRelease:
         blog = tmp_path / "_blog"
         blog.mkdir()
         # Only include WARNING-level content (no ERRORs)
-        (blog / "post.md").write_text("I think this is much faster.\n")
+        (blog / "post.md").write_text("I think this is much faster.\n", encoding="utf-8")
 
         check_content_for_release(tmp_path, errors_only=True)
         captured = capsys.readouterr()

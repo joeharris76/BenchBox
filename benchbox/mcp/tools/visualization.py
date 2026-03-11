@@ -16,9 +16,9 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from benchbox.core.visualization.ascii_runtime import render_ascii_chart_from_results
+from benchbox.core.visualization.ascii_api import render_ascii_chart_from_results
 from benchbox.core.visualization.chart_types import CHART_TYPE_DESCRIPTIONS, CHART_TYPE_SPECS
-from benchbox.core.visualization.utils import extract_chart_metadata
+from benchbox.core.visualization.utils import extract_chart_subtitle
 from benchbox.mcp.errors import ErrorCode, make_error
 from benchbox.mcp.tools.path_utils import resolve_result_file_path
 
@@ -43,18 +43,14 @@ VIZ_GENERATE_ANNOTATIONS = ToolAnnotations(
 )
 
 
-def _extract_chart_metadata(results: list) -> dict[str, Any]:
-    return extract_chart_metadata(results)
-
-
 def _render_single_ascii_chart(
     results: list,
     chart_type: str,
     opts: Any,
 ) -> str | None:
     """Render a single ASCII chart for the given chart type."""
-    metadata = _extract_chart_metadata(results)
-    return render_ascii_chart_from_results(results, chart_type, options=opts, metadata=metadata)
+    subtitle = extract_chart_subtitle(results)
+    return render_ascii_chart_from_results(results, chart_type, options=opts, subtitle=subtitle)
 
 
 def _generate_ascii_chart(
@@ -67,14 +63,14 @@ def _generate_ascii_chart(
 
     Returns chart content as inline string.
     """
-    from benchbox.core.visualization.ascii.base import ASCIIChartOptions
+    from benchbox.core.visualization.ascii_api import ChartOptions
     from benchbox.core.visualization.result_plotter import ResultPlotter
 
     try:
         plotter = ResultPlotter.from_sources(resolved_paths)
         results = plotter.results
 
-        opts = ASCIIChartOptions(use_color=False)
+        opts = ChartOptions(use_color=False)
 
         if template_name is not None:
             from benchbox.core.visualization.templates import get_template

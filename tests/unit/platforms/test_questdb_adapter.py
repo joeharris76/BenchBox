@@ -15,7 +15,10 @@ import benchbox.platforms.questdb as questdb_module
 from benchbox.core.platform_registry import PlatformRegistry
 from benchbox.platforms.questdb import QUESTDB_DIALECT, QuestDBAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()

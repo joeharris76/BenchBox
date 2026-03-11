@@ -4,48 +4,69 @@ from __future__ import annotations
 
 import pytest
 
-from benchbox.core.visualization.utils import extract_chart_metadata, slugify
+from benchbox.core.visualization.utils import build_chart_subtitle, extract_chart_subtitle, slugify
 from tests.fixtures.result_dict_fixtures import make_normalized_result
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
-class TestExtractChartMetadata:
-    def test_empty_results_returns_empty_dict(self):
-        assert extract_chart_metadata([]) == {}
+class TestBuildChartSubtitle:
+    def test_empty_returns_none(self):
+        assert build_chart_subtitle() is None
+
+    def test_benchmark_only(self):
+        assert build_chart_subtitle(benchmark="tpch") == "TPCH"
+
+    def test_scale_factor_formatted(self):
+        subtitle = build_chart_subtitle(scale_factor=0.01)
+        assert subtitle == "SF=sf001"
+
+    def test_full_subtitle(self):
+        subtitle = build_chart_subtitle(
+            benchmark="tpch", scale_factor=1, platform_version="DuckDB 1.4.3", tuning="tuned"
+        )
+        assert subtitle == "TPCH | SF=sf1 | DuckDB 1.4.3 | tuned"
+
+
+class TestExtractChartSubtitle:
+    def test_empty_results_returns_none(self):
+        assert extract_chart_subtitle([]) is None
 
     def test_basic_fields_extracted(self):
         r = make_normalized_result(platform="DuckDB", platform_version="1.4.3")
-        meta = extract_chart_metadata([r])
-        assert meta["benchmark"] == "tpch"
-        assert meta["scale_factor"] == 1.0
+        subtitle = extract_chart_subtitle([r])
+        assert "TPCH" in subtitle
+        assert "SF=" in subtitle
 
     def test_version_appended_to_platform_name(self):
         """When version is not in platform label, it gets appended."""
         r = make_normalized_result(platform="DuckDB", platform_version="1.4.3")
-        meta = extract_chart_metadata([r])
-        assert meta["platform_version"] == "DuckDB 1.4.3"
+        subtitle = extract_chart_subtitle([r])
+        assert "DuckDB 1.4.3" in subtitle
 
     def test_no_duplicate_when_version_already_in_label(self):
         """After version disambiguation, platform label already contains version -- no duplication."""
         r = make_normalized_result(platform="DuckDB 1.4.3", platform_version="1.4.3")
-        meta = extract_chart_metadata([r])
-        assert meta["platform_version"] == "DuckDB 1.4.3"
-        assert "DuckDB 1.4.3 1.4.3" not in meta.get("platform_version", "")
+        subtitle = extract_chart_subtitle([r])
+        assert "DuckDB 1.4.3" in subtitle
+        assert "DuckDB 1.4.3 1.4.3" not in subtitle
 
     def test_no_platform_version_when_no_raw_version(self):
-        """No raw version -- no platform_version key."""
+        """No raw version -- subtitle omits platform version segment."""
         r = make_normalized_result(platform="DuckDB")
-        meta = extract_chart_metadata([r])
-        assert "platform_version" not in meta
+        subtitle = extract_chart_subtitle([r])
+        assert "DuckDB" not in subtitle  # Only benchmark and scale factor present
 
-    def test_uses_first_result_for_metadata(self):
-        """Metadata is extracted from results[0]."""
+    def test_uses_first_result_for_subtitle(self):
+        """Subtitle is extracted from results[0]."""
         r1 = make_normalized_result(platform="DuckDB", platform_version="1.0.0", scale_factor=1.0)
         r2 = make_normalized_result(platform="Polars", platform_version="0.19.0", benchmark="tpcds", scale_factor=10.0)
-        meta = extract_chart_metadata([r1, r2])
-        assert meta["benchmark"] == "tpch"
-        assert "DuckDB" in meta.get("platform_version", "")
+        subtitle = extract_chart_subtitle([r1, r2])
+        assert "TPCH" in subtitle
+        assert "DuckDB" in subtitle
 
 
 class TestSlugify:

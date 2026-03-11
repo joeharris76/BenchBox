@@ -18,7 +18,10 @@ from benchbox.core.connection import DatabaseConnection
 from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 from benchbox.core.tpchavoc.benchmark import TPCHavocBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPrimitivesDatabaseReuse:

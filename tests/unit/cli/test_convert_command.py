@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from benchbox.cli.commands.convert import convert
 
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.fast,
     pytest.mark.skipif(
         sys.version_info < (3, 11),

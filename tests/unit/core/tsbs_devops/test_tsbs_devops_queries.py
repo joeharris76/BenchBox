@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.core.tsbs_devops.queries import QUERIES, TSBSDevOpsQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueriesDefinition:

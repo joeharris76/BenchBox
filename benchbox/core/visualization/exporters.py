@@ -54,7 +54,7 @@ def render_ascii_chart(
                     diverging_bar, summary_box).
         data: Chart data in the appropriate format for the chart type.
         title: Optional chart title.
-        options: ASCIIChartOptions instance.
+        options: ChartOptions instance.
         **kwargs: Additional arguments passed to the chart constructor.
 
     Returns:
@@ -63,22 +63,22 @@ def render_ascii_chart(
     Raises:
         VisualizationError: If chart type is not supported.
     """
-    from benchbox.core.visualization.ascii import (
-        ASCIIBarChart,
-        ASCIIBoxPlot,
-        ASCIIHeatmap,
-        ASCIILineChart,
-        ASCIIQueryHistogram,
-        ASCIIScatterPlot,
+    from benchbox.core.visualization.ascii_api import (
+        BarChart,
+        BarData,
+        BoxPlot,
+        BoxPlotSeries,
+        ChartOptions,
+        Heatmap,
+        Histogram,
+        HistogramBar,
+        LineChart,
+        LinePoint,
+        ScatterPlot,
+        ScatterPoint,
     )
-    from benchbox.core.visualization.ascii.bar_chart import BarData
-    from benchbox.core.visualization.ascii.base import ASCIIChartOptions
-    from benchbox.core.visualization.ascii.box_plot import BoxPlotSeries
-    from benchbox.core.visualization.ascii.histogram import HistogramBar
-    from benchbox.core.visualization.ascii.line_chart import LinePoint
-    from benchbox.core.visualization.ascii.scatter_plot import ScatterPoint
 
-    opts = options or ASCIIChartOptions()
+    opts = options or ChartOptions()
 
     if chart_type == "performance_bar":
         converted = []
@@ -96,7 +96,7 @@ def render_ascii_chart(
                         is_worst=getattr(item, "is_worst", False),
                     )
                 )
-        chart = ASCIIBarChart(data=converted, title=title, options=opts, **kwargs)
+        chart = BarChart(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "distribution_box":
         converted = []
@@ -110,11 +110,12 @@ def render_ascii_chart(
                         values=list(getattr(item, "values", [])),
                     )
                 )
-        chart = ASCIIBoxPlot(series=converted, title=title, options=opts, **kwargs)
+        chart = BoxPlot(series=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "query_heatmap":
         if isinstance(data, dict):
-            chart = ASCIIHeatmap(
+            kwargs.setdefault("value_label", "ms")
+            chart = Heatmap(
                 matrix=data.get("matrix", []),
                 row_labels=data.get("queries", data.get("row_labels", [])),
                 col_labels=data.get("platforms", data.get("col_labels", [])),
@@ -133,15 +134,16 @@ def render_ascii_chart(
             else:
                 converted.append(
                     HistogramBar(
-                        query_id=getattr(item, "query_id", str(item)),
-                        latency_ms=getattr(item, "latency_ms", 0),
+                        label=getattr(item, "label", str(item)),
+                        value=getattr(item, "value", 0),
                         platform=getattr(item, "platform", None),
                         error=getattr(item, "error", None),
                         is_best=getattr(item, "is_best", False),
                         is_worst=getattr(item, "is_worst", False),
                     )
                 )
-        chart = ASCIIQueryHistogram(data=converted, title=title, options=opts, **kwargs)
+        kwargs.setdefault("y_label", "Execution Time (ms)")
+        chart = Histogram(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "cost_scatter":
         converted = []
@@ -152,11 +154,13 @@ def render_ascii_chart(
                 converted.append(
                     ScatterPoint(
                         name=getattr(item, "name", str(item)),
-                        x=getattr(item, "cost", getattr(item, "x", 0)),
-                        y=getattr(item, "performance", getattr(item, "y", 0)),
+                        x=getattr(item, "x", 0),
+                        y=getattr(item, "y", 0),
                     )
                 )
-        chart = ASCIIScatterPlot(points=converted, title=title, options=opts, **kwargs)
+        kwargs.setdefault("x_label", "Cost (USD)")
+        kwargs.setdefault("y_label", "Performance")
+        chart = ScatterPlot(points=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "time_series":
         converted = []
@@ -172,10 +176,10 @@ def render_ascii_chart(
                         label=getattr(item, "label", None),
                     )
                 )
-        chart = ASCIILineChart(points=converted, title=title, options=opts, **kwargs)
+        chart = LineChart(points=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "comparison_bar":
-        from benchbox.core.visualization.ascii.comparison_bar import ASCIIComparisonBar, ComparisonBarData
+        from benchbox.core.visualization.ascii_api import ComparisonBar, ComparisonBarData
 
         converted = []
         for item in data:
@@ -191,10 +195,11 @@ def render_ascii_chart(
                         comparison_name=getattr(item, "comparison_name", "Comparison"),
                     )
                 )
-        chart = ASCIIComparisonBar(data=converted, title=title, options=opts, **kwargs)
+        kwargs.setdefault("metric_label", "Execution Time (ms)")
+        chart = ComparisonBar(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "diverging_bar":
-        from benchbox.core.visualization.ascii.diverging_bar import ASCIIDivergingBar, DivergingBarData
+        from benchbox.core.visualization.ascii_api import DivergingBar, DivergingBarData
 
         converted = []
         for item in data:
@@ -207,10 +212,10 @@ def render_ascii_chart(
                         pct_change=getattr(item, "pct_change", 0),
                     )
                 )
-        chart = ASCIIDivergingBar(data=converted, title=title, options=opts, **kwargs)
+        chart = DivergingBar(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "percentile_ladder":
-        from benchbox.core.visualization.ascii.percentile_ladder import ASCIIPercentileLadder, PercentileData
+        from benchbox.core.visualization.ascii_api import PercentileData, PercentileLadder
 
         converted = []
         for item in data:
@@ -226,10 +231,11 @@ def render_ascii_chart(
                         p99=getattr(item, "p99", 0),
                     )
                 )
-        chart = ASCIIPercentileLadder(data=converted, title=title, options=opts, **kwargs)
+        kwargs.setdefault("metric_label", "ms")
+        chart = PercentileLadder(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "normalized_speedup":
-        from benchbox.core.visualization.ascii.normalized_speedup import ASCIINormalizedSpeedup, SpeedupData
+        from benchbox.core.visualization.ascii_api import NormalizedSpeedup, SpeedupData
 
         converted = []
         for item in data:
@@ -243,14 +249,10 @@ def render_ascii_chart(
                         is_baseline=getattr(item, "is_baseline", False),
                     )
                 )
-        chart = ASCIINormalizedSpeedup(data=converted, title=title, options=opts, **kwargs)
+        chart = NormalizedSpeedup(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "stacked_phase":
-        from benchbox.core.visualization.ascii.stacked_bar import (
-            ASCIIStackedBar,
-            StackedBarData,
-            StackedBarSegment,
-        )
+        from benchbox.core.visualization.ascii_api import StackedBar, StackedBarData, StackedBarSegment
 
         converted = []
         for item in data:
@@ -272,18 +274,19 @@ def render_ascii_chart(
                         total=getattr(item, "total", None),
                     )
                 )
-        chart = ASCIIStackedBar(data=converted, title=title, options=opts, **kwargs)
+        kwargs.setdefault("metric_label", "ms")
+        chart = StackedBar(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "sparkline_table":
-        from benchbox.core.visualization.ascii.sparkline_table import ASCIISparklineTable, SparklineTableData
+        from benchbox.core.visualization.ascii_api import SparklineTable, SparklineTableData
 
         if isinstance(data, SparklineTableData):
-            chart = ASCIISparklineTable(data=data, title=title, options=opts, **kwargs)
+            chart = SparklineTable(data=data, title=title, options=opts, **kwargs)
         else:
             raise VisualizationError("sparkline_table data must be a SparklineTableData instance")
 
     elif chart_type == "cdf_chart":
-        from benchbox.core.visualization.ascii.cdf_chart import ASCIICDFChart, CDFSeriesData
+        from benchbox.core.visualization.ascii_api import CDFChart, CDFSeriesData
 
         converted = []
         for item in data:
@@ -296,28 +299,41 @@ def render_ascii_chart(
                         values=list(getattr(item, "values", [])),
                     )
                 )
-        chart = ASCIICDFChart(data=converted, title=title, options=opts, **kwargs)
+        chart = CDFChart(data=converted, title=title, options=opts, **kwargs)
 
     elif chart_type == "rank_table":
-        from benchbox.core.visualization.ascii.rank_table import ASCIIRankTable, RankTableData
+        from benchbox.core.visualization.ascii_api import RankTable, RankTableData
 
         if isinstance(data, RankTableData):
-            chart = ASCIIRankTable(data=data, title=title, options=opts, **kwargs)
+            chart = RankTable(data=data, title=title, options=opts, **kwargs)
         else:
             raise VisualizationError("rank_table data must be a RankTableData instance")
 
     elif chart_type == "summary_box":
-        from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
+        from benchbox.core.visualization.ascii_api import SummaryBox, SummaryStats
 
         if isinstance(data, SummaryStats):
             stats = data
         elif isinstance(data, dict):
-            # Include 'environment' explicitly as it's a key field for two-column layout
             field_names = [f.name for f in SummaryStats.__dataclass_fields__.values()]
-            stats = SummaryStats(**{k: v for k, v in data.items() if k in field_names})
+            stats_payload = {
+                "title": title or "Benchmark Summary",
+                "primary_label": "Geo Mean",
+                "secondary_label": "Median",
+                "total_label": "Total",
+                "count_label": "Queries",
+            }
+            stats_payload.update({k: v for k, v in data.items() if k in field_names})
+            stats = SummaryStats(**stats_payload)
         else:
-            stats = SummaryStats(title=title or "Summary")
-        chart = ASCIISummaryBox(stats=stats, options=opts)
+            stats = SummaryStats(
+                title=title or "Benchmark Summary",
+                primary_label="Geo Mean",
+                secondary_label="Median",
+                total_label="Total",
+                count_label="Queries",
+            )
+        chart = SummaryBox(stats=stats, options=opts)
 
     else:
         raise VisualizationError(f"Unsupported ASCII chart type: {chart_type}")

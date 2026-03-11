@@ -16,7 +16,10 @@ import pytest
 
 from benchbox.platforms.databend.adapter import DatabendAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDatabendAdapterInitialization:

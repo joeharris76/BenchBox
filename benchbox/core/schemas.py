@@ -106,10 +106,10 @@ class RunConfig(BaseModel):
     warm_up_iterations: int = GENERIC_POWER_DEFAULT_WARMUP_ITERATIONS  # Default: 1 warmup iteration
     power_fail_fast: bool = False
 
-    # Format conversion fields
-    convert_format: Optional[str] = None
-    conversion_compression: str = "snappy"
-    conversion_partition_cols: list[str] = Field(default_factory=list)
+    # Table format fields
+    table_format: Optional[str] = None
+    table_format_compression: str = "snappy"
+    table_format_partition_cols: list[str] = Field(default_factory=list)
 
     @field_validator("scale_factor")
     @classmethod
@@ -154,15 +154,15 @@ class RunConfig(BaseModel):
             raise ValueError(f"test_execution_type must be one of {allowed}, got: {v}")
         return v
 
-    @field_validator("convert_format")
+    @field_validator("table_format")
     @classmethod
-    def validate_convert_format(cls, v: Optional[str]) -> Optional[str]:
-        """Validate convert_format is supported."""
+    def validate_table_format(cls, v: Optional[str]) -> Optional[str]:
+        """Validate table_format is supported."""
         if v is not None:
             allowed = {"parquet", "vortex", "delta", "iceberg"}
             v_lower = v.lower()
             if v_lower not in allowed:
-                raise ValueError(f"convert_format must be one of {allowed}, got: {v}")
+                raise ValueError(f"table_format must be one of {allowed}, got: {v}")
             return v_lower
         return v
 

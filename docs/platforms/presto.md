@@ -64,8 +64,9 @@ print(f"Completed in {results.duration_seconds:.2f}s")
 ```bash
 # Minimal PrestoDB run (assumes presto-python-client installed)
 benchbox run --platform presto --benchmark tpch --scale 1.0 \
-  --host presto-coordinator.example.com \
-  --catalog hive --schema default --username presto
+  --platform-option host=presto-coordinator.example.com \
+  --platform-option catalog=hive \
+  --platform-option schema=default
 ```
 
 ## Configuration Highlights

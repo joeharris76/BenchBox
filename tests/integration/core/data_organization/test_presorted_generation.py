@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -11,6 +12,13 @@ import pytest
 
 from benchbox.core.data_organization.config import DataOrganizationConfig, SortColumn, SortOrder
 from benchbox.core.data_organization.sorting import SortedParquetWriter
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+    pytest.mark.resource_heavy,
+]
+
 
 DELTALAKE_AVAILABLE = importlib.util.find_spec("deltalake") is not None
 PYICEBERG_AVAILABLE = importlib.util.find_spec("pyiceberg") is not None
@@ -98,6 +106,7 @@ def test_delta_sorted_output_writes_readable_delta_table(tmp_path: Path):
 
 @pytest.mark.requires_table_formats
 @pytest.mark.skipif(not PYICEBERG_AVAILABLE, reason="pyiceberg package not installed")
+@pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg generates Unix-style paths incompatible with Windows")
 def test_iceberg_sorted_output_writes_iceberg_layout(tmp_path: Path):
     source = tmp_path / "lineitem.tbl"
     _write_tbl(source, [(2, "1992-01-02"), (1, "1992-01-01")])

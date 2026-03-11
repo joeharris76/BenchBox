@@ -14,7 +14,10 @@ from benchbox.core.datavault.etl.hash_functions import (
     generate_hashdiff_sql,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGenerateHashKey:

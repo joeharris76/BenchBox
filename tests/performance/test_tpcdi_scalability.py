@@ -17,6 +17,12 @@ from pathlib import Path
 import psutil
 import pytest
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
+
 pytest.importorskip("pandas")
 
 from benchbox.core.tpcdi.benchmark import TPCDIBenchmark

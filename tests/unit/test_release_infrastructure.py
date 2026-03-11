@@ -14,6 +14,12 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:

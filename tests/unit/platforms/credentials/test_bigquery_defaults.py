@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.platforms.credentials.bigquery import setup_bigquery_credentials
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBigQueryCredentialDefaults:

@@ -9,7 +9,11 @@ import pytest
 from benchbox.core.tuning.interface import UnifiedTuningConfiguration
 from benchbox.platforms.databricks import DatabricksAdapter
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 def _make_col(name: str, order: int):
@@ -43,7 +47,6 @@ def _make_table_tuning(cluster_cols=None, distribution_cols=None, sort_cols=None
     return table_tuning
 
 
-@pytest.mark.fast
 @patch("benchbox.platforms.databricks.adapter.databricks_sql")
 def test_apply_table_tunings_uses_liquid_clustering_when_configured(_mock_databricks_sql):
     adapter = DatabricksAdapter(
@@ -78,7 +81,6 @@ def test_apply_table_tunings_uses_liquid_clustering_when_configured(_mock_databr
     ]
 
 
-@pytest.mark.fast
 @patch("benchbox.platforms.databricks.adapter.databricks_sql")
 def test_apply_table_tunings_keeps_z_order_default_behavior(_mock_databricks_sql):
     adapter = DatabricksAdapter(
@@ -113,7 +115,6 @@ def test_apply_table_tunings_keeps_z_order_default_behavior(_mock_databricks_sql
     ]
 
 
-@pytest.mark.fast
 @patch("benchbox.platforms.databricks.adapter.databricks_sql")
 def test_strategy_precedence_prefers_liquid_when_legacy_z_order_is_also_enabled(_mock_databricks_sql):
     adapter = DatabricksAdapter(
@@ -142,7 +143,6 @@ def test_strategy_precedence_prefers_liquid_when_legacy_z_order_is_also_enabled(
     assert not any("ZORDER BY" in call for call in execute_calls)
 
 
-@pytest.mark.fast
 @patch("benchbox.platforms.databricks.adapter.databricks_sql")
 def test_apply_table_tunings_liquid_clustering_falls_back_to_sort_columns(_mock_databricks_sql):
     adapter = DatabricksAdapter(

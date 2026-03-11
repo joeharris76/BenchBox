@@ -11,7 +11,10 @@ from click.testing import CliRunner
 
 ph = importlib.import_module("benchbox.cli.commands.plan_history")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @dataclass

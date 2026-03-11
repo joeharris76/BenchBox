@@ -42,6 +42,19 @@ class SparkDataLoadMixin:
         - self._normalize_and_validate_file_paths(file_paths)
     """
 
+    @staticmethod
+    def _detect_spark_table_format(path: Path) -> str | None:
+        """Detect directory-based Spark table formats from on-disk markers."""
+        if not path.is_dir():
+            return None
+        if (path / "_delta_log").is_dir():
+            return "delta"
+        if (path / "metadata").is_dir():
+            return "iceberg"
+        if (path / ".hoodie").is_dir():
+            return "hudi"
+        return None
+
     def _load_data_spark(
         self,
         benchmark: Any,
@@ -71,7 +84,11 @@ class SparkDataLoadMixin:
         spark = connection
 
         try:
-            resolver = DataSourceResolver()
+            resolver = DataSourceResolver(
+                platform_name=getattr(self, "platform_name", None),
+                table_mode=getattr(self, "table_mode", "native"),
+                platform_config=getattr(self, "__dict__", None),
+            )
             data_source = resolver.resolve(benchmark, Path(data_dir))
 
             if not data_source or not data_source.tables:
@@ -102,8 +119,11 @@ class SparkDataLoadMixin:
 
                     for raw_path in valid_files:
                         file_path = Path(raw_path)
+                        table_format = self._detect_spark_table_format(file_path)
 
-                        if format_info.format_type == "parquet":
+                        if table_format is not None:
+                            df = spark.read.format(table_format).load(str(file_path))
+                        elif format_info.format_type == "parquet":
                             df = spark.read.parquet(str(file_path))
                         else:
                             df = (

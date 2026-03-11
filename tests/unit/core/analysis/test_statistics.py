@@ -28,7 +28,10 @@ from benchbox.core.analysis.statistics import (
     welchs_t_test,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBasicStatistics:

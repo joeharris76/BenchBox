@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.core.config_utils import merge_all_configs
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestVerboseConfig(unittest.TestCase):

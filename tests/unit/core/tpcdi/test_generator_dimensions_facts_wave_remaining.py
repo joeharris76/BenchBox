@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.core.tpcdi.generator.data import TPCDIDataGenerator
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_small_generator(tmp_path: Path) -> TPCDIDataGenerator:

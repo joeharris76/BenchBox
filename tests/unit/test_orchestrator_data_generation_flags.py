@@ -8,7 +8,10 @@ import pytest
 from benchbox.cli.benchmarks import BenchmarkConfig
 from benchbox.cli.orchestrator import BenchmarkOrchestrator
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _DummySystem:

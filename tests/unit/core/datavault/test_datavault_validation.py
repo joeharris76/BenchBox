@@ -20,7 +20,10 @@ from benchbox.core.datavault.validation import (
     validate_row_counts,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestExpectedRowCounts:

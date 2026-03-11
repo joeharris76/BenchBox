@@ -14,7 +14,10 @@ from benchbox.core.tuning.validation import (
     validate_constraint_consistency,
 )
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _col(name: str, order: int = 1, typ: str = "INTEGER") -> TuningColumn:

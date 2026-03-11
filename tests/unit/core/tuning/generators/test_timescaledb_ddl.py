@@ -12,10 +12,17 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 from __future__ import annotations
 
+import pytest
+
 from benchbox.core.tuning import TuningColumn
 from benchbox.core.tuning.ddl_generator import ColumnDefinition, ColumnNullability
 from benchbox.core.tuning.generators.timescaledb import TimescaleDBDDLGenerator
 from benchbox.core.tuning.interface import TableTuning
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTimescaleDBDDLGeneratorBasics:

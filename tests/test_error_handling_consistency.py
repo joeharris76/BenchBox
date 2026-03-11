@@ -16,6 +16,8 @@ import pytest
 from benchbox.tpcds import TPCDS
 from benchbox.tpch import TPCH
 
+pytestmark = pytest.mark.fast
+
 
 class TestErrorHandlingConsistency:
     """Test that TPC-H and TPC-DS handle errors consistently."""

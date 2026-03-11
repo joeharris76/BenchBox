@@ -13,7 +13,10 @@ from benchbox.utils.dialect_utils import (
     translate_sql_query,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDialectNormalization:

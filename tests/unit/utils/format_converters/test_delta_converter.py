@@ -19,7 +19,11 @@ except ImportError:
     DELTA_AVAILABLE = False
 
 
-pytestmark = pytest.mark.skipif(not DELTA_AVAILABLE, reason="Delta Lake library not installed")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(not DELTA_AVAILABLE, reason="Delta Lake library not installed"),
+]
 
 
 class TestDeltaConverterBasics:

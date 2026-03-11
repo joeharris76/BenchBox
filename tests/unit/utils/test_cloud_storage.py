@@ -24,7 +24,10 @@ from benchbox.utils.cloud_storage import (
     validate_cloud_path_support,
 )
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]  # Include in CI fast coverage pass
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestCloudPathDetection:
@@ -95,7 +98,7 @@ class TestPathHandlerCreation:
         local_path = "/tmp/local"
         handler = create_path_handler(local_path)
         assert isinstance(handler, Path)
-        assert str(handler) == local_path
+        assert handler == Path(local_path)
 
     def test_create_path_handler_local_path_object(self):
         """Test creating path handler for Path objects."""
@@ -262,7 +265,7 @@ class TestCloudPathAdapter:
     def test_cloud_path_adapter_str_representation(self):
         """Test string representation of CloudPathAdapter."""
         adapter = CloudPathAdapter("/tmp/test")
-        assert "/tmp/test" in str(adapter)
+        assert str(Path("/tmp/test")) in str(adapter)
 
     def test_cloud_path_adapter_path_joining(self):
         """Test path joining with CloudPathAdapter."""
@@ -363,7 +366,7 @@ class TestDatabricksPathClass:
 
         db_path = DatabricksPath(local_path, dbfs_target)
 
-        assert str(db_path) == local_path
+        assert str(db_path) == str(Path(local_path))
         assert db_path.dbfs_target == dbfs_target
 
     def test_databricks_path_with_path_object(self):
@@ -387,7 +390,7 @@ class TestDatabricksPathClass:
         import os
 
         fspath = os.fspath(db_path)
-        assert fspath == local_path
+        assert fspath == str(Path(local_path))
 
     def test_databricks_path_delegation(self):
         """Test DatabricksPath delegates methods to underlying Path."""
@@ -597,14 +600,14 @@ class TestCloudStagingPath:
         staging_path = CloudStagingPath(local_path, "gs://bucket/path")
 
         # os.fspath() should work with CloudStagingPath
-        assert os.fspath(staging_path) == local_path
+        assert os.fspath(staging_path) == str(Path(local_path))
 
     def test_str_returns_local_path(self):
         """Test str() returns local path."""
         local_path = "/tmp/data"
         staging_path = CloudStagingPath(local_path, "gs://bucket/data")
 
-        assert str(staging_path) == local_path
+        assert str(staging_path) == str(Path(local_path))
 
     def test_repr_shows_both_paths(self):
         """Test repr() shows both local and cloud paths."""
@@ -631,7 +634,7 @@ class TestCloudStagingPath:
         joined = staging_path / "subdir" / "file.txt"
 
         assert isinstance(joined, Path)
-        assert str(joined) == "/tmp/data/subdir/file.txt"
+        assert joined == Path("/tmp/data/subdir/file.txt")
 
     def test_equality_comparison(self):
         """Test equality comparison between CloudStagingPath instances."""

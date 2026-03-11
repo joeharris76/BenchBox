@@ -221,6 +221,7 @@ All notebooks include these benchmark scenarios:
 - Performance tuning with platform optimizations
 - Cross-platform comparisons
 - Regression testing against baselines
+- External table mode (`--table-mode external`) for faster iteration without data materialization
 
 ## Cost Considerations
 

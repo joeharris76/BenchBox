@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Import adapter with mocking for cuDF
 with patch.dict("sys.modules", {"cudf": MagicMock(), "dask_cudf": None, "dask_sql": None}):

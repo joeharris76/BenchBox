@@ -15,7 +15,10 @@ from benchbox.core.tpch.throughput_test import (
 )
 
 # Mark all tests in this file as integration tests
-pytestmark = [pytest.mark.integration, pytest.mark.slow]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
 
 
 def _make_benchmark_mock() -> Mock:

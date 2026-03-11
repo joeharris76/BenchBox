@@ -13,6 +13,11 @@ import pytest
 
 from benchbox import TSBSDevOps
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.duckdb

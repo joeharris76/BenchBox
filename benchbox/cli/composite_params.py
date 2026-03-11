@@ -6,7 +6,7 @@ related options into single, concise parameters using colon syntax.
 Examples:
     --compression zstd:9
     --plan-config sample:0.1,first:5,queries:1,6,17
-    --convert parquet:snappy,partition:year,month
+    --table-format parquet:snappy,partition:year,month
     --validation full
 
 Copyright 2026 Joe Harris / BenchBox Project
@@ -171,16 +171,16 @@ class PlanCaptureConfig:
 
 
 @dataclass
-class ConvertConfig:
-    """Parsed format conversion configuration."""
+class TableFormatConfig:
+    """Parsed table format configuration."""
 
     format: str = "parquet"
     compression: str = "snappy"
     partition_cols: list[str] = field(default_factory=list)
 
     @classmethod
-    def parse(cls, value: Optional[str]) -> Optional["ConvertConfig"]:
-        """Parse convert string.
+    def parse(cls, value: Optional[str]) -> Optional["TableFormatConfig"]:
+        """Parse table format string.
 
         Formats:
             - "parquet" -> parquet with default compression
@@ -188,10 +188,10 @@ class ConvertConfig:
             - "iceberg:zstd,partition:year,month" -> iceberg with zstd, partitioned
 
         Args:
-            value: Convert specification string
+            value: Table format specification string
 
         Returns:
-            ConvertConfig instance or None if no conversion
+            TableFormatConfig instance or None if no table format specified
 
         Raises:
             click.BadParameter: If format is invalid
@@ -410,20 +410,20 @@ class PlanConfigParamType(click.ParamType):
             self.fail(str(e), param, ctx)
 
 
-class ConvertParamType(click.ParamType):
-    """Click parameter type for format conversion configuration."""
+class TableFormatParamType(click.ParamType):
+    """Click parameter type for table format configuration."""
 
-    name = "convert"
+    name = "table-format"
 
     def convert(
         self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
-    ) -> Optional[ConvertConfig]:
-        if isinstance(value, ConvertConfig):
+    ) -> Optional[TableFormatConfig]:
+        if isinstance(value, TableFormatConfig):
             return value
         if value is None:
             return None
         try:
-            return ConvertConfig.parse(str(value))
+            return TableFormatConfig.parse(str(value))
         except click.BadParameter as e:
             self.fail(str(e), param, ctx)
 
@@ -447,6 +447,6 @@ class ValidationParamType(click.ParamType):
 # Singleton instances for use in Click decorators
 COMPRESSION = CompressionParamType()
 PLAN_CONFIG = PlanConfigParamType()
-CONVERT = ConvertParamType()
+TABLE_FORMAT = TableFormatParamType()
 VALIDATION = ValidationParamType()
 FORCE = ForceParamType()

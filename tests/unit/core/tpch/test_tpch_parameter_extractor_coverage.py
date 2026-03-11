@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.core.tpch import parameter_extractor as pe
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.parametrize(

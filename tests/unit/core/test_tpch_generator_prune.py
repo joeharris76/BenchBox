@@ -7,7 +7,10 @@ import pytest
 
 from benchbox.core.tpch.generator import TPCHDataGenerator
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @patch("benchbox.core.tpch.generator.TPCHDataGenerator._find_or_build_dbgen")

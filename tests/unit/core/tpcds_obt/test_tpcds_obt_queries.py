@@ -6,7 +6,10 @@ from benchbox.core.tpcds_obt.queries import CONVERTIBLE_QUERY_IDS, TPCDSOBTQuery
 from benchbox.core.tpcds_obt.query_conversion import QueryConverter
 from benchbox.core.tpcds_obt.schema import OBT_TABLE_NAME, get_obt_columns
 
-pytestmark = pytest.mark.medium  # OBT query tests parse SQL in DuckDB (~1-2s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 def test_get_query_returns_formatted_sql() -> None:

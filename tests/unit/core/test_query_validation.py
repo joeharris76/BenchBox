@@ -19,7 +19,10 @@ from benchbox.core.validation.query_validation import (
     QueryValidator,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueryValidatorExactModeSafeguards:

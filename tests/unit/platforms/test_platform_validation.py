@@ -18,7 +18,10 @@ from benchbox.platforms.base.validation import (
     ValidationResult,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestValidationResult:
@@ -659,7 +662,6 @@ class TestDatabaseValidator:
 
 @pytest.mark.unit
 @pytest.mark.unit
-@pytest.mark.fast
 class TestValidationCoverageGaps:
     """Test validation coverage gaps."""
 

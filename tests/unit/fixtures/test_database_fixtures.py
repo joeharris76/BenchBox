@@ -11,6 +11,12 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 pytest_plugins = ["tests.fixtures.database_fixtures"]
 
 # Import all database fixtures from the fixtures module
@@ -24,7 +30,6 @@ from tests.fixtures.database_fixtures import (
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestBasicUsage:
     """Test basic database fixture usage patterns."""
 
@@ -53,7 +58,6 @@ class TestBasicUsage:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestParameterizedFixtures:
     """Test parameterized fixtures."""
 
@@ -73,7 +77,6 @@ class TestParameterizedFixtures:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestCustomDatabases:
     """Test custom database factory."""
 
@@ -113,7 +116,6 @@ class TestCustomDatabases:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestPerformanceFixtures:
     """Test performance-optimized fixtures."""
 
@@ -133,7 +135,6 @@ class TestPerformanceFixtures:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestUtilityFunctions:
     """Test utility functions for advanced scenarios."""
 
@@ -183,7 +184,6 @@ class TestUtilityFunctions:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestBackwardCompatibility:
     """Test backward compatibility - existing tests work unchanged."""
 
@@ -211,7 +211,6 @@ class TestBackwardCompatibility:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestMigrationPatterns:
     """Test migration from old patterns to new ones."""
 
@@ -268,7 +267,6 @@ class TestMigrationPatterns:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestFixtureErrorHandling:
     """Test error handling and edge cases in database fixtures."""
 
@@ -297,7 +295,6 @@ class TestFixtureErrorHandling:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestFixtureResourceManagement:
     """Test proper resource management in database fixtures."""
 
@@ -326,7 +323,6 @@ class TestFixtureResourceManagement:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestFixtureConfiguration:
     """Test fixture configuration options."""
 
@@ -377,7 +373,6 @@ class TestFixtureConfiguration:
 
 @pytest.mark.unit
 @pytest.mark.duckdb
-@pytest.mark.fast
 class TestDatabaseFixtureConsistency:
     """Test consistency across different fixture types."""
 

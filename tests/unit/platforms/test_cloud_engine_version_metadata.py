@@ -5,7 +5,10 @@ import pytest
 from benchbox.core.results.platform_info import PlatformInfoInput, merge_platform_info
 from benchbox.core.results.schema import ENGINE_VERSION_KEYS, _collect_engine_version_metadata
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestEngineVersionMetadataFields:

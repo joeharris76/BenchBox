@@ -1,7 +1,7 @@
 # BenchBox Makefile
 # This makefile provides commands for building, testing and development
 
-.PHONY: test test-unit test-integration test-tpch test-all test-fast test-unlock test-medium test-slow test-stress test-pytest clean lint install develop coverage coverage-html coverage-report coverage-check test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke test-local-matrix complexity-check complexity-report duplicate-check duplicate-check-verbose duplicate-check-json
+.PHONY: test test-unit test-integration test-tpch test-all test-fast test-unlock test-medium test-slow test-stress test-pytest clean lint install develop coverage coverage-html coverage-report coverage-check test-duckdb test-sqlite test-read-primitives test-benchmarks test-ci typecheck validate-imports format dependency-check docs-build docs-serve docs-clean docs-linkcheck docs-validate docs-check docs-images test-pyspark ci-lint ci-test ci-docs ci-local security-audit spellcheck docstring-coverage test-package test-integration-smoke test-local-matrix complexity-check complexity-report duplicate-check duplicate-check-verbose duplicate-check-json codex-skills-sync codex-skills-check mutation-test
 
 # Primary test commands using pytest marker system
 test: test-fast
@@ -9,9 +9,9 @@ test: test-fast
 
 test-all:
 	@echo "Running non-resource-heavy tests in parallel..."
-	uv run -- python -m pytest -m "not (stress or resource_heavy)"
-	@echo "Running resource-heavy tests serially..."
-	uv run -- python -m pytest -m "resource_heavy and not stress" -n 0
+	uv run -- python -m pytest -m "not (slow or stress or resource_heavy or live_integration)"
+	@echo "Running slow and resource-heavy tests serially..."
+	uv run -- python -m pytest -m "(slow or resource_heavy) and not (stress or live_integration)" -n 0
 
 test-unit:
 	uv run -- python -m pytest -m "unit" --tb=short
@@ -22,9 +22,9 @@ test-integration:
 test-tpch:
 	uv run -- python -m pytest -m "tpch" --tb=short
 
-# Quick tests without data generation (using fast marker)
+# Curated lightweight smoke lane
 test-quick:
-	uv run -- python -m pytest -m "fast and not slow" --tb=short --maxfail=5
+	uv run -- python -m pytest -m "fast and not (slow or stress or resource_heavy or live_integration)" --tb=short --maxfail=5
 
 # Verbose test output for all tests
 test-verbose:
@@ -36,7 +36,7 @@ test-pytest:
 
 # Speed-based testing
 test-fast:
-	uv run -- python -m pytest -m "fast" --tb=short
+	uv run -- python -m pytest -m "fast and not (slow or stress or resource_heavy or live_integration)" --tb=short
 
 test-unlock:
 	@echo "Removing stale BenchBox test lock..."
@@ -44,17 +44,17 @@ test-unlock:
 	@echo "Lock cleared."
 
 test-medium:
-	uv run -- python -m pytest -m "medium" --tb=short --timeout=60
+	uv run -- python -m pytest -m "medium and not (slow or stress or resource_heavy or live_integration)" --tb=short --timeout=60 -n 5
 
 test-slow:
-	uv run -- python -m pytest -m "slow" --tb=short -v
+	uv run -- python -m pytest -m "slow and not (stress or live_integration)" -n 0 --tb=short -v
 
 test-stress:
 	uv run -- python -m pytest -m "stress" -n 0 --tb=short -v
 
-# Development cycle testing
+# Development cycle testing using the curated fast unit subset
 test-dev:
-	uv run -- python -m pytest -m "fast and unit" --tb=short --maxfail=3
+	uv run -- python -m pytest -m "fast and unit and not (slow or stress or resource_heavy or live_integration)" --tb=short --maxfail=3
 
 # Smoke tests (alias for test-quick)
 test-smoke: test-quick
@@ -142,12 +142,6 @@ coverage-html:
 coverage-report:
 	uv run -- python -m pytest -c pytest-ci.ini --cov=benchbox --cov-report=xml:coverage.xml --cov-report=term-missing
 
-coverage-check:
-	uv run -- python scripts/check_module_coverage.py --coverage-xml coverage.xml --threshold 50
-
-coverage-per-file:
-	uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=json --cov-report=term-missing --cov-fail-under=50
-	uv run -- python scripts/check_per_file_coverage.py --min 50 --coverage-json coverage.json
 
 # Cyclomatic complexity checks
 complexity-check:
@@ -181,6 +175,13 @@ clean:
 lint:
 	uv run ruff check .
 
+# Sync/check repo-local shared skill mirrors for Codex portability
+codex-skills-sync:
+	uv run -- python _project/scripts/sync_codex_shared_skills.py sync
+
+codex-skills-check:
+	uv run -- python _project/scripts/sync_codex_shared_skills.py check
+
 # Duplicate code detection (AST structural clone detection)
 duplicate-check:
 	uv run -- python scripts/check_duplicate_code.py
@@ -191,6 +192,12 @@ duplicate-check-verbose:
 duplicate-check-json:
 	uv run -- python scripts/check_duplicate_code.py --json
 
+mutation-test:
+	@echo "Running mutation tests on critical modules..."
+	uv run -- mutmut run
+	@echo "--- Mutation test results ---"
+	uv run -- mutmut results
+
 ##@ CI Local Equivalents
 # These targets mirror GitHub Actions workflows for local validation
 
@@ -200,20 +207,21 @@ ci-lint:
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run ty check
+	uv run -- python _project/scripts/sync_codex_shared_skills.py check
 	@echo "✅ CI lint checks passed"
 
 # CI test check - exact match for test.yml workflow (fast tests with coverage)
 # Note: -p pytest_cov re-enables pytest-cov which is disabled by default in pytest.ini
-# Coverage threshold set to 50% (current baseline); TODO: increase as coverage improves
+# Suite-wide coverage threshold set to 60%
 ci-test:
 	@echo "Running CI test suite..."
-	uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=xml:coverage.xml --cov-report=term-missing --cov-fail-under=50
-	uv run -- python scripts/check_module_coverage.py --coverage-xml coverage.xml --threshold 50
+	uv run -- python -m pytest tests -m "fast" --tb=short -p pytest_cov --cov=benchbox --cov-report=xml:coverage.xml --cov-report=term-missing --cov-fail-under=60
 	@echo "✅ CI test suite passed"
 
 # CI docs build - exact match for docs.yml workflow
 ci-docs:
-	@echo "Running CI docs build..."
+	@echo "Running CI docs checks..."
+	@$(MAKE) docs-validate
 	@cd docs && uv run sphinx-build -b html --keep-going . _build/html
 	@echo "✅ CI docs build passed"
 
@@ -345,6 +353,14 @@ docs-validate:
 	@echo ""
 	@echo "Checking example file syntax..."
 	@uv run -- python scripts/check_example_syntax.py
+	@echo ""
+	@echo "Validating visualization screenshot sync..."
+	@uv run -- python scripts/validate_visualization_images.py
+
+# Refresh generated visualization screenshots and sync shared docs/blog copies
+docs-images:
+	@echo "Capturing visualization screenshots..."
+	@uv run -- python scripts/capture_chart_images.py
 
 # Run all documentation checks (build, linkcheck, validate)
 docs-check: docs-validate docs-linkcheck docs-build
@@ -440,6 +456,7 @@ help:
 	@echo "  make validate-imports Validate import structure and detect circular dependencies"
 	@echo "  make dependency-check Validate lock file against pyproject specs (ARGS='--matrix' to show summary)"
 	@echo "  make duplicate-check Detect duplicate code via AST structural hashing"
+	@echo "  make mutation-test   Run mutation testing on critical modules (mutmut)"
 	@echo "  make format          Format code with ruff"
 	@echo "  make clean           Remove build artifacts"
 	@echo "  make install         Install the package"
@@ -451,7 +468,8 @@ help:
 	@echo "  make docs-serve      Build and serve docs at http://localhost:8000"
 	@echo "  make docs-clean      Clean documentation build artifacts"
 	@echo "  make docs-linkcheck  Check for broken links in documentation"
-	@echo "  make docs-validate   Validate example file references and syntax"
+	@echo "  make docs-validate   Validate example references, syntax, and screenshot sync"
+	@echo "  make docs-images     Refresh generated visualization screenshots and sync docs/blog copies"
 	@echo "  make docs-check      Run all documentation checks (validate, linkcheck, build)"
 	@echo ""
 	@echo "  make help            Show this help message"

@@ -6,7 +6,10 @@ import pytest
 from benchbox.core.tpcds_obt.benchmark import TPCDSOBTBenchmark
 from benchbox.core.tpcds_obt.schema import OBT_TABLE_NAME
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class StubGenerator:

@@ -7,7 +7,10 @@ from benchbox.core.tpcds.maintenance_operations import (
     MaintenanceOperationType,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class FakeCursor:

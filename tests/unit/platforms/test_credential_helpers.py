@@ -15,7 +15,10 @@ from benchbox.platforms.credentials.helpers import (
     prompt_with_default,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestFormatPromptWithCurrent:

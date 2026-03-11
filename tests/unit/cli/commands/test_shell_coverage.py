@@ -12,7 +12,10 @@ from click.testing import CliRunner
 
 mod = importlib.import_module("benchbox.cli.commands.shell")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_platform_extension_mapping() -> None:

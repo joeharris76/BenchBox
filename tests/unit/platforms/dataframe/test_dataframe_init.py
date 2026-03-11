@@ -6,7 +6,10 @@ import pytest
 
 import benchbox.platforms.dataframe as dataframe_pkg
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_dataframe_package_exports_core_symbols() -> None:

@@ -18,7 +18,10 @@ from benchbox.core.dataframe.profiling import (
     compare_execution_modes,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueryPlan:

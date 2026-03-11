@@ -21,7 +21,10 @@ from benchbox.core.write_primitives.schema import (
     get_table_schema,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestWritePrimitivesSchema:

@@ -9,7 +9,10 @@ import pytest
 from benchbox.core.schemas import BenchmarkConfig, DryRunResult
 from benchbox.examples import dryrun_utils
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FakeExecutor:

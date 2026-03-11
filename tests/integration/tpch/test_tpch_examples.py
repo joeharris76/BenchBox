@@ -13,6 +13,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 class TestTPCHExamples:
     """Test that example scripts work with ultra-simplified implementation."""

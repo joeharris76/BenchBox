@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.platforms.base.adapter import DriverIsolationCapability, check_isolation_capability
 
-pytestmark = [pytest.mark.fast, pytest.mark.integration]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
 
 
 # --------------------------------------------------------------------------- #

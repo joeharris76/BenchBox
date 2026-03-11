@@ -50,8 +50,8 @@ from .base.adapter import check_isolation_capability
 #   - DuckDBAdapter (duckdb - core dependency, always available)
 #   - MotherDuckAdapter (duckdb - shares core dependency)
 #   - SQLiteAdapter (stdlib sqlite3)
-#   - DataFusionAdapter (datafusion - lightweight)
-#   - PolarsAdapter (polars - lightweight)
+#   - DataFusionAdapter (datafusion - ~68 MB native lib, now lazy)
+#   - PolarsAdapter (polars - ~142 MB native lib, now lazy)
 #   - PostgreSQLAdapter (psycopg2 - core dependency)
 #   - TimescaleDBAdapter (psycopg2 - shares core dependency)
 # ============================================================================
@@ -85,6 +85,9 @@ _LAZY_ADAPTERS = {
     "QuantonAdapter": ".onehouse",
     "LakeSailAdapter": ".lakesail",
     "DorisAdapter": ".doris",
+    # Native-heavy adapters deferred to avoid ~210 MB of native library loading per process
+    "DataFusionAdapter": ".datafusion",
+    "PolarsAdapter": ".polars_platform",
     # DataFrame adapters (have their own lazy loading but need module-level deferral)
     "PolarsDataFrameAdapter": ".dataframe",
     "PandasDataFrameAdapter": ".dataframe",
@@ -215,15 +218,8 @@ try:
 except ImportError:
     SQLiteAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
 
-try:
-    from .datafusion import DataFusionAdapter
-except ImportError:
-    DataFusionAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
-
-try:
-    from .polars_platform import PolarsAdapter
-except ImportError:
-    PolarsAdapter: Optional[Type[PlatformAdapter]] = None  # type: ignore[assignment,misc]
+# DataFusionAdapter and PolarsAdapter are loaded lazily via _LAZY_ADAPTERS
+# because their native libraries are large (~68 MB and ~142 MB respectively).
 
 try:
     from .postgresql import PostgreSQLAdapter

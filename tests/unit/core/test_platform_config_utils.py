@@ -10,6 +10,11 @@ from benchbox.core.platform_config_utils import (
     standardize_cloud_provider,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestNormalizeWarehouseSize:
     def test_none_size_returns_none(self):

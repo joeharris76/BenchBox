@@ -13,7 +13,10 @@ import pytest
 
 from benchbox.core.tpch.streams import TPCHStreamRunner, TPCHStreams
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCHStreamRunner:

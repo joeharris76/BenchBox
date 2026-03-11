@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from datetime import timezone
 
+import pytest
+
 from benchbox.utils.clock import Stopwatch, elapsed_seconds, measure_elapsed, mono_time, utc_now
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_mono_time_is_monotonic() -> None:

@@ -15,7 +15,10 @@ from benchbox.core.results.schema import build_result_payload
 from benchbox.core.runner import run_benchmark_lifecycle
 from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _mk_system_profile() -> SystemProfile:

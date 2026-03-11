@@ -26,7 +26,10 @@ from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 
 # Mark all tests in this file as integration tests
-pytestmark = [pytest.mark.integration, pytest.mark.slow]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
 
 
 class TestTPCComplianceFramework:

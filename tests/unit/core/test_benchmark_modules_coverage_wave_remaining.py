@@ -13,7 +13,10 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # ---------------------------------------------------------------------------

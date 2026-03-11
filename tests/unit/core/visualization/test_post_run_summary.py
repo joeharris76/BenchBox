@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from unittest.mock import patch
 
@@ -10,12 +11,16 @@ import pytest
 from benchbox.core.visualization.post_run_summary import (
     PostRunSummary,
     _extract_environment,
+    _extract_platform_config,
     _should_use_horizontal,
     generate_post_run_summary,
 )
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_result(query_results: list | None = None, **kwargs):
@@ -259,7 +264,7 @@ class TestGeneratePostRunSummary:
         callers are responsible for catching exceptions."""
         result = _make_result([_make_query("Q1", 100.0)])
         with patch(
-            "benchbox.core.visualization.post_run_summary.ASCIISummaryBox.render",
+            "benchbox.core.visualization.post_run_summary.SummaryBox.render",
             side_effect=RuntimeError("render boom"),
         ):
             with pytest.raises(RuntimeError, match="render boom"):
@@ -346,6 +351,7 @@ class TestEnvironmentInfoRendering:
         # The ┬ character would only appear in two-column mode separators
         assert not any("\u252c" in line for line in box_lines)  # ┬
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Unicode box-drawing chars may not render on Windows")
     def test_two_column_has_column_divider(self):
         """Two-column mode uses box-drawing divider characters."""
         queries = [_make_query("Q1", 100.0), _make_query("Q2", 200.0)]
@@ -423,41 +429,174 @@ class TestExtractEnvironment:
         env = _extract_environment({"total_memory_gb": 64.0})
         assert env == {"Memory": "64 GB"}
 
+    def test_none_system_profile_returns_none(self):
+        """None system_profile returns None."""
+        assert _extract_environment(None) is None
+
+
+class TestExtractPlatformConfig:
+    """Tests for _extract_platform_config helper."""
+
     def test_platform_info_adds_driver_row(self):
         """platform_info with platform_version adds a Driver row."""
-        env = _extract_environment(None, platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"})
-        assert env is not None
-        assert env["Driver"] == "DuckDB 1.4.3"
+        cfg = _extract_platform_config({"platform_name": "DuckDB", "platform_version": "1.4.3"}, {})
+        assert cfg is not None
+        assert cfg["Driver"] == "DuckDB 1.4.3"
 
     def test_platform_info_version_fallback_keys(self):
         """Falls back to 'version' then 'driver_version_actual' when platform_version absent."""
-        env = _extract_environment(None, platform_info={"platform_name": "DuckDB", "version": "1.2.0"})
-        assert env is not None
-        assert env["Driver"] == "DuckDB 1.2.0"
+        cfg = _extract_platform_config({"platform_name": "DuckDB", "version": "1.2.0"}, {})
+        assert cfg is not None
+        assert cfg["Driver"] == "DuckDB 1.2.0"
 
-        env2 = _extract_environment(None, platform_info={"driver_version_actual": "1.1.3"})
-        assert env2 is not None
-        assert env2["Driver"] == "1.1.3"
+        cfg2 = _extract_platform_config({"driver_version_actual": "1.1.3"}, {})
+        assert cfg2 is not None
+        assert cfg2["Driver"] == "1.1.3"
 
     def test_platform_info_no_version_skips_driver_row(self):
         """platform_info without any version key produces no Driver row."""
-        env = _extract_environment({"cpu_count": 8}, platform_info={"platform_name": "DuckDB"})
-        assert env is not None
-        assert "Driver" not in env
+        cfg = _extract_platform_config({"platform_name": "DuckDB"}, {})
+        assert cfg is None
 
-    def test_platform_info_combined_with_system_profile(self):
-        """platform_info Driver row appears alongside system profile rows."""
-        env = _extract_environment(
-            {"os_name": "Darwin", "os_version": "25.3.0"},
-            platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"},
+    def test_table_mode_external(self):
+        """table_mode 'external' without format adds plain Tables row."""
+        cfg = _extract_platform_config(None, {"table_mode": "external"})
+        assert cfg is not None
+        assert cfg["Tables"] == "External"
+
+    def test_table_mode_external_with_format(self):
+        """table_mode 'external' with external_format includes format in parentheses."""
+        cfg = _extract_platform_config(None, {"table_mode": "external", "external_format": "parquet"})
+        assert cfg is not None
+        assert cfg["Tables"] == "External (Parquet)"
+
+    def test_table_mode_external_tbl_format(self):
+        """TBL format is capitalized correctly."""
+        cfg = _extract_platform_config(None, {"table_mode": "external", "external_format": "tbl"})
+        assert cfg is not None
+        assert cfg["Tables"] == "External (Tbl)"
+
+    def test_table_mode_native_excluded(self):
+        """table_mode 'native' (the default) is omitted."""
+        cfg = _extract_platform_config(None, {"table_mode": "native"})
+        assert cfg is None
+
+    def test_tuning_mode(self):
+        """tuning_mode adds Tuning row."""
+        cfg = _extract_platform_config(None, {"tuning_mode": "notuning"})
+        assert cfg is not None
+        assert cfg["Tuning"] == "Notuning"
+
+    def test_table_format_with_compression(self):
+        """table_format renders Table Format row with compression."""
+        cfg = _extract_platform_config(None, {"table_format": "parquet", "table_format_compression": "zstd"})
+        assert cfg is not None
+        assert cfg["Table Format"] == "Parquet (zstd)"
+
+    def test_table_format_without_compression(self):
+        """table_format without table_format_compression renders plain format."""
+        cfg = _extract_platform_config(None, {"table_format": "iceberg"})
+        assert cfg is not None
+        assert cfg["Table Format"] == "Iceberg"
+
+    def test_combined_driver_and_table_mode(self):
+        """Driver + table_mode + tuning_mode all appear together."""
+        cfg = _extract_platform_config(
+            {"platform_name": "DuckDB", "platform_version": "1.4.3"},
+            {"table_mode": "external", "external_format": "parquet", "tuning_mode": "tuned"},
         )
-        assert env is not None
-        assert env["OS"] == "Darwin 25.3.0"
-        assert env["Driver"] == "DuckDB 1.4.3"
+        assert cfg is not None
+        assert cfg["Driver"] == "DuckDB 1.4.3"
+        assert cfg["Tables"] == "External (Parquet)"
+        assert cfg["Tuning"] == "Tuned"
 
     def test_both_none_returns_none(self):
-        """Both system_profile and platform_info being None returns None."""
-        assert _extract_environment(None, platform_info=None) is None
+        """Both platform_info and run_cfg empty returns None."""
+        assert _extract_platform_config(None, {}) is None
+
+
+class TestExternalFormatSummaryDisplay:
+    """End-to-end tests: external_format in execution_metadata renders in summary box.
+
+    These tests verify the full pipeline: execution_metadata -> _extract_platform_config
+    -> SummaryStats -> rendered summary box.  system_profile is required to activate
+    the multi-column layout where platform_config (Tables row) appears.
+    """
+
+    def test_parquet_format_appears_in_summary_box(self):
+        """Summary box should display 'External (Parquet)' when format is parquet."""
+        queries = [_make_query("Q1", 100.0), _make_query("Q2", 200.0)]
+        result = _make_result(
+            queries,
+            platform="duckdb",
+            execution_metadata={
+                "run_config": {"table_mode": "external", "external_format": "parquet"},
+            },
+            platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"},
+            system_profile=_SAMPLE_SYSTEM_PROFILE,
+        )
+        summary = generate_post_run_summary(result, color=False, max_width=120)
+        assert "External (Parquet)" in summary.summary_box
+
+    def test_tbl_format_appears_in_summary_box(self):
+        """Summary box should display 'External (Tbl)' when format is tbl."""
+        queries = [_make_query("Q1", 100.0), _make_query("Q2", 200.0)]
+        result = _make_result(
+            queries,
+            platform="duckdb",
+            execution_metadata={
+                "run_config": {"table_mode": "external", "external_format": "tbl"},
+            },
+            platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"},
+            system_profile=_SAMPLE_SYSTEM_PROFILE,
+        )
+        summary = generate_post_run_summary(result, color=False, max_width=120)
+        assert "External (Tbl)" in summary.summary_box
+
+    def test_external_without_format_shows_plain_external(self):
+        """When external_format is absent, summary shows just 'External'."""
+        queries = [_make_query("Q1", 100.0), _make_query("Q2", 200.0)]
+        result = _make_result(
+            queries,
+            platform="duckdb",
+            execution_metadata={
+                "run_config": {"table_mode": "external"},
+            },
+            platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"},
+            system_profile=_SAMPLE_SYSTEM_PROFILE,
+        )
+        summary = generate_post_run_summary(result, color=False, max_width=120)
+        assert "External" in summary.summary_box
+        assert "External (" not in summary.summary_box
+
+    def test_native_mode_omits_tables_row_from_summary(self):
+        """Native table mode should not produce a Tables row in the summary."""
+        queries = [_make_query("Q1", 100.0), _make_query("Q2", 200.0)]
+        result = _make_result(
+            queries,
+            platform="duckdb",
+            execution_metadata={
+                "run_config": {"table_mode": "native"},
+            },
+            system_profile=_SAMPLE_SYSTEM_PROFILE,
+        )
+        summary = generate_post_run_summary(result, color=False, max_width=120)
+        assert "Tables" not in summary.summary_box
+
+    def test_table_format_appears_in_summary_box(self):
+        """Summary box should display table format from run_config."""
+        queries = [_make_query("Q1", 100.0), _make_query("Q2", 200.0)]
+        result = _make_result(
+            queries,
+            platform="duckdb",
+            execution_metadata={
+                "run_config": {"table_format": "parquet", "table_format_compression": "zstd"},
+            },
+            platform_info={"platform_name": "DuckDB", "platform_version": "1.4.3"},
+            system_profile=_SAMPLE_SYSTEM_PROFILE,
+        )
+        summary = generate_post_run_summary(result, color=False, max_width=120)
+        assert "Parquet (zstd)" in summary.summary_box
 
 
 class TestShouldUseHorizontal:
@@ -519,7 +658,7 @@ class TestHorizontalBarChartIntegration:
     """Tests that generate_post_run_summary() selects the correct chart type."""
 
     def test_long_query_names_produce_horizontal_bars(self):
-        """Primitives-style long names should render using ASCIIBarChart (horizontal)."""
+        """Primitives-style long names should render using BarChart (horizontal)."""
         queries = [
             _make_query("aggregation_groupby_large", 100.0),
             _make_query("shuffle_inner_join", 200.0),
@@ -537,7 +676,7 @@ class TestHorizontalBarChartIntegration:
         assert "read_parquet_single" in summary.query_histogram
 
     def test_short_query_names_produce_vertical_histogram(self):
-        """TPC-H style short IDs should render using ASCIIQueryHistogram (vertical)."""
+        """TPC-H style short IDs should render using Histogram (vertical)."""
         queries = [_make_query(f"Q{i}", float(i * 10)) for i in range(1, 6)]
         result = _make_result(queries)
         summary = generate_post_run_summary(result, color=False)

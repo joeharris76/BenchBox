@@ -16,7 +16,10 @@ import pytest
 
 from benchbox.core.expected_results.models import ValidationMode, ValidationResult
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAdapterValidationConsistency:

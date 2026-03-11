@@ -12,7 +12,10 @@ import pytest
 from benchbox.core.data_organization.config import DataOrganizationConfig, SortColumn
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCDSStreamingCompression:

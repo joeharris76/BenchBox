@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.platforms.credentials.redshift import setup_redshift_credentials
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestRedshiftCredentialDefaults:

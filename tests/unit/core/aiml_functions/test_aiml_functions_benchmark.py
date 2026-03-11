@@ -14,7 +14,10 @@ from benchbox.core.aiml_functions.benchmark import (
 )
 from benchbox.core.aiml_functions.functions import AIMLFunctionCategory
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAIMLQueryResult:

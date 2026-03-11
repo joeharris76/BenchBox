@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 NOTEBOOK_DIR = Path(__file__).parent.parent.parent / "examples" / "notebooks"
 

@@ -25,6 +25,7 @@ except ImportError:
     DUCKDB_AVAILABLE = False
 
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.fast,
     pytest.mark.skipif(not DEPS_AVAILABLE, reason="Polars and/or Pandas not installed"),
 ]

@@ -17,7 +17,10 @@ from click.testing import CliRunner
 from benchbox.cli.main import cli
 from benchbox.core.schemas import DatabaseConfig
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_database_config(driver_version_actual=None, driver_version_resolved=None):

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+import pytest
+
 from benchbox.core.tuning import TuningColumn
 from benchbox.core.tuning.ddl_generator import ColumnDefinition
 from benchbox.core.tuning.interface import TableTuning
@@ -21,6 +23,11 @@ from benchbox.platforms.base.cloud_spark.mixins import (
     SparkDDLGeneratorMixin,
     SparkTableFormat,
 )
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockSparkAdapter(SparkDDLGeneratorMixin):

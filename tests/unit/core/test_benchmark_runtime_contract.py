@@ -13,7 +13,11 @@ from benchbox.core.contracts.benchmark_runtime import (
     has_runtime_contract,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Benchmarks resolved by benchbox.core.benchmark_loader.
 LOADER_RESOLVED_BENCHMARK_IDS: tuple[str, ...] = tuple(list_loader_benchmark_ids())

@@ -15,6 +15,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # ===================================================================
 # normalize_benchmark_name
 # ===================================================================

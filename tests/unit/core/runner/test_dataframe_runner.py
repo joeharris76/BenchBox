@@ -11,6 +11,7 @@ Copyright 2026 Joe Harris / BenchBox Project
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,7 +27,10 @@ from benchbox.core.runner.dataframe_runner import (
     run_dataframe_benchmark,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestIsDataFrameExecution:
@@ -34,31 +38,19 @@ class TestIsDataFrameExecution:
 
     def test_polars_df_is_dataframe(self):
         """Test polars-df is detected as DataFrame mode."""
-        config = MagicMock()
-        config.type = "polars-df"
-
-        assert is_dataframe_execution(config) is True
+        assert is_dataframe_execution(types.SimpleNamespace(type="polars-df")) is True
 
     def test_pandas_df_is_dataframe(self):
         """Test pandas-df is detected as DataFrame mode."""
-        config = MagicMock()
-        config.type = "pandas-df"
-
-        assert is_dataframe_execution(config) is True
+        assert is_dataframe_execution(types.SimpleNamespace(type="pandas-df")) is True
 
     def test_duckdb_is_sql(self):
         """Test duckdb is detected as SQL mode."""
-        config = MagicMock()
-        config.type = "duckdb"
-
-        assert is_dataframe_execution(config) is False
+        assert is_dataframe_execution(types.SimpleNamespace(type="duckdb")) is False
 
     def test_polars_without_df_is_sql(self):
         """Test polars (without -df) is SQL mode."""
-        config = MagicMock()
-        config.type = "polars"
-
-        assert is_dataframe_execution(config) is False
+        assert is_dataframe_execution(types.SimpleNamespace(type="polars")) is False
 
     def test_none_config(self):
         """Test None config returns False."""
@@ -66,10 +58,7 @@ class TestIsDataFrameExecution:
 
     def test_case_insensitive(self):
         """Test case insensitive detection."""
-        config = MagicMock()
-        config.type = "Polars-DF"
-
-        assert is_dataframe_execution(config) is True
+        assert is_dataframe_execution(types.SimpleNamespace(type="Polars-DF")) is True
 
 
 class TestGetExecutionMode:
@@ -77,17 +66,11 @@ class TestGetExecutionMode:
 
     def test_dataframe_mode(self):
         """Test DataFrame platform returns 'dataframe'."""
-        config = MagicMock()
-        config.type = "polars-df"
-
-        assert get_execution_mode(config) == "dataframe"
+        assert get_execution_mode(types.SimpleNamespace(type="polars-df")) == "dataframe"
 
     def test_sql_mode(self):
         """Test SQL platform returns 'sql'."""
-        config = MagicMock()
-        config.type = "duckdb"
-
-        assert get_execution_mode(config) == "sql"
+        assert get_execution_mode(types.SimpleNamespace(type="duckdb")) == "sql"
 
     def test_none_returns_sql(self):
         """Test None config returns 'sql'."""
@@ -283,15 +266,8 @@ class TestModeCoexistence:
 
     def test_same_benchmark_different_modes(self):
         """Test same benchmark can be identified for different modes."""
-        sql_config = MagicMock()
-        sql_config.type = "duckdb"
-
-        df_config = MagicMock()
-        df_config.type = "polars-df"
-
-        # Same benchmark name
-        sql_mode = get_execution_mode(sql_config)
-        df_mode = get_execution_mode(df_config)
+        sql_mode = get_execution_mode(types.SimpleNamespace(type="duckdb"))
+        df_mode = get_execution_mode(types.SimpleNamespace(type="polars-df"))
 
         assert sql_mode == "sql"
         assert df_mode == "dataframe"
@@ -311,9 +287,7 @@ class TestModeCoexistence:
         }
 
         for platform, expected_mode in platforms.items():
-            config = MagicMock()
-            config.type = platform
-            actual_mode = get_execution_mode(config)
+            actual_mode = get_execution_mode(types.SimpleNamespace(type=platform))
             assert actual_mode == expected_mode, f"Platform {platform} expected {expected_mode}, got {actual_mode}"
 
 

@@ -4,7 +4,10 @@ import pytest
 
 from benchbox.utils.output_path import normalize_output_root
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_normalize_local_path():

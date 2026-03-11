@@ -335,6 +335,7 @@ def _execute_load_only_mode(
     adapter: Any,
     platform_config: dict[str, Any] | None,
     validation_opts: ValidationOptions,
+    table_mode: str = "native",
 ) -> tuple[BenchmarkResults, ValidationResult | None]:
     """Execute load-only workflow using the core runner primitives."""
 
@@ -347,8 +348,15 @@ def _execute_load_only_mode(
     try:
         connection = adapter.create_connection(**(platform_config or {}))
 
-        # Create schema before loading data
-        schema_time = adapter.create_schema(benchmark, connection)
+        if table_mode == "external":
+            if not getattr(adapter, "supports_external_tables", False):
+                raise RuntimeError(
+                    f"Platform '{getattr(adapter, 'platform_name', type(adapter).__name__)}' "
+                    "does not support --table-mode external"
+                )
+            validate_external = getattr(adapter, "validate_external_table_requirements", None)
+            if callable(validate_external):
+                validate_external()
 
         data_dir = getattr(benchmark, "output_dir", None)
         if data_dir is None:
@@ -356,7 +364,21 @@ def _execute_load_only_mode(
         if data_dir is None:
             raise RuntimeError("Benchmark output directory not configured; cannot perform load-only operations")
 
-        table_stats, load_time, per_table_timings = adapter.load_data(benchmark, connection, data_dir)
+        if table_mode == "external":
+            table_stats, load_time, per_table_timings = adapter.create_external_tables(benchmark, connection, data_dir)
+            schema_phase = {
+                "status": "SKIPPED",
+                "duration_ms": 0,
+                "reason": "External table mode bypasses native schema+load materialization",
+            }
+        else:
+            # Create schema before loading data in native table mode.
+            schema_time = adapter.create_schema(benchmark, connection)
+            table_stats, load_time, per_table_timings = adapter.load_data(benchmark, connection, data_dir)
+            schema_phase = {
+                "status": "COMPLETED",
+                "duration_ms": int(schema_time * 1000),
+            }
 
         if validation_opts.enable_postload_validation:
             if hasattr(benchmark, "validate_loaded_data"):
@@ -373,10 +395,7 @@ def _execute_load_only_mode(
 
         phases = {
             "data_generation": {"status": "COMPLETED"},
-            "schema_creation": {
-                "status": "COMPLETED",
-                "duration_ms": int(schema_time * 1000),
-            },
+            "schema_creation": schema_phase,
             "data_loading": {
                 "status": "COMPLETED",
                 "duration_ms": int(load_time * 1000),
@@ -458,16 +477,16 @@ def _run_format_conversion(
     """
     # Extract conversion settings from benchmark_config.options
     options_dict = getattr(benchmark_config, "options", {}) or {}
-    convert_format = options_dict.get("convert_format")
+    table_format = options_dict.get("table_format")
 
     # Check if conversion is requested
-    if not convert_format:
+    if not table_format:
         return None
 
     # Validate format
     allowed_formats = {"parquet", "vortex", "delta", "iceberg"}
-    if convert_format.lower() not in allowed_formats:
-        logger.error(f"Invalid format: {convert_format}. Allowed: {allowed_formats}")
+    if table_format.lower() not in allowed_formats:
+        logger.error(f"Invalid format: {table_format}. Allowed: {allowed_formats}")
         return None
 
     output_dir = getattr(benchmark, "output_dir", None)
@@ -488,25 +507,31 @@ def _run_format_conversion(
         return None
 
     # Build conversion options from benchmark_config.options
-    conversion_compression = options_dict.get("conversion_compression", "snappy")
-    conversion_partition_cols = options_dict.get("conversion_partition_cols", [])
+    tf_compression = options_dict.get("table_format_compression", "snappy")
+    tf_partition_cols = options_dict.get("table_format_partition_cols", [])
 
     options = ConversionOptions(
-        compression=conversion_compression,
-        partition_cols=conversion_partition_cols or [],
+        compression=tf_compression,
+        partition_cols=tf_partition_cols or [],
         merge_shards=True,
         validate_row_count=True,
     )
 
+    # When targeting Vortex in external table mode, require the DuckDB extension writer
+    # so that generated files are compatible with DuckDB's read_vortex().
+    table_mode = options_dict.get("table_mode", "native")
+    if table_format == "vortex" and str(table_mode).lower() == "external":
+        options.metadata["require_duckdb_writer"] = True
+
     # Run conversion orchestration
     orchestrator = FormatConversionOrchestrator()
-    logger.info(f"Converting benchmark data to {convert_format} format (compression: {options.compression})")
+    logger.info(f"Converting benchmark data to {table_format} format (compression: {options.compression})")
 
     try:
         results = orchestrator.convert_benchmark_tables(
             manifest_path=manifest_path,
             output_dir=output_dir,
-            target_format=convert_format,
+            target_format=table_format,
             schemas=schemas,
             options=options,
         )
@@ -514,7 +539,7 @@ def _run_format_conversion(
         return results
     except Exception as e:
         logger.error(f"Format conversion failed: {e}")
-        raise RuntimeError(f"Format conversion to {convert_format} failed") from e
+        raise RuntimeError(f"Format conversion to {table_format} failed") from e
 
 
 @dataclass
@@ -683,6 +708,12 @@ def run_benchmark_lifecycle(
         adapter.apply_verbosity(verbosity_settings)
 
     options = getattr(benchmark_config, "options", {}) or {}
+    table_mode = str(options.get("table_mode", "native") or "native").lower()
+
+    # Propagate table_mode to adapter so run_enhanced_benchmark can route
+    # to create_external_tables instead of create_schema + load_data.
+    if adapter is not None and hasattr(adapter, "table_mode"):
+        adapter.table_mode = table_mode
 
     # Detect DataFrame adapter by checking for 'family' attribute
     is_dataframe_adapter = hasattr(adapter, "family") and adapter.family in ("expression", "pandas")
@@ -731,6 +762,7 @@ def run_benchmark_lifecycle(
                 adapter=adapter,
                 platform_config=platform_config,
                 validation_opts=validation_opts,
+                table_mode=table_mode,
             )
 
             if postload_result is not None:
@@ -775,6 +807,40 @@ def run_benchmark_lifecycle(
         or GENERIC_POWER_DEFAULT_WARMUP_ITERATIONS
     )
     fail_fast = bool(options.get("power_fail_fast", False))
+    table_format_raw = options.get("table_format")
+    table_format = None
+    if isinstance(table_format_raw, str) and table_format_raw.strip():
+        table_format = table_format_raw.strip().lower()
+
+    # Fail fast: ensure the platform supports the requested table format
+    if table_format:
+        from benchbox.platforms.base.format_capabilities import get_supported_formats
+
+        platform_name = getattr(adapter, "platform_name", "unknown")
+        supported = get_supported_formats(
+            platform_name,
+            table_mode=table_mode,
+            platform_config=getattr(adapter, "__dict__", None),
+        )
+        if table_format not in supported:
+            raise RuntimeError(
+                f"Platform '{platform_name}' does not support table format '{table_format}'. "
+                f"Supported formats: {supported}"
+            )
+
+    table_format_compression_raw = options.get("table_format_compression", "snappy")
+    table_format_compression = str(table_format_compression_raw or "snappy")
+
+    table_format_partition_cols_raw = options.get("table_format_partition_cols")
+    table_format_partition_cols: list[str] = []
+    if isinstance(table_format_partition_cols_raw, str):
+        table_format_partition_cols = [
+            part.strip() for part in table_format_partition_cols_raw.split(",") if part.strip()
+        ]
+    elif isinstance(table_format_partition_cols_raw, (list, tuple)):
+        table_format_partition_cols = [
+            str(part).strip() for part in table_format_partition_cols_raw if str(part).strip()
+        ]
 
     run_config = RunConfig(
         query_subset=benchmark_config.queries,
@@ -796,6 +862,9 @@ def run_benchmark_lifecycle(
         power_fail_fast=fail_fast,
         capture_plans=benchmark_config.capture_plans,
         strict_plan_capture=benchmark_config.strict_plan_capture,
+        table_format=table_format,
+        table_format_compression=table_format_compression,
+        table_format_partition_cols=table_format_partition_cols,
     )
 
     if is_dataframe_adapter:
@@ -1108,7 +1177,9 @@ def _validate_manifest_if_present(benchmark: Any, config: BenchmarkConfig) -> tu
             return False, None, True
 
         # Validate manifest entries using V2-aware helper
-        from benchbox.utils.datagen_manifest import get_table_files
+        from pathlib import Path
+
+        from benchbox.utils.datagen_manifest import compute_entry_size, get_table_files
 
         tables = manifest.get("tables", {}) or {}
         for table_name in tables.keys():
@@ -1119,10 +1190,18 @@ def _validate_manifest_if_present(benchmark: Any, config: BenchmarkConfig) -> tu
                 if rel is None or size < 0:
                     return False, None, True
                 fp = output_dir.joinpath(rel)
-                if (not hasattr(fp, "exists") or not fp.exists()) or (
-                    not hasattr(fp, "stat") or fp.stat().st_size != size
-                ):
+                if not hasattr(fp, "exists") or not fp.exists():
                     return False, None, True
+                # Use compute_entry_size for directory-aware size comparison
+                # (directories like Delta/Iceberg need recursive file sum)
+                if isinstance(fp, Path) and compute_entry_size(fp) != size:
+                    return False, None, True
+                # Cloud paths: fall back to stat() (directories not expected)
+                if not isinstance(fp, Path):
+                    if hasattr(fp, "is_dir") and fp.is_dir():
+                        logger.warning("Cloud path %s is a directory; size check may be inaccurate", rel)
+                    if not hasattr(fp, "stat") or fp.stat().st_size != size:
+                        return False, None, True
         return True, manifest, True
     except Exception:
         return False, None, bool(locals().get("manifest_found", False))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from benchbox.core.manifest.models import ManifestV2
 from benchbox.platforms.base.format_capabilities import get_supported_formats
 
@@ -10,6 +12,8 @@ def get_preferred_format(
     manifest: ManifestV2,
     table_name: str,
     platform_name: str,
+    table_mode: str = "native",
+    platform_config: Mapping[str, Any] | None = None,
 ) -> str | None:
     """Get preferred format for a table on a platform.
 
@@ -35,7 +39,7 @@ def get_preferred_format(
         return None
 
     # Get platform supported formats (in preference order)
-    platform_formats = get_supported_formats(platform_name)
+    platform_formats = get_supported_formats(platform_name, table_mode=table_mode, platform_config=platform_config)
 
     # Try manifest preference first
     for fmt in manifest.format_preference:

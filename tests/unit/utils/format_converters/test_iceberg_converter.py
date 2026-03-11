@@ -1,6 +1,7 @@
 """Tests for Apache Iceberg format converter."""
 
 import sys
+from pathlib import Path
 
 import pyarrow as pa
 import pytest
@@ -23,7 +24,11 @@ except ImportError:
 # Iceberg has path format issues on Windows (WinError 123)
 IS_WINDOWS = sys.platform == "win32"
 
-pytestmark = pytest.mark.skipif(not ICEBERG_AVAILABLE, reason="Iceberg library not installed")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(not ICEBERG_AVAILABLE, reason="Iceberg library not installed"),
+]
 
 
 class TestIcebergConverterBasics:
@@ -502,6 +507,79 @@ class TestIcebergConversion:
         # Verify table was overwritten (has 2 rows, not 3)
         assert result2.row_count == 2
 
+    def test_convert_with_non_nullable_schema(self, temp_dir):
+        """Non-nullable schema fields must survive CSV reading and Iceberg write.
+
+        PyArrow's CSV reader ignores nullability constraints, producing all-nullable
+        columns.  The converter must re-apply declared nullability so PyIceberg's
+        strict field validation does not reject the write.  This is the exact
+        scenario that broke Iceberg conversion for TPC-H (all columns NOT NULL).
+        """
+        schema = {
+            "columns": [
+                {"name": "id", "type": "INTEGER", "nullable": False},
+                {"name": "name", "type": "VARCHAR(25)", "nullable": False},
+                {"name": "amount", "type": "DECIMAL(15,2)", "nullable": False},
+            ]
+        }
+
+        tbl_file = temp_dir / "test.tbl"
+        tbl_file.write_text("1|Alice|100.50|\n2|Bob|200.75|\n")
+
+        converter = IcebergConverter()
+        result = converter.convert(
+            source_files=[tbl_file],
+            table_name="test",
+            schema=schema,
+            options=ConversionOptions(output_dir=temp_dir),
+        )
+
+        assert result.success is True
+        assert result.row_count == 2
+
+    def test_convert_with_mixed_nullability(self, temp_dir):
+        """Schema mixing nullable and non-nullable fields converts correctly."""
+        schema = {
+            "columns": [
+                {"name": "id", "type": "INTEGER", "nullable": False},
+                {"name": "comment", "type": "VARCHAR(100)", "nullable": True},
+            ]
+        }
+
+        tbl_file = temp_dir / "test.tbl"
+        tbl_file.write_text("1|hello|\n2||\n")
+
+        converter = IcebergConverter()
+        result = converter.convert(
+            source_files=[tbl_file],
+            table_name="test",
+            schema=schema,
+            options=ConversionOptions(output_dir=temp_dir),
+        )
+
+        assert result.success is True
+        assert result.row_count == 2
+
+    def test_convert_with_relative_output_dir(self, temp_dir, sample_schema, monkeypatch):
+        """Relative output_dir should work (converter resolves to absolute URI path)."""
+        tbl_file = temp_dir / "test.tbl"
+        tbl_file.write_text("1|Alice|100.50|\n2|Bob|200.75|\n")
+
+        monkeypatch.chdir(temp_dir)
+        relative_output = Path("relative_iceberg_output")
+
+        converter = IcebergConverter()
+        result = converter.convert(
+            source_files=[tbl_file],
+            table_name="test",
+            schema=sample_schema,
+            options=ConversionOptions(output_dir=relative_output),
+        )
+
+        assert result.success is True
+        assert result.output_files[0].is_absolute()
+        assert result.output_files[0].exists()
+
 
 @pytest.mark.skipif(IS_WINDOWS, reason="Iceberg path format incompatible with Windows")
 class TestIcebergPartitioning:
@@ -608,6 +686,34 @@ class TestIcebergPartitioning:
         # Verify partition counts
         assert "partition_counts" in result.metadata
         assert result.metadata["partition_counts"]["region"] == 3  # East, West, North
+
+    def test_partition_with_non_nullable_schema(self, temp_dir):
+        """Partitioned Iceberg write with non-nullable fields must succeed."""
+        schema = {
+            "columns": [
+                {"name": "id", "type": "INTEGER", "nullable": False},
+                {"name": "name", "type": "VARCHAR(25)", "nullable": False},
+                {"name": "region", "type": "VARCHAR(10)", "nullable": False},
+            ]
+        }
+
+        tbl_file = temp_dir / "test.tbl"
+        tbl_file.write_text("1|Alice|East|\n2|Bob|West|\n3|Charlie|East|\n")
+
+        converter = IcebergConverter()
+        result = converter.convert(
+            source_files=[tbl_file],
+            table_name="test",
+            schema=schema,
+            options=ConversionOptions(
+                output_dir=temp_dir,
+                partition_cols=["region"],
+            ),
+        )
+
+        assert result.success is True
+        assert result.row_count == 3
+        assert result.metadata["partitioned"] is True
 
     def test_non_partitioned_output_has_partitioned_false(self, temp_dir, partitioned_schema):
         """Test that non-partitioned output has partitioned=False in metadata."""

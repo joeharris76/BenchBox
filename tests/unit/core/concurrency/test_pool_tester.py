@@ -17,7 +17,10 @@ from benchbox.core.concurrency.pool_tester import (
     PoolTestResult,
 )
 
-pytestmark = [pytest.mark.medium, pytest.mark.fast, pytest.mark.unit]  # Include in CI fast coverage pass
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 @pytest.fixture

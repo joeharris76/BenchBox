@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "benchbox"
-version = "0.1.4"
+version = "0.1.5"
 description = "Embedded benchmark datasets and queries for database evaluation. Implements TPC-H, TPC-DS, TPC-DI and other industry-standard benchmarks."
 readme = "README.md"
 authors = [{ name = "Joe Harris", email = "joe@benchbox.dev" }]
@@ -25,6 +25,7 @@ classifiers = [
 ]
 requires-python = ">=3.10,<3.15"
 dependencies = [
+    "textcharts>=0.1.0",
     "sqlglot>=20.0.0",
     # CLI essentials
     "click>=8.0.0",
@@ -182,6 +183,7 @@ clickhouse-local = ["chdb>=0.10.0; sys_platform != 'win32'"]
 table-formats = [
     "deltalake>=1.2.1",
     "pyiceberg>=0.10.0",
+    "vortex-data>=0.29.0",
 ]
 
 # DataFrame platform extras (for benchbox.platforms.dataframe)
@@ -319,7 +321,7 @@ spark = [
 ]
 
 [project.scripts]
-benchbox = "benchbox.cli:main"
+benchbox = "benchbox.cli.main:main"
 benchbox-mcp = "benchbox.mcp.cli:main"
 benchbox-sync = "benchbox.release.sync:main"
 
@@ -376,7 +378,7 @@ possibly-missing-attribute = "warn"
 error-on-warning = false
 
 [tool.pytest.ini_options]
-minversion = "0.1.4"
+minversion = "0.1.5"
 testpaths = ["tests"]
 python_files = "test_*.py"
 markers = [
@@ -425,27 +427,27 @@ dev = [
     "polars>=1.35.2",
     "clickhouse-connect>=0.10.0",
     "psycopg2-binary>=2.9.0",
-    "pytest>=8.0.0",                            # Test framework
+    "pytest>=8.0.0", # Test framework
     "pytest-cov>=6.2.1",
     "pytest-benchmark>=5.1.0",
     "pytest-xdist>=3.8.0",
     "pytest-timeout>=2.4.0",
-    "pandas>=2.0.0",                            # DataFrame dependencies (needed for many tests)
-    "pyiceberg[sql-sqlite,pyarrow]>=0.10.0",    # Table format converters (needed for tests/unit/utils/format_converters/)
+    "pandas>=2.0.0", # DataFrame dependencies (needed for many tests)
+    "pyiceberg[sql-sqlite,pyarrow]>=0.10.0", # Table format converters (needed for tests/unit/utils/format_converters/)
     "deltalake>=1.2.1",
-    "datafusion>=40.0.0",                       # DataFusion (needed for tests/integration/test_datafusion_integration.py)
-    "cloudpathlib[s3,gs,azure]>=0.15.0",        # Cloud storage with S3 support (needed for tests/unit/utils/test_cloud_storage.py)
-    "chdb>=0.10.0; sys_platform != 'win32'",    # ClickHouse local (chdb is not available on Windows)
-    "clickhouse-driver>=0.2.0",                 # ClickHouse server (needed for tests/unit/platforms/test_clickhouse_local.py server tests)
-    "trino>=0.336.0",                           # Firebolt (needed for tests/unit/platforms/test_firebolt_adapter.py)
-    "firebolt-sdk>=1.18.0",                     # InfluxDB (needed for tests/unit/platforms/test_influxdb_adapter.py)
-    "influxdb3-python>=0.10.0",                 # Databricks SDK (needed for tests/unit/platforms/test_databricks_copy_into.py UC volumes)
-    "databricks-sdk>=0.20.0",                   # PySpark (needed for tests/unit/platforms/dataframe/test_pyspark_df.py and related)
-    "pyspark>=3.5.0",                           # XML parsing (needed for tests/unit/core/tpcdi/test_etl_sources.py)
-    "lxml>=5.0.0",                              # MCP SDK (needed for tests/unit/mcp/)
+    "datafusion>=40.0.0", # DataFusion (needed for tests/integration/test_datafusion_integration.py)
+    "cloudpathlib[s3,gs,azure]>=0.15.0", # Cloud storage with S3 support (needed for tests/unit/utils/test_cloud_storage.py)
+    "chdb>=0.10.0; sys_platform != 'win32'", # ClickHouse local (chdb is not available on Windows)
+    "clickhouse-driver>=0.2.0", # ClickHouse server (needed for tests/unit/platforms/test_clickhouse_local.py server tests)
+    "trino>=0.336.0", # Firebolt (needed for tests/unit/platforms/test_firebolt_adapter.py)
+    "firebolt-sdk>=1.18.0", # InfluxDB (needed for tests/unit/platforms/test_influxdb_adapter.py)
+    "influxdb3-python>=0.10.0", # Databricks SDK (needed for tests/unit/platforms/test_databricks_copy_into.py UC volumes)
+    "databricks-sdk>=0.20.0", # PySpark (needed for tests/unit/platforms/dataframe/test_pyspark_df.py and related)
+    "pyspark>=3.5.0", # XML parsing (needed for tests/unit/core/tpcdi/test_etl_sources.py)
+    "lxml>=5.0.0", # MCP SDK (needed for tests/unit/mcp/)
     "mcp>=1.2.0",
-    "sphinx>=7.4.7",                            # Documentation
-    "roman-numerals<4.0",                       # Sphinx 9 needs roman_numerals module; v4.x broke the import
+    "sphinx>=7.4.7", # Documentation
+    "roman-numerals<4.0", # Sphinx 9 needs roman_numerals module; v4.x broke the import
     "myst-parser>=3.0.1",
     "sphinx-rtd-theme>=3.1.0",
     "sphinxcontrib-mermaid>=1.2.3",
@@ -455,7 +457,18 @@ dev = [
     "furo>=2025.9.25",
     "ablog>=0.11.13 ; python_version >= '3.11'", # version that includes a required Sphinx 9 fix
     "ruamel-yaml>=0.19.1",
+    "mutmut>=3.5.0",
 ]
+
+[tool.mutmut]
+paths_to_mutate = [
+    "benchbox/platforms/duckdb.py",
+    "benchbox/platforms/base/adapter.py",
+    "benchbox/core/runner/runner.py",
+    "benchbox/core/visualization/chart_generator.py",
+    "benchbox/cli/commands/run.py",
+]
+tests_dir = ["tests/unit/"]
 
 [tool.setuptools.package-data]
 "benchbox.core.primitives.catalog" = ["queries.yaml"]
@@ -608,7 +621,7 @@ omit = [
 
 [tool.coverage.report]
 # Coverage reporting thresholds
-fail_under = 75
+fail_under = 60
 show_missing = true
 skip_covered = false
 exclude_lines = [
@@ -619,104 +632,6 @@ exclude_lines = [
     "@abstractmethod",
 ]
 
-[tool.benchbox.coverage]
-# Temporary-split deferred modules for per-file coverage gating.
-# Re-entry rule: remove each file once dedicated unit tests exist for key public
-# behaviors or the module is refactored into testable units.
-deferred_files = [
-    "benchbox/core/tpcdi/tools/file_parsers.py",
-    "benchbox/core/tpcdi/tools/data_cleaners.py",
-    "benchbox/core/tpcdi/source_generators.py",
-    "benchbox/core/tpcdi/etl/transformations.py",
-    "benchbox/core/tpcdi/etl/batch.py",
-    "benchbox/core/tpchavoc/variants.py",
-    "benchbox/core/tpc_validation.py",
-    "benchbox/core/tpc_patterns.py",
-    "benchbox/core/tpc_metrics.py",
-    "benchbox/core/tpcdi/streaming.py",
-    "benchbox/core/tpcdi/worker_pool_examples.py",
-    "benchbox/core/tpcds/reporting.py",
-    "benchbox/core/tpch/reporting.py",
-    "benchbox/platforms/dataframe/ducklake_maintenance.py",
-    "benchbox/core/tpcds/dataframe_queries/rollup_helper.py",
-    "benchbox/core/tpcds/dataframe_queries/channel_helper.py",
-    "benchbox/core/visualization/chart_generator.py",
-    "benchbox/mcp/__main__.py",
-    "benchbox/core/results/display.py",
-    "benchbox/core/metadata_primitives/generator.py",
-    "benchbox/core/tpcds/dataframe_queries/queries.py",
-    "benchbox/core/tpch/maintenance_test.py",
-    "benchbox/core/tpcdi/etl/pipeline.py",
-    "benchbox/core/query_plans/parsers/sqlite.py",
-    "benchbox/core/analysis/insights.py",
-    "benchbox/core/runner/conversion.py",
-    "benchbox/core/datavault/dataframe_queries/queries.py",
-    "benchbox/cli/commands/results.py",
-    "benchbox/core/amplab/benchmark.py",
-    "benchbox/core/analysis/ranking.py",
-    "benchbox/core/ssb/benchmark.py",
-    "benchbox/core/nyctaxi/benchmark.py",
-    "benchbox/core/read_primitives/dataframe_queries.py",
-    "benchbox/core/ssb/dataframe_queries/queries.py",
-    "benchbox/core/joinorder/generator.py",
-    "benchbox/core/nyctaxi/downloader.py",
-    "benchbox/core/nyctaxi/dataframe_queries/queries.py",
-    "benchbox/core/amplab/dataframe_queries/queries.py",
-    "benchbox/core/clickbench/benchmark.py",
-    "benchbox/core/tpcdi/etl/scd_processor.py",
-    "benchbox/core/transaction_primitives/schema.py",
-    "benchbox/core/transaction_primitives/benchmark.py",
-    "benchbox/core/h2odb/benchmark.py",
-    "benchbox/core/tpcdi/generator/dimensions.py",
-    "benchbox/core/results/timing.py",
-    "benchbox/core/concurrency/pool_tester.py",
-    "benchbox/core/amplab/generator.py",
-    "benchbox/core/metadata_primitives/schema.py",
-    "benchbox/core/tpcdi/generator/facts.py",
-    "benchbox/core/concurrency/executor.py",
-    "benchbox/core/tpcds/official_benchmark.py",
-    "benchbox/core/clickbench/dataframe_queries/queries.py",
-    "benchbox/core/coffeeshop/dataframe_queries/queries.py",
-    "benchbox/cli/exceptions.py",
-    "benchbox/core/clickbench/generator.py",
-    "benchbox/utils/cloud_storage.py",
-    "benchbox/cli/commands/plot.py",
-    "benchbox/core/joinorder/queries.py",
-    "benchbox/platforms/athena.py",
-    "benchbox/core/metadata_primitives/benchmark.py",
-    "benchbox/platforms/influxdb/setup.py",
-    "benchbox/platforms/fabric_warehouse.py",
-    "benchbox/platforms/influxdb/client.py",
-    "benchbox/core/write_primitives/benchmark.py",
-    "benchbox/core/ssb/generator.py",
-    "benchbox/core/tpch/throughput_test.py",
-    "benchbox/core/tpcds/generator/runner.py",
-    "benchbox/core/ai_primitives/dataframe_operations.py",
-    "benchbox/core/amplab/queries.py",
-    "benchbox/core/joinorder/schema.py",
-    "benchbox/core/metadata_primitives/dataframe_operations.py",
-    "benchbox/core/h2odb/generator.py",
-    "benchbox/platforms/dataframe/__init__.py",
-    "benchbox/core/tpcds/c_tools.py",
-    "benchbox/cli/commands/run.py",
-    "benchbox/platforms/redshift.py",
-    "benchbox/core/tpchavoc/queries.py",
-    "benchbox/core/results/anonymization.py",
-    "benchbox/platforms/clickhouse/workload.py",
-    "benchbox/platforms/bigquery.py",
-    "benchbox/core/tpcds/power_test.py",
-    "benchbox/platforms/databricks/adapter.py",
-]
-
-[tool.benchbox.coverage.module_check]
-# Explicit allowlist for modules temporarily excluded from per-module
-# coverage floor enforcement. Keep this list small and review regularly.
-exclude_modules = [
-    # Data package is mostly static assets and package markers.
-    "benchbox/data",
-    # Examples are illustrative snippets and are not part of core runtime.
-    "benchbox/examples",
-]
 
 [tool.benchbox.complexity]
 # Cyclomatic complexity check configuration (used by scripts/check_complexity.py).

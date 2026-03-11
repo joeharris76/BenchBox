@@ -94,6 +94,20 @@ adapter.load_benchmark(benchmark)
 results = adapter.run_benchmark(benchmark)
 ```
 
+### External Table Mode
+
+Skip CTAS materialization and register external tables directly over staged Parquet:
+
+```bash
+# External mode: query over S3 Parquet without materializing native tables
+benchbox run --platform athena --benchmark tpch --scale 1.0 \
+  --table-mode external \
+  --platform-option staging_root=s3://my-bucket/benchbox/
+```
+
+This requires an S3 bucket (via `staging_root` or `s3_bucket`). Not compatible
+with `--tuning tuned`.
+
 ## S3 Data Staging
 
 BenchBox stages benchmark data to S3 before querying:
@@ -110,7 +124,7 @@ For best performance, use Parquet with Snappy compression:
 
 ```bash
 benchbox run --platform athena --benchmark tpch \
-  --convert-format parquet \
+  --table-format parquet \
   --compression-type snappy
 ```
 

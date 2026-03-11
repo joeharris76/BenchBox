@@ -17,7 +17,10 @@ from benchbox.cli.orchestrator import BenchmarkOrchestrator
 from benchbox.core.schemas import BenchmarkConfig
 from benchbox.utils.scale_factor import format_scale_factor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _assert_tpch_default_path(path: Path, scale_factor: float) -> None:

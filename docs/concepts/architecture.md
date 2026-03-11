@@ -286,6 +286,20 @@ See: [Custom Benchmarks Guide](../advanced/custom-benchmarks.md)
 3. Add platform extras to `pyproject.toml`
 4. Register in `benchbox/platforms/__init__.py`
 
+#### External Table Support
+
+Platforms can optionally support `--table-mode external` by setting
+`supports_external_tables = True` and implementing `create_external_tables()`.
+In external mode the runner skips native schema creation and `load_data()`,
+calling `create_external_tables()` instead to register views or external table
+definitions over staged Parquet files.
+
+Shared logic for Hive-style external tables (Trino, Presto) lives in
+`HiveExternalTableMixin` (`benchbox/platforms/base/external_table_mixin.py`).
+Platforms that need pre-flight validation (e.g. Athena checking for an S3 bucket)
+can implement `validate_external_table_requirements()`, which the runner calls
+before proceeding.
+
 See: [Adding New Platforms](../development/adding-new-platforms.md)
 
 ### Adding Query Parameter Variants

@@ -13,7 +13,10 @@ import pytest
 from benchbox.core.nyctaxi.benchmark import NYCTaxiBenchmark
 from benchbox.core.nyctaxi.schema import NYC_TAXI_SCHEMA
 
-pytestmark = [pytest.mark.medium, pytest.mark.fast, pytest.mark.unit]  # Include in fast coverage pass
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestBenchmarkInitialization:

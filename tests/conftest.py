@@ -5,8 +5,22 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
-import fcntl
+# ── Limit library-internal parallelism ────────────────────────────────────
+# Must be set BEFORE importing any native library (polars, numpy, etc.).
+# With pytest-xdist each worker is a separate process; libraries that default
+# to using all CPU cores (polars, DuckDB, BLAS, OpenMP) multiply effective
+# parallelism by the worker count, causing CPU oversubscription and machine
+# lock-ups on developer workstations.
 import os
+from types import FrameType
+
+os.environ.setdefault("POLARS_MAX_THREADS", "2")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+# DuckDB ignores env vars; patched in pytest_configure below.
+
 import sys
 import tempfile
 import time
@@ -69,9 +83,51 @@ def _should_acquire_test_lock(config: pytest.Config) -> bool:
     return bool(n)
 
 
+def _is_xdist_remote_exec_namespace(globals_dict: dict[str, Any]) -> bool:
+    """Return True for the live xdist remote.py ``__channelexec__`` globals."""
+    return globals_dict.get("__name__") == "__channelexec__" and callable(globals_dict.get("worker_title"))
+
+
+def _suppress_xdist_worker_title(start_frame: FrameType | None = None) -> bool:
+    """Replace xdist's live ``worker_title`` when its exec frame is on the stack."""
+    import inspect
+
+    frame = start_frame or inspect.currentframe()
+    if frame is None:
+        return False
+    if start_frame is None:
+        frame = frame.f_back
+
+    try:
+        while frame is not None:
+            if _is_xdist_remote_exec_namespace(frame.f_globals):
+                frame.f_globals["worker_title"] = lambda title: None
+                return True
+            frame = frame.f_back
+    finally:
+        del frame  # avoid reference cycle
+
+    return False
+
+
 def pytest_configure(config) -> None:
     """Configure pytest with enhanced test organization and optimization settings."""
     global _test_lock_fd
+
+    # Suppress setproctitle on macOS to prevent launchservicesd CPU storm.
+    #
+    # Root cause: xdist calls setproctitle() twice per test (running/idle)
+    # via xdist.remote.worker_title().  At ~200 calls/second this triggers
+    # macOS launchservicesd to rebuild its process registry continuously,
+    # consuming 200%+ CPU and ~900 MB RSS — the actual root cause of
+    # the macOS beachball during parallel test runs.
+    #
+    # In xdist workers, remote.py runs in an execnet __channelexec__
+    # namespace, so `import xdist.remote` loads a different module object
+    # than the one executing.  We walk the call stack to find the real
+    # xdist exec namespace and patch its worker_title there.
+    if sys.platform == "darwin" and hasattr(config, "workerinput"):
+        _suppress_xdist_worker_title()
 
     # Acquire exclusive lock to prevent concurrent parallel test runs from
     # competing for CPU. Only the controller process (not xdist workers) locks.
@@ -79,8 +135,15 @@ def pytest_configure(config) -> None:
         _TEST_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(_TEST_LOCK_PATH), os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0), 0o644)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+            if sys.platform == "win32":
+                import msvcrt
+
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
             # Another parallel run holds the lock — fail fast with a clear message.
             try:
                 holder_info = _TEST_LOCK_PATH.read_text().strip()
@@ -114,12 +177,25 @@ def pytest_configure(config) -> None:
             pass
         _test_lock_fd = fd  # Keep fd open to maintain the lock for the whole session.
 
-    # Configure DuckDB for optimal testing performance
-    config.option.duckdb_memory_limit = "2GB"
-    config.option.duckdb_threads = 2  # Limit for CI environments
-    config.option.duckdb_enable_extensions = True
+    # Limit DuckDB internal threads.  DuckDB ignores environment variables;
+    # the only reliable method is passing config={'threads': N} to connect().
+    # Monkey-patch duckdb.connect so ALL connections created during tests
+    # default to 2 threads (preserving explicit overrides).
+    try:
+        import duckdb as _duckdb_mod
 
-    # Markers are defined in pytest.ini - no need to register here
+        _original_duckdb_connect = _duckdb_mod.connect
+
+        def _limited_duckdb_connect(*args, **kwargs):
+            cfg = kwargs.get("config") or {}
+            if isinstance(cfg, dict) and "threads" not in cfg:
+                cfg["threads"] = "2"
+                kwargs["config"] = cfg
+            return _original_duckdb_connect(*args, **kwargs)
+
+        _duckdb_mod.connect = _limited_duckdb_connect
+    except ImportError:
+        pass
 
 
 def pytest_unconfigure(config) -> None:
@@ -127,7 +203,14 @@ def pytest_unconfigure(config) -> None:
     global _test_lock_fd
     if _test_lock_fd is not None:
         try:
-            fcntl.flock(_test_lock_fd, fcntl.LOCK_UN)
+            if sys.platform == "win32":
+                import msvcrt
+
+                msvcrt.locking(_test_lock_fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(_test_lock_fd, fcntl.LOCK_UN)
             os.close(_test_lock_fd)
         except OSError:
             pass
@@ -228,168 +311,6 @@ def pytest_runtest_setup(item) -> None:
         pytest.skip("Local-only test skipped in CI")
 
 
-# Paths with known slow tests (>10s) - should be marked "slow" not "fast"
-# These patterns are matched against the test path string
-SLOW_SPEED_PATTERNS = frozenset(
-    {
-        # Databricks adapter tests have heavy import overhead (~300s)
-        "tests/unit/platforms/databricks/test_databricks_df_adapter.py",
-        # Platform info tests load all platform modules (~300s)
-        "tests/unit/platforms/test_platform_info.py",
-        # CLI power/throughput tests spawn subprocesses (~10-15s)
-        "tests/unit/cli/test_cli_power_throughput.py",
-        # TPC-DS integration tests run dsdgen at SF 1.0 (minimum, takes several minutes)
-        "tests/integration/test_tpcds_query_generation.py",
-        # Sphinx docs build takes several minutes
-        "tests/docs/",
-    }
-)
-
-# Paths with medium-speed tests (1-10s) - should be marked "medium" not "fast"
-MEDIUM_SPEED_PATTERNS = frozenset(
-    {
-        # TPC data generation tests invoke binaries (2-5s per test)
-        "tests/unit/core/tpch/test_tpch_stdout_datagen.py",
-        "tests/unit/core/tpcds/test_tpcds_stdout_datagen.py",
-        # CLI execution tests spawn subprocesses (2-5s per test)
-        "tests/unit/cli/test_cli_test_execution.py",
-        "tests/unit/cli/test_cli_main.py",
-        "tests/unit/examples/",
-        # Concurrency tests have sleep/wait time
-        "tests/unit/core/concurrency/",
-        # TPC-DI ETL sources generate data
-        "tests/unit/core/tpcdi/test_etl_sources.py",
-        # TPC-DS OBT queries parse SQL in DuckDB
-        "tests/unit/core/tpcds_obt/test_tpcds_obt_queries.py",
-        # System info tests profile the machine
-        "tests/unit/utils/test_system_info.py",
-        # Error handling tests have concurrent file access
-        "tests/unit/test_error_handling.py",
-        # Release infrastructure tests invoke CLI entry points
-        "tests/unit/test_release_infrastructure.py",
-        # Query generation preflight invokes dsqgen
-        "tests/unit/test_query_generation_preflight.py",
-        # BigQuery staging root tests
-        "tests/unit/platforms/test_bigquery_staging_root.py",
-        # Plan capture tests have timeouts
-        "tests/unit/platforms/test_plan_capture_errors.py",
-        # Base benchmark tests generate data
-        "tests/test_base.py",
-        # TPC-DS enhanced tests
-        "tests/unit/test_tpcds_enhanced.py",
-        # CLI exceptions tests with validation
-        "tests/unit/cli/test_exceptions.py",
-    }
-)
-
-# Marker names that are known to create high CPU/memory or import pressure when
-# fanned out across many xdist workers.
-# Tests in these categories are forced into the serial lane in `make test-all`.
-# Keep this focused on tests that materially increase CPU/memory/import pressure.
-RESOURCE_HEAVY_MARKERS = frozenset(
-    {
-        "slow",
-        "performance",
-        "live_integration",
-        "cloud_import",
-        "requires_table_formats",
-    }
-)
-
-# Extremely expensive suites are routed to explicit stress lane.
-# They remain covered, but are excluded from default `make test-all` runs.
-STRESS_PATH_PATTERNS = frozenset(
-    {
-        "tests/performance/",
-    }
-)
-
-
-def _get_speed_marker_for_path(test_path: Path) -> str | None:
-    """Determine speed marker based on test path patterns.
-
-    Returns:
-        'slow' for slow tests (>10s), 'medium' for medium tests (1-10s),
-        None to use default behavior.
-    """
-    path_str = str(test_path)
-
-    # Check slow patterns first (highest priority)
-    for pattern in SLOW_SPEED_PATTERNS:
-        if pattern in path_str:
-            return "slow"
-
-    # Check medium patterns
-    for pattern in MEDIUM_SPEED_PATTERNS:
-        if pattern in path_str:
-            return "medium"
-
-    return None
-
-
-def pytest_collection_modifyitems(config, items) -> None:
-    """Apply directory-based defaults for markers with speed-aware classification."""
-    for item in items:
-        test_path = Path(str(item.fspath))
-        path_str = str(test_path)
-        marker_names = {marker.name for marker in item.iter_markers()}
-
-        if "stress" not in marker_names:
-            for pattern in STRESS_PATH_PATTERNS:
-                if pattern in path_str:
-                    item.add_marker(pytest.mark.stress)
-                    marker_names.add("stress")
-                    break
-
-        # Directory-driven test categories
-        if "unit" not in marker_names and "integration" not in marker_names and "performance" not in marker_names:
-            if any(part == "unit" for part in test_path.parts):
-                item.add_marker(pytest.mark.unit)
-                marker_names.add("unit")
-            elif any(part == "integration" for part in test_path.parts):
-                item.add_marker(pytest.mark.integration)
-                marker_names.add("integration")
-            elif any(part == "performance" for part in test_path.parts):
-                item.add_marker(pytest.mark.performance)
-                marker_names.add("performance")
-
-        # Speed markers with pattern-based classification
-        # Always assign one of fast/medium/slow even when stress is present.
-        if not {"fast", "medium", "slow"} & marker_names:
-            # First check if this path matches known slow/medium patterns
-            speed_marker = _get_speed_marker_for_path(test_path)
-
-            if speed_marker == "slow":
-                item.add_marker(pytest.mark.slow)
-                marker_names.add("slow")
-            elif speed_marker == "medium":
-                item.add_marker(pytest.mark.medium)
-                marker_names.add("medium")
-            elif "unit" in marker_names:
-                # Default: unit tests are fast unless pattern-matched above
-                item.add_marker(pytest.mark.fast)
-                marker_names.add("fast")
-            elif "integration" in marker_names:
-                # Integration tests are medium by default
-                item.add_marker(pytest.mark.medium)
-                marker_names.add("medium")
-            elif "performance" in marker_names:
-                item.add_marker(pytest.mark.slow)
-                marker_names.add("slow")
-            else:
-                item.add_marker(pytest.mark.medium)
-                marker_names.add("medium")
-
-        # Route all existing slow tests into the explicit stress lane.
-        # This preserves coverage while keeping default `make test-all` lean.
-        if "slow" in marker_names and "stress" not in marker_names:
-            item.add_marker(pytest.mark.stress)
-            marker_names.add("stress")
-
-        if marker_names & RESOURCE_HEAVY_MARKERS and "resource_heavy" not in marker_names:
-            item.add_marker(pytest.mark.resource_heavy)
-
-
 @pytest.fixture(autouse=True)
 def _provide_fake_duckdb(monkeypatch):
     """Provide a lightweight duckdb stub when the optional dependency is missing."""
@@ -478,20 +399,6 @@ def medium_scale_factor() -> float:
 def sql_dialect(request) -> str:
     """Parameterized fixture for testing different SQL dialects."""
     return request.param
-
-
-@pytest.fixture
-def mock_environment_variables() -> Generator[None, None, None]:
-    """Set up environment variables for testing and restore them afterwards."""
-    original_env = os.environ.copy()
-    try:
-        # Set environment variables for testing
-        os.environ["BENCHBOX_DATA_DIR"] = "/tmp/benchbox-test-data"
-        yield
-    finally:
-        # Restore original environment variables
-        os.environ.clear()
-        os.environ.update(original_env)
 
 
 def pytest_sessionstart(session) -> None:
@@ -623,124 +530,3 @@ def mock_platform_dependency_checks():
             pass
 
         yield
-
-
-@pytest.fixture
-def cli_benchmark_mocks():
-    """Pre-configured mocks for CLI benchmark testing.
-
-    This fixture provides a standard set of mocks for testing CLI benchmark
-    commands without spawning subprocesses or invoking real platform adapters.
-    Use this to reduce CLI test execution time from ~19s to <5s.
-
-    Returns:
-        Dictionary with mock objects for BenchmarkManager, DatabaseManager,
-        SystemProfiler, ConfigManager, and BenchmarkOrchestrator.
-
-    Example:
-        def test_cli_run_command(cli_benchmark_mocks, cli_runner):
-            result = cli_runner.invoke(cli, ["run", "--platform", "duckdb", ...])
-            assert result.exit_code == 0
-    """
-    with (
-        patch("benchbox.cli.main.BenchmarkManager") as mock_main_manager,
-        patch("benchbox.cli.main.DatabaseManager") as mock_main_db_manager,
-        patch("benchbox.cli.main.SystemProfiler") as mock_main_profiler,
-        patch("benchbox.cli.main.ConfigManager") as mock_config,
-        patch("benchbox.cli.main.get_config_manager") as mock_get_config_manager,
-        patch("benchbox.cli.orchestrator.BenchmarkOrchestrator") as mock_orchestrator,
-        patch("benchbox.cli.commands.run.BenchmarkManager") as mock_run_manager,
-        patch("benchbox.cli.commands.run.DatabaseManager") as mock_run_db_manager,
-        patch("benchbox.cli.commands.run.SystemProfiler") as mock_run_profiler,
-        patch("benchbox.cli.commands.run.BenchmarkOrchestrator") as mock_run_orchestrator,
-        patch("benchbox.cli.commands.run._execute_orchestrated_run") as mock_execute_orchestrated_run,
-        patch("benchbox.cli.commands.run._export_orchestrated_result") as mock_export_orchestrated_result,
-        patch("benchbox.cli.commands.run._render_post_run_charts"),
-        patch("benchbox.cli.preferences.save_last_run_config"),
-    ):
-        # Configure BenchmarkManager
-        mock_manager_instance = type("MockBenchmarkManager", (), {})()
-        mock_manager_instance.benchmarks = {
-            "tpch": {"display_name": "TPC-H", "estimated_time_range": (2, 10)},
-            "tpcds": {"display_name": "TPC-DS", "estimated_time_range": (5, 30)},
-        }
-        mock_manager_instance.set_verbosity = lambda *_args, **_kwargs: None
-        mock_manager_instance.validate_scale_factor = lambda *_args, **_kwargs: None
-        mock_main_manager.return_value = mock_manager_instance
-        mock_run_manager.return_value = mock_manager_instance
-
-        # Configure DatabaseManager
-        mock_db_manager_instance = type("MockDatabaseManager", (), {})()
-        mock_db_manager_instance.set_verbosity = lambda *_args, **_kwargs: None
-        mock_db_config = type(
-            "MockDbConfig",
-            (),
-            {
-                "type": "duckdb",
-                "options": {},
-                "driver_version_actual": None,
-                "driver_version_resolved": None,
-            },
-        )()
-        mock_db_manager_instance.create_config = lambda *_args, **_kwargs: mock_db_config
-        mock_main_db_manager.return_value = mock_db_manager_instance
-        mock_run_db_manager.return_value = mock_db_manager_instance
-
-        # Configure SystemProfiler
-        mock_system_profile = type(
-            "MockSystemProfile",
-            (),
-            {"cpu_cores_logical": 4, "memory_total_gb": 8},
-        )()
-        mock_profiler_instance = type("MockProfiler", (), {})()
-        mock_profiler_instance.get_system_profile = lambda: mock_system_profile
-        mock_main_profiler.return_value = mock_profiler_instance
-        mock_run_profiler.return_value = mock_profiler_instance
-
-        # Configure ConfigManager
-        mock_config_instance = type("MockConfigManager", (), {})()
-        mock_config_instance.config_path = Path("benchbox.yaml")
-        mock_config_instance.validate_config = lambda: True
-        mock_config_instance.load_unified_tuning_config = lambda *_args, **_kwargs: None
-        mock_config_instance.get = lambda _key, default=None: default
-        mock_config.return_value = mock_config_instance
-        mock_get_config_manager.return_value = mock_config_instance
-
-        # Configure BenchmarkOrchestrator
-        mock_orchestrator_instance = type("MockOrchestrator", (), {})()
-        mock_orchestrator_instance.set_verbosity = lambda *_args, **_kwargs: None
-        mock_orchestrator_instance.set_custom_output_dir = lambda *_args, **_kwargs: None
-        mock_orchestrator.return_value = mock_orchestrator_instance
-        mock_run_orchestrator.return_value = mock_orchestrator_instance
-
-        # Configure result execution helpers
-        mock_result = type(
-            "MockResult",
-            (),
-            {"validation_status": "PASSED", "execution_id": "mock-exec-id", "query_results": []},
-        )()
-        mock_execute_orchestrated_run.return_value = mock_result
-        mock_export_orchestrated_result.return_value = {"json": "benchmark_runs/results/mock-exec-id.json"}
-
-        yield {
-            "manager": mock_run_manager,
-            "db_manager": mock_run_db_manager,
-            "profiler": mock_run_profiler,
-            "config": mock_config,
-            "orchestrator": mock_run_orchestrator,
-        }
-
-
-@pytest.fixture
-def cli_runner():
-    """Provide a Click CLI test runner.
-
-    This fixture creates a CliRunner instance for testing Click CLI commands.
-    Use in conjunction with cli_benchmark_mocks for fast CLI testing.
-
-    Returns:
-        click.testing.CliRunner instance
-    """
-    from click.testing import CliRunner
-
-    return CliRunner()

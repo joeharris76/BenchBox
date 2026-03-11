@@ -23,6 +23,12 @@ import pytest
 from benchbox.core.tpch.generator import TPCHDataGenerator
 from benchbox.core.write_primitives.generator import WritePrimitivesDataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
+
 _TPCH_TABLE_FILES = (
     "customer.tbl",
     "lineitem.tbl",
@@ -495,7 +501,6 @@ class TestConcurrentGeneration:
             assert test_file.stat().st_mtime > frozen_mtime
 
 
-@pytest.mark.medium  # Tests generate TPC-H data, taking 2-3s each
 class TestErrorHandling:
     """Tests for error handling edge cases."""
 

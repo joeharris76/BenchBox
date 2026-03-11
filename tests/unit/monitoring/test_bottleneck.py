@@ -17,7 +17,10 @@ from benchbox.monitoring.bottleneck import (
 )
 from benchbox.monitoring.profiler import ResourceSample, ResourceTimeline, ResourceType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBottleneckType:

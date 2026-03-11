@@ -19,7 +19,10 @@ from benchbox.cli.commands.run import BENCHMARK_ALIASES, normalize_benchmark_nam
 from benchbox.cli.dryrun import DryRunExecutor
 from benchbox.cli.system import SystemProfile
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBenchmarkNameNormalization:
@@ -150,12 +153,12 @@ class TestGenerateCliCommand:
         cmd = generate_cli_command(platform="athena", benchmark="tpch", scale=0.01, output="s3://bucket/path/")
         assert "--output s3://bucket/path/" in cmd
 
-    def test_convert_format_included(self):
-        """Test that convert format is included."""
+    def test_table_format_included(self):
+        """Test that table format is included."""
         from benchbox.cli.dryrun import generate_cli_command
 
-        cmd = generate_cli_command(platform="duckdb", benchmark="tpch", scale=0.01, convert_format="parquet")
-        assert "--convert parquet" in cmd
+        cmd = generate_cli_command(platform="duckdb", benchmark="tpch", scale=0.01, table_format="parquet")
+        assert "--table-format parquet" in cmd
 
     def test_compression_included(self):
         """Test that compression is included."""
@@ -248,7 +251,7 @@ class TestGenerateCliCommand:
             tuning="tuned",
             seed=42,
             output="s3://bucket/data/",
-            convert_format="parquet:zstd",
+            table_format="parquet:zstd",
             compression="zstd:9",
             mode="sql",
             force="all",
@@ -267,7 +270,7 @@ class TestGenerateCliCommand:
         assert "--tuning tuned" in cmd
         assert "--seed 42" in cmd
         assert "--output s3://bucket/data/" in cmd
-        assert "--convert parquet:zstd" in cmd
+        assert "--table-format parquet:zstd" in cmd
         assert "--compression zstd:9" in cmd
         assert "--mode sql" in cmd
         assert "--force all" in cmd
@@ -779,7 +782,6 @@ class TestDryRunErrorHandling:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestDryRunExecutorCoverageGaps:
     """Test coverage gaps in DryRunExecutor."""
 
@@ -854,6 +856,332 @@ class TestDryRunExecutorCoverageGaps:
             result = executor.execute_dry_run(config, system_profile, None)
             # Schema should be processed without error
             assert result is None or result is not None
+
+
+class TestDryRunDisplayConfigurationSummary:
+    """Test that _display_configuration_summary shows data layout and tuning rows."""
+
+    def _make_result(self, options=None, benchmark_overrides=None, tuning_config=None):
+        from benchbox.core.schemas import DryRunResult
+
+        benchmark_config = {
+            "name": "tpch",
+            "scale_factor": 1.0,
+            "concurrency": 1,
+            "compress_data": False,
+            "compression_type": "zstd",
+            "compression_level": None,
+            "options": options or {},
+            **(benchmark_overrides or {}),
+        }
+        return DryRunResult(
+            benchmark_config=benchmark_config,
+            database_config={"type": "duckdb", "name": "DuckDB"},
+            system_profile={"cpu_cores_logical": 8, "memory_total_gb": 16.0, "os_name": "Darwin"},
+            platform_config={},
+            queries={"Q1": "SELECT 1"},
+            execution_mode="sql",
+            tuning_config=tuning_config,
+            constraint_config={"enable_primary_keys": False, "enable_foreign_keys": False},
+        )
+
+    def _render(self, result):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from benchbox.cli.dryrun import DryRunDisplay
+
+        buf = StringIO()
+        console = Console(file=buf, force_terminal=True, width=120)
+        display = DryRunDisplay(console=console)
+        display._display_configuration_summary(result)
+        return buf.getvalue()
+
+    def test_shows_table_mode_when_external(self):
+        result = self._make_result(options={"table_mode": "external"})
+        output = self._render(result)
+        assert "External" in output
+        assert "Table Mode" in output
+
+    def test_hides_data_layout_when_all_defaults(self):
+        result = self._make_result()
+        output = self._render(result)
+        assert "Data Layout" not in output
+
+    def test_shows_table_format(self):
+        result = self._make_result(options={"table_mode": "external", "table_format": "iceberg"})
+        output = self._render(result)
+        assert "Iceberg" in output
+        assert "Table Format" in output
+
+    def test_shows_compression(self):
+        result = self._make_result(
+            benchmark_overrides={"compress_data": True, "compression_type": "zstd", "compression_level": 3},
+        )
+        output = self._render(result)
+        assert "zstd:3" in output
+        assert "Compression" in output
+
+    def test_shows_compression_without_level(self):
+        result = self._make_result(
+            benchmark_overrides={"compress_data": True, "compression_type": "gzip", "compression_level": None},
+        )
+        output = self._render(result)
+        assert "gzip" in output
+        assert ":None" not in output
+
+    def test_shows_tuning_disabled(self):
+        result = self._make_result()
+        output = self._render(result)
+        assert "Disabled (baseline)" in output
+
+    def test_shows_tuning_mode(self):
+        result = self._make_result(tuning_config={"tuning_type": "tuned"})
+        output = self._render(result)
+        assert "Tuned" in output
+
+    def test_shows_all_data_layout_rows(self):
+        result = self._make_result(
+            options={"table_mode": "external", "table_format": "delta"},
+            benchmark_overrides={"compress_data": True, "compression_type": "zstd", "compression_level": 9},
+        )
+        output = self._render(result)
+        assert "External" in output
+        assert "Delta" in output
+        assert "zstd:9" in output
+
+
+class TestGenerateCliCommandNewParams:
+    """Test the new parameters added to generate_cli_command."""
+
+    def test_platform_options_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="duckdb",
+            benchmark="tpch",
+            scale=0.01,
+            platform_options={"driver_version": "1.2.0", "warehouse": "MY_WH"},
+        )
+        assert "--platform-option driver_version=1.2.0" in cmd
+        assert "--platform-option warehouse=MY_WH" in cmd
+
+    def test_platform_options_omitted_when_none(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(platform="duckdb", benchmark="tpch", scale=0.01)
+        assert "--platform-option" not in cmd
+
+    def test_plan_config_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="duckdb",
+            benchmark="tpch",
+            scale=0.01,
+            plan_config="sample:0.1,first:5",
+        )
+        assert "--plan-config sample:0.1,first:5" in cmd
+
+    def test_plan_config_omitted_when_none(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(platform="duckdb", benchmark="tpch", scale=0.01)
+        assert "--plan-config" not in cmd
+
+    def test_presort_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="duckdb",
+            benchmark="tpch",
+            scale=0.01,
+            presort="delta-sorted",
+        )
+        assert "--presort delta-sorted" in cmd
+
+    def test_presort_omitted_when_none(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(platform="duckdb", benchmark="tpch", scale=0.01)
+        assert "--presort" not in cmd
+
+    def test_sorted_ingestion_mode_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="databricks",
+            benchmark="tpch",
+            scale=0.01,
+            sorted_ingestion_mode="force",
+        )
+        assert "--sorted-ingestion-mode force" in cmd
+
+    def test_sorted_ingestion_mode_off_omitted(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="databricks",
+            benchmark="tpch",
+            scale=0.01,
+            sorted_ingestion_mode="off",
+        )
+        assert "--sorted-ingestion-mode" not in cmd
+
+    def test_sorted_ingestion_method_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="databricks",
+            benchmark="tpch",
+            scale=0.01,
+            sorted_ingestion_method="z_order",
+        )
+        assert "--sorted-ingestion-method z_order" in cmd
+
+    def test_databricks_clustering_strategy_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="databricks",
+            benchmark="tpch",
+            scale=0.01,
+            databricks_clustering_strategy="liquid_clustering",
+        )
+        assert "--databricks-clustering-strategy liquid_clustering" in cmd
+
+    def test_liquid_clustering_columns_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="databricks",
+            benchmark="tpch",
+            scale=0.01,
+            liquid_clustering_columns="col1,col2",
+        )
+        assert "--liquid-clustering-columns col1,col2" in cmd
+
+    def test_global_cache_rendered(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="polars-df",
+            benchmark="tpch",
+            scale=0.01,
+            global_cache=True,
+        )
+        assert "--global-cache" in cmd
+
+    def test_global_cache_omitted_when_false(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="polars-df",
+            benchmark="tpch",
+            scale=0.01,
+            global_cache=False,
+        )
+        assert "--global-cache" not in cmd
+
+    def test_compression_zstd_not_silently_dropped(self):
+        """Regression: --compression zstd was previously silently dropped."""
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="duckdb",
+            benchmark="tpch",
+            scale=0.01,
+            compression="zstd",
+        )
+        assert "--compression zstd" in cmd
+
+    def test_all_new_params_together(self):
+        from benchbox.cli.dryrun import generate_cli_command
+
+        cmd = generate_cli_command(
+            platform="databricks",
+            benchmark="tpch",
+            scale=1.0,
+            platform_options={"driver_version": "1.0.0"},
+            plan_config="sample:0.5",
+            presort="delta-sorted",
+            sorted_ingestion_mode="auto",
+            sorted_ingestion_method="ctas",
+            databricks_clustering_strategy="z_order",
+            liquid_clustering_columns="col1",
+            global_cache=True,
+            capture_plans=True,
+        )
+        assert "--platform-option driver_version=1.0.0" in cmd
+        assert "--plan-config sample:0.5" in cmd
+        assert "--presort delta-sorted" in cmd
+        assert "--sorted-ingestion-mode auto" in cmd
+        assert "--sorted-ingestion-method ctas" in cmd
+        assert "--databricks-clustering-strategy z_order" in cmd
+        assert "--liquid-clustering-columns col1" in cmd
+        assert "--global-cache" in cmd
+        assert "--capture-plans" in cmd
+
+
+class TestGenerateCliCommandCompleteness:
+    """Introspection test: assert generate_cli_command covers all behavior-affecting CLI params."""
+
+    # Params that are cosmetic/output-only and intentionally excluded from generate_cli_command
+    COSMETIC_PARAMS = frozenset(
+        {
+            "dry_run",
+            "verbose",
+            "quiet",
+            "non_interactive",
+            "no_monitoring",
+            "no_progress",
+            "ignore_memory_warnings",
+            "help",
+            "help_topic",
+        }
+    )
+
+    # Params whose Click name differs from the generate_cli_command kwarg name
+    CLICK_TO_KWARG_RENAMES = {
+        "platform_option_pairs": "platform_options",
+    }
+
+    def test_completeness(self):
+        """Every behavior-affecting Click param on `run` has a corresponding kwarg in generate_cli_command."""
+        import inspect
+
+        import click
+
+        from benchbox.cli.commands.run import run
+        from benchbox.cli.dryrun import generate_cli_command
+
+        # Get Click command's parameter names (excluding the context)
+        click_params = set()
+        assert isinstance(run, click.Command)
+        for param in run.params:
+            if isinstance(param, click.Argument):
+                continue
+            click_params.add(param.name)
+
+        # Get generate_cli_command's parameter names
+        sig = inspect.signature(generate_cli_command)
+        gen_params = set(sig.parameters.keys())
+
+        # Apply renames
+        normalized_click = set()
+        for p in click_params:
+            renamed = self.CLICK_TO_KWARG_RENAMES.get(p, p)
+            normalized_click.add(renamed)
+
+        # The set of Click params minus cosmetic ones should be a subset of generate_cli_command params
+        behavior_params = normalized_click - self.COSMETIC_PARAMS
+        missing = behavior_params - gen_params
+
+        assert not missing, (
+            f"CLI params not represented in generate_cli_command(): {sorted(missing)}. "
+            f"Either add them to generate_cli_command() or add to COSMETIC_PARAMS if they are output-only."
+        )
 
 
 if __name__ == "__main__":

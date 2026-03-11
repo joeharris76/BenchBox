@@ -6,6 +6,12 @@ import pytest
 
 from benchbox.core.tuning.type_mapping import map_sql_type_with_fallback
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 _SAMPLE_MAPPING = {
     "INTEGER": "INT",
     "VARCHAR": "STRING",
@@ -14,7 +20,6 @@ _SAMPLE_MAPPING = {
 }
 
 
-@pytest.mark.fast
 class TestMapSqlTypeWithFallback:
     """Direct tests for map_sql_type_with_fallback edge cases."""
 

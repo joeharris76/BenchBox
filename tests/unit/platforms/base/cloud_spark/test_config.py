@@ -17,7 +17,10 @@ from benchbox.platforms.base.cloud_spark.config import (
     SparkResourceConfig,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSparkResourceConfig:

@@ -11,6 +11,11 @@ import pytest
 from benchbox.cli.orchestrator import BenchmarkOrchestrator
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings, compute_verbosity
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 class _NoopConsole:
     def print(self, *args, **kwargs):  # pragma: no cover - helper for tests

@@ -13,7 +13,11 @@ import pytest
 
 from benchbox.platforms.redshift import RedshiftAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 class TestRedshiftAdapter:
@@ -560,6 +564,156 @@ class TestRedshiftAdapter:
 
         finally:
             temp_path.unlink()
+
+    def test_external_table_mode_generates_spectrum_sql(self):
+        """External mode should create Spectrum schema/table DDL from Parquet sources."""
+        try:
+            adapter = RedshiftAdapter(
+                host="test-cluster.redshift.amazonaws.com",
+                database="test_db",
+                username="test_user",
+                password="test_pass",
+                s3_bucket="benchbox-test-bucket",
+                s3_prefix="benchbox",
+                iam_role="arn:aws:iam::123456789012:role/benchbox-redshift",
+            )
+        except ImportError:
+            pytest.skip("Redshift drivers not installed")
+
+        assert adapter.supports_external_tables is True
+
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (42,)
+
+        mock_benchmark = Mock()
+        mock_benchmark.get_schema.return_value = {
+            "orders": {
+                "columns": [
+                    {"name": "o_orderkey", "type": "BIGINT"},
+                    {"name": "o_totalprice", "type": "DECIMAL(15,2)"},
+                ]
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".parquet", delete=False) as f:
+            f.write(b"PAR1")
+            parquet_path = Path(f.name)
+
+        mock_benchmark.tables = {"orders": [parquet_path]}
+
+        mock_s3_client = Mock()
+        try:
+            with patch.object(adapter, "_create_s3_client", return_value=mock_s3_client):
+                table_stats, load_time, _ = adapter.create_external_tables(
+                    mock_benchmark, mock_connection, Path("/tmp")
+                )
+
+            assert table_stats["orders"] == 42
+            assert load_time >= 0
+            mock_s3_client.upload_file.assert_called_once()
+
+            execute_calls = [str(call) for call in mock_cursor.execute.call_args_list]
+            assert any("CREATE EXTERNAL SCHEMA IF NOT EXISTS" in call for call in execute_calls)
+            assert any("CREATE EXTERNAL TABLE" in call for call in execute_calls)
+            assert any("STORED AS PARQUET" in call for call in execute_calls)
+            assert any(
+                "LOCATION 's3://benchbox-test-bucket/benchbox/test_db_external/orders/" in call
+                for call in execute_calls
+            )
+        finally:
+            parquet_path.unlink()
+
+    def test_external_table_mode_generates_delta_spectrum_sql(self):
+        """External mode should emit Delta-flavored Spectrum SQL for Delta directories."""
+        try:
+            adapter = RedshiftAdapter(
+                host="test-cluster.redshift.amazonaws.com",
+                database="test_db",
+                username="test_user",
+                password="test_pass",
+                s3_bucket="benchbox-test-bucket",
+                s3_prefix="benchbox",
+                iam_role="arn:aws:iam::123456789012:role/benchbox-redshift",
+            )
+        except ImportError:
+            pytest.skip("Redshift drivers not installed")
+
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (9,)
+
+        mock_benchmark = Mock()
+        mock_benchmark.get_schema.return_value = {"orders": {"columns": [{"name": "o_orderkey", "type": "BIGINT"}]}}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            delta_dir = Path(tmpdir) / "orders"
+            (delta_dir / "_delta_log").mkdir(parents=True)
+            (delta_dir / "_delta_log" / "00000000000000000000.json").write_text("{}")
+            (delta_dir / "part-000.parquet").write_bytes(b"PAR1")
+            mock_benchmark.tables = {"orders": [delta_dir]}
+
+            with patch.object(adapter, "_create_s3_client", return_value=Mock()):
+                table_stats, _, _ = adapter.create_external_tables(mock_benchmark, mock_connection, Path(tmpdir))
+
+        assert table_stats["orders"] == 9
+        execute_calls = [str(call) for call in mock_cursor.execute.call_args_list]
+        assert any("TABLE PROPERTIES ('table_type'='DELTA')" in call for call in execute_calls)
+
+    def test_external_table_mode_requires_iam_role(self):
+        """External mode should require IAM role configuration for Spectrum DDL."""
+        try:
+            adapter = RedshiftAdapter(
+                host="test-cluster.redshift.amazonaws.com",
+                database="test_db",
+                username="test_user",
+                password="test_pass",
+                s3_bucket="benchbox-test-bucket",
+            )
+        except ImportError:
+            pytest.skip("Redshift drivers not installed")
+
+        with pytest.raises(ValueError, match="requires IAM role credentials"):
+            adapter.validate_external_table_requirements()
+
+    def test_load_data_native_path_still_uses_copy_loader(self):
+        """Native load path should continue to use COPY-based loader when S3 is configured."""
+        try:
+            adapter = RedshiftAdapter(
+                host="test-cluster.redshift.amazonaws.com",
+                database="test_db",
+                username="test_user",
+                password="test_pass",
+                s3_bucket="benchbox-test-bucket",
+                iam_role="arn:aws:iam::123456789012:role/benchbox-redshift",
+            )
+        except ImportError:
+            pytest.skip("Redshift drivers not installed")
+
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write("1,test\n")
+            csv_path = Path(f.name)
+
+        mock_benchmark = Mock()
+        mock_benchmark.tables = {"orders": [csv_path]}
+
+        try:
+            with (
+                patch.object(adapter, "_create_s3_client", return_value=Mock()),
+                patch.object(adapter, "_load_table_via_s3", return_value=7) as mock_copy_loader,
+            ):
+                table_stats, _, _ = adapter.load_data(mock_benchmark, mock_connection, Path("/tmp"))
+
+            assert table_stats["orders"] == 7
+            mock_copy_loader.assert_called_once()
+        finally:
+            csv_path.unlink()
 
     def test_configure_for_benchmark_olap(self):
         """Test OLAP benchmark configuration with Redshift optimizations."""

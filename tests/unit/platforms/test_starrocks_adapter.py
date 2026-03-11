@@ -13,7 +13,10 @@ import pytest
 
 from benchbox.platforms.starrocks import StarRocksAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture(autouse=True)

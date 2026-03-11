@@ -17,7 +17,10 @@ from benchbox.utils.runtime_env import (
     load_driver_module,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_ensure_driver_version_matches(monkeypatch):
@@ -423,10 +426,18 @@ def _make_isolated_env(root: Path, name: str, pkg: str, version: str, ext_files:
 
 
 def _wrong_abi_filename() -> str:
-    """Return a .so filename with a cpython ABI tag that does NOT match the running Python."""
+    """Return a filename with a cpython ABI tag that does NOT match the running Python."""
     major, minor = sys.version_info.major, sys.version_info.minor
     wrong_minor = minor + 1  # guaranteed to differ
-    return f"duckdb.cpython-{major}{wrong_minor}-darwin.so"
+    ext = ".pyd" if sys.platform == "win32" else ".so"
+    return f"duckdb.cpython-{major}{wrong_minor}-platform{ext}"
+
+
+def _correct_abi_filename() -> str:
+    """Return a filename with a cpython ABI tag that matches the running Python."""
+    major, minor = sys.version_info.major, sys.version_info.minor
+    ext = ".pyd" if sys.platform == "win32" else ".so"
+    return f"duckdb.cpython-{major}{minor}-platform{ext}"
 
 
 def test_validate_runtime_abi_wrong_suffix(tmp_path):
@@ -443,13 +454,12 @@ def test_validate_runtime_abi_wrong_suffix(tmp_path):
 
 def test_validate_runtime_abi_correct_suffix(tmp_path):
     """Extension files matching the current interpreter's ABI tag are accepted."""
-    current_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]  # e.g. .cpython-311-darwin.so
     site_packages = _make_isolated_env(
         tmp_path,
         "env",
         "duckdb",
         "1.2.2",
-        ext_files=[f"duckdb{current_suffix}"],
+        ext_files=[_correct_abi_filename()],
     )
     assert _validate_runtime_abi(site_packages, "duckdb")
 
@@ -480,13 +490,12 @@ def test_validate_runtime_abi_stable_abi(tmp_path):
 
 def test_validate_runtime_abi_mixed_tags_accepts_if_any_match(tmp_path):
     """Package with both wrong-ABI and correct-ABI extensions is accepted."""
-    current_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
     site_packages = _make_isolated_env(
         tmp_path,
         "env",
         "duckdb",
         "1.2.2",
-        ext_files=[_wrong_abi_filename(), f"duckdb{current_suffix}"],
+        ext_files=[_wrong_abi_filename(), _correct_abi_filename()],
     )
     assert _validate_runtime_abi(site_packages, "duckdb")
 
@@ -520,7 +529,6 @@ def test_discover_skips_abi_mismatch_candidate(tmp_path, monkeypatch, caplog):
 def test_discover_skips_bad_candidate_returns_good_one(tmp_path, monkeypatch):
     """When first candidate has wrong ABI, discovery falls through to the second."""
     envs = tmp_path / "envs"
-    current_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
 
     # Bad candidate (wrong ABI)
     _make_isolated_env(
@@ -536,7 +544,7 @@ def test_discover_skips_bad_candidate_returns_good_one(tmp_path, monkeypatch):
         "good-env",
         "duckdb",
         "1.2.2",
-        ext_files=[f"duckdb{current_suffix}"],
+        ext_files=[_correct_abi_filename()],
     )
     monkeypatch.setenv("BENCHBOX_DRIVER_RUNTIME_ROOTS", str(envs))
 

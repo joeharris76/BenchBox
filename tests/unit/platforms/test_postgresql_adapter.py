@@ -14,7 +14,10 @@ import pytest
 import benchbox.platforms.postgresql as postgresql_module
 from benchbox.platforms.postgresql import POSTGRES_DIALECT, PostgreSQLAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()

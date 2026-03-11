@@ -11,7 +11,10 @@ from benchbox.utils.format_converters.base import (
 )
 from benchbox.utils.format_converters.parquet_converter import ParquetConverter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestParquetConverterBasics:

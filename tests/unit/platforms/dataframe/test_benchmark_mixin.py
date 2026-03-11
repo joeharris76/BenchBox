@@ -20,7 +20,10 @@ from benchbox.platforms.dataframe.benchmark_mixin import (
     DataFrameRunOptions,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class DummyAdapter(BenchmarkExecutionMixin):

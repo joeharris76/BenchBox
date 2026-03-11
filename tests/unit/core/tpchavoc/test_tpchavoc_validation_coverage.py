@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.tpchavoc.validation import ResultValidator, ValidationError, ValidationReport
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_validate_results_exact_accepts_reordered_rows() -> None:

@@ -13,7 +13,11 @@ import pytest
 
 from benchbox.platforms.snowflake import SnowflakeAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 @pytest.fixture(autouse=True)
@@ -56,6 +60,12 @@ class TestSnowflakeAdapter:
             assert adapter.warehouse_size == "MEDIUM"
             assert adapter.auto_suspend == 300
             assert adapter.auto_resume is True
+
+    def test_external_table_capability_declared(self):
+        """Snowflake should explicitly declare external-table support."""
+        with patch("benchbox.platforms.snowflake.snowflake"):
+            adapter = SnowflakeAdapter(account="test_account", username="test_user", password="test_pass")
+            assert adapter.supports_external_tables is True
 
     def test_initialization_missing_driver(self):
         """Test initialization when Snowflake dependencies are missing."""
@@ -327,9 +337,9 @@ class TestSnowflakeAdapter:
 
         # Create a temporary key file
         with tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False) as f:
-            f.write("""-----BEGIN RSA PRIVATE KEY-----
-MIIEpAIBAAKCAQEA0123456789...
------END RSA PRIVATE KEY-----""")
+            f.write("""-----BEGIN TEST KEY-----
+benchbox-fixture-key-material
+-----END TEST KEY-----""")
             key_path = f.name
 
         try:
@@ -484,6 +494,176 @@ MIIEpAIBAAKCAQEA0123456789...
 
         finally:
             temp_path.unlink()
+
+    @patch("benchbox.platforms.snowflake.snowflake")
+    def test_validate_external_table_requirements_requires_staging_root(self, mock_snowflake):
+        """External mode should require staging_root for Snowflake."""
+        adapter = SnowflakeAdapter(
+            account="test_account",
+            username="test_user",
+            password="test_pass",
+            warehouse="TEST_WH",
+            database="TEST_DB",
+        )
+
+        with pytest.raises(ValueError, match="requires --platform-option staging_root"):
+            adapter.validate_external_table_requirements()
+
+    @patch("benchbox.platforms.snowflake.snowflake")
+    def test_create_external_tables_generates_stage_and_external_table_sql(self, mock_snowflake):
+        """External mode should create external stage and external table DDL."""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (77,)
+
+        adapter = SnowflakeAdapter(
+            account="test_account",
+            username="test_user",
+            password="test_pass",
+            warehouse="TEST_WH",
+            database="TEST_DB",
+            schema="PUBLIC",
+            staging_root="s3://benchbox-stage-root",
+        )
+
+        with patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [Path("/tmp/lineitem.parquet")]}):
+            table_stats, load_time, per_table_timings = adapter.create_external_tables(
+                benchmark=Mock(),
+                connection=mock_connection,
+                data_dir=Path("/tmp"),
+            )
+
+        assert table_stats == {"LINEITEM": 77}
+        assert isinstance(load_time, float)
+        assert per_table_timings is None
+
+        execute_calls = [str(call.args[0]) for call in mock_cursor.execute.call_args_list]
+        assert any("CREATE STAGE IF NOT EXISTS PUBLIC.BENCHBOX_EXTERNAL_STAGE" in sql for sql in execute_calls)
+        assert any("CREATE OR REPLACE EXTERNAL TABLE LINEITEM" in sql for sql in execute_calls)
+        assert any("AUTO_REFRESH=FALSE" in sql for sql in execute_calls)
+        assert any("FILE_FORMAT=(TYPE=PARQUET)" in sql for sql in execute_calls)
+        assert any("ALTER EXTERNAL TABLE LINEITEM REFRESH" in sql for sql in execute_calls)
+        assert any("SELECT COUNT(*) FROM LINEITEM" in sql for sql in execute_calls)
+
+    @patch("benchbox.platforms.snowflake.snowflake")
+    def test_create_external_tables_generates_iceberg_sql(self, mock_snowflake):
+        """Iceberg external mode should derive BASE_LOCATION from staging_root."""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (11,)
+
+        adapter = SnowflakeAdapter(
+            account="test_account",
+            username="test_user",
+            password="test_pass",
+            warehouse="TEST_WH",
+            database="TEST_DB",
+            schema="PUBLIC",
+            staging_root="s3://benchbox-stage-root/external-prefix",
+            iceberg_external_volume="BENCHBOX_VOL",
+        )
+
+        with (
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [Path("/tmp/lineitem")]}),
+            patch.object(adapter, "_detect_external_table_format", return_value="iceberg"),
+        ):
+            table_stats, _, _ = adapter.create_external_tables(
+                benchmark=Mock(), connection=mock_connection, data_dir=Path("/tmp")
+            )
+
+        assert table_stats == {"LINEITEM": 11}
+        execute_calls = [str(call.args[0]) for call in mock_cursor.execute.call_args_list]
+        assert any("CREATE OR REPLACE ICEBERG TABLE LINEITEM" in sql for sql in execute_calls)
+        assert any("EXTERNAL_VOLUME = 'BENCHBOX_VOL'" in sql for sql in execute_calls)
+        assert any("CATALOG = 'SNOWFLAKE'" in sql for sql in execute_calls)
+        assert any("BASE_LOCATION = 'external-prefix/test_db/lineitem'" in sql for sql in execute_calls)
+
+    @patch("benchbox.platforms.snowflake.snowflake")
+    def test_create_external_tables_iceberg_requires_external_volume(self, mock_snowflake):
+        """Iceberg external mode should reject runs without external volume config."""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        adapter = SnowflakeAdapter(
+            account="test_account",
+            username="test_user",
+            password="test_pass",
+            warehouse="TEST_WH",
+            database="TEST_DB",
+            schema="PUBLIC",
+            staging_root="s3://benchbox-stage-root/external-prefix",
+        )
+
+        with (
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [Path("/tmp/lineitem")]}),
+            patch.object(adapter, "_detect_external_table_format", return_value="iceberg"),
+            pytest.raises(ValueError, match="requires --platform-option iceberg_external_volume"),
+        ):
+            adapter.create_external_tables(benchmark=Mock(), connection=mock_connection, data_dir=Path("/tmp"))
+
+    @patch("benchbox.platforms.snowflake.snowflake")
+    def test_create_external_tables_generates_delta_sql(self, mock_snowflake):
+        """Delta external mode should use TABLE_FORMAT=DELTA."""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (12,)
+
+        adapter = SnowflakeAdapter(
+            account="test_account",
+            username="test_user",
+            password="test_pass",
+            warehouse="TEST_WH",
+            database="TEST_DB",
+            schema="PUBLIC",
+            staging_root="s3://benchbox-stage-root",
+        )
+
+        with (
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [Path("/tmp/lineitem")]}),
+            patch.object(adapter, "_detect_external_table_format", return_value="delta"),
+        ):
+            table_stats, _, _ = adapter.create_external_tables(
+                benchmark=Mock(), connection=mock_connection, data_dir=Path("/tmp")
+            )
+
+        assert table_stats == {"LINEITEM": 12}
+        execute_calls = [str(call.args[0]) for call in mock_cursor.execute.call_args_list]
+        assert any("TABLE_FORMAT=DELTA" in sql for sql in execute_calls)
+
+    @patch("benchbox.platforms.snowflake.snowflake")
+    def test_create_external_tables_escapes_staging_root_quotes(self, mock_snowflake):
+        """Staging root with single quotes must be escaped in CREATE STAGE SQL."""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (10,)
+
+        adapter = SnowflakeAdapter(
+            account="test_account",
+            username="test_user",
+            password="test_pass",
+            warehouse="TEST_WH",
+            database="TEST_DB",
+            schema="PUBLIC",
+            staging_root="s3://bucket/it's-a-path",
+        )
+
+        with patch.object(adapter, "_resolve_data_files", return_value={"orders": [Path("/tmp/orders.parquet")]}):
+            adapter.create_external_tables(
+                benchmark=Mock(),
+                connection=mock_connection,
+                data_dir=Path("/tmp"),
+            )
+
+        execute_calls = [str(call.args[0]) for call in mock_cursor.execute.call_args_list]
+        stage_sql = [sql for sql in execute_calls if "CREATE STAGE" in sql]
+        assert stage_sql, "Expected CREATE STAGE SQL"
+        # The single quote in the path should be escaped as ''
+        assert "it''s-a-path" in stage_sql[0]
 
     @patch("benchbox.platforms.snowflake.snowflake")
     def test_configure_for_benchmark_olap(self, mock_snowflake):

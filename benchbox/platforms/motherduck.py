@@ -37,7 +37,7 @@ except ImportError:
     duckdb = None
 
 from .base import DriverIsolationCapability, PlatformAdapter
-from .duckdb import _build_duckdb_ctas_sort_sql
+from .duckdb import _build_duckdb_ctas_sort_sql, _create_duckdb_external_views
 
 if TYPE_CHECKING:
     from benchbox.core.tuning.interface import TuningColumn
@@ -61,6 +61,7 @@ class MotherDuckAdapter(PlatformAdapter):
     """
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         """Initialize MotherDuck adapter.
@@ -342,6 +343,12 @@ class MotherDuckAdapter(PlatformAdapter):
 
         load_time = time.perf_counter() - start_time
         return row_counts, load_time, None
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Create MotherDuck external views over Parquet/Delta sources."""
+        return _create_duckdb_external_views(self, benchmark, connection, data_dir)
 
     def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
         """Build MotherDuck CTAS SQL using DuckDB-compatible syntax."""

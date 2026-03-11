@@ -6,6 +6,11 @@ from benchbox.core.runner.runner import LifecyclePhases, ValidationOptions, run_
 from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig
 from benchbox.core.system import SystemProfiler
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.duckdb

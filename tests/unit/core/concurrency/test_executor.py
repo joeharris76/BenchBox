@@ -16,7 +16,10 @@ from benchbox.core.concurrency.executor import (
 )
 from benchbox.core.concurrency.patterns import SteadyPattern, StepPattern
 
-pytestmark = pytest.mark.medium  # Executor tests have concurrent operations (~1s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestQueryExecution:

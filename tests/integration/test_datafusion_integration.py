@@ -20,6 +20,12 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
+
 # Skip all tests if DataFusion is not available
 try:
     from datafusion import SessionContext
@@ -338,7 +344,6 @@ class TestDataFusionIntegration:
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 @pytest.mark.skipif(not datafusion_available, reason="DataFusion not installed")
 class TestDataFusionSmoke:
     """Quick smoke tests for DataFusion adapter."""

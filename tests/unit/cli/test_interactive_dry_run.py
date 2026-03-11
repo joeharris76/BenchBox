@@ -15,7 +15,6 @@ from benchbox.cli.benchmarks import (
     BenchmarkConfig,
     get_platform_format_recommendation,
     prompt_capture_plans,
-    prompt_data_format,
     prompt_force_regeneration,
     prompt_official_mode,
     prompt_output_location,
@@ -23,10 +22,17 @@ from benchbox.cli.benchmarks import (
     prompt_platform_options,
     prompt_query_subset,
     prompt_seed,
+    prompt_table_format,
+    prompt_table_mode,
     prompt_validation_mode,
     prompt_verbose_output,
 )
 from benchbox.cli.dryrun import display_interactive_preview, generate_cli_command
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGenerateCLICommand:
@@ -123,15 +129,15 @@ class TestGenerateCLICommand:
         )
         assert "--output s3://bucket/path" in cmd
 
-    def test_convert_format_included(self):
-        """Test that convert format is included."""
+    def test_table_format_included(self):
+        """Test that table format is included."""
         cmd = generate_cli_command(
             platform="duckdb",
             benchmark="tpch",
             scale=0.1,
-            convert_format="iceberg",
+            table_format="iceberg",
         )
-        assert "--convert iceberg" in cmd
+        assert "--table-format iceberg" in cmd
 
     def test_compression_included(self):
         """Test that compression is included."""
@@ -152,6 +158,26 @@ class TestGenerateCLICommand:
             mode="dataframe",
         )
         assert "--mode dataframe" in cmd
+
+    def test_table_mode_included(self):
+        """Test that table mode is included when specified."""
+        cmd = generate_cli_command(
+            platform="duckdb",
+            benchmark="tpch",
+            scale=0.1,
+            table_mode="external",
+        )
+        assert "--table-mode external" in cmd
+
+    def test_table_mode_native_omitted(self):
+        """Native table mode (default) should be omitted from equivalent command."""
+        cmd = generate_cli_command(
+            platform="duckdb",
+            benchmark="tpch",
+            scale=0.1,
+            table_mode="native",
+        )
+        assert "--table-mode" not in cmd
 
     def test_force_included(self):
         """Test that force mode is included."""
@@ -204,7 +230,7 @@ class TestGenerateCLICommand:
             tuning="tuned",
             seed=12345,
             output="s3://bucket/benchmark-data",
-            convert_format="iceberg:zstd",
+            table_format="iceberg:zstd",
             compression="zstd:9",
             mode="sql",
             force="all",
@@ -220,7 +246,7 @@ class TestGenerateCLICommand:
         assert "--tuning tuned" in cmd
         assert "--seed 12345" in cmd
         assert "--output s3://bucket/benchmark-data" in cmd
-        assert "--convert iceberg:zstd" in cmd
+        assert "--table-format iceberg:zstd" in cmd
         assert "--compression zstd:9" in cmd
         assert "--mode sql" in cmd
         assert "--force all" in cmd
@@ -298,6 +324,8 @@ class TestDisplayInteractivePreview:
         assert "DUCKDB" in result
         assert "TPC-H" in result
         assert "power" in result
+        assert "Table Mode:" in result
+        assert "native" in result
         assert "benchbox run" in result
 
     def test_preview_with_all_options(self):
@@ -356,6 +384,30 @@ class TestDisplayInteractivePreview:
         assert "--platform duckdb" in result
         assert "--benchmark tpch" in result
         assert "--scale 0.5" in result
+        assert "--table-mode" not in result  # native is default, omitted
+
+    def test_preview_external_table_mode_reflected(self):
+        """Preview table and command should reflect external table mode."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config(scale_factor=0.5)
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["power"],
+            table_mode="external",
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "Table Mode:" in result
+        assert "external" in result
+        assert "--table-mode external" in result
 
     def test_preview_with_query_subset(self):
         """Test preview with query subset specified."""
@@ -421,6 +473,306 @@ class TestDisplayInteractivePreview:
         assert "POLARS" in result
         assert "dataframe mode" in result
 
+    def test_preview_shows_table_format_in_table(self):
+        """Table Format row appears when table_format is in benchmark options."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config(
+            options={"table_format": "iceberg", "table_format_compression": "zstd"},
+        )
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["generate", "load", "power"],
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "Table Format:" in result
+        assert "Iceberg" in result
+        assert "zstd" in result
+
+    def test_preview_shows_table_format_in_cli_command(self):
+        """Equivalent CLI command includes --table-format when format is set."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config(
+            options={"table_format": "parquet", "table_format_compression": "snappy"},
+        )
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["power"],
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "--table-format parquet" in result
+
+    def test_preview_omits_format_when_not_set(self):
+        """No Table Format row when table_format is absent from options."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config()
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["power"],
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "Table Format:" not in result
+        assert "--table-format" not in result
+
+    def test_preview_cli_command_includes_tuning_when_set(self):
+        """CLI command in preview should include --tuning when tuning is specified."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config()
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["generate", "load", "power"],
+            tuning="tuned",
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "--tuning tuned" in result
+
+    def test_preview_cli_command_omits_tuning_when_none(self):
+        """CLI command should not include --tuning when tuning is None."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config()
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["power"],
+            tuning=None,
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "--tuning" not in result
+
+    def test_preview_cli_command_includes_compression(self):
+        """CLI command should include --compression when compress_data is set."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config(
+            compress_data=True,
+            compression_type="zstd",
+            compression_level=3,
+        )
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["power"],
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "--compression zstd:3" in result
+
+    def test_preview_cli_command_includes_all_configured_options(self):
+        """CLI command should include tuning, table-mode, table-format, and compression."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=120)
+
+        db_config = self._create_mock_database_config()
+        bench_config = self._create_mock_benchmark_config(
+            scale_factor=1.0,
+            compress_data=True,
+            compression_type="zstd",
+            compression_level=3,
+            options={"table_format": "iceberg"},
+        )
+
+        display_interactive_preview(
+            database_config=db_config,
+            benchmark_config=bench_config,
+            phases=["generate", "load", "power"],
+            table_mode="external",
+            tuning="tuned",
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "--tuning tuned" in result
+        assert "--table-mode external" in result
+        assert "--table-format iceberg" in result
+        assert "--compression zstd:3" in result
+
+
+class TestDisplayInteractivePreviewAllParams:
+    """Integration test: display_interactive_preview with all params set."""
+
+    def test_preview_cli_command_includes_all_new_params(self):
+        """CLI command output should contain every new flag when all params are set."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=200)
+
+        class MockDB:
+            type = "databricks"
+            execution_mode = "sql"
+
+        bench_config = BenchmarkConfig(
+            name="tpch",
+            display_name="TPC-H",
+            scale_factor=1.0,
+            compress_data=True,
+            compression_type="zstd",
+            compression_level=9,
+            options={"table_format": "delta", "table_format_compression": "zstd"},
+        )
+
+        display_interactive_preview(
+            database_config=MockDB(),
+            benchmark_config=bench_config,
+            phases=["generate", "load", "power"],
+            output="s3://bucket/data",
+            table_mode="external",
+            tuning="tuned",
+            seed=42,
+            force="all",
+            official=True,
+            capture_plans=True,
+            validation="full",
+            verbose=2,
+            console_obj=console,
+            platform_options={"driver_version": "1.2.0"},
+            plan_config="sample:0.1,first:5",
+            presort="delta-sorted",
+            sorted_ingestion_mode="force",
+            sorted_ingestion_method="z_order",
+            databricks_clustering_strategy="liquid_clustering",
+            liquid_clustering_columns="col1,col2",
+            global_cache=True,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+
+        # All original params
+        assert "--platform databricks" in result
+        assert "--benchmark tpch" in result
+        assert "--scale 1.0" in result
+        assert "--phases generate,load,power" in result
+        assert "--tuning tuned" in result
+        assert "--seed 42" in result
+        assert "--table-mode external" in result
+        assert "--table-format delta:zstd" in result
+        assert "--compression zstd:9" in result
+        assert "--force all" in result
+        assert "--official" in result
+        assert "--capture-plans" in result
+        assert "--validation full" in result
+        assert "-vv" in result
+
+        # All new params
+        assert "--platform-option driver_version=1.2.0" in result
+        assert "--plan-config sample:0.1,first:5" in result
+        assert "--presort delta-sorted" in result
+        assert "--sorted-ingestion-mode force" in result
+        assert "--sorted-ingestion-method z_order" in result
+        assert "--databricks-clustering-strategy liquid_clustering" in result
+        assert "--liquid-clustering-columns col1,col2" in result
+        assert "--global-cache" in result
+
+    def test_preview_compression_zstd_not_dropped(self):
+        """Regression: --compression zstd should appear when compress_data=True."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=200)
+
+        class MockDB:
+            type = "duckdb"
+            execution_mode = "sql"
+
+        bench_config = BenchmarkConfig(
+            name="tpch",
+            display_name="TPC-H",
+            scale_factor=0.01,
+            compress_data=True,
+            compression_type="zstd",
+            compression_level=None,
+        )
+
+        display_interactive_preview(
+            database_config=MockDB(),
+            benchmark_config=bench_config,
+            phases=["power"],
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "--compression zstd" in result
+
+    def test_preview_table_format_with_compression_suffix(self):
+        """--table-format should include :compression when not snappy."""
+        import re
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=200)
+
+        class MockDB:
+            type = "duckdb"
+            execution_mode = "sql"
+
+        bench_config = BenchmarkConfig(
+            name="tpch",
+            display_name="TPC-H",
+            scale_factor=0.01,
+            compress_data=False,
+            options={"table_format": "iceberg", "table_format_compression": "zstd"},
+        )
+
+        display_interactive_preview(
+            database_config=MockDB(),
+            benchmark_config=bench_config,
+            phases=["power"],
+            console_obj=console,
+        )
+
+        result = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+        assert "--table-format iceberg:zstd" in result
+
 
 class TestPromptPhases:
     """Tests for prompt_phases function."""
@@ -444,6 +796,39 @@ class TestPromptPhases:
         response_iter = iter(responses)
         monkeypatch.setattr("benchbox.cli.benchmarks.Prompt.ask", lambda *_args, **_kwargs: next(response_iter))
         assert prompt_phases() == expected
+
+
+class TestPromptTableMode:
+    """Tests for prompt_table_mode function."""
+
+    def test_select_native(self, monkeypatch):
+        monkeypatch.setattr("benchbox.cli.benchmarks.Prompt.ask", lambda *_args, **_kwargs: "1")
+        assert prompt_table_mode() == "native"
+
+    def test_select_external(self, monkeypatch):
+        monkeypatch.setattr("benchbox.cli.benchmarks.Prompt.ask", lambda *_args, **_kwargs: "2")
+        assert prompt_table_mode() == "external"
+
+    def test_default_fallback_for_invalid_default(self, monkeypatch):
+        def _ask(*_args, **kwargs):
+            assert kwargs.get("default") == "1"
+            return "1"
+
+        monkeypatch.setattr("benchbox.cli.benchmarks.Prompt.ask", _ask)
+        assert prompt_table_mode(default_mode="unknown") == "native"
+
+    def test_external_default_label_rendered(self, monkeypatch):
+        rendered_lines = []
+
+        monkeypatch.setattr(
+            "benchbox.cli.benchmarks.console.print",
+            lambda *args, **_kwargs: rendered_lines.append(str(args[0]) if args else ""),
+        )
+        monkeypatch.setattr("benchbox.cli.benchmarks.Prompt.ask", lambda *_args, **_kwargs: "2")
+
+        assert prompt_table_mode(default_mode="external") == "external"
+        assert any("external (default)" in line for line in rendered_lines)
+        assert not any("native (default)" in line for line in rendered_lines)
 
 
 class TestPromptQuerySubset:
@@ -809,19 +1194,19 @@ class TestGetPlatformFormatRecommendation:
         assert "widely compatible" in reason
 
 
-class TestPromptDataFormat:
-    """Tests for prompt_data_format function."""
+class TestPromptTableFormat:
+    """Tests for prompt_table_format function."""
 
     def test_unsupported_platform_returns_none(self):
         """Test unsupported platform returns None without prompting."""
-        result = prompt_data_format("postgresql")
+        result = prompt_table_format("postgresql")
         assert result == (None, None)
 
     @patch("benchbox.cli.benchmarks.Confirm.ask")
     def test_decline_configure_format(self, mock_confirm):
         """Test declining format configuration returns None."""
         mock_confirm.return_value = False
-        result = prompt_data_format("duckdb")
+        result = prompt_table_format("duckdb")
         assert result == (None, None)
 
     @patch("benchbox.cli.benchmarks.Prompt.ask")
@@ -830,7 +1215,7 @@ class TestPromptDataFormat:
         """Test selecting CSV format."""
         mock_confirm.return_value = True
         mock_prompt.return_value = "1"  # CSV
-        fmt, compression = prompt_data_format("duckdb")
+        fmt, compression = prompt_table_format("duckdb")
         assert fmt is None
         assert compression is None
 
@@ -841,7 +1226,7 @@ class TestPromptDataFormat:
         mock_confirm.return_value = True
         # Parquet=2, zstd=2 (parquet options: snappy=1, zstd=2, gzip=3, none=4)
         mock_prompt.side_effect = ["2", "2"]
-        fmt, compression = prompt_data_format("duckdb")
+        fmt, compression = prompt_table_format("duckdb")
         assert fmt == "parquet"
         assert compression == "zstd"
 
@@ -852,7 +1237,7 @@ class TestPromptDataFormat:
         mock_confirm.return_value = True
         # Vortex=3, zstd=1 (vortex options: zstd=1, lz4=2, none=3)
         mock_prompt.side_effect = ["3", "1"]
-        fmt, compression = prompt_data_format("duckdb")
+        fmt, compression = prompt_table_format("duckdb")
         assert fmt == "vortex"
         assert compression == "zstd"
 
@@ -863,7 +1248,7 @@ class TestPromptDataFormat:
         mock_confirm.return_value = True
         # Delta=4, snappy=1 (delta options: snappy=1, zstd=2, none=3)
         mock_prompt.side_effect = ["4", "1"]
-        fmt, compression = prompt_data_format("databricks")
+        fmt, compression = prompt_table_format("databricks")
         assert fmt == "delta"
         assert compression == "snappy"
 
@@ -874,7 +1259,7 @@ class TestPromptDataFormat:
         mock_confirm.return_value = True
         # Iceberg=5, zstd=1 (iceberg options: zstd=1, snappy=2, gzip=3, none=4)
         mock_prompt.side_effect = ["5", "1"]
-        fmt, compression = prompt_data_format("snowflake")
+        fmt, compression = prompt_table_format("snowflake")
         assert fmt == "iceberg"
         assert compression == "zstd"
 
@@ -885,9 +1270,41 @@ class TestPromptDataFormat:
         mock_confirm.return_value = True
         # Parquet=2, none=4 (parquet options: snappy=1, zstd=2, gzip=3, none=4)
         mock_prompt.side_effect = ["2", "4"]
-        fmt, compression = prompt_data_format("duckdb")
+        fmt, compression = prompt_table_format("duckdb")
         assert fmt == "parquet"
         assert compression is None
+
+    @patch("benchbox.cli.benchmarks.Prompt.ask")
+    @patch("benchbox.cli.benchmarks.Confirm.ask")
+    def test_format_and_compression_returned_separately(self, mock_confirm, mock_prompt):
+        """Format and compression must be separate values, not combined as 'iceberg:zstd'.
+
+        The runner expects table_format='iceberg' and table_format_compression='zstd'
+        as separate keys in benchmark_config.options. A combined string would fail
+        the allowed_formats validation in _run_format_conversion().
+        """
+        mock_confirm.return_value = True
+        mock_prompt.side_effect = ["5", "1"]  # Iceberg + zstd
+        fmt, compression = prompt_table_format("snowflake")
+
+        # Format must be a plain name without colon — runner validates against {"parquet", "vortex", "delta", "iceberg"}
+        assert fmt == "iceberg"
+        assert ":" not in fmt
+        assert compression == "zstd"
+
+    @patch("benchbox.cli.benchmarks.Prompt.ask")
+    @patch("benchbox.cli.benchmarks.Confirm.ask")
+    def test_all_formats_return_valid_runner_names(self, mock_confirm, mock_prompt):
+        """Every format returned by prompt_table_format must be in the runner's allowed set."""
+        allowed_formats = {"parquet", "vortex", "delta", "iceberg"}
+        format_choices = {"2": "parquet", "3": "vortex", "4": "delta", "5": "iceberg"}
+
+        for choice, expected_fmt in format_choices.items():
+            mock_confirm.return_value = True
+            mock_prompt.side_effect = [choice, "1"]  # format + first compression option
+            fmt, _ = prompt_table_format("duckdb")
+            assert fmt in allowed_formats, f"Format '{fmt}' from choice {choice} not in runner's allowed set"
+            assert fmt == expected_fmt
 
 
 class TestPromptVerboseOutput:
@@ -1006,9 +1423,9 @@ class TestRunCommandImportIntegrity:
         """Verify all composite param classes are accessible at module level."""
         from benchbox.cli.commands.run import (
             CompressionConfig,
-            ConvertConfig,
             ForceConfig,
             PlanCaptureConfig,
+            TableFormatConfig,
             ValidationConfig,
         )
 
@@ -1020,7 +1437,7 @@ class TestRunCommandImportIntegrity:
         compression = CompressionConfig()
         assert compression.enabled is True
 
-        convert = ConvertConfig()
+        convert = TableFormatConfig()
         assert convert.format == "parquet"
 
         plan = PlanCaptureConfig()

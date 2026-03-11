@@ -12,9 +12,10 @@ import pytest
 
 from benchbox import TPCH
 
+pytestmark = pytest.mark.medium
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchBox(unittest.TestCase):
     def setUp(self) -> None:
         """Set up test fixtures before each test method."""

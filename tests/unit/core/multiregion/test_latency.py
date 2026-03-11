@@ -16,7 +16,10 @@ from benchbox.core.multiregion.latency import (
     estimate_latency_from_distance,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestLatencyMeasurement:

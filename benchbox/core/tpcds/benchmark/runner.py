@@ -1178,6 +1178,7 @@ class TPCDSBenchmark(BaseBenchmark):
             logger.info(f"Starting TPC-DS Throughput Test ({num_streams} streams)")
 
         test_start_time = time.time()
+        _perf_start = time.perf_counter()
         stream_results = []
         successful_streams = 0
 
@@ -1306,7 +1307,7 @@ class TPCDSBenchmark(BaseBenchmark):
                         logger.error(f"Stream execution failed: {e}")
 
         test_end_time = time.time()
-        total_duration = test_end_time - test_start_time
+        total_duration = time.perf_counter() - _perf_start
 
         # Calculate Throughput@Size metric
         throughput_at_size = 0.0

@@ -4,7 +4,10 @@ from unittest.mock import Mock
 
 import pytest
 
-pytestmark = pytest.mark.medium  # Preflight tests invoke dsqgen (~3s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 def _mk_tpcds_power(raise_on_ids=None):

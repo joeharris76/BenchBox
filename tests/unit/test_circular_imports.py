@@ -15,6 +15,11 @@ import importlib
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
 
 class TestCircularImports:
     """Test suite for circular import issues."""
@@ -116,7 +121,6 @@ class TestCircularImports:
         for module_name in platform_modules:
             importlib.import_module(module_name)
 
-    @pytest.mark.fast
     def test_import_validation_script_functions(self):
         """Test that key modules can be imported without circular dependency issues."""
         # Simple test that key modules can be imported successfully
@@ -173,7 +177,6 @@ class TestCircularImports:
             assert reloaded_module is module  # Should be the same object
 
 
-@pytest.mark.fast
 @pytest.mark.unit
 class TestImportStructure:
     """Test the overall import structure health."""

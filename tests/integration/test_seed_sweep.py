@@ -7,6 +7,11 @@ automatically if binaries are not available in this environment.
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 def _has_tpcds_dsqgen():
     try:

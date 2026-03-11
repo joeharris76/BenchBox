@@ -7,6 +7,12 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
+
 # Skip if MCP SDK not installed
 mcp = pytest.importorskip("mcp", reason="MCP SDK not installed. Install with: uv add benchbox --extra mcp")
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.text import Text
@@ -19,14 +20,14 @@ from benchbox.cli.benchmarks import BenchmarkConfig, BenchmarkManager
 from benchbox.cli.cloud_storage import prompt_cloud_output_location
 from benchbox.cli.composite_params import (
     COMPRESSION,
-    CONVERT,
     FORCE,
     PLAN_CONFIG,
+    TABLE_FORMAT,
     VALIDATION,
     CompressionConfig,
-    ConvertConfig,
     ForceConfig,
     PlanCaptureConfig,
+    TableFormatConfig,
     ValidationConfig,
 )
 from benchbox.cli.database import DatabaseManager
@@ -60,7 +61,7 @@ from benchbox.platforms import is_dataframe_platform, list_available_dataframe_p
 from benchbox.utils.cloud_storage import is_cloud_path
 from benchbox.utils.compression import CompressionManager
 from benchbox.utils.output_path import normalize_output_root
-from benchbox.utils.verbosity import VerbositySettings, compute_verbosity
+from benchbox.utils.verbosity import VerbositySettings
 
 logger = logging.getLogger(__name__)
 DATA_ORGANIZATION_ENV = "BENCHBOX_DATA_ORGANIZATION_CONFIG_JSON"
@@ -91,6 +92,15 @@ def normalize_benchmark_name(name: str) -> str:
     """Normalize benchmark name: lowercase and resolve aliases."""
     normalized = name.lower()
     return BENCHMARK_ALIASES.get(normalized, normalized)
+
+
+def _reject_external_tuned(console: Any, logger: logging.Logger | None, ctx: click.Context) -> None:
+    """Exit with error when --table-mode external is combined with --tuning tuned."""
+    console.print("[red]❌ Error: --table-mode external is incompatible with --tuning tuned[/red]")
+    console.print("[yellow]Use --table-mode native or choose a non-tuned mode[/yellow]")
+    if logger:
+        logger.error("Invalid flag combination: --table-mode external with --tuning tuned")
+    ctx.exit(1)
 
 
 def _build_data_organization_from_tuning(unified_tuning: Any) -> dict[str, Any] | None:
@@ -136,17 +146,17 @@ def _build_data_organization_from_tuning(unified_tuning: Any) -> dict[str, Any] 
 
 def _resolve_data_organization_payload(
     benchmark_name: str | None,
-    data_format: str | None,
+    presort: str | None,
     tuning_payload: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     """Resolve effective data organization payload from tuning and CLI flags."""
-    if data_format not in {"parquet-sorted", "delta-sorted", "iceberg-sorted"}:
+    if presort not in {"parquet-sorted", "delta-sorted", "iceberg-sorted"}:
         return tuning_payload
 
     if tuning_payload is not None:
-        if data_format in {"delta-sorted", "iceberg-sorted"}:
+        if presort in {"delta-sorted", "iceberg-sorted"}:
             payload = dict(tuning_payload)
-            payload["output_format"] = "delta" if data_format == "delta-sorted" else "iceberg"
+            payload["output_format"] = "delta" if presort == "delta-sorted" else "iceberg"
             return payload
         return tuning_payload
 
@@ -156,7 +166,7 @@ def _resolve_data_organization_payload(
         "delta-sorted": "delta",
         "iceberg-sorted": "iceberg",
     }
-    output_format = output_format_map[data_format]
+    output_format = output_format_map[presort]
     if benchmark_key == "tpch":
         return {
             "table_configs": {"lineitem": [{"name": "l_shipdate", "order": "asc"}]},
@@ -169,7 +179,7 @@ def _resolve_data_organization_payload(
         }
 
     if benchmark_key:
-        raise ValueError("--data-format sorted modes are currently supported for tpch and tpcds benchmarks")
+        raise ValueError("--presort sorted modes are currently supported for tpch and tpcds benchmarks")
     return tuning_payload
 
 
@@ -349,101 +359,7 @@ def _describe_platform_options(platform_names: Iterable[str]) -> None:
         console.print()
 
 
-def setup_verbose_logging(
-    verbose: int | bool | VerbositySettings = 0,
-    quiet: bool = False,
-) -> tuple[logging.Logger | None, VerbositySettings]:
-    """Configure logging according to verbosity settings.
-
-    Args:
-        verbose: Verbosity level or :class:`VerbositySettings` instance. When an
-            integer/bool is provided, ``0`` disables verbose logging, ``1``
-            enables info-level output, and ``2`` or greater enables debug-level
-            output.
-        quiet: When True, overrides verbosity and silences non-critical logs.
-
-    Returns:
-        A tuple of ``(logger, settings)`` where ``logger`` is the configured
-        BenchBox CLI logger (or ``None`` when verbosity is disabled) and
-        ``settings`` is the normalized :class:`VerbositySettings` instance.
-    """
-    settings = _resolve_verbosity_settings(verbose, quiet)
-    log_level = _determine_log_level(settings)
-
-    root_logger = _configure_root_logger(log_level, settings)
-    _configure_third_party_loggers(settings)
-
-    logger = None
-    if settings.verbose_enabled:
-        logger = logging.getLogger("benchbox.cli.main")
-        if settings.very_verbose:
-            logger.debug("Very verbose logging enabled - DEBUG level logging active")
-            logger.debug(f"Root logger level: {logging.getLevelName(root_logger.level)}")
-        else:
-            logger.info("Verbose logging enabled - INFO level logging active")
-
-    return logger, settings
-
-
-def _resolve_verbosity_settings(verbose: int | bool | VerbositySettings, quiet: bool) -> VerbositySettings:
-    """Normalize verbose parameter into VerbositySettings."""
-    if isinstance(verbose, VerbositySettings):
-        if quiet and not verbose.quiet:
-            return VerbositySettings.from_flags(verbose.level, True)
-        return verbose
-    return compute_verbosity(verbose, quiet)
-
-
-def _determine_log_level(settings: VerbositySettings) -> int:
-    """Map verbosity settings to a logging level."""
-    if settings.quiet:
-        return logging.CRITICAL
-    if settings.very_verbose:
-        return logging.DEBUG
-    if settings.verbose_enabled:
-        return logging.INFO
-    return logging.WARNING
-
-
-def _configure_root_logger(log_level: int, settings: VerbositySettings) -> logging.Logger:
-    """Configure the root logger with appropriate handler and formatter."""
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(log_level)
-
-    if settings.very_verbose:
-        fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        formatter = logging.Formatter(fmt, datefmt="%H:%M:%S")
-    elif settings.verbose_enabled:
-        formatter = logging.Formatter("%(levelname)s - %(message)s")
-    else:
-        formatter = logging.Formatter("%(message)s")
-
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # Keep BenchBox namespace loggers inheriting from root
-    for logger_name in ["benchbox", "benchbox.cli", "benchbox.platforms", "benchbox.core", "benchbox.utils"]:
-        logging.getLogger(logger_name).setLevel(logging.NOTSET)
-
-    return root_logger
-
-
-def _configure_third_party_loggers(settings: VerbositySettings) -> None:
-    """Configure third-party library loggers to appropriate levels."""
-    # Always suppress noisy libraries at WARNING
-    _always_warn = ["urllib3", "requests", "py4j", "py4j.java_gateway", "py4j.clientserver", "pyspark", "pyspark.sql"]
-    for name in _always_warn:
-        logging.getLogger(name).setLevel(logging.WARNING)
-
-    # SQLAlchemy gets INFO only in very-verbose mode
-    sa_level = logging.INFO if (settings.very_verbose and not settings.quiet) else logging.WARNING
-    logging.getLogger("sqlalchemy").setLevel(sa_level)
+from benchbox.cli.verbose_logging import setup_verbose_logging as setup_verbose_logging  # noqa: E402
 
 
 @click.command("run", cls=BenchBoxCommand)
@@ -477,6 +393,12 @@ def _configure_third_party_loggers(settings: VerbositySettings) -> None:
     type=str,
     default="notuning",
     help="Tuning: tuned, notuning, auto, or YAML path",
+)
+@click.option(
+    "--table-mode",
+    type=click.Choice(["native", "external"], case_sensitive=False),
+    default="native",
+    help="Table mode: native materialized tables or external table/view references",
 )
 @advanced_option(
     "--sorted-ingestion-mode",
@@ -551,16 +473,16 @@ def _configure_third_party_loggers(settings: VerbositySettings) -> None:
 )
 # Format Conversion
 @advanced_option(
-    "--convert",
-    type=CONVERT,
+    "--table-format",
+    type=TABLE_FORMAT,
     default=None,
-    help="Convert format: parquet, vortex, delta:snappy, iceberg:zstd,partition:year,month",
+    help="Table format: parquet, vortex, delta:snappy, iceberg:zstd,partition:year,month",
 )
 @advanced_option(
-    "--data-format",
+    "--presort",
     type=click.Choice(["parquet-sorted", "delta-sorted", "iceberg-sorted"], case_sensitive=False),
     default=None,
-    help="Generate pre-sorted data in open table formats (parquet-sorted, delta-sorted, iceberg-sorted).",
+    help="Pre-sort data into open table formats (parquet-sorted, delta-sorted, iceberg-sorted).",
 )
 # Validation
 @advanced_option(
@@ -613,6 +535,7 @@ def run(
     phases: str,
     queries: str | None,
     tuning: str,
+    table_mode: str,
     sorted_ingestion_mode: str | None,
     sorted_ingestion_method: str | None,
     databricks_clustering_strategy: str | None,
@@ -626,8 +549,8 @@ def run(
     capture_plans: bool,
     plan_config: PlanCaptureConfig | None,
     compression: CompressionConfig | None,
-    convert: ConvertConfig | None,
-    data_format: str | None,
+    table_format: TableFormatConfig | None,
+    presort: str | None,
     validation: ValidationConfig | None,
     platform_option_pairs: tuple[tuple[str, str], ...],
     mode: str | None,
@@ -678,10 +601,10 @@ def run(
     plan_queries_str = ",".join(plan_cfg.queries) if plan_cfg.queries else None
     show_query_plans = capture_plans  # Show plans when capturing
 
-    # Convert config -> legacy variables
-    convert_format = convert.format if convert else None
-    conversion_compression = convert.compression if convert else "snappy"
-    conversion_partition_cols = tuple(convert.partition_cols) if convert else ()
+    # Table format config -> legacy variables
+    table_format_value = table_format.format if table_format else None
+    table_format_compression = table_format.compression if table_format else "snappy"
+    table_format_partition_cols = tuple(table_format.partition_cols) if table_format else ()
 
     # Validation config -> legacy variables
     val_config = validation or ValidationConfig()
@@ -736,6 +659,13 @@ def run(
 
     platform_key = normalize_platform_name(platform) if platform else None
     benchmark = normalize_benchmark_name(benchmark) if benchmark else None
+    table_mode = (table_mode or "native").lower()
+    table_mode_cli_supplied = False
+    if hasattr(ctx, "get_parameter_source"):
+        try:
+            table_mode_cli_supplied = ctx.get_parameter_source("table_mode") == click.core.ParameterSource.COMMANDLINE
+        except Exception:
+            table_mode_cli_supplied = False
     if platform_option_pairs and not platform_key:
         console.print("[red]❌ Platform options require a --platform selection[/red]")
         ctx.exit(1)
@@ -753,6 +683,9 @@ def run(
     if logger:
         logger.debug("Starting BenchBox CLI run command")
         logger.debug(f"Arguments: platform={platform}, benchmark={benchmark}, scale={scale}, verbose={verbose}")
+
+    if table_mode == "external" and tuning.strip().lower() == "tuned":
+        _reject_external_tuned(console, logger, ctx)
 
     # Set non-interactive environment variable if flag is provided
     if non_interactive:
@@ -949,7 +882,8 @@ def run(
                 from benchbox.utils.dependencies import get_install_command
 
                 console.print(f"[red]❌ Platform '{platform_key}' is not available (missing dependencies)[/red]")
-                console.print(f"Run [cyan]{get_install_command(platform_key)}[/cyan] to install dependencies.")
+                install_cmd = get_install_command(platform_key)
+                console.print(f"Run [cyan]{escape(install_cmd)}[/cyan] to install dependencies.")
                 ctx.exit(1)
             # Legacy DataFrame platform handling
             resolved_mode = "dataframe"
@@ -998,7 +932,8 @@ def run(
                 from benchbox.utils.dependencies import get_install_command
 
                 console.print(f"[red]❌ Platform '{platform_key}' is not available (missing dependencies)[/red]")
-                console.print(f"Run [cyan]{get_install_command(platform_key)}[/cyan] to install dependencies.")
+                install_cmd = get_install_command(platform_key)
+                console.print(f"Run [cyan]{escape(install_cmd)}[/cyan] to install dependencies.")
                 ctx.exit(1)
 
         if logger and resolved_mode:
@@ -1124,9 +1059,7 @@ def run(
 
     data_organization_payload = _build_data_organization_from_tuning(loaded_unified_config)
     try:
-        data_organization_payload = _resolve_data_organization_payload(
-            benchmark, data_format, data_organization_payload
-        )
+        data_organization_payload = _resolve_data_organization_payload(benchmark, presort, data_organization_payload)
     except ValueError as exc:
         console.print(f"[red]❌ {exc}[/red]")
         ctx.exit(1)
@@ -1394,6 +1327,7 @@ def run(
                 **verbosity_payload,
                 "estimated_time_range": benchmark_info["estimated_time_range"],
                 "tuning_enabled": tuning_enabled,
+                "table_mode": table_mode,
                 "unified_tuning_configuration": loaded_unified_config,
                 **({"data_organization": data_organization_payload} if data_organization_payload is not None else {}),
                 "force_regenerate": force_regenerate,
@@ -1404,10 +1338,18 @@ def run(
                 **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
                 **({"seed": seed} if seed is not None else {}),
                 **({"validation_mode": validation_mode} if validation_mode is not None else {}),
-                **({"convert_format": convert_format} if convert_format is not None else {}),
-                **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
-                **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
-                **({"data_format": data_format} if data_format is not None else {}),
+                **({"table_format": table_format_value} if table_format_value is not None else {}),
+                **(
+                    {"table_format_compression": table_format_compression}
+                    if table_format_compression is not None
+                    else {}
+                ),
+                **(
+                    {"table_format_partition_cols": list(table_format_partition_cols)}
+                    if table_format_partition_cols
+                    else {}
+                ),
+                **({"presort": presort} if presort is not None else {}),
             },
         )
 
@@ -1518,10 +1460,11 @@ def run(
 
         # Emit the run announcement now that driver version is resolved
         _driver_version = database_config.driver_version_actual or database_config.driver_version_resolved
+        _mode_tag = " \\[external]" if table_mode == "external" else ""
         if _driver_version:
-            console.print(f"Running {benchmark} on {platform} at scale {scale} \\[driver {_driver_version}]")
+            console.print(f"Running {benchmark} on {platform} at scale {scale} \\[driver {_driver_version}]{_mode_tag}")
         else:
-            console.print(f"Running {benchmark} on {platform} at scale {scale}")
+            console.print(f"Running {benchmark} on {platform} at scale {scale}{_mode_tag}")
 
         # Validate benchmark exists
         if benchmark not in bench_manager.benchmarks:
@@ -1556,6 +1499,7 @@ def run(
                 **verbosity_payload,
                 "estimated_time_range": benchmark_info["estimated_time_range"],
                 "tuning_enabled": tuning_enabled,
+                "table_mode": table_mode,
                 "unified_tuning_configuration": loaded_unified_config,
                 **({"data_organization": data_organization_payload} if data_organization_payload is not None else {}),
                 "force_regenerate": force_regenerate,
@@ -1565,10 +1509,18 @@ def run(
                 "seed": seed,
                 "ignore_memory_warnings": ignore_memory_warnings,
                 **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
-                **({"convert_format": convert_format} if convert_format is not None else {}),
-                **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
-                **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
-                **({"data_format": data_format} if data_format is not None else {}),
+                **({"table_format": table_format_value} if table_format_value is not None else {}),
+                **(
+                    {"table_format_compression": table_format_compression}
+                    if table_format_compression is not None
+                    else {}
+                ),
+                **(
+                    {"table_format_partition_cols": list(table_format_partition_cols)}
+                    if table_format_partition_cols
+                    else {}
+                ),
+                **({"presort": presort} if presort is not None else {}),
             },
         )
 
@@ -1656,6 +1608,7 @@ def run(
                 compression_level=compression_level,
                 test_execution_type=test_execution_type,
                 seed=seed,
+                additional_options={"table_mode": table_mode},
             )
         else:
             console.print(f"\n[red]❌ Benchmark failed: {result.validation_status}[/red]")
@@ -1764,6 +1717,7 @@ def run(
             options={
                 **verbosity_payload,
                 "estimated_time_range": benchmark_info["estimated_time_range"],
+                "table_mode": table_mode,
                 "unified_tuning_configuration": loaded_unified_config,
                 **({"data_organization": data_organization_payload} if data_organization_payload is not None else {}),
                 "force_regenerate": force_regenerate,
@@ -1773,10 +1727,18 @@ def run(
                 "seed": seed,
                 "ignore_memory_warnings": ignore_memory_warnings,
                 **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
-                **({"convert_format": convert_format} if convert_format is not None else {}),
-                **({"conversion_compression": conversion_compression} if conversion_compression is not None else {}),
-                **({"conversion_partition_cols": list(conversion_partition_cols)} if conversion_partition_cols else {}),
-                **({"data_format": data_format} if data_format is not None else {}),
+                **({"table_format": table_format_value} if table_format_value is not None else {}),
+                **(
+                    {"table_format_compression": table_format_compression}
+                    if table_format_compression is not None
+                    else {}
+                ),
+                **(
+                    {"table_format_partition_cols": list(table_format_partition_cols)}
+                    if table_format_partition_cols
+                    else {}
+                ),
+                **({"presort": presort} if presort is not None else {}),
             },
         )
 
@@ -1889,6 +1851,7 @@ def run(
                 compression_level=compression_level,
                 test_execution_type=test_execution_type,
                 seed=seed,
+                additional_options={"table_mode": table_mode},
             )
         else:
             console.print(
@@ -1960,6 +1923,11 @@ def run(
             scale = last_run["scale"]
             tuning = last_run.get("tuning_mode", "tuned")
             phases = last_run.get("phases", ["load", "power"])
+            # Preserve explicit CLI --table-mode over saved quick-restart preference.
+            if not table_mode_cli_supplied:
+                table_mode = str(last_run.get("table_mode", table_mode) or "native").lower()
+            if table_mode == "external" and tuning.strip().lower() == "tuned":
+                _reject_external_tuned(console, logger, ctx)
 
             console.print("[green]✓ Using saved configuration[/green]")
 
@@ -2007,6 +1975,7 @@ def run(
                 strict_plan_capture=strict_plan_capture,
                 options={
                     "estimated_time_range": benchmark_info.get("estimated_time_range", (0, 60)),
+                    "table_mode": table_mode,
                     "complexity": benchmark_info.get("complexity", "medium"),
                     **(
                         {"data_organization": data_organization_payload}
@@ -2017,16 +1986,18 @@ def run(
                     "seed": seed,
                     "ignore_memory_warnings": ignore_memory_warnings,
                     **({"cache_dir": str(Path.home() / ".benchbox" / "datagen")} if global_cache else {}),
-                    **({"convert_format": convert_format} if convert_format is not None else {}),
+                    **({"table_format": table_format_value} if table_format_value is not None else {}),
                     **(
-                        {"conversion_compression": conversion_compression} if conversion_compression is not None else {}
-                    ),
-                    **(
-                        {"conversion_partition_cols": list(conversion_partition_cols)}
-                        if conversion_partition_cols
+                        {"table_format_compression": table_format_compression}
+                        if table_format_compression is not None
                         else {}
                     ),
-                    **({"data_format": data_format} if data_format is not None else {}),
+                    **(
+                        {"table_format_partition_cols": list(table_format_partition_cols)}
+                        if table_format_partition_cols
+                        else {}
+                    ),
+                    **({"presort": presort} if presort is not None else {}),
                 },
             )
 
@@ -2126,7 +2097,6 @@ def run(
         if sys.stdin.isatty() and sys.stdout.isatty():
             from benchbox.cli.benchmarks import (
                 prompt_capture_plans,
-                prompt_data_format,
                 prompt_force_regeneration,
                 prompt_official_mode,
                 prompt_output_location,
@@ -2134,9 +2104,19 @@ def run(
                 prompt_platform_options,
                 prompt_query_subset,
                 prompt_seed,
+                prompt_table_format,
+                prompt_table_mode,
                 prompt_validation_mode,
                 prompt_verbose_output,
             )
+
+            # Table mode selection (unless explicitly provided on CLI)
+            if not table_mode_cli_supplied:
+                table_mode = prompt_table_mode(default_mode=table_mode)
+                if table_mode == "external" and tuning.strip().lower() == "tuned":
+                    _reject_external_tuned(console, logger, ctx)
+            else:
+                console.print(f"[dim]Using table mode from CLI: {table_mode}[/dim]")
 
             # Phase selection
             phases_to_run = prompt_phases(default_phases=phases_to_run)
@@ -2207,15 +2187,13 @@ def run(
                 if custom_output:
                     output = custom_output
 
-            # Data format selection (only if not already set via CLI)
-            if convert_format is None:
-                selected_format, selected_compression = prompt_data_format(database_config.type)
+            # Table format selection (only if not already set via CLI)
+            if table_format_value is None:
+                selected_format, selected_compression = prompt_table_format(database_config.type)
                 if selected_format:
-                    # Build convert_format string (e.g., "parquet", "delta:snappy")
+                    table_format_value = selected_format
                     if selected_compression:
-                        convert_format = f"{selected_format}:{selected_compression}"
-                    else:
-                        convert_format = selected_format
+                        table_format_compression = selected_compression
 
             # Verbose output selection (only if not already set via CLI)
             if verbosity_settings.level == 0:
@@ -2267,9 +2245,18 @@ def run(
         # Add tuning config to benchmark options
         benchmark_config.options["unified_tuning_configuration"] = loaded_unified_config
         benchmark_config.options["tuning_enabled"] = True
+        # Update tuning variable so the CLI preview command includes --tuning
+        tuning = "tuned"
         benchmark_config.options["seed"] = seed
+        benchmark_config.options["table_mode"] = table_mode
         if df_tuning_config:
             benchmark_config.options["df_tuning_config"] = df_tuning_config
+
+        # Propagate table format settings from interactive prompt
+        if table_format_value is not None:
+            benchmark_config.options["table_format"] = table_format_value
+        if table_format_compression is not None:
+            benchmark_config.options["table_format_compression"] = table_format_compression
 
     # Pre-flight validation: Ensure cloud platforms have output location
     # Note: In interactive mode, this should not be reached since prompt handles it
@@ -2315,11 +2302,30 @@ def run(
             elif force.upload:
                 force_str = "upload"
 
+        # Build plan_config string for CLI preview
+        plan_config_str = None
+        if plan_config:
+            plan_parts = []
+            if plan_config.sample_rate is not None:
+                plan_parts.append(f"sample:{plan_config.sample_rate}")
+            if plan_config.first_n is not None:
+                plan_parts.append(f"first:{plan_config.first_n}")
+            if plan_config.queries:
+                plan_parts.append(f"queries:{','.join(plan_config.queries)}")
+            if plan_config.strict:
+                plan_parts.append("strict:true")
+            if plan_parts:
+                plan_config_str = ",".join(plan_parts)
+
+        # Build platform_options dict for CLI preview
+        platform_options_dict = dict(platform_option_pairs) if platform_option_pairs else None
+
         display_interactive_preview(
             database_config=database_config,
             benchmark_config=benchmark_config,
             phases=phases_to_run,
             output=output,
+            table_mode=table_mode,
             tuning=tuning if tuning != "notuning" else None,
             seed=seed,
             force=force_str,
@@ -2328,6 +2334,14 @@ def run(
             validation=validation_mode if validation_mode and validation_mode != "exact" else None,
             verbose=verbosity_settings.level,
             console_obj=console,
+            platform_options=platform_options_dict,
+            plan_config=plan_config_str,
+            presort=presort,
+            sorted_ingestion_mode=sorted_ingestion_mode,
+            sorted_ingestion_method=sorted_ingestion_method,
+            databricks_clustering_strategy=databricks_clustering_strategy,
+            liquid_clustering_columns=liquid_clustering_columns,
+            global_cache=global_cache,
         )
 
         if not Confirm.ask("Proceed with execution?", default=True):
@@ -2419,6 +2433,7 @@ def run(
             compression_level=benchmark_config.compression_level,
             test_execution_type=benchmark_config.test_execution_type,
             seed=seed,
+            additional_options={"table_mode": table_mode},
         )
     else:
         console.print(f"\n[red]❌ Benchmark failed with status: {result.validation_status}[/red]")

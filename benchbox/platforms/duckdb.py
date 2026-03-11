@@ -106,10 +106,290 @@ def _build_duckdb_ctas_sort_sql(table_name: str, sort_columns) -> str:
     return f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM {table_name} ORDER BY {order_by_clause};"
 
 
+def _resolve_external_table_sources(benchmark: Any, data_dir: Path) -> dict[str, list[Path]]:
+    """Resolve table->file mappings for external table/view registration."""
+    from benchbox.platforms.base.data_loading import DataSourceResolver
+
+    source = DataSourceResolver().resolve(benchmark, data_dir)
+    if source is None:
+        return {}
+
+    table_sources: dict[str, list[Path]] = {}
+    for table_name, raw_paths in source.tables.items():
+        candidates = raw_paths if isinstance(raw_paths, list) else [raw_paths]
+        normalized_paths = [Path(path) for path in candidates if Path(path).exists()]
+        if normalized_paths:
+            table_sources[table_name] = normalized_paths
+
+    return table_sources
+
+
+def _build_duckdb_external_scan_expression(
+    connection: Any,
+    source_paths: list[Path],
+    *,
+    delta_extension_loaded: bool,
+    vortex_extension_loaded: bool,
+    iceberg_extension_loaded: bool = False,
+    column_names: list[str] | None = None,
+) -> tuple[str, bool, bool, bool, str]:
+    """Build DuckDB scan expression for external table/view creation.
+
+    Supports Parquet, Vortex, Delta, Iceberg, and delimited text files (TBL/CSV/DAT).
+    For text files, ``column_names`` should be provided so the VIEW has
+    correct column names (text files have no embedded schema).
+
+    Returns:
+        Tuple of (scan_expression, delta_ext_loaded, vortex_ext_loaded, iceberg_ext_loaded, format_name)
+        where format_name is one of "parquet", "vortex", "delta", "iceberg", "tbl", or "csv".
+    """
+    from benchbox.platforms.base.data_loading import escape_sql_string_literal
+    from benchbox.utils.file_format import detect_data_format
+
+    def _build_parquet_scan_expression(parquet_paths: list[Path]) -> str:
+        escaped_paths = [escape_sql_string_literal(str(path)) for path in parquet_paths]
+        if len(escaped_paths) == 1:
+            return f"read_parquet('{escaped_paths[0]}')"
+        path_array = "[" + ", ".join(f"'{path}'" for path in escaped_paths) + "]"
+        return f"read_parquet({path_array})"
+
+    # Delta table directory: use delta_scan() with duckdb delta extension.
+    if len(source_paths) == 1 and source_paths[0].is_dir() and (source_paths[0] / "_delta_log").is_dir():
+        if not delta_extension_loaded:
+            connection.execute("INSTALL delta")
+            connection.execute("LOAD delta")
+            delta_extension_loaded = True
+        escaped_delta_path = escape_sql_string_literal(str(source_paths[0]))
+        return (
+            f"delta_scan('{escaped_delta_path}')",
+            delta_extension_loaded,
+            vortex_extension_loaded,
+            iceberg_extension_loaded,
+            "delta",
+        )
+
+    # Iceberg table directory: use iceberg_scan() with duckdb iceberg extension.
+    if len(source_paths) == 1 and source_paths[0].is_dir() and (source_paths[0] / "metadata").is_dir():
+        if not iceberg_extension_loaded:
+            connection.execute("INSTALL iceberg")
+            connection.execute("LOAD iceberg")
+            iceberg_extension_loaded = True
+        escaped_iceberg_path = escape_sql_string_literal(str(source_paths[0]))
+        return (
+            f"iceberg_scan('{escaped_iceberg_path}')",
+            delta_extension_loaded,
+            vortex_extension_loaded,
+            iceberg_extension_loaded,
+            "iceberg",
+        )
+
+    # Vortex files: use read_vortex() with DuckDB vortex extension.
+    vortex_paths: list[Path] = []
+    for path in source_paths:
+        if path.is_dir():
+            vortex_paths.extend(sorted(path.glob("*.vortex")))
+        elif path.suffix.lower() == ".vortex":
+            vortex_paths.append(path)
+
+    if vortex_paths:
+        if not vortex_extension_loaded:
+            try:
+                connection.execute("INSTALL vortex")
+                connection.execute("LOAD vortex")
+                vortex_extension_loaded = True
+            except Exception as e:
+                raise RuntimeError(
+                    "DuckDB external table mode for Vortex files requires the DuckDB vortex extension. "
+                    "Install/load failed. Ensure your DuckDB runtime supports the extension, "
+                    "or use --table-mode native."
+                ) from e
+
+        escaped_paths = [escape_sql_string_literal(str(path)) for path in vortex_paths]
+        if len(escaped_paths) == 1:
+            scan_expr = f"read_vortex('{escaped_paths[0]}')"
+        else:
+            union_terms = [f"SELECT * FROM read_vortex('{path}')" for path in escaped_paths]
+            scan_expr = "(" + " UNION ALL ".join(union_terms) + ")"
+
+        try:
+            connection.execute(f"SELECT * FROM {scan_expr} LIMIT 1").fetchall()
+        except Exception as probe_error:
+            raise RuntimeError(
+                "DuckDB cannot read these Vortex files. This typically occurs when files were "
+                "written by Python Vortex bindings instead of the DuckDB vortex extension. "
+                "Re-run with --force datagen to regenerate files using the DuckDB extension writer, "
+                "or use --table-mode native to load data into DuckDB tables directly."
+            ) from probe_error
+
+        return scan_expr, delta_extension_loaded, vortex_extension_loaded, iceberg_extension_loaded, "vortex"
+
+    # Parquet files (self-describing format, no column_names needed).
+    parquet_paths: list[Path] = []
+    for path in source_paths:
+        if path.is_dir():
+            parquet_paths.extend(sorted(path.glob("*.parquet")))
+        elif path.suffix.lower() == ".parquet":
+            parquet_paths.append(path)
+
+    if parquet_paths:
+        return (
+            _build_parquet_scan_expression(parquet_paths),
+            delta_extension_loaded,
+            vortex_extension_loaded,
+            iceberg_extension_loaded,
+            "parquet",
+        )
+
+    # Delimited text files (TBL, CSV, DAT) — use DuckDB read_csv().
+    text_paths: list[Path] = []
+    detected_fmt = "csv"
+    for path in source_paths:
+        if not path.is_dir():
+            fmt = detect_data_format(path)
+            if fmt in ("tbl", "csv"):
+                text_paths.append(path)
+                detected_fmt = fmt
+
+    if text_paths:
+        return (
+            _build_csv_scan_expression(text_paths, column_names),
+            delta_extension_loaded,
+            vortex_extension_loaded,
+            iceberg_extension_loaded,
+            detected_fmt,
+        )
+
+    formatted_sources = ", ".join(str(path) for path in source_paths)
+    raise RuntimeError(
+        "DuckDB external table mode requires Parquet, Vortex, Delta, Iceberg, "
+        f"or delimited text files (TBL/CSV/DAT). Received: {formatted_sources}"
+    )
+
+
+def _build_csv_scan_expression(
+    text_paths: list[Path],
+    column_names: list[str] | None,
+) -> str:
+    """Build a ``read_csv()`` scan expression for DuckDB external views."""
+    from benchbox.platforms.base.data_loading import escape_sql_string_literal
+    from benchbox.utils.file_format import (
+        get_column_names_with_trailing,
+        get_delimiter_for_file,
+        has_trailing_delimiter,
+    )
+
+    delimiter = get_delimiter_for_file(text_paths[0])
+    escaped_paths = [escape_sql_string_literal(str(p)) for p in text_paths]
+    if len(escaped_paths) == 1:
+        path_expr = f"'{escaped_paths[0]}'"
+    else:
+        path_expr = "[" + ", ".join(f"'{p}'" for p in escaped_paths) + "]"
+
+    csv_params = [f"delim='{delimiter}'", "header=false", "nullstr=''", "ignore_errors=true"]
+
+    if column_names:
+        trailing = has_trailing_delimiter(text_paths[0], delimiter, column_names)
+        all_names = get_column_names_with_trailing(column_names, trailing)
+        names_param = ", ".join(f"'{col}'" for col in all_names)
+        csv_params.extend([f"names=[{names_param}]", "null_padding=true"])
+        scan_expr = f"read_csv({path_expr}, {', '.join(csv_params)})"
+        if trailing:
+            select_cols = ", ".join(f'"{col}"' for col in column_names)
+            return f"(SELECT {select_cols} FROM {scan_expr})"
+        return scan_expr
+
+    # No column names — fall back to auto_detect (columns will be column0, column1, …).
+    csv_params.append("auto_detect=true")
+    return f"read_csv({path_expr}, {', '.join(csv_params)})"
+
+
+def _get_benchmark_column_names(benchmark: Any, table_name: str) -> list[str] | None:
+    """Extract column names for *table_name* from benchmark schema, if available."""
+    schema: dict | None = None
+    if hasattr(benchmark, "_impl") and hasattr(benchmark._impl, "get_schema"):
+        raw = benchmark._impl.get_schema()
+        if isinstance(raw, dict):
+            schema = raw
+    if schema is None and hasattr(benchmark, "get_schema"):
+        raw = benchmark.get_schema()
+        if isinstance(raw, dict):
+            schema = raw
+    if not schema:
+        return None
+    table_def = schema.get(table_name)
+    if not table_def or "columns" not in table_def:
+        return None
+    return [col["name"] for col in table_def["columns"]]
+
+
+def _create_duckdb_external_views(
+    adapter: Any,
+    benchmark: Any,
+    connection: Any,
+    data_dir: Path,
+) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+    """Create external DuckDB views over Parquet/Delta/text sources and return table stats."""
+    from benchbox.platforms.base.data_loading import validate_sql_identifier
+
+    start_time = mono_time()
+    data_dir = Path(data_dir)
+    table_sources = _resolve_external_table_sources(benchmark, data_dir)
+    if not table_sources:
+        raise RuntimeError(f"No external source files found under {data_dir}")
+
+    if hasattr(benchmark, "get_table_loading_order"):
+        ordered_tables = benchmark.get_table_loading_order(list(table_sources.keys()))
+    else:
+        ordered_tables = sorted(table_sources.keys())
+
+    table_stats: dict[str, int] = {}
+    delta_loaded = False
+    vortex_loaded = False
+    iceberg_loaded = False
+    detected_format: str | None = None
+    for table_name in ordered_tables:
+        if table_name not in table_sources:
+            continue
+
+        validated_table = validate_sql_identifier(table_name, "table name")
+        col_names = _get_benchmark_column_names(benchmark, table_name)
+        scan_expr, delta_loaded, vortex_loaded, iceberg_loaded, fmt = _build_duckdb_external_scan_expression(
+            connection,
+            table_sources[table_name],
+            delta_extension_loaded=delta_loaded,
+            vortex_extension_loaded=vortex_loaded,
+            iceberg_extension_loaded=iceberg_loaded,
+            column_names=col_names,
+        )
+        if detected_format is None:
+            detected_format = fmt
+
+        # DuckDB cannot CREATE OR REPLACE VIEW when a TABLE with the same name exists
+        # (and vice-versa). Drop whichever object type currently occupies the name.
+        existing = connection.execute(
+            f"SELECT table_type FROM information_schema.tables "
+            f"WHERE table_schema = 'main' AND table_name = '{validated_table}'"
+        ).fetchone()
+        if existing:
+            if existing[0] == "BASE TABLE":
+                connection.execute(f"DROP TABLE {validated_table}")
+            else:
+                connection.execute(f"DROP VIEW {validated_table}")
+        connection.execute(f"CREATE VIEW {validated_table} AS SELECT * FROM {scan_expr}")
+        row = connection.execute(f"SELECT COUNT(*) FROM {scan_expr}").fetchone()
+        table_stats[table_name] = int(row[0]) if row else 0
+
+    if detected_format is not None:
+        adapter.external_format = detected_format
+    loading_time = elapsed_seconds(start_time)
+    return table_stats, loading_time, None
+
+
 class DuckDBAdapter(PlatformAdapter):
     """DuckDB platform adapter with optimized bulk loading and execution."""
 
     driver_isolation_capability = DriverIsolationCapability.SUPPORTED
+    supports_external_tables = True
 
     @property
     def platform_name(self) -> str:
@@ -524,6 +804,12 @@ class DuckDBAdapter(PlatformAdapter):
         table_stats, loading_time = loader.load()
         # DataLoader doesn't provide per-table timings yet
         return table_stats, loading_time, None
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Create DuckDB external views over Parquet/Delta sources."""
+        return _create_duckdb_external_views(self, benchmark, connection, data_dir)
 
     def _build_ctas_sort_sql(self, table_name: str, sort_columns: list[TuningColumn]) -> str | None:
         """Build DuckDB CTAS SQL used by PlatformAdapter.apply_ctas_sort."""

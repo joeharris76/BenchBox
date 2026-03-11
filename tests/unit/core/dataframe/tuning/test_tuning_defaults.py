@@ -15,7 +15,10 @@ from benchbox.core.dataframe.tuning import (
     get_smart_defaults,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSystemProfile:

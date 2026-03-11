@@ -16,7 +16,10 @@ import pytest
 
 from benchbox.platforms.doris import DorisAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDorisIdentifierValidation:

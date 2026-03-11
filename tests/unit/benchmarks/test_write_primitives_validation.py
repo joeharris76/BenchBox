@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.core.write_primitives.catalog import ValidationQuery
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.unit

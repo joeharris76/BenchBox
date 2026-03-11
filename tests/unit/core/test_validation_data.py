@@ -8,7 +8,10 @@ from benchbox.core.validation.data import (
     ValidationStatus,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def make_validator(platform_name: str = "duckdb") -> DataValidator:

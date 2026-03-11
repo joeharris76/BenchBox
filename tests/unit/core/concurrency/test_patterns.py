@@ -17,7 +17,10 @@ from benchbox.core.concurrency.patterns import (
     WorkloadPhase,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSteadyPattern:

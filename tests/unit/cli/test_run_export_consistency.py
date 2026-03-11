@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.cli.commands.run import _export_orchestrated_result
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.skipif(

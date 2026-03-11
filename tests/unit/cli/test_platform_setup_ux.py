@@ -18,7 +18,11 @@ from benchbox.cli.platform import (
 )
 from benchbox.core.schemas import PlatformInfo
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Skip marker for tests that use mock.patch on CLI module attributes (Python 3.10 incompatible)
 skip_py310_cli_mock = pytest.mark.skipif(

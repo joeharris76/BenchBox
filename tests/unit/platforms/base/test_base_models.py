@@ -12,7 +12,10 @@ from benchbox.platforms.base import (
     QueryExecution,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_connection_config_env_resolution(monkeypatch):

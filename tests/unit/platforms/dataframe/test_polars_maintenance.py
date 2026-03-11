@@ -21,7 +21,11 @@ from benchbox.core.dataframe.maintenance_interface import (
     get_maintenance_operations_for_platform,
 )
 
-pytestmark = pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars not installed")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars not installed"),
+]
 
 
 @pytest.fixture

@@ -26,7 +26,10 @@ from benchbox.core.results.models import (
 )
 from benchbox.platforms.base import PlatformAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockPlatformAdapter(PlatformAdapter):

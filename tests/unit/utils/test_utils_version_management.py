@@ -4,9 +4,13 @@ import pytest
 
 from benchbox.utils import version as version_utils
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestVersionConsistency:
     """Validate version consistency helpers."""
 
@@ -30,7 +34,6 @@ class TestVersionConsistency:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestVersionCompatibility:
     """Check semantic version compatibility helpers."""
 
@@ -59,7 +62,6 @@ class TestVersionCompatibility:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestEnhancedImportErrors:
     """Validate helpful messaging when optional dependencies are missing."""
 

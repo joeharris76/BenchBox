@@ -20,7 +20,10 @@ from benchbox.utils.tpc_compilation import (
     get_tpc_compiler,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _mock_discover_paths(tpc_h=None, tpc_ds=None, precompiled=None):

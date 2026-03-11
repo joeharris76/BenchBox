@@ -7,7 +7,10 @@ import pytest
 from benchbox.core.query_plans.parsers.datafusion import DataFusionQueryPlanParser
 from benchbox.core.results.query_plan_models import JoinType, LogicalOperatorType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # Test fixtures - DataFusion EXPLAIN output samples

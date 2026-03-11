@@ -11,6 +11,11 @@ import pytest
 
 from benchbox.platforms.duckdb import DuckDBAdapter
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 class TestTPCTestRouting:
     """Test TPC test routing functionality in platform adapters."""

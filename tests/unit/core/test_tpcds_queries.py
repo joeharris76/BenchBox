@@ -3,7 +3,10 @@ import pytest
 from benchbox.core.tpcds.c_tools import TPCDSError
 from benchbox.core.tpcds.queries import TPCDSQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class FakeDSQGen:

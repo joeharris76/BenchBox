@@ -21,7 +21,10 @@ from benchbox.cli.output import ConsoleResultFormatter, ResultExporter
 from benchbox.core.schemas import QueryResult
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestConsoleResultFormatter:

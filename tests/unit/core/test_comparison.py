@@ -18,6 +18,12 @@ from benchbox.core.comparison.types import (
     detect_platform_types,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # ---------------------------------------------------------------------------
 # types.py — enums and constants
 # ---------------------------------------------------------------------------

@@ -19,9 +19,13 @@ import pytest
 from benchbox.core.tpch.benchmark import TPCH_SF1_REFERENCE_SEED
 from benchbox.core.tpch.power_test import TPCHPowerTestConfig
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestReferenceSeedConstant:
     """Test the TPCH_SF1_REFERENCE_SEED constant."""
 
@@ -36,7 +40,6 @@ class TestReferenceSeedConstant:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestPowerTestConfigDefaults:
     """Test TPCHPowerTestConfig default values."""
 

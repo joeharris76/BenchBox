@@ -161,7 +161,7 @@ PostgreSQL provides detailed query plan analysis:
 
 ```bash
 benchbox run --platform postgresql --benchmark tpch \
-  --show-query-plans
+  --capture-plans
 ```
 
 This captures EXPLAIN ANALYZE output including:

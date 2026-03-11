@@ -264,7 +264,7 @@ class TSBSDevOpsDataGenerator(VerbosityMixin):
             for host in self.hosts:
                 hostname = host["hostname"]
                 # Each host has different total memory (8GB to 64GB)
-                total_mem = int(self.rng.choice([8, 16, 32, 64]) * 1024 * 1024 * 1024)
+                total_mem = int(self.rng.choice([8, 16, 32, 64])) * 1024 * 1024 * 1024
                 base_used_pct = 40 + self.rng.random() * 30
 
                 for t in range(num_timestamps):

@@ -25,7 +25,10 @@ from benchbox.cli.exceptions import (
     create_error_handler,
 )
 
-pytestmark = pytest.mark.medium  # CLI exception tests with validation (~1s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 def _assert_version_metadata(payload: dict) -> None:

@@ -13,7 +13,10 @@ import pytest
 
 from benchbox.platforms.datafusion import DataFusionAdapter, DataFusionConnectionCompat
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDataFusionAdapter:
@@ -46,6 +49,26 @@ class TestDataFusionAdapter:
             assert adapter.target_partitions > 0  # Should default to CPU count
             assert adapter.data_format == "parquet"
             assert adapter.batch_size == 8192
+
+    def test_external_table_capability_declared(self):
+        """DataFusion should explicitly declare external table support."""
+        with patch("benchbox.platforms.datafusion.SessionContext"), tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir)
+            assert adapter.supports_external_tables is True
+
+    def test_create_external_tables_delegates_to_load_data(self):
+        """External mode should reuse existing load_data implementation."""
+        with patch("benchbox.platforms.datafusion.SessionContext"), tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir)
+            benchmark = Mock()
+            connection = Mock()
+            expected = ({"customer": 42}, 0.12, {"customer": {"total_ms": 120.0}})
+
+            with patch.object(adapter, "load_data", return_value=expected) as mock_load_data:
+                result = adapter.create_external_tables(benchmark, connection, Path(tmpdir))
+
+            assert result == expected
+            mock_load_data.assert_called_once_with(benchmark, connection, Path(tmpdir))
 
     def test_initialization_missing_driver(self):
         """Test initialization when DataFusion driver is not available."""
@@ -255,6 +278,184 @@ class TestDataFusionAdapter:
             mock_write_table.assert_called_once()
             # Verify table was registered
             mock_conn.register_parquet.assert_called_once()
+
+    def test_is_parquet_file(self):
+        """Test Parquet file detection by extension."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("benchbox.platforms.datafusion.SessionContext"):
+                adapter = DataFusionAdapter(working_dir=tmpdir)
+
+            assert adapter._is_parquet_file(Path("customer.parquet")) is True
+            assert adapter._is_parquet_file(Path("customer.parquet.zst")) is True
+            assert adapter._is_parquet_file(Path("customer.parquet.gz")) is True
+            assert adapter._is_parquet_file(Path("customer.parquet.lz4")) is True
+            assert adapter._is_parquet_file(Path("customer.parquet.snappy")) is True
+            assert adapter._is_parquet_file(Path("customer.csv")) is False
+            assert adapter._is_parquet_file(Path("customer.tbl")) is False
+            assert adapter._is_parquet_file(Path("customer.tbl.zst")) is False
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_load_table_parquet_with_parquet_input(self, mock_session_context):
+        """Test that pre-existing Parquet files are registered directly without CSV conversion."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a real Parquet file
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+
+            parquet_file = Path(tmpdir) / "test_table.parquet"
+            table = pa.table({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+            pq.write_table(table, parquet_file)
+
+            adapter = DataFusionAdapter(working_dir=tmpdir, data_format="parquet")
+            mock_conn = Mock()
+
+            row_count = adapter._load_table_parquet(mock_conn, "test_table", [parquet_file], Path(tmpdir))
+
+            assert row_count == 3
+            # Should register directly, not go through CSV conversion
+            mock_conn.register_parquet.assert_called_once_with("test_table", str(parquet_file))
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_load_table_parquet_with_multiple_parquet_files(self, mock_session_context):
+        """Test that multiple Parquet files are concatenated and registered."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+
+            # Create two Parquet files
+            pq.write_table(pa.table({"id": [1, 2]}), Path(tmpdir) / "part1.parquet")
+            pq.write_table(pa.table({"id": [3, 4]}), Path(tmpdir) / "part2.parquet")
+
+            working_dir = Path(tmpdir) / "work"
+            working_dir.mkdir()
+            adapter = DataFusionAdapter(working_dir=str(working_dir), data_format="parquet")
+            mock_conn = Mock()
+
+            file_paths = [Path(tmpdir) / "part1.parquet", Path(tmpdir) / "part2.parquet"]
+            row_count = adapter._load_table_parquet(mock_conn, "test_table", file_paths, Path(tmpdir))
+
+            assert row_count == 4
+            mock_conn.register_parquet.assert_called_once()
+            # Should have written a combined file in working_dir
+            registered_path = mock_conn.register_parquet.call_args[0][1]
+            assert "test_table.parquet" in registered_path
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_load_data_passes_platform_name_to_resolver(self, mock_session_context):
+        """Test that load_data passes platform name to DataSourceResolver for correct format selection."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = DataFusionAdapter(working_dir=tmpdir, data_format="parquet")
+
+            mock_benchmark = Mock()
+            mock_benchmark.tables = {}
+
+            with patch("benchbox.platforms.base.data_loading.DataSourceResolver") as mock_resolver_cls:
+                mock_resolver = Mock()
+                mock_resolver.resolve.return_value = None
+                mock_resolver_cls.return_value = mock_resolver
+
+                with pytest.raises(ValueError, match="No data files found"):
+                    adapter.load_data(mock_benchmark, Mock(), Path(tmpdir))
+
+                # Verify platform_name was passed (lowercase)
+                mock_resolver_cls.assert_called_once_with(platform_name="datafusion")
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    @patch("pyarrow.csv.read_csv")
+    @patch("pyarrow.parquet.write_table")
+    @patch("pyarrow.concat_tables")
+    def test_load_table_parquet_with_csv_input(
+        self, mock_concat_tables, mock_write_table, mock_read_csv, mock_session_context
+    ):
+        """Test that CSV files still go through conversion when data_format is parquet."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_file = Path(tmpdir) / "test.csv"
+            csv_file.write_text("1,test\n2,data\n")
+
+            adapter = DataFusionAdapter(working_dir=tmpdir, data_format="parquet")
+
+            mock_table = Mock()
+            mock_table.num_rows = 2
+            mock_read_csv.return_value = mock_table
+            mock_concat_tables.return_value = mock_table
+            mock_conn = Mock()
+
+            row_count = adapter._load_table_parquet(mock_conn, "test_table", [csv_file], Path(tmpdir))
+
+            assert row_count == 2
+            # Should have gone through CSV→Parquet conversion
+            mock_read_csv.assert_called_once()
+            mock_write_table.assert_called_once()
+            mock_conn.register_parquet.assert_called_once()
+
+    def test_detect_directory_format_delta(self, tmp_path):
+        """Test detection of Delta Lake directory format."""
+        delta_dir = tmp_path / "customer"
+        delta_dir.mkdir()
+        (delta_dir / "_delta_log").mkdir()
+
+        assert DataFusionAdapter._detect_directory_format([delta_dir]) == "delta"
+
+    def test_detect_directory_format_iceberg(self, tmp_path):
+        """Test detection of Iceberg directory format."""
+        ice_dir = tmp_path / "customer"
+        ice_dir.mkdir()
+        (ice_dir / "metadata").mkdir()
+
+        assert DataFusionAdapter._detect_directory_format([ice_dir]) == "iceberg"
+
+    def test_detect_directory_format_regular_file(self, tmp_path):
+        """Test that regular files are not detected as directory formats."""
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("a,b\n1,2\n")
+
+        assert DataFusionAdapter._detect_directory_format([csv_file]) is None
+
+    def test_detect_directory_format_multiple_files(self, tmp_path):
+        """Test that multiple files are not detected as directory formats."""
+        f1 = tmp_path / "part1.parquet"
+        f2 = tmp_path / "part2.parquet"
+        f1.touch()
+        f2.touch()
+
+        assert DataFusionAdapter._detect_directory_format([f1, f2]) is None
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_load_table_delta(self, mock_session_context, tmp_path):
+        """Test loading a Delta Lake table registers record batches."""
+        import pyarrow as pa
+
+        adapter = DataFusionAdapter(working_dir=str(tmp_path))
+        mock_conn = Mock()
+
+        mock_arrow_table = pa.table({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+
+        with patch("benchbox.platforms.datafusion.DataFusionAdapter._load_table_delta") as original:
+            # Test the actual method by calling it with mocked deltalake
+            original.side_effect = None  # don't use the side_effect
+
+        # Test via mock
+        with patch("deltalake.DeltaTable") as mock_delta_cls:
+            mock_delta = Mock()
+            mock_delta.to_pyarrow_table.return_value = mock_arrow_table
+            mock_delta_cls.return_value = mock_delta
+
+            row_count = adapter._load_table_delta(mock_conn, "customer", tmp_path / "customer")
+
+            assert row_count == 3
+            mock_conn.register_record_batches.assert_called_once()
+            call_args = mock_conn.register_record_batches.call_args
+            assert call_args[0][0] == "customer"
+
+    @patch("benchbox.platforms.datafusion.SessionContext")
+    def test_load_table_delta_missing_package(self, mock_session_context, tmp_path):
+        """Test that missing deltalake package raises clear error."""
+        adapter = DataFusionAdapter(working_dir=str(tmp_path))
+        mock_conn = Mock()
+
+        with patch.dict("sys.modules", {"deltalake": None}):
+            with pytest.raises(RuntimeError, match="deltalake"):
+                adapter._load_table_delta(mock_conn, "customer", tmp_path / "customer")
 
     @patch("benchbox.platforms.datafusion.SessionContext")
     def test_execute_query_success(self, mock_session_context):

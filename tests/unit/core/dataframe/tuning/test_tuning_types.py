@@ -12,7 +12,10 @@ from benchbox.core.dataframe.tuning.types import (
     get_all_platforms,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDataFrameTuningType:

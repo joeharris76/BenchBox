@@ -21,7 +21,10 @@ from benchbox.platforms.base import (
 )
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockPlatformAdapter(PlatformAdapter):
@@ -248,6 +251,18 @@ class TestPlatformAdapter:
         assert adapter.connection is None
         assert adapter.connection_pool is None
         assert adapter.dialect is None
+
+    def test_external_table_capability_defaults_disabled(self):
+        """Base adapter defaults to native tables unless subclasses opt in."""
+        adapter = MockPlatformAdapter()
+        assert adapter.supports_external_tables is False
+        assert PlatformAdapter.supports_external_tables is False
+
+    def test_create_external_tables_raises_by_default(self, tmp_path):
+        """Base implementation should force adapters to provide external mode behavior."""
+        adapter = MockPlatformAdapter()
+        with pytest.raises(NotImplementedError, match="does not support external table mode"):
+            adapter.create_external_tables(benchmark=Mock(), connection=Mock(), data_dir=tmp_path)
 
     def test_sql_translation_no_dialect(self):
         """Test SQL translation when no dialect is set."""
@@ -1578,3 +1593,96 @@ class TestMonotonicPhaseTiming:
         assert phase.duration_ms == 800
         assert phase.tables_generated == 1
         assert phase.per_table_stats["orders"].generation_time_ms == 200
+
+
+class TestReusedDatabaseExternalMode:
+    """Verify _setup_reused_database_phases routes to create_external_tables in external mode."""
+
+    def test_reused_db_external_mode_calls_create_external_tables(self):
+        adapter = MockPlatformAdapter()
+        adapter.table_mode = "external"
+        adapter.supports_external_tables = True
+        adapter.create_external_tables = Mock(return_value=({"t1": 100}, 0.3, None))
+
+        benchmark = Mock()
+        benchmark.output_dir = "/tmp/test"
+        connection = Mock()
+
+        result = adapter._setup_reused_database_phases(benchmark, connection)
+        schema_time, schema_phase, loading_time, table_stats, data_phase, tuning_saved = result
+
+        adapter.create_external_tables.assert_called_once()
+        assert table_stats == {"t1": 100}
+        assert loading_time == 0.3
+        assert tuning_saved is False
+
+    def test_reused_db_native_mode_skips_external_tables(self):
+        adapter = MockPlatformAdapter()
+        adapter.table_mode = "native"
+        adapter.create_external_tables = Mock()
+
+        benchmark = Mock()
+        benchmark.get_schema.return_value = {"t1": {}}
+        connection = Mock()
+
+        adapter._setup_reused_database_phases(benchmark, connection)
+        adapter.create_external_tables.assert_not_called()
+
+    def test_reused_db_external_raises_for_unsupported_platform(self):
+        adapter = MockPlatformAdapter()
+        adapter.table_mode = "external"
+        adapter.supports_external_tables = False
+
+        benchmark = Mock()
+        connection = Mock()
+
+        with pytest.raises(RuntimeError, match="does not support"):
+            adapter._setup_reused_database_phases(benchmark, connection)
+
+    def test_reused_db_external_calls_validate_requirements(self):
+        adapter = MockPlatformAdapter()
+        adapter.table_mode = "external"
+        adapter.supports_external_tables = True
+        adapter.validate_external_table_requirements = Mock()
+        adapter.create_external_tables = Mock(return_value=({"t1": 100}, 0.1, None))
+
+        benchmark = Mock()
+        benchmark.output_dir = "/tmp/test"
+        connection = Mock()
+
+        adapter._setup_reused_database_phases(benchmark, connection)
+        adapter.validate_external_table_requirements.assert_called_once()
+
+
+class TestExecutionMetadataTableMode:
+    """Verify table_mode appears in _build_execution_metadata run_config."""
+
+    def test_external_mode_in_execution_metadata(self):
+        adapter = MockPlatformAdapter()
+        adapter.table_mode = "external"
+        metadata, _, _ = adapter._build_execution_metadata({"benchmark": "tpch", "scale_factor": 0.01})
+        run_config = metadata.get("run_config", {})
+        assert run_config.get("table_mode") == "external"
+
+    def test_native_mode_omitted_from_execution_metadata(self):
+        adapter = MockPlatformAdapter()
+        adapter.table_mode = "native"
+        metadata, _, _ = adapter._build_execution_metadata({"benchmark": "tpch", "scale_factor": 0.01})
+        run_config = metadata.get("run_config", {})
+        assert run_config.get("table_mode") is None
+
+    def test_table_format_settings_in_execution_metadata(self):
+        adapter = MockPlatformAdapter()
+        metadata, _, _ = adapter._build_execution_metadata(
+            {
+                "benchmark": "tpch",
+                "scale_factor": 0.01,
+                "table_format": "parquet",
+                "table_format_compression": "zstd",
+                "table_format_partition_cols": ["region"],
+            }
+        )
+        run_config = metadata.get("run_config", {})
+        assert run_config.get("table_format") == "parquet"
+        assert run_config.get("table_format_compression") == "zstd"
+        assert run_config.get("table_format_partition_cols") == ["region"]

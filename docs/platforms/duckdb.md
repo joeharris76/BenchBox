@@ -196,9 +196,9 @@ benchbox run --platform duckdb --benchmark tpch --scale 1.0
 ### CSV
 
 ```bash
-# Force CSV format
-benchbox run --platform duckdb --benchmark tpch --scale 1.0 \
-  --format csv
+# Generate CSV data, then run benchmark
+benchbox datagen --benchmark tpch --scale 1.0 --format csv --output ./data/tpch_csv
+benchbox run --platform duckdb --benchmark tpch --scale 1.0 --output ./data/tpch_csv
 ```
 
 ### Direct Query (No Load)

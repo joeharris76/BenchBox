@@ -4,7 +4,10 @@ import pytest
 
 from benchbox.core.joinorder.benchmark import JoinOrderBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_core_verbose_logs_info(caplog):

@@ -15,7 +15,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _get_unified_expr():

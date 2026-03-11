@@ -12,6 +12,24 @@ BenchBox makes it easy to compare platforms because:
 - Same data (shared generation)
 - Same validation criteria
 
+### Shared Parquet Data
+
+BenchBox generates benchmark data as Parquet files once, then every platform reads from the same dataset. This gives you an apples-to-apples comparison — differences in results reflect engine performance, not data differences. When you run the same benchmark at the same scale factor across DuckDB, DataFusion, Polars, and others, they all query identical Parquet files from a shared data directory.
+
+### Choosing Table Mode
+
+Use `--table-mode` to control how data is registered before query execution:
+
+```bash
+# Default: materialize native tables
+benchbox run --platform duckdb --benchmark tpch --scale 0.1 --table-mode native
+
+# External registration over files (views/external tables)
+benchbox run --platform duckdb --benchmark tpch --scale 0.1 --table-mode external
+```
+
+`--table-mode external` is useful when you want direct file-based comparisons across engines. It is not compatible with `--tuning tuned`.
+
 ## Quick Comparison: DuckDB vs SQLite
 
 ```bash
@@ -50,6 +68,14 @@ benchbox run --platform duckdb --benchmark tpch --scale 1 -o local.json
 # Cloud (requires credentials)
 benchbox run --platform snowflake --benchmark tpch --scale 1 -o snowflake.json
 benchbox run --platform bigquery --benchmark tpch --scale 1 -o bigquery.json
+
+# Cloud external-mode examples (file-backed registration)
+benchbox run --platform snowflake --benchmark tpch --scale 1 --table-mode external \
+  --platform-option staging_root=s3://bucket/benchbox/ -o snowflake_external.json
+benchbox run --platform athena --benchmark tpch --scale 1 --table-mode external \
+  --platform-option staging_root=s3://bucket/benchbox/ -o athena_external.json
+benchbox run --platform bigquery --benchmark tpch --scale 1 --table-mode external \
+  --platform-option staging_root=gs://bucket/benchbox/ -o bigquery_external.json
 
 # Multi-way comparison
 benchbox compare local.json snowflake.json bigquery.json

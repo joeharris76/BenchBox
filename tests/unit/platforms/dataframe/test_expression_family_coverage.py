@@ -10,7 +10,10 @@ from benchbox.core.dataframe.query import DataFrameQuery
 from benchbox.platforms.dataframe.expression_family import ExpressionFamilyAdapter
 from benchbox.platforms.dataframe.unified_frame import UnifiedExpr
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class CoverageExpressionAdapter(ExpressionFamilyAdapter[dict, dict, str]):

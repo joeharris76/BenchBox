@@ -29,7 +29,10 @@ from benchbox.core.transaction_primitives.dataframe_operations import (
     validate_transaction_primitives_platform,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTransactionOperationType:

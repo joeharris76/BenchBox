@@ -110,7 +110,7 @@ def _register_clickhouse() -> None:
         return DatabaseConfig(
             type=platform,
             name=name,
-            options={},
+            options=options,
             driver_package=driver_package,
             driver_version=driver_version,
             driver_auto_install=bool(auto_install),
@@ -157,7 +157,7 @@ def _register_duckdb() -> None:
         return DatabaseConfig(
             type=platform,
             name=name,
-            options={},
+            options=options,
             driver_package=driver_package,
             driver_version=driver_version,
             driver_auto_install=bool(auto_install),
@@ -197,7 +197,7 @@ def _register_sqlite() -> None:
             type=platform,
             name=name,
             connection_string=str(db_path),
-            options={},
+            options=options,
             driver_package=driver_package,
             driver_version=driver_version,
             driver_auto_install=bool(auto_install),

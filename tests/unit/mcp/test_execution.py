@@ -5,12 +5,19 @@ Copyright 2026 Joe Harris / BenchBox Project
 Licensed under the MIT License. See LICENSE file in the project root for details.
 """
 
+import pytest
+
 from benchbox.mcp.execution import (
     ExecutionState,
     ExecutionStatus,
     ExecutionTracker,
     get_execution_tracker,
 )
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestExecutionStatus:

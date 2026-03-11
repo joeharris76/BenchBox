@@ -26,7 +26,10 @@ from benchbox.core.tsbs_devops.generator import (
     TSBSDevOpsDataGenerator,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGeneratorConfiguration:

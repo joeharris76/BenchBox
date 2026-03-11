@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_generator(compression_enabled: bool, verbose: bool = False) -> TPCDSDataGenerator:

@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.medium  # Sphinx build takes 5-6s
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+]
+
 
 try:
     from sphinx.cmd.build import build_main

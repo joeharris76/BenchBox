@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.core.results.schema import build_result_payload
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_build_result_payload_prefers_execution_time_seconds() -> None:

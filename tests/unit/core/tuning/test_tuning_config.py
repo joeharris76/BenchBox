@@ -19,6 +19,11 @@ from benchbox.core.tuning import (
     TuningColumn,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestTuningColumnEnhancements:
     """Tests for enhanced TuningColumn fields."""

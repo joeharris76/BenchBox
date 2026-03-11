@@ -16,7 +16,10 @@ from benchbox.core.ai_primitives.cost import (
     get_platform_pricing,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestCostEstimate:

@@ -6,6 +6,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 import click
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
@@ -90,7 +91,7 @@ def setup_credentials(ctx, platform, validate_only, list_platforms_flag, show_st
             console.print(f"[red]❌ Missing dependencies for {platform}:[/red]")
             console.print(f"   {', '.join(missing)}")
             console.print("\n[yellow]Install with:[/yellow]")
-            console.print(f"   {get_install_command(platform_lower)}")
+            console.print(f"   {escape(get_install_command(platform_lower))}")
             return
 
     # Interactive setup

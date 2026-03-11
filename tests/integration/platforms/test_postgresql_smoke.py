@@ -4,6 +4,11 @@ import pytest
 
 from .common import PostgreSQLStubState, install_postgresql_stub
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.platform_smoke

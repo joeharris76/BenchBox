@@ -8,9 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.fast,
     pytest.mark.skipif(sys.platform == "win32", reason="PySpark tests skipped on Windows"),
 ]
+
 
 # Check if PySpark is available for tests that need real Spark
 try:

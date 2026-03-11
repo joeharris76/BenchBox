@@ -16,7 +16,10 @@ from benchbox.core.tpch_skew.distributions import (
     create_distribution,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestZipfianDistribution:

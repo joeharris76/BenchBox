@@ -114,7 +114,7 @@ def sa2_expression_impl(ctx: DataFrameContext) -> Any:
         ol.with_columns(col("order_date").dt.year().alias("year"))
         .filter(col("year") == lit(year))
         .join(dp, left_on="product_record_id", right_on="record_id")
-        .group_by("subcategory", "name")
+        .group_by("subcategory", "product_name")
         .agg(
             col("quantity").sum().alias("total_quantity"),
             col("total_price").sum().alias("total_revenue"),

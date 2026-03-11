@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.core.read_primitives.queries import ReadPrimitivesQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueryManagerVariantRetrieval:

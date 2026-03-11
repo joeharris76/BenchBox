@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.datavault.benchmark import DataVaultBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_default_output_dir_uses_datavault_name(tmp_path, monkeypatch):

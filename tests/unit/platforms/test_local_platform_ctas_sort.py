@@ -12,7 +12,10 @@ from benchbox.platforms.postgresql import PostgreSQLAdapter
 from benchbox.platforms.sqlite import SQLiteAdapter
 from benchbox.platforms.starrocks.adapter import StarRocksAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_sort_column(name: str, order: int) -> Mock:

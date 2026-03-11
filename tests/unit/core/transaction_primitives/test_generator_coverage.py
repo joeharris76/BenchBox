@@ -10,7 +10,10 @@ import pytest
 
 from benchbox.core.transaction_primitives.generator import TransactionPrimitivesDataGenerator
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

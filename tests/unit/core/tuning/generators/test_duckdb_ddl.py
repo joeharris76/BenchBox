@@ -30,6 +30,11 @@ from benchbox.core.tuning.generators.duckdb import (
 )
 from benchbox.core.tuning.interface import TableTuning
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestVersionParsing:
     """Tests for version parsing utilities."""

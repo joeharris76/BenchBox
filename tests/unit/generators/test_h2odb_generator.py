@@ -12,6 +12,11 @@ import pytest
 
 from benchbox.core.h2odb.generator import H2ODataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def temp_dir():
@@ -21,7 +26,6 @@ def temp_dir():
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestH2ODataGenerator:
     """Test H2ODB data generator basic functionality."""
 
@@ -220,7 +224,6 @@ class TestH2ODataGenerator:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestGeneratorExtended:
     """Advanced tests for H2ODB data generator."""
 

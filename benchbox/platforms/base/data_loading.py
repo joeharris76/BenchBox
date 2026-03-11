@@ -18,6 +18,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -238,9 +239,17 @@ class ManifestFileSource:
             mapping = {}
             platform_name = getattr(self, "_platform_name", None) or self._infer_platform_name(benchmark)
             preferred_format = None
+            table_mode = getattr(self, "_table_mode", "native")
+            platform_config = getattr(self, "_platform_config", None)
 
             for table_name in manifest.tables.keys():
-                preferred_format = get_preferred_format(manifest, table_name, platform_name)
+                preferred_format = get_preferred_format(
+                    manifest,
+                    table_name,
+                    platform_name,
+                    table_mode=table_mode,
+                    platform_config=platform_config,
+                )
 
                 if preferred_format:
                     files = get_files_for_format(manifest, table_name, preferred_format)
@@ -303,12 +312,31 @@ class ManifestFileSource:
 class DataSourceResolver:
     """Resolves data source using chain of responsibility pattern."""
 
-    def __init__(self):
-        """Initialize resolver with ordered list of providers."""
+    def __init__(
+        self,
+        platform_name: str | None = None,
+        table_mode: str | None = None,
+        platform_config: dict[str, Any] | None = None,
+    ):
+        """Initialize resolver with ordered list of providers.
+
+        Args:
+            platform_name: Platform name for format preference resolution.
+                If not provided, ManifestFileSource falls back to inferring
+                from the benchmark object (default: "duckdb").
+        """
+        manifest_source = ManifestFileSource()
+        if platform_name:
+            manifest_source._platform_name = platform_name
+        if table_mode:
+            manifest_source._table_mode = table_mode
+        if platform_config:
+            manifest_source._platform_config = platform_config
+
         self.providers = [
             BenchmarkTablesSource(),
             BenchmarkImplTablesSource(),
-            ManifestFileSource(),
+            manifest_source,
         ]
 
     def resolve(self, benchmark: Any, data_dir: Path) -> DataSource | None:
@@ -1393,11 +1421,27 @@ class VortexFileHandler(FileFormatHandler):
         except ImportError as e:
             raise RuntimeError(
                 "Vortex format support requires the 'vortex' package. "
-                "Install it with: uv add vortex --optional table-formats"
+                "Install it with: uv add vortex-data --optional table-formats"
             ) from e
 
+        io_module = getattr(vortex, "io", None)
+        read_vortex = getattr(io_module, "read", None)
+        if not callable(read_vortex):
+            open_vortex = getattr(vortex, "open", None)
+            if callable(open_vortex):
+                read_vortex = open_vortex
+
+        if not callable(read_vortex):
+            providers = importlib_metadata.packages_distributions().get("vortex", [])
+            provider_text = f" Found provider(s): {', '.join(providers)}." if providers else ""
+            raise RuntimeError(
+                "Installed 'vortex' module is incompatible with BenchBox Vortex loading."
+                " Install compatible bindings with: uv add vortex-data --optional table-formats."
+                f"{provider_text}"
+            )
+
         # Read Vortex file and convert to PyArrow table
-        vortex_array = vortex.io.read(file_path)
+        vortex_array = read_vortex(str(file_path))
         arrow_table = vortex_array.to_arrow()
         row_count = arrow_table.num_rows
 

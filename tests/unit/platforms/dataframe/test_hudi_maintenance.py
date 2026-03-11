@@ -24,7 +24,10 @@ except ImportError:
     SparkSession = None  # type: ignore[assignment, misc]
     PYSPARK_AVAILABLE = False
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestHudiMaintenanceAvailability:

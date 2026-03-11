@@ -8,7 +8,10 @@ import pytest
 from benchbox.core.dataframe.capabilities import DataFormat
 from benchbox.core.dataframe.data_loader import ConversionStatus, DataFrameDataLoader
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _BenchmarkStub:

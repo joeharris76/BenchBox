@@ -15,7 +15,10 @@ from benchbox.cli.dryrun import DryRunExecutor
 from benchbox.cli.system import SystemProfile
 from benchbox.core.dryrun import DryRunExecutor as CoreDryRunExecutor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

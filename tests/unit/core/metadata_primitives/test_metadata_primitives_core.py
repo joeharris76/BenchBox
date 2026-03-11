@@ -24,7 +24,10 @@ from benchbox.core.metadata_primitives.catalog import (
     load_metadata_catalog,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.unit

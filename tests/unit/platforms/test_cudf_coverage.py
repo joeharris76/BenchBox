@@ -8,7 +8,10 @@ import pytest
 from benchbox.core.gpu.capabilities import GPUInfo
 from benchbox.platforms import cudf as cudf_module
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FakeArrowTable:

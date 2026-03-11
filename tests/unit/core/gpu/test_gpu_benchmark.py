@@ -19,7 +19,11 @@ from benchbox.core.gpu.benchmark import (
 from benchbox.core.gpu.capabilities import GPUDevice, GPUInfo, GPUVendor
 from benchbox.core.gpu.metrics import GPUMetricsAggregate
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Check if pandas is available for data generation tests
 try:

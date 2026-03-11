@@ -15,7 +15,10 @@ import pytest
 
 from benchbox.core.results.anonymization import AnonymizationConfig, AnonymizationManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAnonymizationMachineID:

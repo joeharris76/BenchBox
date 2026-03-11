@@ -4,6 +4,7 @@ Validates PrestoAdapter behavior and ensures the adapter remains distinct
 from the Trino adapter.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -12,7 +13,10 @@ import pytest
 import benchbox.platforms.presto as presto_module
 from benchbox.platforms.presto import PRESTO_DIALECT, PrestoAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()
@@ -392,6 +396,63 @@ class TestPrestoAdapter:
 
         assert stats["bad table"] == 0
         assert mock_cursor.execute.call_count == 0
+
+    def test_external_table_mode_requires_staging_root(self, presto_stubs):
+        """External mode should require staging_root configuration."""
+        adapter = PrestoAdapter(catalog="hive", schema="analytics")
+
+        with pytest.raises(ValueError, match="requires --platform-option staging_root"):
+            adapter.validate_external_table_requirements()
+
+    def test_create_external_tables_generates_location_sql(self, presto_stubs):
+        """External mode should create tables with external_location and parquet format."""
+        mock_cursor = Mock()
+        mock_cursor.fetchone.return_value = (12,)
+        mock_connection = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        adapter = PrestoAdapter(catalog="hive", schema="analytics", staging_root="s3://benchbox/staging")
+
+        benchmark = Mock()
+        benchmark.tables = {"orders": [Path("/tmp/orders.parquet")]}
+        benchmark.get_schema.return_value = {
+            "orders": {
+                "columns": [
+                    {"name": "o_orderkey", "type": "BIGINT"},
+                    {"name": "o_totalprice", "type": "DECIMAL(15,2)"},
+                ]
+            }
+        }
+
+        stats, _, _ = adapter.create_external_tables(benchmark, mock_connection, Path("/tmp"))
+
+        assert stats["orders"] == 12
+        executed_sql = " ".join(call.args[0] for call in mock_cursor.execute.call_args_list)
+        assert "CREATE TABLE hive.analytics.orders" in executed_sql
+        assert "external_location = 's3://benchbox/staging/orders/'" in executed_sql
+        assert "format = 'PARQUET'" in executed_sql
+
+    def test_load_data_does_not_invoke_external_registration(self, presto_stubs, tmp_path):
+        """Native load_data path should remain independent from external registration."""
+        mock_cursor = Mock()
+        mock_connection = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+
+        data_file = tmp_path / "orders.tbl"
+        data_file.write_text("1|hello|\n")
+
+        class Benchmark:
+            tables = {"orders": data_file}
+
+        adapter = PrestoAdapter(catalog="hive", schema="analytics")
+        with patch.object(
+            adapter,
+            "create_external_tables",
+            side_effect=AssertionError("native load_data should not call create_external_tables"),
+        ):
+            stats, _, _ = adapter.load_data(Benchmark(), mock_connection, tmp_path)
+
+        assert stats["orders"] == 1
 
     def test_dialect_is_presto_not_trino(self, presto_stubs):
         """Ensure the adapter is locked to the Presto dialect."""

@@ -16,6 +16,11 @@ from benchbox.core.metadata_primitives import (
     MetadataPrimitivesQueryManager,
 )
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def duckdb_connection():

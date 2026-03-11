@@ -22,12 +22,15 @@ from benchbox.release.workflow import (
     check_release_size,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # =============================================================================
 # ReleaseSizeViolation Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestReleaseSizeViolation:
     """Test ReleaseSizeViolation class."""
 
@@ -56,9 +59,6 @@ class TestReleaseSizeViolation:
 # =============================================================================
 # check_release_size Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestCheckReleaseSize:
     """Test check_release_size() function."""
 

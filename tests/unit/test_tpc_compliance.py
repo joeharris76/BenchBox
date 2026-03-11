@@ -7,13 +7,13 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import json
 import tempfile
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
+import benchbox.utils.clock as _clock
 from benchbox.core.connection import DatabaseConnection
 from benchbox.core.tpc_compliance import (
     TPCCompliantBenchmark,
@@ -33,7 +33,10 @@ from benchbox.core.tpc_compliance import (
 )
 
 # Mark all tests in this file as unit tests
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCMetrics:
@@ -254,58 +257,58 @@ class TestTPCTestConfig:
 class TestTPCTimer:
     """Test TPC timer utilities."""
 
-    def test_timer_basic_functionality(self):
+    def test_timer_basic_functionality(self, monkeypatch):
         """Test basic timer functionality."""
-        timer = TPCTimer()
+        clock = iter([100.0, 100.15]).__next__
+        monkeypatch.setattr(_clock, "perf_counter", clock)
 
-        # Test start/stop
+        timer = TPCTimer()
         timer.start("test")
-        time.sleep(0.1)
         elapsed = timer.stop("test")
 
-        assert elapsed >= 0.1
-        assert elapsed < 0.5  # Allow for CI environment variability
+        assert elapsed == pytest.approx(0.15, abs=1e-6)
 
-    def test_timer_multiple_timers(self):
+    def test_timer_multiple_timers(self, monkeypatch):
         """Test multiple concurrent timers."""
+        times = iter([1.0, 1.05, 1.10, 1.10]).__next__
+        monkeypatch.setattr(_clock, "perf_counter", times)
+
         timer = TPCTimer()
+        timer.start("timer1")  # 1.0
+        timer.start("timer2")  # 1.05
 
-        timer.start("timer1")
-        time.sleep(0.05)
-        timer.start("timer2")
-        time.sleep(0.05)
+        elapsed1 = timer.stop("timer1")  # 1.10 - 1.0 = 0.10
+        elapsed2 = timer.stop("timer2")  # 1.10 - 1.05 = 0.05
 
-        elapsed1 = timer.stop("timer1")
-        elapsed2 = timer.stop("timer2")
-
-        assert elapsed1 >= 0.1
-        assert elapsed2 >= 0.05
+        assert elapsed1 == pytest.approx(0.10, abs=1e-6)
+        assert elapsed2 == pytest.approx(0.05, abs=1e-6)
         assert elapsed1 > elapsed2
 
-    def test_timer_elapsed(self):
+    def test_timer_elapsed(self, monkeypatch):
         """Test elapsed time measurement."""
+        times = iter([0.0, 0.05, 0.12]).__next__
+        monkeypatch.setattr(_clock, "perf_counter", times)
+
         timer = TPCTimer()
+        timer.start("test")  # 0.0
+        elapsed = timer.elapsed("test")  # 0.05 - 0.0
 
-        timer.start("test")
-        time.sleep(0.05)
-        elapsed = timer.elapsed("test")
-
-        assert elapsed >= 0.05
-        assert elapsed < 0.5  # Allow slack for CI systems with variable timing
+        assert elapsed == pytest.approx(0.05, abs=1e-6)
 
         # Timer should still be running
-        time.sleep(0.05)
-        final_elapsed = timer.stop("test")
+        final_elapsed = timer.stop("test")  # 0.12 - 0.0
         assert final_elapsed > elapsed
 
-    def test_timer_context_manager(self):
+    def test_timer_context_manager(self, monkeypatch):
         """Test timer context manager."""
+        times = iter([5.0, 5.08, 5.08]).__next__
+        monkeypatch.setattr(_clock, "perf_counter", times)
+
         timer = TPCTimer()
 
         with timer.measure("context_test") as get_elapsed:
-            time.sleep(0.05)
             elapsed = get_elapsed()
-            assert elapsed >= 0.05
+            assert elapsed == pytest.approx(0.08, abs=1e-6)
 
     def test_timer_error_handling(self):
         """Test timer error handling."""
@@ -500,8 +503,7 @@ class MockTPCPowerTest(TPCPowerTest):
 
     def execute_query(self, query_id, connection, stream_id=0):
         start_time = datetime.now()
-        time.sleep(0.01)  # Simulate query execution
-        end_time = datetime.now()
+        end_time = start_time + timedelta(milliseconds=10)
 
         return TPCQueryResult(
             query_id=query_id,
@@ -562,8 +564,7 @@ class MockTPCThroughputTest(TPCThroughputTest):
 
     def execute_query(self, query_id, connection, stream_id=0):
         start_time = datetime.now()
-        time.sleep(0.01)  # Simulate query execution
-        end_time = datetime.now()
+        end_time = start_time + timedelta(milliseconds=10)
 
         return TPCQueryResult(
             query_id=query_id,
@@ -629,8 +630,7 @@ class MockTPCMaintenanceTest(TPCMaintenanceTest):
 
     def execute_maintenance_operation(self, operation, connection):
         start_time = datetime.now()
-        time.sleep(0.01)  # Simulate operation execution
-        end_time = datetime.now()
+        end_time = start_time + timedelta(milliseconds=10)
 
         return TPCQueryResult(
             query_id=operation,

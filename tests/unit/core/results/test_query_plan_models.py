@@ -23,7 +23,10 @@ from benchbox.core.results.query_plan_models import (
     compute_plan_fingerprint,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPhysicalOperator:

@@ -21,7 +21,10 @@ from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpch.queries import TPCHQueries
 
 # Mark all tests in this file appropriately
-pytestmark = [pytest.mark.tpch, pytest.mark.integration]
+pytestmark = [
+    pytest.mark.medium,
+    pytest.mark.tpch,
+]
 
 
 class TestTPCHQueryGeneration:

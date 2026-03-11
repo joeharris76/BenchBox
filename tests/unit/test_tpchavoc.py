@@ -19,7 +19,10 @@ import pytest
 
 from benchbox.tpchavoc import TPCHavoc
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCHavocInit:

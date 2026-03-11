@@ -9,6 +9,11 @@ from .common import (
     run_smoke_benchmark,
 )
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.platform_smoke

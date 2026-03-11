@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.schemas import QueryResult
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_query_result_accepts_canonical_execution_time_seconds() -> None:

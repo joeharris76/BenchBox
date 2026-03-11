@@ -12,7 +12,10 @@ from benchbox.core.tpcds.dataframe_queries.rollup_helper import (
     lochierarchy_expression,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _LitExpr:

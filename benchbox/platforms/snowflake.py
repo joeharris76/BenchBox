@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     )
 
 from ..core.exceptions import ConfigurationError
+from ..utils.cloud_storage import get_cloud_path_info
 from ..utils.dependencies import check_platform_dependencies, get_dependency_error_message
 from ..utils.file_format import is_tpc_format
 from .base import DriverIsolationCapability, PlatformAdapter
@@ -44,6 +45,7 @@ class SnowflakeAdapter(PlatformAdapter):
     """Snowflake platform adapter with cloud data warehouse optimizations."""
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -106,14 +108,14 @@ class SnowflakeAdapter(PlatformAdapter):
         # Cloud storage staging (optional - Snowflake uses internal stages by default)
         # staging_root is passed by orchestrator when using CloudStagingPath
         # For now, we log it but continue using internal stages (which work with local files)
-        staging_root = config.get("staging_root")
-        if staging_root:
-            from benchbox.utils.cloud_storage import get_cloud_path_info
-
-            path_info = get_cloud_path_info(staging_root)
+        self.staging_root = config.get("staging_root")
+        self.iceberg_external_volume = config.get("iceberg_external_volume")
+        self.iceberg_catalog = config.get("iceberg_catalog") or "SNOWFLAKE"
+        self.delta_table_format = config.get("delta_table_format") or "DELTA"
+        if self.staging_root:
+            path_info = get_cloud_path_info(self.staging_root)
             self.logger.info(
-                f"Note: staging_root provided ({path_info['provider']}://{path_info['bucket']}), "
-                "but Snowflake adapter uses internal stages for data loading"
+                f"staging_root configured for Snowflake external mode ({path_info['provider']}://{path_info['bucket']})"
             )
 
         if not all([self.account, self.username, self.password, self.warehouse, self.database]):
@@ -718,6 +720,89 @@ class SnowflakeAdapter(PlatformAdapter):
         # Snowflake doesn't provide detailed per-table timings yet
         return table_stats, total_time, None
 
+    def validate_external_table_requirements(self) -> None:
+        """Validate required cloud staging configuration for external table mode."""
+        if not self.staging_root:
+            raise ValueError(
+                "Snowflake external mode requires --platform-option staging_root=<cloud-uri> "
+                "(for example s3://bucket/path, gs://bucket/path, or azure://container/path)."
+            )
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Register external tables backed by cloud storage via a named external stage."""
+        self.validate_external_table_requirements()
+        assert self.staging_root is not None
+
+        self.log_operation_start("Snowflake external table registration")
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+        cursor = connection.cursor()
+
+        stage_name = f"{self.schema}.BENCHBOX_EXTERNAL_STAGE"
+        stage_root = self.staging_root.rstrip("/").replace("'", "''")
+
+        try:
+            data_files = self._resolve_data_files(benchmark, data_dir)
+
+            cursor.execute(f"CREATE STAGE IF NOT EXISTS {stage_name} URL='{stage_root}'")
+
+            for table_name, file_paths in data_files.items():
+                table_name_upper = table_name.upper()
+                table_path = f"{self.database.lower()}/{table_name.lower()}/"
+                source_format = self._detect_external_table_format(file_paths)
+                if source_format == "iceberg":
+                    if not self.iceberg_external_volume:
+                        raise ValueError(
+                            "Snowflake Iceberg external mode requires --platform-option iceberg_external_volume=<name>."
+                        )
+                    stage_path = get_cloud_path_info(self.staging_root).get("path", "").strip("/")
+                    base_location = f"{stage_path}/{table_path}".strip("/") if stage_path else table_path.strip("/")
+                    cursor.execute(f"""
+                        CREATE OR REPLACE ICEBERG TABLE {table_name_upper}
+                        EXTERNAL_VOLUME = '{self.iceberg_external_volume.replace("'", "''")}'
+                        CATALOG = '{self.iceberg_catalog.replace("'", "''")}'
+                        BASE_LOCATION = '{base_location.replace("'", "''")}'
+                    """)
+                else:
+                    table_clause = (
+                        f"TABLE_FORMAT={self.delta_table_format}"
+                        if source_format == "delta"
+                        else "FILE_FORMAT=(TYPE=PARQUET)"
+                    )
+                    cursor.execute(f"""
+                        CREATE OR REPLACE EXTERNAL TABLE {table_name_upper}
+                        WITH LOCATION=@{stage_name}/{table_path}
+                        {table_clause}
+                        AUTO_REFRESH=FALSE
+                    """)
+                    cursor.execute(f"ALTER EXTERNAL TABLE {table_name_upper} REFRESH")
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name_upper}")
+                result = cursor.fetchone()
+                table_stats[table_name_upper] = int(result[0]) if result else 0
+
+        finally:
+            cursor.close()
+
+        total_time = elapsed_seconds(start_time)
+        self.log_operation_complete("Snowflake external table registration", details=f"{len(table_stats)} tables")
+        return table_stats, total_time, None
+
+    @staticmethod
+    def _detect_external_table_format(file_paths: Any) -> str:
+        """Detect Snowflake external-table source format from file paths."""
+        paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        for raw_path in paths:
+            path = Path(raw_path)
+            if not path.is_dir():
+                continue
+            if (path / "_delta_log").is_dir():
+                return "delta"
+            if (path / "metadata").is_dir():
+                return "iceberg"
+        return "parquet"
+
     def _create_load_file_formats(self, cursor: Any) -> None:
         """Create Snowflake file formats used by COPY INTO operations."""
         self.log_verbose("Creating file formats for data loading")
@@ -746,7 +831,11 @@ class SnowflakeAdapter(PlatformAdapter):
 
     def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
         """Resolve benchmark data files from benchmark tables or manifest."""
-        resolver = DataSourceResolver()
+        resolver = DataSourceResolver(
+            platform_name=self.platform_name,
+            table_mode=getattr(self, "table_mode", "native"),
+            platform_config=getattr(self, "__dict__", None),
+        )
         data_source = resolver.resolve(benchmark, data_dir)
         if not data_source or not data_source.tables:
             raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")

@@ -11,7 +11,10 @@ import pytest
 from benchbox.core.exceptions import ConfigurationError
 from benchbox.platforms.azure import SynapseSparkAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _adapter() -> SynapseSparkAdapter:

@@ -21,7 +21,10 @@ import pytest
 from benchbox.core.tpcds.dist_parser import TPCDSDistribution, TPCDSDistributionParser
 
 # Mark all tests in this file as unit tests
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCDSDistribution:

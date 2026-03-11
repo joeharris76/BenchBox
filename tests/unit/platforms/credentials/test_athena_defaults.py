@@ -16,7 +16,10 @@ from benchbox.platforms.credentials.athena import (
 )
 from benchbox.security.credentials import CredentialStatus
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAthenaCredentialDefaults:

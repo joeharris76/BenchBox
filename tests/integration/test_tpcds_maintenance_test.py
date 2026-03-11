@@ -25,6 +25,11 @@ from benchbox.core.tpcds.maintenance_operations import (
 )
 from benchbox.core.tpcds.maintenance_test import TPCDSMaintenanceTest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 class TestTPCDSMaintenanceTestIntegration:
     """Integration tests for TPC-DS Maintenance Test."""

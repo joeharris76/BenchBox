@@ -10,6 +10,11 @@ from click.testing import CliRunner
 
 from benchbox.cli.app import cli
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def runner():

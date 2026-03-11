@@ -19,7 +19,11 @@ from click.testing import CliRunner
 
 from benchbox.cli.main import run, setup_verbose_logging
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Skip marker for tests that use mock.patch on Click commands (Python 3.10 incompatible)
 skip_py310_click_mock = pytest.mark.skipif(

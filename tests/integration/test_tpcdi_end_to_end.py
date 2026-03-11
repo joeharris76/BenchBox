@@ -39,6 +39,12 @@ from unittest.mock import patch
 import duckdb
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
+
 pytest.importorskip("pandas")
 
 from benchbox import TPCDI

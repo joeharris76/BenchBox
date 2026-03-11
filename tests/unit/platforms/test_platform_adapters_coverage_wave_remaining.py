@@ -18,13 +18,18 @@ import argparse
 import builtins
 import importlib
 import sys
+import types
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # ===================================================================
 # dataframe/__init__.py - optional import fallbacks
@@ -403,23 +408,23 @@ class TestBenchmarkTablesSource:
         from benchbox.platforms.base.data_loading import BenchmarkTablesSource
 
         src = BenchmarkTablesSource()
-        benchmark = MagicMock()
-        benchmark.tables = {"orders": Path("/data/orders.csv")}
+        benchmark = types.SimpleNamespace(tables={"orders": Path("/data/orders.csv")})
         assert src.can_provide(benchmark, Path("/data")) is True
 
     def test_can_provide_no_tables(self):
         from benchbox.platforms.base.data_loading import BenchmarkTablesSource
 
         src = BenchmarkTablesSource()
-        benchmark = MagicMock(spec=[])  # no tables attribute
+        benchmark = types.SimpleNamespace()  # no tables attribute
         assert src.can_provide(benchmark, Path("/data")) is False
 
     def test_get_data_source_normalizes_to_list(self):
         from benchbox.platforms.base.data_loading import BenchmarkTablesSource
 
         src = BenchmarkTablesSource()
-        benchmark = MagicMock()
-        benchmark.tables = {"orders": Path("/data/orders.csv"), "lineitem": [Path("/data/li_1.csv")]}
+        benchmark = types.SimpleNamespace(
+            tables={"orders": Path("/data/orders.csv"), "lineitem": [Path("/data/li_1.csv")]}
+        )
         result = src.get_data_source(benchmark, Path("/data"))
         assert result is not None
         assert result.source_type == "benchmark_tables"
@@ -432,15 +437,14 @@ class TestBenchmarkImplTablesSource:
         from benchbox.platforms.base.data_loading import BenchmarkImplTablesSource
 
         src = BenchmarkImplTablesSource()
-        benchmark = MagicMock()
-        benchmark._impl.tables = {"orders": Path("/data/orders.csv")}
+        benchmark = types.SimpleNamespace(_impl=types.SimpleNamespace(tables={"orders": Path("/data/orders.csv")}))
         assert src.can_provide(benchmark, Path("/data")) is True
 
     def test_cannot_provide_no_impl(self):
         from benchbox.platforms.base.data_loading import BenchmarkImplTablesSource
 
         src = BenchmarkImplTablesSource()
-        benchmark = MagicMock(spec=[])
+        benchmark = types.SimpleNamespace()  # no _impl attribute
         assert src.can_provide(benchmark, Path("/data")) is False
 
 
@@ -449,14 +453,14 @@ class TestManifestFileSource:
         from benchbox.platforms.base.data_loading import ManifestFileSource
 
         src = ManifestFileSource()
-        assert src.can_provide(MagicMock(), tmp_path) is False
+        assert src.can_provide(types.SimpleNamespace(), tmp_path) is False
 
     def test_can_provide_with_manifest(self, tmp_path):
         from benchbox.platforms.base.data_loading import ManifestFileSource
 
         (tmp_path / "_datagen_manifest.json").write_text("{}")
         src = ManifestFileSource()
-        assert src.can_provide(MagicMock(), tmp_path) is True
+        assert src.can_provide(types.SimpleNamespace(), tmp_path) is True
 
 
 class TestDataSourceResolver:
@@ -464,8 +468,7 @@ class TestDataSourceResolver:
         from benchbox.platforms.base.data_loading import DataSourceResolver
 
         resolver = DataSourceResolver()
-        benchmark = MagicMock()
-        benchmark.tables = {"orders": Path("/data/orders.csv")}
+        benchmark = types.SimpleNamespace(tables={"orders": Path("/data/orders.csv")})
         result = resolver.resolve(benchmark, Path("/data"))
         assert result is not None
         assert result.source_type == "benchmark_tables"
@@ -474,9 +477,27 @@ class TestDataSourceResolver:
         from benchbox.platforms.base.data_loading import DataSourceResolver
 
         resolver = DataSourceResolver()
-        benchmark = MagicMock(spec=[])  # no tables, no _impl, no get_tables
+        benchmark = types.SimpleNamespace()  # no tables, no _impl, no get_tables
         result = resolver.resolve(benchmark, Path("/nonexistent"))
         assert result is None
+
+    def test_platform_name_propagates_to_manifest_source(self):
+        """Test that platform_name is set on the ManifestFileSource provider."""
+        from benchbox.platforms.base.data_loading import DataSourceResolver, ManifestFileSource
+
+        resolver = DataSourceResolver(platform_name="datafusion")
+        manifest_sources = [p for p in resolver.providers if isinstance(p, ManifestFileSource)]
+        assert len(manifest_sources) == 1
+        assert manifest_sources[0]._platform_name == "datafusion"
+
+    def test_platform_name_default_is_none(self):
+        """Test that without platform_name, ManifestFileSource has no _platform_name override."""
+        from benchbox.platforms.base.data_loading import DataSourceResolver, ManifestFileSource
+
+        resolver = DataSourceResolver()
+        manifest_sources = [p for p in resolver.providers if isinstance(p, ManifestFileSource)]
+        assert len(manifest_sources) == 1
+        assert not hasattr(manifest_sources[0], "_platform_name") or manifest_sources[0]._platform_name is None
 
 
 class TestGzipHandler:
@@ -770,11 +791,12 @@ class TestAthenaAdapterInit:
 
 class TestSchemaInspector:
     def test_get_column_count_from_schema(self):
+        import io
+
         from benchbox.platforms.base.data_loading import SchemaInspector
 
-        benchmark = MagicMock()
-        benchmark.get_schema.return_value = {"orders": {"columns": ["id", "name", "price"]}}
-        count = SchemaInspector.get_column_count(benchmark, "orders", MagicMock(), "|")
+        benchmark = types.SimpleNamespace(get_schema=lambda: {"orders": {"columns": ["id", "name", "price"]}})
+        count = SchemaInspector.get_column_count(benchmark, "orders", io.StringIO(), "|")
         assert count == 3
 
     def test_get_column_count_from_file(self):
@@ -782,8 +804,7 @@ class TestSchemaInspector:
 
         from benchbox.platforms.base.data_loading import SchemaInspector
 
-        benchmark = MagicMock()
-        benchmark.get_schema.return_value = {}
+        benchmark = types.SimpleNamespace(get_schema=dict)
         fh = io.StringIO("col1|col2|col3\n1|2|3\n")
         count = SchemaInspector.get_column_count(benchmark, "orders", fh, "|")
         assert count == 3
@@ -793,8 +814,7 @@ class TestSchemaInspector:
 
         from benchbox.platforms.base.data_loading import SchemaInspector
 
-        benchmark = MagicMock()
-        benchmark.get_schema.return_value = {}
+        benchmark = types.SimpleNamespace(get_schema=dict)
         fh = io.StringIO("")
         count = SchemaInspector.get_column_count(benchmark, "orders", fh, "|")
         assert count is None
@@ -891,7 +911,7 @@ class TestManifestFileSourceV1:
         (tmp_path / "_datagen_manifest.json").write_text(json.dumps(manifest))
 
         src = ManifestFileSource()
-        result = src.get_data_source(MagicMock(spec=[]), tmp_path)
+        result = src.get_data_source(types.SimpleNamespace(), tmp_path)
         # Result may be None if v2 parser consumes it; just verify no crash
         if result is not None:
             assert "orders" in result.tables

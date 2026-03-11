@@ -19,6 +19,11 @@ import pytest
 from benchbox import TPCHSkew
 from benchbox.core.tpch_skew.benchmark import TPCHSkewBenchmark
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.duckdb

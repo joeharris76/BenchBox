@@ -16,6 +16,11 @@ import pytest
 
 from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.tpcds

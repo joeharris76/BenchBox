@@ -12,7 +12,10 @@ from benchbox.core.benchmark_registry import (
     list_loader_benchmark_ids,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_loader_and_registry_benchmark_ids_match() -> None:

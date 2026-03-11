@@ -15,7 +15,10 @@ from benchbox.platforms.base.data_loading import (
     IcebergFileHandler,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_get_base_data_extension_multi_suffix_tbl_zst():

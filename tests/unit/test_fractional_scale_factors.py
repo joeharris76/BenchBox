@@ -15,6 +15,11 @@ import pytest
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 from benchbox.core.tpch.generator import TPCHDataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+]
+
 
 @pytest.mark.slow
 class TestFractionalScaleFactors:

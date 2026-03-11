@@ -18,15 +18,28 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from benchbox.core.results.query_normalizer import format_query_id, normalize_query_id
-from benchbox.core.visualization.ascii.bar_chart import ASCIIBarChart, BarData
-from benchbox.core.visualization.ascii.base import ASCIIChartOptions
-from benchbox.core.visualization.ascii.histogram import ASCIIQueryHistogram, HistogramBar
-from benchbox.core.visualization.ascii.summary_box import ASCIISummaryBox, SummaryStats
+from benchbox.core.visualization.ascii_api import (
+    BarChart,
+    BarData,
+    ChartOptions,
+    Histogram,
+    HistogramBar,
+    SummaryBox,
+    SummaryStats,
+)
+from benchbox.core.visualization.ascii_runtime import _SUMMARY_QUERY_COUNT
 
 if TYPE_CHECKING:
     from benchbox.core.results.models import BenchmarkResults
 
 logger = logging.getLogger(__name__)
+
+_SUMMARY_LABELS = {
+    "primary_label": "Geo Mean",
+    "secondary_label": "Median",
+    "total_label": "Total",
+    "count_label": "Queries",
+}
 
 
 @dataclass
@@ -58,7 +71,7 @@ def generate_post_run_summary(
     Returns:
         PostRunSummary with rendered ASCII charts.
     """
-    options = ASCIIChartOptions(
+    options = ChartOptions(
         theme=theme,
         use_color=color,
         use_unicode=unicode,
@@ -104,27 +117,31 @@ def generate_post_run_summary(
 
     # Best (fastest) and worst (slowest) by per-query mean
     sorted_queries = sorted(query_order, key=lambda qid: query_means[qid])
-    best = [(query_display_ids[qid], query_means[qid]) for qid in sorted_queries[:3]]
-    worst = [(query_display_ids[qid], query_means[qid]) for qid in sorted_queries[-3:]]
+    best = [(query_display_ids[qid], query_means[qid]) for qid in sorted_queries[:_SUMMARY_QUERY_COUNT]]
+    worst = [(query_display_ids[qid], query_means[qid]) for qid in sorted_queries[-_SUMMARY_QUERY_COUNT:]]
     worst.reverse()  # Slowest first
 
     title = f"{result.benchmark_name} on {result.platform} (SF {result.scale_factor})"
 
-    # Extract system environment info from result if available
-    environment = _extract_environment(result.system_profile, platform_info=result.platform_info)
+    # Extract system environment and platform config from result
+    environment = _extract_environment(result.system_profile)
+    run_cfg = (result.execution_metadata or {}).get("run_config") or {}
+    platform_config = _extract_platform_config(result.platform_info, run_cfg)
 
     stats = SummaryStats(
         title=title,
-        geo_mean_ms=geo_mean,
-        median_ms=median_time,
-        total_time_ms=total_time,
-        num_queries=len(query_order),
-        best_queries=best,
-        worst_queries=worst,
+        primary_value=geo_mean,
+        secondary_value=median_time,
+        total_value=total_time,
+        num_items=len(query_order),
+        best_items=best,
+        worst_items=worst,
         environment=environment,
+        platform_config=platform_config,
+        **_SUMMARY_LABELS,
     )
 
-    summary_box_chart = ASCIISummaryBox(stats, options=options)
+    summary_box_chart = SummaryBox(stats, options=options)
     summary_box_text = summary_box_chart.render()
 
     # Build query latency chart — choose orientation based on label length.
@@ -143,16 +160,17 @@ def generate_post_run_summary(
     else:
         histogram_bars = [
             HistogramBar(
-                query_id=query_display_ids[qid],
-                latency_ms=query_means[qid],
+                label=query_display_ids[qid],
+                value=query_means[qid],
                 is_best=(qid == best_qid),
                 is_worst=(qid == worst_qid),
             )
             for qid in query_order
         ]
-        histogram_chart = ASCIIQueryHistogram(
+        histogram_chart = Histogram(
             data=histogram_bars,
             title="Query Latency",
+            y_label="Execution Time (ms)",
             options=options,
         )
         histogram_text = histogram_chart.render()
@@ -166,6 +184,9 @@ def generate_post_run_summary(
     )
 
 
+# Median query-ID length above which horizontal bars are used instead of vertical.
+# 6 chars accommodates TPC-style IDs (Q1–Q22) vertically; longer benchmark IDs
+# (e.g., ClickBench "aggregation_groupby_large") switch to horizontal layout.
 _HORIZONTAL_LABEL_THRESHOLD = 6
 
 
@@ -187,7 +208,7 @@ def _render_horizontal_bars(
     query_means: dict[str, float],
     best_qid: str | None,
     worst_qid: str | None,
-    options: ASCIIChartOptions,
+    options: ChartOptions,
 ) -> str:
     """Render a horizontal bar chart for queries with long names."""
     bars = [
@@ -199,7 +220,7 @@ def _render_horizontal_bars(
         )
         for qid in query_order
     ]
-    chart = ASCIIBarChart(
+    chart = BarChart(
         data=bars,
         title="Query Latency",
         metric_label="ms",
@@ -211,9 +232,8 @@ def _render_horizontal_bars(
 
 def _extract_environment(
     system_profile: dict | None,
-    platform_info: dict | None = None,
 ) -> dict[str, str] | None:
-    """Build an ordered environment dict from a system_profile dict.
+    """Build an ordered compute-environment dict from a system_profile dict.
 
     Accepts both SystemProfile keys (os_name, cpu_cores_logical, memory_total_gb)
     and SystemInfo.to_dict() keys (os_type, cpu_cores, total_memory_gb)
@@ -221,37 +241,46 @@ def _extract_environment(
 
     Returns None if the profile is missing or has no usable fields.
     """
-    if not system_profile and not platform_info:
+    if not system_profile:
         return None
 
     env: dict[str, str] = {}
 
-    if system_profile:
-        os_name = system_profile.get("os_name") or system_profile.get("os_type", "")
-        os_version = system_profile.get("os_version") or system_profile.get("os_release", "")
-        if os_name:
-            env["OS"] = f"{os_name} {os_version}".strip()
+    os_name = system_profile.get("os_name") or system_profile.get("os_type", "")
+    os_version = system_profile.get("os_version") or system_profile.get("os_release", "")
+    if os_name:
+        env["OS"] = f"{os_name} {os_version}".strip()
 
-        python_version = system_profile.get("python_version", "")
-        if python_version:
-            env["Python"] = python_version
+    python_version = system_profile.get("python_version", "")
+    if python_version:
+        env["Python"] = python_version
 
-        cpus = (
-            system_profile.get("cpu_cores_logical")
-            or system_profile.get("cpu_cores")
-            or system_profile.get("cpu_count")
-        )
-        arch = system_profile.get("architecture", "")
-        if cpus:
-            env["CPUs"] = f"{cpus} ({arch})" if arch else str(cpus)
+    cpus = system_profile.get("cpu_cores_logical") or system_profile.get("cpu_cores") or system_profile.get("cpu_count")
+    arch = system_profile.get("architecture", "")
+    if cpus:
+        env["CPUs"] = f"{cpus} ({arch})" if arch else str(cpus)
 
-        mem_gb = (
-            system_profile.get("memory_total_gb")
-            or system_profile.get("total_memory_gb")
-            or system_profile.get("memory_gb")
-        )
-        if mem_gb is not None:
-            env["Memory"] = f"{mem_gb:.0f} GB"
+    mem_gb = (
+        system_profile.get("memory_total_gb")
+        or system_profile.get("total_memory_gb")
+        or system_profile.get("memory_gb")
+    )
+    if mem_gb is not None:
+        env["Memory"] = f"{mem_gb:.0f} GB"
+
+    return env if env else None
+
+
+def _extract_platform_config(
+    platform_info: dict | None,
+    run_cfg: dict,
+) -> dict[str, str] | None:
+    """Build a platform configuration dict for the summary box right column.
+
+    Includes driver version, table mode, and tuning mode.
+    Returns None if no config fields are available.
+    """
+    cfg: dict[str, str] = {}
 
     if platform_info and isinstance(platform_info, dict):
         version = (
@@ -261,6 +290,26 @@ def _extract_environment(
         )
         if version:
             platform_name = platform_info.get("platform_name") or platform_info.get("name", "")
-            env["Driver"] = f"{platform_name} {version}".strip() if platform_name else str(version)
+            cfg["Driver"] = f"{platform_name} {version}".strip() if platform_name else str(version)
 
-    return env if env else None
+    table_mode = run_cfg.get("table_mode")
+    if table_mode and table_mode != "native":
+        external_format = run_cfg.get("external_format")
+        if external_format:
+            cfg["Tables"] = f"{table_mode.capitalize()} ({external_format.capitalize()})"
+        else:
+            cfg["Tables"] = table_mode.capitalize()
+
+    table_format = run_cfg.get("table_format")
+    if table_format:
+        tf_value = str(table_format).capitalize()
+        table_format_compression = run_cfg.get("table_format_compression")
+        if table_format_compression:
+            tf_value = f"{tf_value} ({table_format_compression})"
+        cfg["Table Format"] = tf_value
+
+    tuning_mode = run_cfg.get("tuning_mode")
+    if tuning_mode:
+        cfg["Tuning"] = tuning_mode.capitalize()
+
+    return cfg if cfg else None

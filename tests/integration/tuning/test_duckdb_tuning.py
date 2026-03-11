@@ -22,6 +22,11 @@ from benchbox.core.tuning.interface import (
     UnifiedTuningConfiguration,
 )
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 class TestDuckDBTuningConfigFlow:
     """Tests for tuning config flow from YAML to DDL."""

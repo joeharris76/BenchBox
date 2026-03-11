@@ -15,7 +15,10 @@ from benchbox.core.nyctaxi.schema import (
     get_trips_columns,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSchemaDefinition:

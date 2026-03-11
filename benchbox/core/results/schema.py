@@ -60,6 +60,11 @@ CONFIG_KEY_ORDER = [
     "tuning_mode",
     "tuning_config",
     "platform_options",
+    "table_mode",
+    "external_format",
+    "table_format",
+    "table_format_compression",
+    "table_format_partition_cols",
     "mode",
     "test_type",
 ]
@@ -680,7 +685,16 @@ def _shorten_benchmark_name(name: str) -> str:
 
 # Fields that fall back from ctx → run_cfg (use_is_not_none=True for seed).
 _CONFIG_CTX_OR_RUN = ["seed", "phases", "query_subset"]
-_CONFIG_RUN_ONLY = ["platform_options", "tuning_mode", "tuning_config"]
+_CONFIG_RUN_ONLY = [
+    "platform_options",
+    "tuning_mode",
+    "tuning_config",
+    "table_mode",
+    "external_format",
+    "table_format",
+    "table_format_compression",
+    "table_format_partition_cols",
+]
 
 
 def _build_config_block(result: BenchmarkResults) -> dict[str, Any]:

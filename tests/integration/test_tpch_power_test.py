@@ -10,7 +10,10 @@ import pytest
 from benchbox.core.tpch.power_test import TPCHPowerTest, TPCHPowerTestConfig, TPCHPowerTestResult
 
 # Mark all tests in this file as integration tests
-pytestmark = [pytest.mark.integration, pytest.mark.slow]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
 
 
 def _make_power_test(

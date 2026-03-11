@@ -5,7 +5,10 @@ import pytest
 from benchbox.core.clickbench.generator import ClickBenchDataGenerator
 from benchbox.core.h2odb.generator import H2ODataGenerator
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_clickbench_generator_record_and_local_generation(tmp_path):

@@ -18,9 +18,11 @@ except ImportError:
 
 # Skip entire module if pyspark not installed
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.fast,
     pytest.mark.skipif(not PYSPARK_AVAILABLE, reason="PySpark not installed"),
 ]
+
 
 if PYSPARK_AVAILABLE:
     from benchbox.platforms.pyspark import sql_adapter

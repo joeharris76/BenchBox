@@ -18,6 +18,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
+
 # Add scripts/ to sys.path so we can import release script functions directly
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
@@ -41,12 +47,10 @@ from finalize_release import (
 from update_version import update_version_in_init, update_version_in_pyproject
 from verify_release import verify_wheel_fingerprint
 
+
 # =============================================================================
 # automate_release.py Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestParseTimestamp:
     """Test parse_timestamp() from automate_release.py."""
 
@@ -84,7 +88,6 @@ class TestParseTimestamp:
         assert int(dt_from_git.timestamp()) == unix_ts
 
 
-@pytest.mark.fast
 class TestRunPreFlightChecks:
     """Test run_pre_flight_checks() from automate_release.py."""
 
@@ -164,7 +167,6 @@ class TestRunPreFlightChecks:
         assert result is True
 
 
-@pytest.mark.fast
 class TestRunCiChecks:
     """Test run_ci_checks() from automate_release.py."""
 
@@ -222,7 +224,6 @@ class TestRunCiChecks:
         assert result is False
 
 
-@pytest.mark.fast
 class TestUpdateVersionScript:
     """Regression coverage for scripts/update_version.py helpers."""
 
@@ -274,9 +275,6 @@ class TestUpdateVersionScript:
 # =============================================================================
 # build_release.py Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestCalculateSha256:
     """Test calculate_sha256() from build_release.py."""
 
@@ -314,7 +312,6 @@ class TestCalculateSha256:
         assert result == expected
 
 
-@pytest.mark.fast
 class TestVerifyWheelTimestamps:
     """Test verify_wheel_timestamps() from build_release.py."""
 
@@ -374,9 +371,6 @@ class TestVerifyWheelTimestamps:
 # =============================================================================
 # verify_release.py Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestVerifyWheelFingerprint:
     """Test verify_wheel_fingerprint() from verify_release.py."""
 
@@ -423,9 +417,6 @@ class TestVerifyWheelFingerprint:
 # =============================================================================
 # finalize_release.py Tests
 # =============================================================================
-
-
-@pytest.mark.fast
 class TestGitCommitWithTimestamp:
     """Test git_commit_with_timestamp() from finalize_release.py."""
 
@@ -462,7 +453,6 @@ class TestGitCommitWithTimestamp:
         assert cmd == ["git", "commit", "-m", msg]
 
 
-@pytest.mark.fast
 class TestGitTagWithTimestamp:
     """Test git_tag_with_timestamp() from finalize_release.py."""
 
@@ -528,7 +518,6 @@ class TestGitTagWithTimestamp:
         assert env_arg["GIT_COMMITTER_DATE"] == git_ts
 
 
-@pytest.mark.fast
 class TestVerifyGitStatus:
     """Test verify_git_status() from finalize_release.py."""
 
@@ -580,7 +569,6 @@ class TestVerifyGitStatus:
         assert calls[1][0][0] == ["git", "diff", "--cached", "--quiet"]
 
 
-@pytest.mark.fast
 class TestArchiveReleaseArtifacts:
     """Test archive_release_artifacts() from finalize_release.py."""
 
@@ -635,7 +623,6 @@ class TestArchiveReleaseArtifacts:
         assert result == archive_base / "v0.1.0"
 
 
-@pytest.mark.fast
 class TestVerifySourceFingerprint:
     """Test verify_source_fingerprint() from finalize_release.py."""
 
@@ -743,7 +730,6 @@ def _get_commit_count(path: Path) -> int:
     return int(result.stdout.strip())
 
 
-@pytest.mark.fast
 class TestCommitMessages:
     """Test release commit message generators."""
 
@@ -777,7 +763,6 @@ class TestCommitMessages:
         assert "Co-Authored-By:" in msg
 
 
-@pytest.mark.fast
 class TestFindSquashAnchor:
     """Test _find_squash_anchor() detection logic."""
 
@@ -830,7 +815,6 @@ class TestFindSquashAnchor:
         assert _find_squash_anchor(local) == "v0.1.0"
 
 
-@pytest.mark.fast
 class TestSquashCommits:
     """Test squash_commits() with real git repos.
 

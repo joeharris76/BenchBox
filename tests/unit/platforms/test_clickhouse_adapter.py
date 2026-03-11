@@ -6,13 +6,18 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
 from benchbox.platforms.clickhouse import ClickHouseAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Check for optional dependencies
 try:
@@ -743,3 +748,87 @@ class TestClickHouseNativeHandlerBulk:
         assert result == 4000
         assert not connection.execute.called
         handler.adapter.capture_sql.assert_called_once()
+
+
+# ===================================================================
+# Additional coverage tests (merged from test_clickhouse_metadata_coverage.py)
+# ===================================================================
+
+from benchbox.platforms.clickhouse.metadata import ClickHouseMetadataMixin  # noqa: E402
+
+
+class _DummyClickHouseMetadata(ClickHouseMetadataMixin):
+    def __init__(self, deployment_mode="local"):
+        self.deployment_mode = deployment_mode
+        self.data_path = "/tmp/ch"
+        self.host = "localhost"
+        self.port = 9000
+        self.database = "bench"
+        self.disable_result_cache = False
+        self.logger = SimpleNamespace(debug=lambda *a, **k: None)
+
+
+class TestClickHouseMetadataCoverage:
+    def test_platform_name_and_target_dialect(self):
+        assert _DummyClickHouseMetadata(deployment_mode="local").platform_name == "ClickHouse (Local)"
+        assert _DummyClickHouseMetadata(deployment_mode="server").get_target_dialect() == "clickhouse"
+
+    def test_get_database_path_variants(self, tmp_path):
+        adapter = _DummyClickHouseMetadata(deployment_mode="local")
+
+        assert adapter.get_database_path(database_path="/tmp/db.duckdb").endswith(".chdb")
+        assert adapter.get_database_path(database_path="/tmp/db").endswith(".chdb")
+
+        assert adapter.get_database_path(database_name="bench_local") is None
+
+        server_adapter = _DummyClickHouseMetadata(deployment_mode="server")
+        assert server_adapter.get_database_path(database_path="/tmp/db.duckdb") is None
+
+    def test_get_platform_info_local_no_connection(self):
+        adapter = _DummyClickHouseMetadata(deployment_mode="local")
+        info = adapter.get_platform_info(connection=None)
+        assert info["platform_type"] == "clickhouse"
+        assert info["platform_version"] is None
+        assert info["configuration"]["deployment_mode"] == "local"
+
+    def test_get_platform_info_local_connection(self):
+        adapter = _DummyClickHouseMetadata(deployment_mode="local")
+
+        class LocalConn:
+            def query(self, _sql):
+                return "24.10.1.1234\n"
+
+        info = adapter.get_platform_info(connection=LocalConn())
+        assert info["platform_version"] == "24.10.1.1234"
+
+    def test_get_platform_info_server_connection(self):
+        adapter = _DummyClickHouseMetadata(deployment_mode="server")
+
+        class Cursor:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, _sql):
+                self.calls += 1
+
+            def fetchone(self):
+                return ("24.9",)
+
+            def fetchall(self):
+                if self.calls == 2:
+                    return [("max_threads", "8")]
+                if self.calls == 3:
+                    return [("BUILD_TYPE", "Release")]
+                return []
+
+            def close(self):
+                return None
+
+        class Conn:
+            def cursor(self):
+                return Cursor()
+
+        info = adapter.get_platform_info(connection=Conn())
+        assert info["platform_version"] == "24.9"
+        assert info["compute_configuration"]["system_settings"]["max_threads"] == "8"
+        assert info["compute_configuration"]["build_options"]["BUILD_TYPE"] == "Release"

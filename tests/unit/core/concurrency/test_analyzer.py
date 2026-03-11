@@ -19,7 +19,10 @@ from benchbox.core.concurrency.executor import (
     StreamResult,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

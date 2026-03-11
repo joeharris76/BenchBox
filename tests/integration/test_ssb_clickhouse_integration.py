@@ -13,6 +13,12 @@ import pytest
 from benchbox.core.ssb.benchmark import SSBBenchmark
 from benchbox.platforms.clickhouse import ClickHouseAdapter
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
+
 # Skip all tests if chdb is not available
 chdb = pytest.importorskip("chdb")
 

@@ -12,7 +12,10 @@ from benchbox.core.tpcdi.loader import TPCDIDataLoader
 from benchbox.core.tpcdi.metrics import BenchmarkMetrics, TPCDIMetrics
 from benchbox.core.tpcdi.validation import DataQualityResult, TPCDIValidator, ValidationRule
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @dataclass

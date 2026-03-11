@@ -13,7 +13,10 @@ from benchbox.core.tpcdi.etl.backend import TPCDIETLBackend
 from benchbox.core.tpcdi.etl.dataframe_backend import DataFrameETLBackend
 from benchbox.core.tpcdi.etl.sql_backend import SQLETLBackend
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_sql_backend_loads_dataframes() -> None:

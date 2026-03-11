@@ -7,7 +7,10 @@ import pytest
 
 from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

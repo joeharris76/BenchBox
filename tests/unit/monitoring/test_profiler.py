@@ -21,6 +21,11 @@ from benchbox.monitoring.profiler import (
     calculate_utilization,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestResourceType:
     """Tests for ResourceType enum."""

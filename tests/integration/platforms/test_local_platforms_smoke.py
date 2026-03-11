@@ -10,6 +10,11 @@ from benchbox.platforms.sqlite import SQLiteAdapter
 
 from .common import create_smoke_benchmark, run_smoke_benchmark
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.platform_smoke

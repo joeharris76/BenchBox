@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.core.datavault.queries import DataVaultQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDataVaultQueryManager:

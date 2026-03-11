@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.core.operations import OperationExecutor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.unit

@@ -11,7 +11,10 @@ from benchbox import TPCHSkew
 from benchbox.core.tpch_skew.benchmark import TPCHSkewBenchmark
 from benchbox.core.tpch_skew.skew_config import SkewConfiguration
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestTPCHSkewBenchmark:

@@ -21,7 +21,10 @@ from benchbox.core.dataframe.query import (
     QueryRegistry,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # Test implementations for queries

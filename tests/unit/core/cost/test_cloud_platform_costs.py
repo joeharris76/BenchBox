@@ -13,7 +13,10 @@ from benchbox.core.cost.pricing import (
     get_synapse_serverless_price_per_tb,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSynapseCostCalculation:
@@ -30,7 +33,6 @@ class TestSynapseCostCalculation:
 
         cost = calculator.calculate_query_cost("synapse", resource_usage, platform_config)
 
-        assert cost is not None
         assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 5.0  # 1 TB * $5.00 per TB
         assert cost.currency == "USD"
@@ -48,7 +50,7 @@ class TestSynapseCostCalculation:
 
         cost = calculator.calculate_query_cost("synapse", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 2.5  # 0.5 TB * $5.00 per TB
 
     def test_synapse_dedicated_cost(self):
@@ -64,7 +66,7 @@ class TestSynapseCostCalculation:
 
         cost = calculator.calculate_query_cost("synapse", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 12.0  # 1 hour * $12.00/hour for DW1000c US
         assert cost.pricing_details["mode"] == "dedicated"
         assert cost.pricing_details["dwu_level"] == "dw1000c"
@@ -83,7 +85,7 @@ class TestSynapseCostCalculation:
 
         cost = calculator.calculate_query_cost("synapse", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 1/60 hour * $1.20/hour for DW100c US
         expected = 60 / 3600 * 1.20
         assert abs(cost.compute_cost - expected) < 0.001
@@ -98,7 +100,7 @@ class TestSynapseCostCalculation:
 
         cost = calculator.calculate_query_cost("synapse", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.pricing_details["mode"] == "serverless"
 
     def test_synapse_missing_data_returns_none(self):
@@ -127,7 +129,7 @@ class TestFabricCostCalculation:
 
         cost = calculator.calculate_query_cost("fabric_dw", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 0.18  # 1 CU-hour * $0.18/CU-hour (US)
         assert cost.pricing_details["cu_hours"] == 1.0
         assert cost.pricing_details["is_estimated"] is False
@@ -141,7 +143,7 @@ class TestFabricCostCalculation:
 
         cost = calculator.calculate_query_cost("fabric_dw", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 60 seconds * 64 CUs = 3840 CU-seconds = 1.0667 CU-hours
         # 1.0667 * $0.18 = $0.192
         expected_cu_seconds = 60 * 64
@@ -161,8 +163,8 @@ class TestFabricCostCalculation:
         cost_f2 = calculator.calculate_query_cost("fabric_dw", resource_usage, {"sku": "f2", "region": "eastus"})
         cost_f2048 = calculator.calculate_query_cost("fabric_dw", resource_usage, {"sku": "f2048", "region": "eastus"})
 
-        assert cost_f2 is not None
-        assert cost_f2048 is not None
+        assert isinstance(cost_f2, QueryCost)
+        assert isinstance(cost_f2048, QueryCost)
         # F2048 should be 1024x more expensive than F2 for same time
         assert abs(cost_f2048.compute_cost / cost_f2.compute_cost - 1024) < 0.001
 
@@ -176,9 +178,9 @@ class TestFabricCostCalculation:
         cost_eu = calculator.calculate_query_cost("fabric_dw", resource_usage, {"region": "westeurope"})
         cost_ap = calculator.calculate_query_cost("fabric_dw", resource_usage, {"region": "japaneast"})
 
-        assert cost_us is not None
-        assert cost_eu is not None
-        assert cost_ap is not None
+        assert isinstance(cost_us, QueryCost)
+        assert isinstance(cost_eu, QueryCost)
+        assert isinstance(cost_ap, QueryCost)
 
         # EU should be higher than US, AP higher than EU
         assert cost_us.compute_cost < cost_eu.compute_cost
@@ -204,7 +206,7 @@ class TestFireboltCostCalculation:
 
         cost = calculator.calculate_query_cost("firebolt", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 10 FBUs * $0.0833/FBU = $0.833
         expected = 10.0 * 0.0833
         assert abs(cost.compute_cost - expected) < 0.001
@@ -219,7 +221,7 @@ class TestFireboltCostCalculation:
 
         cost = calculator.calculate_query_cost("firebolt", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 1 hour * 16 FBU/hour (M node) * 1 node * $0.0833/FBU = $1.3328
         expected_fbu = 16.0  # M node = 16 FBU/hour
         expected_cost = expected_fbu * 0.0833
@@ -235,8 +237,8 @@ class TestFireboltCostCalculation:
         cost_1_node = calculator.calculate_query_cost("firebolt", resource_usage, {"node_type": "m", "node_count": 1})
         cost_4_nodes = calculator.calculate_query_cost("firebolt", resource_usage, {"node_type": "m", "node_count": 4})
 
-        assert cost_1_node is not None
-        assert cost_4_nodes is not None
+        assert isinstance(cost_1_node, QueryCost)
+        assert isinstance(cost_4_nodes, QueryCost)
         # 4 nodes should be 4x the cost
         assert abs(cost_4_nodes.compute_cost / cost_1_node.compute_cost - 4.0) < 0.001
 
@@ -249,8 +251,8 @@ class TestFireboltCostCalculation:
         cost_s = calculator.calculate_query_cost("firebolt", resource_usage, {"node_type": "s", "node_count": 1})
         cost_xl = calculator.calculate_query_cost("firebolt", resource_usage, {"node_type": "xl", "node_count": 1})
 
-        assert cost_s is not None
-        assert cost_xl is not None
+        assert isinstance(cost_s, QueryCost)
+        assert isinstance(cost_xl, QueryCost)
         # XL (64 FBU/hr) should be 8x S (8 FBU/hr)
         assert abs(cost_xl.compute_cost / cost_s.compute_cost - 8.0) < 0.001
 
@@ -278,7 +280,7 @@ class TestDatabricksDFAlias:
 
         cost = calculator.calculate_query_cost("databricks-df", resource_usage, platform_config)
 
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 0.22  # $0.22/DBU for premium SQL warehouse
         assert cost.pricing_details["price_per_dbu"] == 0.22
 
@@ -394,7 +396,7 @@ class TestEdgeCases:
             {"execution_time_seconds": 0},
             {"mode": "dedicated", "dwu_level": "dw1000c", "region": "eastus"},
         )
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 0.0
 
         # Firebolt with 0 seconds
@@ -403,7 +405,7 @@ class TestEdgeCases:
             {"execution_time_seconds": 0},
             {"node_type": "m", "node_count": 1},
         )
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 0.0
 
     def test_zero_bytes_processed(self):
@@ -416,7 +418,7 @@ class TestEdgeCases:
             {"bytes_processed": 0},
             {"mode": "serverless", "region": "eastus"},
         )
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost == 0.0
 
     def test_very_large_values(self):
@@ -432,7 +434,7 @@ class TestEdgeCases:
             {"bytes_processed": petabyte},
             {"mode": "serverless", "region": "eastus"},
         )
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 1 PB = 1024 TB, so cost should be 1024 * $5 = $5120
         expected = 1024 * 5.0
         assert abs(cost.compute_cost - expected) < 0.01
@@ -447,7 +449,7 @@ class TestEdgeCases:
             {"bytes_processed": 1},
             {"mode": "serverless", "region": "eastus"},
         )
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 1 byte should have minimal cost (1 / 1024^4 * 5)
         assert cost.compute_cost < 0.00001
 
@@ -464,7 +466,7 @@ class TestEdgeCases:
             {"execution_time_seconds": thirty_days},
             {"mode": "dedicated", "dwu_level": "dw100c", "region": "eastus"},
         )
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 30 days * 24 hours/day * $1.20/hour
         expected = 30 * 24 * 1.20
         assert abs(cost.compute_cost - expected) < 0.01
@@ -481,7 +483,7 @@ class TestEdgeCases:
         )
         # Should return a cost (no validation of negative times), but cost would be negative
         # This documents current behavior; could be enhanced with validation
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         assert cost.compute_cost < 0
 
     def test_very_large_node_count(self):
@@ -494,7 +496,7 @@ class TestEdgeCases:
             {"execution_time_seconds": 3600},
             {"node_type": "m", "node_count": 1000},
         )
-        assert cost is not None
+        assert isinstance(cost, QueryCost)
         # 1 hour * 16 FBU/hour * 1000 nodes * $0.0833/FBU
         expected = 16.0 * 1000 * 0.0833
         assert abs(cost.compute_cost - expected) < 0.01
@@ -510,7 +512,7 @@ class TestEdgeCases:
         cost_upper = calculator.calculate_query_cost("SYNAPSE", resource_usage, config)
         cost_mixed = calculator.calculate_query_cost("SyNaPsE", resource_usage, config)
 
-        assert cost_lower is not None
-        assert cost_upper is not None
-        assert cost_mixed is not None
+        assert isinstance(cost_lower, QueryCost)
+        assert isinstance(cost_upper, QueryCost)
+        assert isinstance(cost_mixed, QueryCost)
         assert cost_lower.compute_cost == cost_upper.compute_cost == cost_mixed.compute_cost

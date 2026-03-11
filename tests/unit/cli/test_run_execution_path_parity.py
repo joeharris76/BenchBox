@@ -9,7 +9,10 @@ from click.testing import CliRunner
 
 from benchbox.cli.main import cli
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _mock_result() -> SimpleNamespace:

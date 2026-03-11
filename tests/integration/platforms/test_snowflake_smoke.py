@@ -6,6 +6,11 @@ from benchbox.platforms.snowflake import SnowflakeAdapter
 
 from .common import create_smoke_benchmark, install_snowflake_stub, run_smoke_benchmark
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.platform_smoke

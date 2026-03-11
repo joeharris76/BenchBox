@@ -15,7 +15,11 @@ from benchbox.platforms.databricks.adapter import DatabricksAdapter
 from benchbox.platforms.redshift import RedshiftAdapter
 from benchbox.platforms.snowflake import SnowflakeAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 def _make_sort_column(name: str, order: int) -> Mock:

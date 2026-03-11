@@ -13,7 +13,11 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Check for optional dependencies
 try:

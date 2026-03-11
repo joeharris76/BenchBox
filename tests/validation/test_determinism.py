@@ -10,6 +10,10 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 from benchbox import TPCH
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpch.queries import TPCHQueries
+import pytest
+
+pytestmark = pytest.mark.medium
+
 
 
 class TestTPCHDeterminism:

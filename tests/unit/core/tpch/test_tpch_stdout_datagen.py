@@ -19,6 +19,11 @@ import pytest
 
 from benchbox.core.tpch.generator import _TPCH_TABLE_CODES, TPCHDataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+]
+
 
 class TestDbgenStdoutSupport:
     """Tests for dbgen -z flag support at the binary level."""

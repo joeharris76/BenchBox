@@ -10,7 +10,10 @@ import pytest
 from benchbox.core.query_plans.parsers.duckdb import DuckDBQueryPlanParser
 from benchbox.core.results.query_plan_models import LogicalOperatorType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # Sample DuckDB JSON EXPLAIN outputs

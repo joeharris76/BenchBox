@@ -16,9 +16,13 @@ import pytest
 
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTPCDSFileFormatFix:
     """Test the fixes for TPC-DS file format inconsistency issue.
 

@@ -9,7 +9,10 @@ import pytest
 from benchbox.core.datavault.etl.transformer import DataVaultETLTransformer
 from benchbox.utils.datagen_manifest import DataGenerationManifest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_datavault_manifest_uses_relative_table_paths_for_relative_output_dir(

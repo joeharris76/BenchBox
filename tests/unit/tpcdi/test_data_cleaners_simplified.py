@@ -21,6 +21,12 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 pytest.importorskip("pandas")
 import pandas as pd
 
@@ -44,7 +50,6 @@ from benchbox.core.tpcdi.tools.data_cleaners import (
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestCleaningResult:
     """Test CleaningResult data structure."""
@@ -73,7 +78,6 @@ class TestCleaningResult:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestWhitespacecleaning:
     """Test whitespace cleaning functionality."""
@@ -138,7 +142,6 @@ class TestWhitespacecleaning:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestNullValueCleaning:
     """Test null value cleaning functionality."""
@@ -196,7 +199,6 @@ class TestNullValueCleaning:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestDateCleaning:
     """Test date cleaning functionality."""
@@ -257,7 +259,6 @@ class TestDateCleaning:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestNumericCleaning:
     """Test numeric cleaning functionality."""
@@ -321,7 +322,6 @@ class TestNumericCleaning:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestDuplicateRemoval:
     """Test duplicate removal functionality."""
@@ -383,7 +383,6 @@ class TestDuplicateRemoval:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestBasicDataCleaner:
     """Test BasicDataCleaner class."""
@@ -470,7 +469,6 @@ class TestBasicDataCleaner:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestTPCDITableCleaners:
     """Test TPCDITableCleaners pre-configured cleaners."""
@@ -531,7 +529,6 @@ class TestTPCDITableCleaners:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestValidationFunctions:
     """Test validation functions."""
@@ -605,7 +602,6 @@ class TestValidationFunctions:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestDataQualityCheck:
     """Test data quality check functionality."""
@@ -680,7 +676,6 @@ class TestDataQualityCheck:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestCleaningRecommendations:
     """Test cleaning recommendations functionality."""
@@ -743,7 +738,6 @@ class TestCleaningRecommendations:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestQuickInterfaces:
     """Test quick cleaning interfaces."""

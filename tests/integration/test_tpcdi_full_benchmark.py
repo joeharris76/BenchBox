@@ -13,6 +13,12 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
+
 pytest.importorskip("pandas")
 
 from benchbox.core.tpcdi.benchmark import TPCDIBenchmark

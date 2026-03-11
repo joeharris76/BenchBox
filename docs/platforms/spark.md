@@ -216,7 +216,7 @@ adapter = SparkAdapter(
 
 ```bash
 benchbox run --platform spark --benchmark tpch \
-  --show-query-plans
+  --capture-plans
 ```
 
 Spark provides detailed physical and logical plans:

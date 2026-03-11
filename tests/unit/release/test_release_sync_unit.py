@@ -15,6 +15,11 @@ from benchbox.release.sync import (
     is_repo_clean,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestIsGitRepo:
     def test_is_git_repo_true(self, tmp_path):

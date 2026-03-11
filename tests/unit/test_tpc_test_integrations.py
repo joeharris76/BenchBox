@@ -12,7 +12,11 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Include the project root to the path so we can import modules
 project_root = Path(__file__).parent.parent.parent

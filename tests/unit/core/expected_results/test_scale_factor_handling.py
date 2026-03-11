@@ -17,7 +17,10 @@ from benchbox.core.expected_results.tpcds_results import get_tpcds_expected_resu
 from benchbox.core.expected_results.tpch_results import get_tpch_expected_results
 from benchbox.core.validation.query_validation import QueryValidator
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestScaleFactorHandling:

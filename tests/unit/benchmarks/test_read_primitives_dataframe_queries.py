@@ -21,6 +21,11 @@ from benchbox.core.read_primitives.dataframe_queries import (
     get_skip_for_expression_family,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestQueryRegistry:
     """Test the Read Primitives DataFrame query registry."""
@@ -242,7 +247,6 @@ class TestQueryMetadata:
         assert len(query_ids) == len(set(query_ids)), "Query IDs should be unique"
 
 
-@pytest.mark.fast
 class TestSqlDataframeParity:
     """Test that SQL catalog and DataFrame registry stay in sync."""
 
@@ -279,7 +283,6 @@ class TestSqlDataframeParity:
         )
 
 
-@pytest.mark.fast
 class TestQueryImplementationSignatures:
     """Test that query implementations have correct signatures."""
 

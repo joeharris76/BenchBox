@@ -17,6 +17,8 @@ from benchbox.core.h2odb.benchmark import H2OBenchmark as H2ODBBenchmark
 
 from .fixtures.benchmark_test_mixin import BenchmarkTestMixin
 
+pytestmark = pytest.mark.medium
+
 
 @pytest.mark.h2odb
 class TestH2ODB:

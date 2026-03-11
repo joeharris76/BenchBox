@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sys
-import types
 from dataclasses import dataclass
 
 import pytest
@@ -14,7 +12,10 @@ from benchbox.core.visualization.chart_generator import (
 )
 from benchbox.core.visualization.result_plotter import NormalizedQuery, NormalizedResult
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_generate_comparison_charts_empty_results_returns_empty(tmp_path):
@@ -22,15 +23,13 @@ def test_generate_comparison_charts_empty_results_returns_empty(tmp_path):
 
 
 def test_generate_comparison_charts_exports_supported_chart_types(monkeypatch, tmp_path):
-    tools_mod = types.ModuleType("benchbox.mcp.tools")
-    viz_mod = types.ModuleType("benchbox.mcp.tools.visualization")
+    def _render_single_ascii_chart(results, chart_type, options, subtitle=None):  # noqa: ARG001
+        return f"{chart_type}:ok"
 
-    def _render_single_ascii_chart(results, chart_type, opts):  # noqa: ARG001
-        return "" if chart_type == "distribution_box" else f"{chart_type}:ok"
-
-    viz_mod._render_single_ascii_chart = _render_single_ascii_chart
-    monkeypatch.setitem(sys.modules, "benchbox.mcp.tools", tools_mod)
-    monkeypatch.setitem(sys.modules, "benchbox.mcp.tools.visualization", viz_mod)
+    monkeypatch.setattr(
+        "benchbox.core.visualization.ascii_api.render_ascii_chart_from_results",
+        _render_single_ascii_chart,
+    )
 
     results = [
         NormalizedResult(
@@ -49,9 +48,10 @@ def test_generate_comparison_charts_exports_supported_chart_types(monkeypatch, t
 
     exported = generate_comparison_charts(results, tmp_path)
 
-    assert set(exported.keys()) == {"performance_bar", "query_heatmap"}
-    assert exported["performance_bar"].exists()
-    assert exported["query_heatmap"].exists()
+    # All three comparison chart types should render (performance_bar, distribution_box, query_heatmap)
+    assert set(exported.keys()) == {"performance_bar", "distribution_box", "query_heatmap"}
+    for path in exported.values():
+        assert path.exists()
 
 
 @dataclass

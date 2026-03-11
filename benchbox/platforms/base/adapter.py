@@ -185,6 +185,9 @@ class PlatformAdapter(VerbosityMixin, ABC):
     # Subclasses should override this class variable to declare their capability.
     # Default is NOT_APPLICABLE — adapters that support isolation must opt in.
     driver_isolation_capability: DriverIsolationCapability = DriverIsolationCapability.NOT_APPLICABLE
+    # External table mode capability declaration.
+    # Subclasses that implement external table/view registration should set this to True.
+    supports_external_tables: bool = False
 
     def __init__(self, **config):
         """Initialize the platform adapter with configuration.
@@ -235,7 +238,13 @@ class PlatformAdapter(VerbosityMixin, ABC):
         # Track whether existing database was reused (vs recreated)
         self.database_was_reused = False
 
+        # Table mode: "native" (default) or "external" (external table/view references)
+        self.table_mode: str = "native"
+        # External format detected during external table creation (e.g., "parquet", "delta", "tbl")
+        self.external_format: str | None = None
+
         # Dry-run mode support
+        self.dry_run = config.get("dry_run", False)
         self.dry_run_mode = False
         self.captured_sql = []
         self.query_counter = 0
@@ -1282,6 +1291,25 @@ class PlatformAdapter(VerbosityMixin, ABC):
             where per_table_timings is optional dict with detailed timing per table
         """
 
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Register benchmark tables as external references instead of loading native tables.
+
+        Platforms that support external-table mode should override this method and
+        return the same tuple shape as ``load_data``.
+
+        Args:
+            benchmark: Benchmark instance
+            connection: Database connection
+            data_dir: Directory containing source data files or external data roots
+
+        Returns:
+            Tuple of (table_statistics, loading_time_seconds, per_table_timings)
+            where per_table_timings is optional dict with detailed timing per table
+        """
+        raise NotImplementedError(f"{self.platform_name} does not support external table mode")
+
     def upload_manifest(self, manifest_path: Path, remote_path: str) -> bool:
         """Upload manifest to remote storage. Override in subclasses if supported.
 
@@ -1494,6 +1522,12 @@ class PlatformAdapter(VerbosityMixin, ABC):
             **connection_config: Connection configuration
         """
         self.log_operation_start("Database validation", "Checking existing database compatibility")
+
+        # Skip validation entirely in dry-run mode — we only need the adapter
+        # for metadata extraction, not for database state management.
+        if self.dry_run:
+            self.log_verbose("Database validation skipped (dry run mode)")
+            return
 
         # Skip database management for managed cloud databases
         # These platforms don't allow DROP/CREATE DATABASE operations
@@ -2832,9 +2866,16 @@ class PlatformAdapter(VerbosityMixin, ABC):
     def _setup_reused_database_phases(self, benchmark, connection: Any) -> tuple:
         """Set up phases when database is being reused (skip schema creation and data loading).
 
+        When ``self.table_mode == "external"`` the reuse path still calls
+        ``create_external_tables`` so that VIEWs/external references are
+        recreated over the staged data files.
+
         Returns:
             Tuple of (schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, tuning_metadata_saved)
         """
+        if self.table_mode == "external":
+            return self._setup_reused_external_phases(benchmark, connection)
+
         quiet_console.print("✅ Database being reused - skipping schema creation and data loading")
         schema_time = 0.0
         schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
@@ -2856,12 +2897,64 @@ class PlatformAdapter(VerbosityMixin, ABC):
         tuning_metadata_saved = False
         return schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, tuning_metadata_saved
 
+    def _setup_reused_external_phases(self, benchmark, connection: Any) -> tuple:
+        """Set up external table phases when database is being reused.
+
+        Even when a database file is reused, external mode must recreate
+        VIEWs/external table references because the previous run may have
+        used native tables.
+        """
+        if not self.supports_external_tables:
+            raise RuntimeError(f"Platform '{self.platform_name}' does not support --table-mode external")
+
+        validate_fn = getattr(self, "validate_external_table_requirements", None)
+        if callable(validate_fn):
+            validate_fn()
+
+        data_dir = Path(benchmark.output_dir) if hasattr(benchmark, "output_dir") else Path(".")
+
+        quiet_console.print("Creating external tables (reusing existing database)...")
+        schema_time = 0.0
+        schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
+        schema_creation_phase.status = "SKIPPED"
+
+        table_stats, loading_time, per_table_timings = self.create_external_tables(benchmark, connection, data_dir)
+        _fmt_tag = f" [{self.external_format}]" if self.external_format else ""
+        quiet_console.print(f"✅ External tables created in {loading_time:.2f}s{_fmt_tag}")
+        data_loading_phase = self._create_enhanced_data_loading_phase(table_stats, loading_time, per_table_timings)
+        return schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, False
+
     def _setup_fresh_database_phases(self, benchmark, connection: Any, effective_tuning_config) -> tuple:
         """Set up phases for fresh database (schema creation, tuning, data loading).
+
+        When ``self.table_mode == "external"`` the adapter skips native schema
+        creation and tuning, and calls ``create_external_tables`` instead of
+        ``load_data``.
 
         Returns:
             Tuple of (schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, tuning_metadata_saved)
         """
+        data_dir = Path(benchmark.output_dir) if hasattr(benchmark, "output_dir") else Path(".")
+
+        if self.table_mode == "external":
+            # External table mode: skip native schema/tuning, create external references
+            if not self.supports_external_tables:
+                raise RuntimeError(f"Platform '{self.platform_name}' does not support --table-mode external")
+            validate_fn = getattr(self, "validate_external_table_requirements", None)
+            if callable(validate_fn):
+                validate_fn()
+
+            schema_time = 0.0
+            schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, 0.0)
+            schema_creation_phase.status = "SKIPPED"
+
+            quiet_console.print("Creating external tables...")
+            table_stats, loading_time, per_table_timings = self.create_external_tables(benchmark, connection, data_dir)
+            _fmt_tag = f" [{self.external_format}]" if self.external_format else ""
+            quiet_console.print(f"✅ External tables created in {loading_time:.2f}s{_fmt_tag}")
+            data_loading_phase = self._create_enhanced_data_loading_phase(table_stats, loading_time, per_table_timings)
+            return schema_time, schema_creation_phase, loading_time, table_stats, data_loading_phase, False
+
         quiet_console.print("Creating database schema...")
         schema_time = self.create_schema(benchmark, connection)
         schema_creation_phase = self._create_enhanced_schema_creation_phase(benchmark, connection, schema_time)
@@ -2880,7 +2973,6 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 quiet_console.print("⚠️ Failed to save tuning metadata")
 
         quiet_console.print("Loading benchmark data...")
-        data_dir = Path(benchmark.output_dir) if hasattr(benchmark, "output_dir") else Path(".")
         table_stats, loading_time, per_table_timings = self.load_data(benchmark, connection, data_dir)
         quiet_console.print(f"✅ Data loading completed in {loading_time:.2f}s")
         data_loading_phase = self._create_enhanced_data_loading_phase(table_stats, loading_time, per_table_timings)
@@ -2998,6 +3090,15 @@ class PlatformAdapter(VerbosityMixin, ABC):
                 "platform_options": run_config.get("platform_options"),
                 "tuning_mode": run_config.get("tuning_mode"),
                 "tuning_config": run_config.get("tuning_config"),
+                "table_mode": self.table_mode if self.table_mode != "native" else None,
+                "external_format": self.external_format,
+                "table_format": run_config.get("table_format"),
+                "table_format_compression": (
+                    run_config.get("table_format_compression") if run_config.get("table_format") else None
+                ),
+                "table_format_partition_cols": (
+                    run_config.get("table_format_partition_cols") if run_config.get("table_format") else None
+                ),
             },
             "sorted_ingestion": self.get_sorted_ingestion_metadata(),
         }

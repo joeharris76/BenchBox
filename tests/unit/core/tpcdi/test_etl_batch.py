@@ -12,7 +12,10 @@ import pytest
 
 from benchbox.core.tpcdi.etl.batch import BatchProcessor, BatchStatus, BatchType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBatchProcessorHistoricalLoad:

@@ -21,7 +21,10 @@ from benchbox.core.nyctaxi.spatial import (
     get_spatial_queries,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTaxiZoneCentroids:

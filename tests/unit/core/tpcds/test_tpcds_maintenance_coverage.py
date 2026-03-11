@@ -11,7 +11,10 @@ from benchbox.core.tpcds.maintenance_test import (
     TPCDSMaintenanceTestConfig,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Cursor:

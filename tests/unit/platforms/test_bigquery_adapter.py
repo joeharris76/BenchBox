@@ -13,7 +13,11 @@ import pytest
 
 from benchbox.platforms.bigquery import BigQueryAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 @pytest.fixture
@@ -51,6 +55,12 @@ class TestBigQueryAdapter:
             assert adapter.maximum_bytes_billed is None
             assert adapter.query_cache is False  # Cache disabled by default for accurate benchmarking
             assert adapter.dry_run is False
+
+    def test_external_table_capability_declared(self, dependencies_available):
+        """BigQuery should explicitly declare external-table support."""
+        with patch("benchbox.platforms.bigquery.bigquery"):
+            adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+            assert adapter.supports_external_tables is True
 
     def test_initialization_missing_driver(self):
         """Test initialization when BigQuery client library is not available."""
@@ -291,6 +301,110 @@ class TestBigQueryAdapter:
 
         finally:
             temp_path.unlink()
+
+    @patch("benchbox.platforms.bigquery.bigquery")
+    def test_validate_external_table_requirements_requires_bucket(self, mock_bigquery, dependencies_available):
+        """External mode should require GCS staging configuration."""
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+
+        with pytest.raises(ValueError, match="requires a GCS bucket"):
+            adapter.validate_external_table_requirements()
+
+    @patch("benchbox.platforms.bigquery.bigquery")
+    def test_create_external_tables_generates_external_table_sql(self, mock_bigquery, dependencies_available):
+        """External mode should create BigQuery external table SQL with GCS URIs."""
+        adapter = BigQueryAdapter(
+            project_id="test-project",
+            dataset_id="test_dataset",
+            storage_bucket="benchbox-bucket",
+            storage_prefix="benchbox-data",
+        )
+
+        mock_connection = Mock()
+        mock_query_job = Mock()
+        mock_query_job.result.return_value = []
+        mock_connection.query.return_value = mock_query_job
+
+        with (
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [Path("/tmp/lineitem.parquet")]}),
+            patch.object(
+                adapter,
+                "_prepare_external_parquet_uris",
+                return_value=["gs://benchbox-bucket/benchbox-data/lineitem/lineitem.parquet"],
+            ),
+            patch.object(adapter, "_create_storage_bucket", return_value=Mock()),
+            patch.object(adapter, "_get_table_row_count", return_value=55),
+        ):
+            table_stats, load_time, per_table_timings = adapter.create_external_tables(
+                benchmark=Mock(),
+                connection=mock_connection,
+                data_dir=Path("/tmp"),
+            )
+
+        assert table_stats == {"LINEITEM": 55}
+        assert isinstance(load_time, float)
+        assert per_table_timings is None
+        query_sql = str(mock_connection.query.call_args[0][0])
+        assert "CREATE OR REPLACE EXTERNAL TABLE `test-project.test_dataset.LINEITEM`" in query_sql
+        assert "format = 'PARQUET'" in query_sql
+        assert "gs://benchbox-bucket/benchbox-data/lineitem/lineitem.parquet" in query_sql
+
+    @patch("benchbox.platforms.bigquery.bigquery")
+    def test_create_external_tables_generates_delta_biglake_sql(self, mock_bigquery, dependencies_available):
+        """Delta external mode should create BigLake SQL with DELTA_LAKE format."""
+        adapter = BigQueryAdapter(
+            project_id="test-project",
+            dataset_id="test_dataset",
+            storage_bucket="benchbox-bucket",
+            storage_prefix="benchbox-data",
+            biglake_connection="test-project.us.benchbox",
+        )
+
+        mock_connection = Mock()
+        mock_query_job = Mock()
+        mock_query_job.result.return_value = []
+        mock_connection.query.return_value = mock_query_job
+
+        with (
+            patch.object(
+                adapter,
+                "_prepare_external_table_uris",
+                return_value=("DELTA_LAKE", ["gs://benchbox-bucket/benchbox-data/lineitem/"]),
+            ),
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [Path("/tmp/lineitem")]}),
+            patch.object(adapter, "_create_storage_bucket", return_value=Mock()),
+            patch.object(adapter, "_get_table_row_count", return_value=66),
+        ):
+            table_stats, _, _ = adapter.create_external_tables(
+                benchmark=Mock(), connection=mock_connection, data_dir=Path("/tmp")
+            )
+
+        assert table_stats == {"LINEITEM": 66}
+        query_sql = str(mock_connection.query.call_args[0][0])
+        assert "WITH CONNECTION `test-project.us.benchbox`" in query_sql
+        assert "format = 'DELTA_LAKE'" in query_sql
+
+    @patch("benchbox.platforms.bigquery.bigquery")
+    def test_create_external_tables_delta_requires_biglake_connection(self, mock_bigquery, dependencies_available):
+        """Delta external mode should reject runs without BigLake connection config."""
+        adapter = BigQueryAdapter(
+            project_id="test-project",
+            dataset_id="test_dataset",
+            storage_bucket="benchbox-bucket",
+            storage_prefix="benchbox-data",
+        )
+
+        with (
+            patch.object(adapter, "_resolve_data_files", return_value={"lineitem": [Path("/tmp/lineitem")]}),
+            patch.object(adapter, "_create_storage_bucket", return_value=Mock()),
+            patch.object(
+                adapter,
+                "_prepare_external_delta_uris",
+                return_value=["gs://benchbox-bucket/benchbox-data/lineitem/"],
+            ),
+            pytest.raises(ValueError, match="requires --platform-option biglake_connection"),
+        ):
+            adapter.create_external_tables(benchmark=Mock(), connection=Mock(), data_dir=Path("/tmp"))
 
     @patch("benchbox.platforms.bigquery.bigquery")
     def test_configure_for_benchmark_olap(self, mock_bigquery, dependencies_available):
@@ -1137,3 +1251,128 @@ class TestBigQueryAdapter:
                     assert result.is_valid is True
                     assert result.can_reuse is True
                     assert len(result.issues) == 0
+
+
+# ===================================================================
+# Additional coverage tests (merged from test_bigquery_case_normalization.py)
+# ===================================================================
+
+
+class TestBigQueryCaseNormalization:
+    """Test BigQuery table name case normalization for TPC-DS compatibility."""
+
+    def test_normalize_single_table(self):
+        """Test normalization of a single lowercase table name."""
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        result = adapter._normalize_table_names_case("SELECT * FROM `customer`")
+        assert "`CUSTOMER`" in result
+        assert "`customer`" not in result
+
+    def test_normalize_multiple_tables(self):
+        """Test normalization of multiple lowercase table names."""
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        query = "SELECT * FROM `customer` JOIN `store_sales` ON `customer`.c_id = `store_sales`.c_id"
+        result = adapter._normalize_table_names_case(query)
+        assert "`CUSTOMER`" in result
+        assert "`STORE_SALES`" in result
+        assert "`customer`" not in result
+        assert "`store_sales`" not in result
+
+    def test_normalize_table_with_underscores(self):
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        result = adapter._normalize_table_names_case("SELECT * FROM `date_dim` WHERE `date_dim`.d_year = 2000")
+        assert "`DATE_DIM`" in result
+        assert "`date_dim`" not in result
+
+    def test_preserves_uppercase_tables(self):
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        result = adapter._normalize_table_names_case("SELECT * FROM `CUSTOMER`")
+        assert "`CUSTOMER`" in result
+
+    def test_ignores_string_literals(self):
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        result = adapter._normalize_table_names_case("SELECT * FROM `customer` WHERE name = 'customer_name'")
+        assert "`CUSTOMER`" in result
+        assert "'customer_name'" in result
+
+    def test_handles_empty_query(self):
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        assert adapter._normalize_table_names_case("") == ""
+
+    def test_handles_query_without_backticks(self):
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        query = "SELECT * FROM CUSTOMER WHERE id = 1"
+        assert adapter._normalize_table_names_case(query) == query
+
+    def test_complex_query_with_joins_and_subqueries(self):
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset")
+        query = """
+        SELECT c.c_id, ss.ss_sales_price
+        FROM `customer` c
+        JOIN (
+            SELECT * FROM `store_sales`
+            WHERE ss_sold_date_sk IN (SELECT d_date_sk FROM `date_dim`)
+        ) ss ON c.c_customer_sk = ss.ss_customer_sk
+        """
+        result = adapter._normalize_table_names_case(query)
+        assert "`CUSTOMER`" in result
+        assert "`STORE_SALES`" in result
+        assert "`DATE_DIM`" in result
+
+
+# ===================================================================
+# Additional coverage tests (merged from test_bigquery_staging_root.py)
+# ===================================================================
+class TestBigQueryStagingRoot:
+    """Test BigQuery staging_root parsing for CloudStagingPath support."""
+
+    def test_staging_root_parsing_simple(self):
+        adapter = BigQueryAdapter(
+            project_id="test-project", dataset_id="test_dataset", staging_root="gs://test-bucket/"
+        )
+        assert adapter.storage_bucket == "test-bucket"
+        assert adapter.storage_prefix == "benchbox-data"
+
+    def test_staging_root_parsing_with_path(self):
+        adapter = BigQueryAdapter(
+            project_id="test-project", dataset_id="test_dataset", staging_root="gs://test-bucket/custom/path/"
+        )
+        assert adapter.storage_bucket == "test-bucket"
+        assert adapter.storage_prefix == "custom/path"
+
+    def test_staging_root_parsing_no_trailing_slash(self):
+        adapter = BigQueryAdapter(
+            project_id="test-project", dataset_id="test_dataset", staging_root="gs://test-bucket/data"
+        )
+        assert adapter.storage_bucket == "test-bucket"
+        assert adapter.storage_prefix == "data"
+
+    def test_staging_root_overrides_explicit_bucket(self):
+        adapter = BigQueryAdapter(
+            project_id="test-project",
+            dataset_id="test_dataset",
+            storage_bucket="old-bucket",
+            storage_prefix="old-prefix",
+            staging_root="gs://new-bucket/new-prefix",
+        )
+        assert adapter.storage_bucket == "new-bucket"
+        assert adapter.storage_prefix == "new-prefix"
+
+    def test_no_staging_root_uses_explicit_config(self):
+        adapter = BigQueryAdapter(
+            project_id="test-project",
+            dataset_id="test_dataset",
+            storage_bucket="explicit-bucket",
+            storage_prefix="explicit-prefix",
+        )
+        assert adapter.storage_bucket == "explicit-bucket"
+        assert adapter.storage_prefix == "explicit-prefix"
+
+    def test_staging_root_invalid_provider_raises_error(self):
+        with pytest.raises(ValueError, match="BigQuery requires GCS"):
+            BigQueryAdapter(project_id="test-project", dataset_id="test_dataset", staging_root="s3://aws-bucket/path")
+
+    def test_staging_root_empty_bucket(self):
+        adapter = BigQueryAdapter(project_id="test-project", dataset_id="test_dataset", staging_root="gs://b")
+        assert adapter.storage_bucket == "b"
+        assert adapter.storage_prefix == "benchbox-data"

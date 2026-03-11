@@ -11,7 +11,10 @@ from rich.console import Console
 from benchbox.cli.progress import BenchmarkProgress, phase_progress, should_show_progress
 from benchbox.monitoring import PerformanceMonitor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_benchmark_progress_initialization():

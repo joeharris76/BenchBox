@@ -15,6 +15,7 @@ Documentation for contributors and developers working on BenchBox.
 
 - [Development Guide](development.md) - Setting up development environment and workflow
 - [Testing](testing.md) - Testing strategies, running tests, and test organization
+- [Pytest xdist Safety](pytest-xdist-safety.md) - Why macOS worker counts are capped and how to validate changes
 
 ## Contributing
 
@@ -35,6 +36,7 @@ Documentation for contributors and developers working on BenchBox.
 ## Testing
 
 - [Testing Guide](testing.md) - Testing strategies and test organization
+- [Pytest xdist Safety](pytest-xdist-safety.md) - Root cause, reproducer, and validation checklist for xdist lock-ups
 - [Testing Index](../testing/index.md) - Test documentation overview
 - [Live Integration Tests](../testing/live-integration-tests.md) - Running tests against live databases
 
@@ -60,6 +62,7 @@ data-dependencies
 import-patterns
 tpc-compilation-guide
 testing
+pytest-xdist-safety
 read-primitives-catalog
 runtime-modules
 run-lifecycle-map

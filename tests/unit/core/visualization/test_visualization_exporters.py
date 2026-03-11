@@ -9,7 +9,10 @@ import pytest
 from benchbox.core.visualization.exceptions import VisualizationError
 from benchbox.core.visualization.exporters import export_ascii, render_ascii_chart
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Point:

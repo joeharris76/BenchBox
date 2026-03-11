@@ -15,7 +15,10 @@ from benchbox.utils.config_interface import (
     create_cli_config_adapter,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestConfigInterface:

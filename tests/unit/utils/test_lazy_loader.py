@@ -4,6 +4,11 @@ import pytest
 
 from benchbox.utils.lazy_loader import LazyImportSpec, LazyLoader
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 def _make_exception(name, spec, original):
     """Test exception factory."""

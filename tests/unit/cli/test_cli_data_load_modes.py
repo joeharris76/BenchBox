@@ -16,6 +16,7 @@ from benchbox.cli.benchmarks import BenchmarkConfig
 from benchbox.cli.main import cli
 
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.fast,
     pytest.mark.skipif(
         sys.version_info < (3, 11),
@@ -177,6 +178,250 @@ class TestCLIDataLoadModes:
             config = mocks["orchestrator"].return_value.execute_benchmark.call_args[0][0]
             assert isinstance(config, BenchmarkConfig)
             assert config.options.get("force_regenerate") is True
+
+    def test_table_mode_option_forwarded(self):
+        """Ensure CLI forwards --table-mode into benchmark config options."""
+        with _mock_run_command_components(include_db_manager=True) as mocks:
+            mock_db_cfg = Mock()
+            mock_db_cfg.type = "duckdb"
+            mock_db_cfg.options = {}
+            assert mocks["db_mgr"] is not None
+            mocks["db_mgr"].return_value.create_config.return_value = mock_db_cfg
+
+            result = self.runner.invoke(
+                cli,
+                [
+                    "run",
+                    "--platform",
+                    "duckdb",
+                    "--benchmark",
+                    "tpch",
+                    "--scale",
+                    "0.01",
+                    "--table-mode",
+                    "external",
+                ],
+            )
+            assert result.exit_code == 0
+
+            mocks["orchestrator"].return_value.execute_benchmark.assert_called_once()
+            config = mocks["orchestrator"].return_value.execute_benchmark.call_args[0][0]
+            assert isinstance(config, BenchmarkConfig)
+            assert config.options.get("table_mode") == "external"
+
+    def test_table_mode_cli_value_saved_for_quick_restart(self):
+        """Explicit CLI --table-mode should be persisted in quick restart config."""
+        with (
+            _mock_run_command_components(include_db_manager=True) as mocks,
+            patch("benchbox.cli.preferences.save_last_run_config") as mock_save_last_run_config,
+        ):
+            mock_db_cfg = Mock()
+            mock_db_cfg.type = "duckdb"
+            mock_db_cfg.options = {}
+            mock_db_cfg.driver_version_actual = "1.4.3"
+            mock_db_cfg.driver_version_resolved = "1.4.3"
+            assert mocks["db_mgr"] is not None
+            mocks["db_mgr"].return_value.create_config.return_value = mock_db_cfg
+
+            result = self.runner.invoke(
+                cli,
+                [
+                    "run",
+                    "--platform",
+                    "duckdb",
+                    "--benchmark",
+                    "tpch",
+                    "--scale",
+                    "0.01",
+                    "--table-mode",
+                    "external",
+                ],
+            )
+            assert result.exit_code == 0
+            assert mock_save_last_run_config.called
+            _, kwargs = mock_save_last_run_config.call_args
+            assert kwargs.get("additional_options", {}).get("table_mode") == "external"
+
+    def test_table_mode_cli_precedence_over_quick_restart_config(self):
+        """Explicit CLI --table-mode should override saved quick-restart table mode."""
+        mock_sys = Mock()
+        mock_sys.stdin = Mock()
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout = Mock()
+        mock_sys.stdout.isatty.return_value = True
+
+        with (
+            _mock_run_command_components(include_db_manager=True) as mocks,
+            patch("benchbox.cli.commands.run.sys", mock_sys),
+            patch("benchbox.cli.onboarding.check_and_run_first_time_setup", return_value=False),
+            patch(
+                "benchbox.cli.preferences.load_last_run_config",
+                return_value={
+                    "database": "duckdb",
+                    "benchmark": "tpch",
+                    "scale": 0.01,
+                    "phases": ["load", "power"],
+                    "tuning_mode": "notuning",
+                    "table_mode": "native",
+                },
+            ),
+            patch("benchbox.cli.preferences.format_last_run_summary", return_value="saved run"),
+            patch("benchbox.cli.commands.run.Confirm.ask") as mock_confirm_ask,
+            patch("benchbox.cli.preferences.save_last_run_config"),
+        ):
+
+            def _confirm_side_effect(prompt, default=False):
+                prompt_text = str(prompt)
+                if "Reuse this configuration?" in prompt_text:
+                    return True
+                if "configure tuning options" in prompt_text:
+                    return False
+                if "Proceed with execution?" in prompt_text:
+                    return True
+                return default
+
+            mock_confirm_ask.side_effect = _confirm_side_effect
+
+            mock_profile = Mock()
+            mock_profile.cpu_cores_logical = 8
+            mock_profile.cpu_cores_physical = 4
+            mock_profile.memory_total_gb = 16
+            mock_profile.is_apple_silicon = False
+            mock_profile.architecture = "x86_64"
+            mock_profile.os_type = "darwin"
+            mock_profile.numa_nodes = None
+            mocks["profiler"].return_value.get_system_profile.return_value = mock_profile
+
+            mock_db_cfg = Mock()
+            mock_db_cfg.type = "duckdb"
+            mock_db_cfg.options = {}
+            mock_db_cfg.driver_version_actual = "1.4.3"
+            mock_db_cfg.driver_version_resolved = "1.4.3"
+            assert mocks["db_mgr"] is not None
+            mocks["db_mgr"].return_value.create_config.return_value = mock_db_cfg
+
+            result = self.runner.invoke(cli, ["run", "--table-mode", "external"])
+            assert result.exit_code == 0, result.output
+
+            mocks["orchestrator"].return_value.execute_benchmark.assert_called_once()
+            config = mocks["orchestrator"].return_value.execute_benchmark.call_args[0][0]
+            assert isinstance(config, BenchmarkConfig)
+            assert config.options.get("table_mode") == "external"
+
+    def test_table_mode_external_rejects_tuned_in_quick_restart(self):
+        """Quick-restart should still reject external table mode with tuned mode."""
+        mock_sys = Mock()
+        mock_sys.stdin = Mock()
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout = Mock()
+        mock_sys.stdout.isatty.return_value = True
+
+        with (
+            _mock_run_command_components(include_db_manager=True) as mocks,
+            patch("benchbox.cli.commands.run.sys", mock_sys),
+            patch("benchbox.cli.onboarding.check_and_run_first_time_setup", return_value=False),
+            patch(
+                "benchbox.cli.preferences.load_last_run_config",
+                return_value={
+                    "database": "duckdb",
+                    "benchmark": "tpch",
+                    "scale": 0.01,
+                    "phases": ["load", "power"],
+                    "tuning_mode": "tuned",
+                    "table_mode": "native",
+                },
+            ),
+            patch("benchbox.cli.preferences.format_last_run_summary", return_value="saved run"),
+            patch("benchbox.cli.commands.run.Confirm.ask", side_effect=[True]),
+            patch("benchbox.cli.preferences.save_last_run_config"),
+        ):
+            mock_profile = Mock()
+            mock_profile.cpu_cores_logical = 8
+            mock_profile.cpu_cores_physical = 4
+            mock_profile.memory_total_gb = 16
+            mock_profile.is_apple_silicon = False
+            mock_profile.architecture = "x86_64"
+            mock_profile.os_type = "darwin"
+            mock_profile.numa_nodes = None
+            mocks["profiler"].return_value.get_system_profile.return_value = mock_profile
+
+            result = self.runner.invoke(cli, ["run", "--table-mode", "external"])
+            assert result.exit_code != 0
+            assert "--table-mode external is incompatible with --tuning tuned" in result.output
+            mocks["orchestrator"].return_value.execute_benchmark.assert_not_called()
+
+    def test_table_mode_external_shows_tag_in_output(self):
+        """CLI should print [external] in the run announcement when --table-mode external."""
+        with _mock_run_command_components(include_db_manager=True) as mocks:
+            mock_db_cfg = Mock()
+            mock_db_cfg.type = "duckdb"
+            mock_db_cfg.options = {}
+            mock_db_cfg.driver_version_actual = "1.4.3"
+            mock_db_cfg.driver_version_resolved = "1.4.3"
+            assert mocks["db_mgr"] is not None
+            mocks["db_mgr"].return_value.create_config.return_value = mock_db_cfg
+
+            result = self.runner.invoke(
+                cli,
+                [
+                    "run",
+                    "--platform",
+                    "duckdb",
+                    "--benchmark",
+                    "tpch",
+                    "--scale",
+                    "0.01",
+                    "--table-mode",
+                    "external",
+                ],
+            )
+            assert result.exit_code == 0
+            assert "[external]" in result.output, f"Expected '[external]' tag in CLI output, got:\n{result.output}"
+
+    def test_table_mode_native_omits_tag_in_output(self):
+        """CLI should NOT print [external] when using default native mode."""
+        with _mock_run_command_components(include_db_manager=True) as mocks:
+            mock_db_cfg = Mock()
+            mock_db_cfg.type = "duckdb"
+            mock_db_cfg.options = {}
+            mock_db_cfg.driver_version_actual = "1.4.3"
+            mock_db_cfg.driver_version_resolved = "1.4.3"
+            assert mocks["db_mgr"] is not None
+            mocks["db_mgr"].return_value.create_config.return_value = mock_db_cfg
+
+            result = self.runner.invoke(
+                cli,
+                [
+                    "run",
+                    "--platform",
+                    "duckdb",
+                    "--benchmark",
+                    "tpch",
+                    "--scale",
+                    "0.01",
+                ],
+            )
+            assert result.exit_code == 0
+            assert "[external]" not in result.output
+
+    def test_table_mode_external_rejects_tuned(self):
+        """external table mode should reject explicit tuned mode."""
+        result = self.runner.invoke(
+            cli,
+            [
+                "run",
+                "--platform",
+                "duckdb",
+                "--benchmark",
+                "tpch",
+                "--table-mode",
+                "external",
+                "--tuning",
+                "tuned",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "--table-mode external is incompatible with --tuning tuned" in result.output
 
     def test_enable_postgen_manifest_flag_forwarded(self):
         """Ensure CLI forwards the manifest validation flag into benchmark options."""

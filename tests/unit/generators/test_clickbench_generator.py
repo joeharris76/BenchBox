@@ -13,6 +13,11 @@ import pytest
 
 from benchbox.core.clickbench.generator import ClickBenchDataGenerator
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 @pytest.fixture
 def temp_dir():
@@ -22,7 +27,6 @@ def temp_dir():
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestClickBenchDataGenerator:
     """Test ClickBench data generator basic functionality."""
 
@@ -237,7 +241,6 @@ class TestClickBenchDataGenerator:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestGeneratorExtended:
     """Advanced tests for ClickBench data generator."""
 

@@ -16,7 +16,10 @@ import pytest
 
 from benchbox.core.platform_registry import PlatformRegistry
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 # Define canonical platform names and their aliases

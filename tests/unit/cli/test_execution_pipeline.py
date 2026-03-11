@@ -24,7 +24,10 @@ from benchbox.core.schemas import (
 )
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestExecutionContext:

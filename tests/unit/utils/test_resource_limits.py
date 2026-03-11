@@ -22,7 +22,10 @@ from benchbox.utils.resource_limits import (
     get_system_memory_mb,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestResourceWarningLevel:

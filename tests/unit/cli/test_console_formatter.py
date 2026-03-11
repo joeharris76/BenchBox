@@ -13,7 +13,11 @@ import pytest
 from benchbox.core.schemas import QueryResult
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Import the ConsoleResultFormatter - we'll need to handle import errors gracefully
 try:

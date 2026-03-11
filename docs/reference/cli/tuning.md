@@ -116,6 +116,7 @@ DataFrame tuning supports these configuration sections:
 | `data_types` | `dtype_backend`, `enable_string_cache`, `auto_categorize_strings` | Type handling |
 | `io` | `memory_pool`, `memory_map`, `pre_buffer`, `row_group_size` | I/O optimization |
 | `gpu` | `enabled`, `device_id`, `spill_to_host`, `pool_type` | GPU settings (cuDF) |
+| `write` | `sort_by`, `partition_by`, `row_group_size`, `target_file_size_mb`, `repartition_count`, `compression`, `compression_level`, `dictionary_columns`, `skip_dictionary_columns`, `data_page_version` | Write-time physical layout and Parquet encoding |
 
 For complete configuration reference, see [DataFrame Platforms - Tuning](../../platforms/dataframe.md#dataframe-tuning).
 

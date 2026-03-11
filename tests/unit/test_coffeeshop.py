@@ -27,7 +27,11 @@ from benchbox.utils.coffeeshop_seed_loader import load_location_seeds, load_prod
 from benchbox.utils.path_utils import get_benchmark_runs_datagen_path
 from benchbox.utils.scale_factor import format_scale_factor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
 
 # Skip marker for tests with Windows file handling issues (line ending differences)
 skip_windows_file_io = pytest.mark.skipif(

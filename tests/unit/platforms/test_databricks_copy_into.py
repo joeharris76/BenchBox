@@ -11,7 +11,12 @@ import pytest
 
 from benchbox.platforms.databricks import DatabricksAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
+
 
 # Check for optional dependencies
 try:

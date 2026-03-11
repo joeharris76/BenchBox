@@ -17,6 +17,12 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
+
 # =============================================================================
 # Platform availability checks
 # =============================================================================
@@ -458,6 +464,7 @@ class TestDeltaLakeMaintenanceIntegration:
 
 @pytest.mark.integration
 @pytest.mark.skipif(not ICEBERG_AVAILABLE or not POLARS_AVAILABLE, reason="Iceberg or Polars not installed")
+@pytest.mark.skipif(__import__("sys").platform == "win32", reason="pyiceberg does not support Windows paths")
 class TestIcebergMaintenanceIntegration:
     """Integration tests for Apache Iceberg maintenance operations."""
 

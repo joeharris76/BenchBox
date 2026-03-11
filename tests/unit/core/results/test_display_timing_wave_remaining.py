@@ -19,7 +19,10 @@ from benchbox.core.results.display import (
 )
 from benchbox.core.results.timing import QueryTiming, TimingAnalyzer, TimingCollector
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_display_results_success_and_failure(capsys):

@@ -13,6 +13,11 @@ import pytest
 from benchbox import TPCH
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 class TestTPCHBenchmarkIntegration:
     """Test TPCHBenchmark integration with ultra-simplified query manager."""

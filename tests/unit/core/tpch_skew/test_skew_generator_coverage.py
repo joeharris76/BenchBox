@@ -16,7 +16,10 @@ from benchbox.core.tpch_skew.skew_config import (
     TemporalSkewConfig,
 )
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_config(distribution: str = "zipfian") -> SkewConfiguration:

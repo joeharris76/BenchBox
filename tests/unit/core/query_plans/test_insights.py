@@ -19,7 +19,10 @@ from benchbox.core.results.query_plan_models import (
     QueryPlanDAG,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _create_scan_operator(table_name: str, op_id: str = "scan_1") -> LogicalOperator:

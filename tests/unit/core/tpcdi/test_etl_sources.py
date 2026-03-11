@@ -11,7 +11,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.medium  # ETL source tests generate data (~1-8s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
 
 # Check if lxml is available for XML tests
 try:
@@ -169,7 +173,6 @@ class TestFixedWidthSourceFormat:
         fw_format = FixedWidthSourceFormat(field_widths={}, fill_char="0")
         assert fw_format.fill_char == "0"
 
-    @pytest.mark.medium
     def test_generate_data_returns_string(self) -> None:
         """Test that generate_data returns a file path string."""
         fw_format = FixedWidthSourceFormat(field_widths={})

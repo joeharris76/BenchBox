@@ -26,7 +26,10 @@ from benchbox.core.dataframe.capabilities import (
     validate_scale_factor,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPlatformCapabilities:

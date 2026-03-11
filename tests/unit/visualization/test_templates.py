@@ -13,7 +13,10 @@ from benchbox.core.visualization.templates import (
     list_templates,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGetTemplate:

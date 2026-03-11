@@ -9,7 +9,11 @@ import pytest
 
 from benchbox.platforms.databricks import dataframe_adapter as mod
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 def _patch_parent_init(monkeypatch: pytest.MonkeyPatch) -> None:

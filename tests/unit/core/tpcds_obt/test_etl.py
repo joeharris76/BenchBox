@@ -6,7 +6,10 @@ import pytest
 from benchbox.core.tpcds_obt import schema
 from benchbox.core.tpcds_obt.etl.transformer import SUPPORTED_CHANNELS, TPCDSOBTTransformer
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class FakeConnection:

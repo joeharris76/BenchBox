@@ -27,6 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
+
 if TYPE_CHECKING:
     from benchbox.platforms.dataframe.expression_family import ExpressionFamilyAdapter
 

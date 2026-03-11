@@ -12,6 +12,12 @@ import pytest
 import benchbox
 from benchbox import BaseBenchmark
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # Check for optional dependencies
 try:
     import pandas
@@ -22,7 +28,6 @@ except ImportError:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestPackageInit:
     """Test benchbox package initialization and imports."""
 
@@ -53,7 +58,6 @@ class TestPackageInit:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestLazyImports:
     """Test lazy import functionality."""
 

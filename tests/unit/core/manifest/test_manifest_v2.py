@@ -18,7 +18,10 @@ from benchbox.core.manifest import (
     write_manifest,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestManifestModels:
@@ -362,6 +365,37 @@ class TestFormatPreferences:
         # DuckDB prefers parquet over tbl
         preferred = get_preferred_format(manifest, "customer", "duckdb")
         assert preferred == "parquet"
+
+    def test_get_preferred_format_external_mode_uses_external_capabilities(self):
+        """Test external mode can select external-only formats without affecting native mode."""
+        manifest = ManifestV2(
+            version=2,
+            format_preference=[],
+            tables={
+                "lineitem": TableFormats(
+                    formats={
+                        "parquet": [ConvertedFileEntry(path="lineitem.parquet", size_bytes=50, row_count=10)],
+                        "delta": [ConvertedFileEntry(path="lineitem", size_bytes=0, row_count=10)],
+                    }
+                )
+            },
+        )
+
+        assert get_preferred_format(manifest, "lineitem", "bigquery") == "parquet"
+        assert get_preferred_format(manifest, "lineitem", "bigquery", table_mode="external") == "parquet"
+        assert (
+            get_preferred_format(
+                manifest,
+                "lineitem",
+                "bigquery",
+                table_mode="external",
+                platform_config={
+                    "staging_root": "gs://bucket/prefix",
+                    "biglake_connection": "project.us.conn",
+                },
+            )
+            == "delta"
+        )
 
     def test_get_preferred_format_fallback(self):
         """Test format selection falls back to first available."""

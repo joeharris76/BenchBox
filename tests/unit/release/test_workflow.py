@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.release.workflow import HOLD_BACK_PATHS, compute_source_fingerprint, prepare_public_release
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()

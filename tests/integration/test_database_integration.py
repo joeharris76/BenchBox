@@ -29,6 +29,11 @@ import pytest
 from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 from benchbox.core.read_primitives.schema import TABLES
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.database

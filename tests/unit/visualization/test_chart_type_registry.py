@@ -9,7 +9,10 @@ from benchbox.core.visualization.chart_types import ALL_CHART_TYPES
 from benchbox.core.visualization.templates import list_templates
 from benchbox.mcp.tools.visualization import CHART_TYPE_DESCRIPTIONS
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_cli_and_mcp_use_canonical_chart_registry():

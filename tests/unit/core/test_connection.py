@@ -11,6 +11,11 @@ import pytest
 
 from benchbox.core.connection import DatabaseConnection, DatabaseError
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestDatabaseConnectionInitialization:
     """Test initialization of DatabaseConnection."""
@@ -446,7 +451,6 @@ class TestDatabaseError:
             assert e.__cause__ is original_error
 
 
-@pytest.mark.fast
 @pytest.mark.unit
 class TestDatabaseConnectionEdgeCases:
     """Test edge cases and error conditions."""

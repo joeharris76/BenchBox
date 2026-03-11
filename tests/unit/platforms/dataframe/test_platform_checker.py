@@ -25,7 +25,10 @@ from benchbox.platforms.dataframe.platform_checker import (
     require_platform,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDataFrameFamily:

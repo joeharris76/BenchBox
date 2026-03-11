@@ -14,7 +14,10 @@ from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.results.result_factory import build_enhanced_benchmark_result
 
 # Mark all tests in this file as unit tests
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockBenchmark(BaseBenchmark):

@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.medium
+
+
 pytest.importorskip("pandas")
 
 from examples import unified_runner

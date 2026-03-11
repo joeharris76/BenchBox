@@ -36,7 +36,10 @@ from benchbox.core.tpch.schema import (
     get_create_all_tables_sql,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTPCHInterface:

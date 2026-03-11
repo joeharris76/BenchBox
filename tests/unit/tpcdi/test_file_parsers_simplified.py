@@ -23,6 +23,12 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 pytest.importorskip("pandas")
 import pandas as pd
 
@@ -41,7 +47,6 @@ from benchbox.core.tpcdi.tools.file_parsers import (
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestParseResult:
     """Test ParseResult data structure."""
@@ -114,7 +119,6 @@ class TestParseResult:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestCSVParser:
     """Test CSV parser functionality."""
@@ -209,7 +213,6 @@ class TestCSVParser:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestPipeDelimitedParser:
     """Test pipe-delimited parser functionality."""
@@ -240,7 +243,6 @@ class TestPipeDelimitedParser:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestFixedWidthParser:
     """Test fixed-width parser functionality."""
@@ -292,7 +294,6 @@ class TestFixedWidthParser:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestXMLParser:
     """Test XML parser functionality."""
@@ -387,7 +388,6 @@ class TestXMLParser:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestMultiFormatParser:
     """Test multi-format parser functionality."""
@@ -443,7 +443,6 @@ class TestMultiFormatParser:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestConvenienceFunctions:
     """Test convenience parsing functions."""
@@ -522,7 +521,6 @@ class TestConvenienceFunctions:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 @pytest.mark.tpcdi
 class TestErrorHandling:
     """Test error handling across all parsers."""

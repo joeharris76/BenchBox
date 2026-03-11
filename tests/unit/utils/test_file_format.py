@@ -32,7 +32,10 @@ from benchbox.utils.file_format import (
     strip_compression_suffix,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestCompressionExtensionsConstant:

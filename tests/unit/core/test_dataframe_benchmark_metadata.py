@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.benchmark_registry import get_benchmark_metadata
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.parametrize(

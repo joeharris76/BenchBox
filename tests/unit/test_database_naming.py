@@ -19,7 +19,10 @@ from benchbox.utils.database_naming import (
     validate_database_name,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDatabaseNameGeneration:

@@ -88,8 +88,9 @@ def get_tpcds_tools_dir() -> Path | None:
 
 # Skip all tests if dsdgen not available
 pytestmark = [
-    pytest.mark.tpcds,
     pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.tpcds,
     pytest.mark.skipif(
         get_dsdgen_path() is None,
         reason="dsdgen binary not available for this platform",

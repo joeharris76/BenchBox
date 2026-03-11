@@ -21,7 +21,10 @@ from benchbox.core.results.query_plan_models import (
 )
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @dataclass

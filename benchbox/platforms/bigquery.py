@@ -52,6 +52,7 @@ class BigQueryAdapter(PlatformAdapter):
     """BigQuery platform adapter with Cloud Storage integration."""
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -73,6 +74,7 @@ class BigQueryAdapter(PlatformAdapter):
         # Cloud Storage settings for data loading
         # Check for staging_root first (set by orchestrator for CloudStagingPath)
         staging_root = config.get("staging_root")
+        self.staging_root = staging_root
         if staging_root:
             # Parse gs://bucket/path format to extract bucket and prefix
             from benchbox.utils.cloud_storage import get_cloud_path_info
@@ -94,6 +96,7 @@ class BigQueryAdapter(PlatformAdapter):
 
         # Query settings
         self.job_priority = config.get("job_priority") or "INTERACTIVE"  # INTERACTIVE or BATCH
+        self.biglake_connection = config.get("biglake_connection")
         # Disable result cache by default for accurate benchmarking
         # Can be overridden with query_cache=true or disable_result_cache=false
         if config.get("query_cache") is not None:
@@ -937,9 +940,62 @@ class BigQueryAdapter(PlatformAdapter):
         # BigQuery doesn't provide detailed per-table timings yet
         return table_stats, total_time, None
 
+    def validate_external_table_requirements(self) -> None:
+        """Validate required GCS configuration for external table mode."""
+        if not self.storage_bucket:
+            raise ValueError(
+                "BigQuery external mode requires a GCS bucket (set --platform-option storage_bucket=<bucket> "
+                "or provide --platform-option staging_root=gs://bucket/path)."
+            )
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Upload external-table sources to GCS and register BigQuery external tables."""
+        self.validate_external_table_requirements()
+
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+        data_files = self._resolve_data_files(benchmark, data_dir)
+        bucket = self._create_storage_bucket()
+
+        for table_name, file_paths in data_files.items():
+            table_name_upper = table_name.upper()
+            source_format, uris = self._prepare_external_table_uris(bucket, table_name, file_paths)
+            if not uris:
+                raise ValueError(
+                    f"BigQuery external mode requires Parquet files or Delta directories for table "
+                    f"'{table_name_upper}'. No supported sources were found."
+                )
+
+            uris_sql = ", ".join(f"'{uri}'" for uri in uris)
+            connection_clause = (
+                f"\n                WITH CONNECTION `{self.biglake_connection}`"
+                if source_format == "DELTA_LAKE"
+                else ""
+            )
+            ddl = f"""
+                CREATE OR REPLACE EXTERNAL TABLE `{self.project_id}.{self.dataset_id}.{table_name_upper}`{connection_clause}
+                OPTIONS (
+                  format = '{source_format}',
+                  uris = [{uris_sql}]
+                )
+            """
+            query_job = connection.query(ddl)
+            query_job.result()
+
+            table_stats[table_name_upper] = self._get_table_row_count(connection, table_name_upper)
+
+        total_time = elapsed_seconds(start_time)
+        return table_stats, total_time, None
+
     def _resolve_data_files(self, benchmark: Any, data_dir: Path) -> dict[str, Any]:
         """Resolve benchmark data files from benchmark tables or manifest."""
-        resolver = DataSourceResolver()
+        resolver = DataSourceResolver(
+            platform_name=self.platform_name,
+            table_mode=getattr(self, "table_mode", "native"),
+            platform_config=getattr(self, "__dict__", None),
+        )
         data_source = resolver.resolve(benchmark, data_dir)
         if not data_source or not data_source.tables:
             raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
@@ -1125,6 +1181,67 @@ class BigQueryAdapter(PlatformAdapter):
                 table_stats[table_name.upper()] = 0
 
         return table_stats
+
+    def _prepare_external_table_uris(self, bucket: Any, table_name: str, file_paths: Any) -> tuple[str, list[str]]:
+        """Prepare BigQuery external-table sources for parquet files or delta directories."""
+        valid_files = self._filter_valid_files(file_paths, allow_cloud=True)
+        delta_uris = self._prepare_external_delta_uris(bucket, table_name, valid_files)
+        if delta_uris:
+            if not self.biglake_connection:
+                raise ValueError(
+                    "BigQuery Delta external mode requires --platform-option biglake_connection=<project.region.name>."
+                )
+            return "DELTA_LAKE", delta_uris
+        return "PARQUET", self._prepare_external_parquet_uris(bucket, table_name, valid_files)
+
+    def _prepare_external_parquet_uris(self, bucket: Any, table_name: str, file_paths: Any) -> list[str]:
+        """Prepare external-table GCS URIs from local or already-cloud Parquet file paths."""
+        uris: list[str] = []
+        valid_files = self._filter_valid_files(file_paths, allow_cloud=True)
+
+        for file_path in valid_files:
+            file_path_str = str(file_path)
+            if is_cloud_path(file_path_str):
+                if file_path_str.lower().endswith(".parquet"):
+                    uris.append(file_path_str)
+                continue
+
+            path = Path(file_path)
+            if path.suffix.lower() != ".parquet":
+                continue
+
+            blob_name = f"{self.storage_prefix}/{table_name.lower()}/{path.name}"
+            blob = bucket.blob(blob_name)
+            blob.upload_from_filename(str(path))
+            uris.append(f"gs://{self.storage_bucket}/{blob_name}")
+
+        return uris
+
+    def _prepare_external_delta_uris(self, bucket: Any, table_name: str, file_paths: list[Path]) -> list[str]:
+        """Prepare BigQuery Delta table root URIs from local or cloud directory inputs."""
+        uris: list[str] = []
+
+        for file_path in file_paths:
+            file_path_str = str(file_path)
+            if is_cloud_path(file_path_str):
+                if "/_delta_log" in file_path_str:
+                    uris.append(file_path_str.split("/_delta_log", 1)[0] + "/")
+                continue
+
+            path = Path(file_path)
+            if not path.is_dir() or not (path / "_delta_log").is_dir():
+                continue
+
+            table_prefix = f"{self.storage_prefix}/{table_name.lower()}/"
+            for source_file in path.rglob("*"):
+                if not source_file.is_file():
+                    continue
+                relative = source_file.relative_to(path)
+                blob = bucket.blob(f"{table_prefix}{relative.as_posix()}")
+                blob.upload_from_filename(str(source_file))
+            uris.append(f"gs://{self.storage_bucket}/{table_prefix}")
+
+        return uris
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply BigQuery-specific optimizations based on benchmark type."""

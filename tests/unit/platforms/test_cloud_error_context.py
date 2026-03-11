@@ -24,6 +24,11 @@ from benchbox.platforms.cloud_error_context import (
     wrap_cloud_operation,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestCloudErrorContext:
     """Tests for CloudErrorContext dataclass."""

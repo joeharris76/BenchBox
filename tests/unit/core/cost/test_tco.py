@@ -21,7 +21,10 @@ from benchbox.core.cost.tco import (
     create_standard_tco_scenarios,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestGrowthModel:

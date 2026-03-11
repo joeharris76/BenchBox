@@ -20,7 +20,10 @@ from benchbox.core.datavault.schema import (
     get_table,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDataVaultSchema:

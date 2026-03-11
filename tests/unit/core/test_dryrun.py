@@ -14,6 +14,12 @@ import yaml
 
 from benchbox.core.dryrun import DryRunExecutor
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # ---------------------------------------------------------------------------
 # DryRunExecutor.__init__
 # ---------------------------------------------------------------------------
@@ -477,3 +483,157 @@ class TestExtractStandardQueries:
         bm = MagicMock(spec=[])  # No attributes
         result = self.executor._extract_standard_queries(bm)
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# _generate_schema_sql — external table mode dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateSchemaSQL:
+    def setup_method(self):
+        self.executor = DryRunExecutor()
+
+    def test_native_mode_uses_create_tables_sql(self):
+        bm = MagicMock()
+        bm.get_create_tables_sql.return_value = "CREATE TABLE t (id INT);"
+        config = MagicMock()
+        config.options = {"table_mode": "native"}
+
+        result = self.executor._generate_schema_sql(bm, config)
+        assert "CREATE TABLE" in result
+
+    def test_external_mode_delegates_to_external_schema(self):
+        bm = MagicMock()
+        bm.get_schema.return_value = {"orders": {"name": "orders", "columns": []}}
+        config = MagicMock()
+        config.options = {"table_mode": "external", "table_format": "iceberg"}
+
+        result = self.executor._generate_schema_sql(bm, config)
+        assert "CREATE VIEW" in result
+        assert "iceberg_scan" in result
+
+    def test_missing_table_mode_defaults_to_native(self):
+        bm = MagicMock()
+        bm.get_create_tables_sql.return_value = "CREATE TABLE t (id INT);"
+        config = MagicMock()
+        config.options = {}
+
+        result = self.executor._generate_schema_sql(bm, config)
+        assert "CREATE TABLE" in result
+
+
+# ---------------------------------------------------------------------------
+# _generate_external_schema_sql
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateExternalSchemaSQL:
+    def setup_method(self):
+        self.executor = DryRunExecutor()
+
+    def _make_config(self, table_format=None):
+        config = MagicMock()
+        config.options = {"table_mode": "external", "table_format": table_format}
+        return config
+
+    def _make_benchmark(self, table_names):
+        bm = MagicMock()
+        bm.get_schema.return_value = {name: {"name": name, "columns": []} for name in table_names}
+        return bm
+
+    def test_iceberg_format(self):
+        bm = self._make_benchmark(["lineitem", "orders"])
+        config = self._make_config("iceberg")
+
+        result = self.executor._generate_external_schema_sql(bm, config)
+        assert "iceberg_scan" in result
+        assert "CREATE VIEW lineitem" in result
+        assert "CREATE VIEW orders" in result
+
+    def test_delta_format(self):
+        bm = self._make_benchmark(["lineitem"])
+        config = self._make_config("delta")
+
+        result = self.executor._generate_external_schema_sql(bm, config)
+        assert "delta_scan" in result
+
+    def test_parquet_format(self):
+        bm = self._make_benchmark(["lineitem"])
+        config = self._make_config("parquet")
+
+        result = self.executor._generate_external_schema_sql(bm, config)
+        assert "read_parquet" in result
+
+    def test_vortex_format(self):
+        bm = self._make_benchmark(["lineitem"])
+        config = self._make_config("vortex")
+
+        result = self.executor._generate_external_schema_sql(bm, config)
+        assert "read_vortex" in result
+
+    def test_none_format_defaults_to_parquet(self):
+        bm = self._make_benchmark(["lineitem"])
+        config = self._make_config(None)
+
+        result = self.executor._generate_external_schema_sql(bm, config)
+        assert "read_parquet" in result
+
+    def test_no_schema_returns_fallback_message(self):
+        bm = MagicMock(spec=[])  # no get_schema
+        config = self._make_config("iceberg")
+
+        result = self.executor._generate_external_schema_sql(bm, config)
+        assert "schema not available" in result
+
+    def test_list_schema_format(self):
+        """Some benchmarks return list[dict] with 'name' keys."""
+        bm = MagicMock()
+        bm.get_schema.return_value = [{"name": "region"}, {"name": "nation"}]
+        config = self._make_config("delta")
+
+        result = self.executor._generate_external_schema_sql(bm, config)
+        assert "CREATE VIEW region" in result
+        assert "CREATE VIEW nation" in result
+        assert "delta_scan" in result
+
+
+# ---------------------------------------------------------------------------
+# execute_dry_run — dry_run=True injected into platform config
+# ---------------------------------------------------------------------------
+
+
+class TestDryRunPlatformConfigInjection:
+    def test_dry_run_flag_injected(self):
+        executor = DryRunExecutor()
+        config = MagicMock()
+        config.name = "tpch"
+        config.scale_factor = 0.01
+        config.options = {}
+        config.queries = None
+        config.compress_data = False
+        config.test_execution_type = "standard"
+
+        db_config = MagicMock()
+        db_config.type = "duckdb"
+        db_config.execution_mode = None
+
+        sp = MagicMock()
+        sp.cpu_cores_logical = 4
+        sp.memory_gb = 8
+
+        with (
+            patch.object(executor, "_get_benchmark_instance") as mock_bm,
+            patch("benchbox.core.dryrun.get_platform_adapter") as mock_adapter,
+            patch.object(executor, "_get_platform_config", return_value={"some": "config"}),
+        ):
+            mock_bm.return_value = MagicMock()
+            mock_adapter.return_value = MagicMock()
+
+            executor.execute_dry_run(config, sp, db_config)
+
+            # Verify dry_run=True was passed to get_platform_adapter
+            call_kwargs = mock_adapter.call_args
+            assert call_kwargs[1].get("dry_run") is True or (
+                len(call_kwargs[0]) > 1 and call_kwargs[0][1].get("dry_run") is True
+            )

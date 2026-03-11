@@ -12,6 +12,9 @@ import pytest
 
 from benchbox.core.tpch.generator import TPCHDataGenerator
 
+pytestmark = pytest.mark.slow
+
+
 
 @pytest.mark.validation
 def test_dbgen_generates_small_table():

@@ -10,6 +10,11 @@ import pytest
 from benchbox import WritePrimitives
 from benchbox.core.write_primitives.benchmark import OperationResult
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.write_primitives

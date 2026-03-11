@@ -11,7 +11,10 @@ from click.testing import CliRunner
 
 ex = importlib.import_module("benchbox.cli.commands.export")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Exporter:

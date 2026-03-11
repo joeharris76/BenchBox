@@ -13,7 +13,10 @@ from benchbox.core.upload_validation import (
     UploadValidationEngine,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def make_manifest(

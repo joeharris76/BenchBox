@@ -9,7 +9,10 @@ from benchbox.core.cost.pricing import (
     get_snowflake_credit_price,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestRegionMapping:

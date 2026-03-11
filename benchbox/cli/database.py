@@ -14,6 +14,7 @@ from typing import Any, Literal
 from rich.prompt import Prompt
 from rich.table import Table
 
+import benchbox.cli.platform_defaults as _platform_defaults  # noqa: F401  # registers builders
 from benchbox.core.databases.manager import check_connection as core_check_connection
 from benchbox.core.platform_registry import PlatformRegistry
 from benchbox.core.schemas import DatabaseConfig, SystemProfile

@@ -9,7 +9,10 @@ from benchbox.core.visualization.exceptions import (
     VisualizationError,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_dependency_error_is_visualization_error() -> None:

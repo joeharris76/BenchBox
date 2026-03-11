@@ -10,6 +10,11 @@ import pytest
 
 from benchbox.core.tpcds.generator import TPCDSDataGenerator
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
 
 class TestTPCDSStreamingPerformance:
     """Performance comparison tests for streaming compression vs traditional approach.

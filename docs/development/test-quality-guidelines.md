@@ -152,6 +152,34 @@ The key distinction: use `is not None` when `None` is a valid return value that 
 5. **Is independent and deterministic** - No order dependencies, no flakiness.
 6. **Has a clear, descriptive name** - `test_empty_input_returns_empty_list` not `test_func1`.
 
+## Parallel Safety Checklist
+
+BenchBox runs many tests under pytest-xdist, so tests must also be safe under
+concurrent execution.
+
+### Avoid These Patterns
+
+- Nested parallelism without limits. If code under test imports Polars, DuckDB,
+  BLAS/OpenMP-backed libraries, or starts thread/process pools, either mock that
+  work or make the thread/process count explicit.
+- Shared fixed paths such as `/tmp/output.csv`, repo-root scratch files, or
+  global cache directories.
+- Tests that assume exclusive access to the current working directory, `HOME`,
+  a shared git repo, or static ports.
+- Controller-only fixes for xdist behavior. If a safeguard must change worker
+  creation, it has to happen before xdist starts workers.
+
+### Prefer These Patterns
+
+- `tmp_path` or `tmp_path_factory` for unique per-test storage.
+- Explicitly capped internal parallelism when running native or threaded code.
+- Local temporary repos instead of mutating shared repository state.
+- A small reproducer and resource measurements when changing pytest-xdist
+  behavior.
+
+See [Pytest xdist Safety](pytest-xdist-safety.md) for the current worker-cap
+design and the validation matrix contributors must rerun before changing it.
+
 ## Test Organization
 
 ### Naming Convention

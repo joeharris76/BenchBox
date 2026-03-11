@@ -8,7 +8,10 @@ import pytest
 from benchbox.utils.execution_manager import PowerRunExecutor
 from benchbox.utils.resource_limits import ResourceUsageSummary
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _SlowPowerTest:

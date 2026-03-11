@@ -14,6 +14,11 @@ import pytest
 
 from benchbox.core.benchmark_mixins import CursorValidationQueryExecutionMixin
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class _FakeParent:
     """Minimal stand-in providing the methods CursorValidationQueryExecutionMixin requires."""
@@ -31,9 +36,6 @@ class _FakeParent:
 # ---------------------------------------------------------------------------
 # MRO resolution tests
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.fast
 @pytest.mark.unit
 class TestCursorValidationMixinMRO:
     """Guard against MRO-shadowing regressions (see commit f2ca27e5)."""
@@ -80,9 +82,6 @@ class TestCursorValidationMixinMRO:
 # ---------------------------------------------------------------------------
 # __init_subclass__ enforcement tests
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.fast
 @pytest.mark.unit
 class TestCursorValidationMixinSubclassEnforcement:
     """Verify __init_subclass__ catches missing method providers."""
@@ -110,9 +109,6 @@ class TestCursorValidationMixinSubclassEnforcement:
 # ---------------------------------------------------------------------------
 # execute_query integration test
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.fast
 @pytest.mark.unit
 class TestCursorValidationExecuteQuery:
     """Test execute_query flow through the mixin."""

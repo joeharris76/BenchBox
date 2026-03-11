@@ -4,7 +4,10 @@ import pytest
 
 from benchbox.core.cost.calculator import CostCalculator, validate_resource_usage
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestResourceUsageValidation:

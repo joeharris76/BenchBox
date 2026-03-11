@@ -21,7 +21,10 @@ from benchbox.core.dataframe.tuning import (
     validate_dataframe_tuning,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestValidationIssue:

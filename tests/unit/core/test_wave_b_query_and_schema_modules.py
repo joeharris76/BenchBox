@@ -9,7 +9,10 @@ from benchbox.core.metadata_primitives import schema as metadata_schema
 from benchbox.core.tpchavoc.queries import TPCHavocQueryManager
 from benchbox.core.transaction_primitives import schema as txn_schema
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_transaction_schema_sql_and_lookup():

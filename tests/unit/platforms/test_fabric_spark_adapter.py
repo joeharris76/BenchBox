@@ -7,7 +7,10 @@ import pytest
 from benchbox.platforms.credentials.fabric_spark import build_fabric_spark_config_from_env
 from benchbox.platforms.fabric_spark import FabricSparkAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_public_fabric_spark_import_is_available():

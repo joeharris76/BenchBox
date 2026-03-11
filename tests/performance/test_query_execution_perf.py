@@ -18,6 +18,11 @@ from typing import Any
 import psutil
 import pytest
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
 
 class QueryExecutionMonitor:
     """Monitor query execution performance metrics."""

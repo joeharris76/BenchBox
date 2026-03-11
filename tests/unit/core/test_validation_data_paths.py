@@ -2,7 +2,10 @@ import pytest
 
 from benchbox.core.validation.data import DataValidator, ValidationStatus
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class FakeCursor:

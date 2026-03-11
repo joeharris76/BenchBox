@@ -9,7 +9,10 @@ import pytest
 
 mod = importlib.import_module("benchbox.cli.composite_params")
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_compression_parse_and_validation() -> None:
@@ -31,12 +34,12 @@ def test_plan_capture_parse_variants() -> None:
 
 
 def test_convert_validation_and_partition_parsing() -> None:
-    c = mod.ConvertConfig.parse("iceberg:zstd,partition:year,month")
+    c = mod.TableFormatConfig.parse("iceberg:zstd,partition:year,month")
     assert c.format == "iceberg"
     assert c.partition_cols == ["year", "month"]
-    assert mod.ConvertConfig.parse(None) is None
+    assert mod.TableFormatConfig.parse(None) is None
     with pytest.raises(click.BadParameter):
-        mod.ConvertConfig.parse("badfmt")
+        mod.TableFormatConfig.parse("badfmt")
 
 
 def test_validation_and_force_parse() -> None:
@@ -56,7 +59,7 @@ def test_click_param_types_convert() -> None:
     assert mod.FORCE.convert(True, None, None).any is True
     assert mod.COMPRESSION.convert("gzip:6", None, None).level == 6
     assert mod.PLAN_CONFIG.convert("first:3", None, None).first_n == 3
-    assert mod.CONVERT.convert("parquet", None, None).format == "parquet"
+    assert mod.TABLE_FORMAT.convert("parquet", None, None).format == "parquet"
     assert mod.VALIDATION.convert("postgen", None, None).postgen is True
 
     with pytest.raises(click.BadParameter):

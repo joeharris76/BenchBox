@@ -13,7 +13,10 @@ from benchbox.core.results.platform_info import (
     merge_platform_info,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockAdapter:

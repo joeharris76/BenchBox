@@ -18,6 +18,11 @@ import pytest
 
 from benchbox import TPCHavoc
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.duckdb

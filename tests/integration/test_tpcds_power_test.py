@@ -29,7 +29,10 @@ from benchbox.core.tpcds.power_test import (
 )
 
 # Mark all tests in this file as integration tests
-pytestmark = [pytest.mark.integration, pytest.mark.slow]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
 
 
 class TestDatabaseConnection:

@@ -14,7 +14,10 @@ from benchbox.cli.cloud_storage import (
     prompt_cloud_output_location,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestPromptCloudOutputLocation:

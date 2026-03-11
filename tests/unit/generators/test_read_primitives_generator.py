@@ -12,7 +12,10 @@ import pytest
 from benchbox.core.read_primitives.generator import ReadPrimitivesDataGenerator
 from benchbox.utils.cloud_storage import CloudStorageGeneratorMixin
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.unit

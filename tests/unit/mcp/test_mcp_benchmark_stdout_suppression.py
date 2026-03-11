@@ -11,7 +11,10 @@ import pytest
 
 from benchbox.utils.clock import mono_time
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_run_benchmark_impl_suppresses_transitive_stdout() -> None:

@@ -13,7 +13,10 @@ import pytest
 from benchbox.core.tsbs_devops.benchmark import TSBSDevOpsBenchmark
 from benchbox.core.tsbs_devops.schema import TSBS_DEVOPS_SCHEMA
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestBenchmarkInitialization:

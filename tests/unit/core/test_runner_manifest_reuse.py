@@ -11,7 +11,10 @@ import pytest
 from benchbox.core.runner.runner import _ensure_data_generated
 from benchbox.core.schemas import BenchmarkConfig
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()
@@ -228,3 +231,86 @@ def test_no_regenerate_with_invalid_manifest_raises(tmp_path: Path, benchmark_co
         _ensure_data_generated(dummy, benchmark_config)
 
     dummy.generate_data.assert_not_called()
+
+
+def _write_directory_manifest(tmp_path: Path, *, table_name: str = "lineitem") -> dict:
+    """Create a manifest with a directory entry (like Delta/Iceberg)."""
+    table_dir = tmp_path / table_name
+    table_dir.mkdir()
+    (table_dir / "part-0.parquet").write_bytes(b"x" * 100)
+    (table_dir / "part-1.parquet").write_bytes(b"y" * 200)
+    log_dir = table_dir / "_delta_log"
+    log_dir.mkdir()
+    (log_dir / "00000.json").write_bytes(b"z" * 50)
+
+    total_size = sum(f.stat().st_size for f in table_dir.rglob("*") if f.is_file())
+
+    manifest = {
+        "benchmark": "tpcds",
+        "scale_factor": 0.01,
+        "compression": {"enabled": True, "type": "zstd", "level": None},
+        "parallel": 1,
+        "created_at": "2025-01-01T00:00:00Z",
+        "generator_version": "test",
+        "format_preference": ["delta"],
+        "tables": {
+            table_name: {
+                "formats": {
+                    "delta": [
+                        {
+                            "path": table_name,
+                            "size_bytes": total_size,
+                            "row_count": 1000,
+                            "is_directory": True,
+                        }
+                    ]
+                }
+            }
+        },
+    }
+
+    with (tmp_path / "_datagen_manifest.json").open("w") as fh:
+        json.dump(manifest, fh)
+
+    return manifest
+
+
+def test_directory_entry_validates_successfully(
+    tmp_path: Path, benchmark_config: BenchmarkConfig, capsys: pytest.CaptureFixture[str]
+):
+    """Directory-based manifest entries (Delta/Iceberg) should validate via recursive size."""
+    _write_directory_manifest(tmp_path)
+
+    class DummyBenchmark:
+        def __init__(self) -> None:
+            self.output_dir = tmp_path
+            self.tables = None
+            self.generate_data = Mock()
+
+    dummy = DummyBenchmark()
+    result = _ensure_data_generated(dummy, benchmark_config)
+
+    assert result is False, "Directory entry should validate and reuse data"
+    dummy.generate_data.assert_not_called()
+    out = capsys.readouterr().out
+    assert "Reusing benchmark data" in out
+
+
+def test_directory_entry_size_mismatch_detected(tmp_path: Path, benchmark_config: BenchmarkConfig):
+    """Directory-based manifest entries should detect size changes (added/removed files)."""
+    _write_directory_manifest(tmp_path)
+
+    # Add an extra file to change the recursive sum
+    (tmp_path / "lineitem" / "extra.parquet").write_bytes(b"w" * 999)
+
+    class DummyBenchmark:
+        def __init__(self) -> None:
+            self.output_dir = tmp_path
+            self.tables = None
+            self.generate_data = Mock()
+
+    dummy = DummyBenchmark()
+    result = _ensure_data_generated(dummy, benchmark_config)
+
+    assert result is True, "Size mismatch in directory should trigger regeneration"
+    dummy.generate_data.assert_called_once()

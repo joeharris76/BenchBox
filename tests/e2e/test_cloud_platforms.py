@@ -15,6 +15,9 @@ from tests.e2e.utils import (
 )
 from tests.integration._cli_e2e_utils import run_cli_command
 
+pytestmark = pytest.mark.slow
+
+
 # ============================================================================
 # Snowflake E2E Tests
 # ============================================================================

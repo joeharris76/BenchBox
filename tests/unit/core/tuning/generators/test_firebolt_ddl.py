@@ -9,7 +9,10 @@ from benchbox.core.tuning.ddl_generator import ColumnDefinition, ColumnNullabili
 from benchbox.core.tuning.generators.firebolt import FireboltDDLGenerator
 from benchbox.core.tuning.interface import TableTuning
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_generate_tuning_clauses_handles_distribution_partition_and_logs():

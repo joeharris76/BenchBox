@@ -18,6 +18,11 @@ import pytest
 
 from benchbox import TPCH
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 
 @pytest.mark.integration
 @pytest.mark.duckdb

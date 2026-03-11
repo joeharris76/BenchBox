@@ -18,7 +18,10 @@ import pytest
 
 from benchbox.platforms.firebolt import FireboltAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestFireboltAdapterInitialization:

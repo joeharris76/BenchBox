@@ -82,7 +82,7 @@ benchbox convert --input ./data/tpch_sf1 --format vortex
 - Optimized for analytical scan workloads
 - Excellent compression ratio
 - DuckDB support via extension, DataFusion experimental support
-- **Requires**: `vortex` package (`uv add vortex`)
+- **Requires**: `vortex-data` package (`uv add vortex-data`)
 
 ### Delta Lake
 
@@ -283,7 +283,7 @@ For Vortex, Delta Lake, and Iceberg formats, install optional dependencies:
 
 ```bash
 # Vortex support
-uv add vortex
+uv add vortex-data
 
 # Delta Lake support
 uv add deltalake
@@ -317,7 +317,7 @@ benchbox convert --input ./data --format parquet --benchmark tpch
 Install the Vortex package:
 
 ```bash
-uv add vortex
+uv add vortex-data
 ```
 
 ### "deltalake package not installed"

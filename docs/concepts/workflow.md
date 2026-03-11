@@ -106,12 +106,27 @@ benchbox run --benchmark tpcds --platform databricks --scale 1 \
 
 # 3. Run benchmark (queries will execute and incur costs)
 benchbox run --benchmark tpcds --platform databricks --scale 1 \
-  --catalog hive_metastore \
-  --schema benchbox_test
+  --platform-option uc_catalog=hive_metastore \
+  --platform-option uc_schema=benchbox_test
 
 # 4. Results saved with cloud execution metadata
 cat benchmark_runs/tpcds_1_databricks_*/results.json
 ```
+
+**External Table Mode**:
+
+Skip native table materialization (COPY/CTAS) and query directly over staged Parquet files:
+
+```bash
+# External mode: register views/external tables over staged data
+benchbox run --benchmark tpch --platform snowflake --scale 1 \
+  --table-mode external \
+  --platform-option staging_root=s3://my-bucket/benchbox/
+```
+
+This is useful for quick file-based comparisons across engines without paying for
+data loading. Not compatible with `--tuning tuned`. See the
+[Platform Comparison Guide](../guides/platform-comparison.md) for supported platforms.
 
 **Cost Control**:
 - Use `--dry-run` to preview queries before execution
@@ -239,7 +254,7 @@ benchbox run --benchmark tpcds --platform clickhouse --scale 10 \
 
 # 2. Apply tunings (partitioning, sorting, indexes)
 benchbox run --benchmark tpcds --platform clickhouse --scale 10 \
-  --tuning-config tunings/clickhouse_tpcds.yaml \
+  --tuning tunings/clickhouse_tpcds.yaml \
   --output tuned/
 
 # 3. Compare results

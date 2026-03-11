@@ -27,6 +27,7 @@ from benchbox import TPCH
 
 # Mark all tests in this file
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.live_integration,
     pytest.mark.live_databricks,
     pytest.mark.skipif(

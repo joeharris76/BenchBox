@@ -14,7 +14,11 @@ from benchbox.platforms.databricks.dataframe_adapter import (
     DatabricksDataFrameAdapter,
 )
 
-pytestmark = [pytest.mark.slow, pytest.mark.cloud_import]  # Heavy Databricks SDK import overhead
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 @pytest.fixture(autouse=True)

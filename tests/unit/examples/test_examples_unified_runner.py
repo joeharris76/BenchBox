@@ -13,7 +13,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-pytestmark = pytest.mark.medium  # Unified runner tests invoke CLI (~4s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
 
 pytest.importorskip("pandas")
 

@@ -29,7 +29,10 @@ from benchbox.utils.dependencies import (
     validate_dependency_group,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDependencyInfo:
@@ -506,9 +509,23 @@ class TestInstallCommandDetection:
 
     def test_get_install_command_development(self):
         """Test get_install_command returns uv sync for development installs."""
-        with patch("benchbox.utils.dependencies.is_development_install", return_value=True):
+        with (
+            patch("benchbox.utils.dependencies.is_development_install", return_value=True),
+            patch("benchbox.utils.dependencies.is_uv_tool_environment", return_value=False),
+        ):
             cmd = get_install_command("athena")
             assert cmd == "uv sync --extra athena"
+
+    def test_get_install_command_development_uv_tool(self):
+        """Dev installs in uv tool envs should target the running interpreter."""
+        fake_python = "/tmp/uv/tools/benchbox/bin/python3"
+        with (
+            patch("benchbox.utils.dependencies.is_development_install", return_value=True),
+            patch("benchbox.utils.dependencies.is_uv_tool_environment", return_value=True),
+            patch("benchbox.utils.dependencies.sys.executable", fake_python),
+        ):
+            cmd = get_install_command("athena")
+            assert cmd == f'uv pip install --python "{fake_python}" "benchbox[athena]"'
 
     def test_get_install_command_package(self):
         """Test get_install_command returns uv pip install for package installs."""
@@ -520,7 +537,10 @@ class TestInstallCommandDetection:
         """Test get_install_command with various extra names."""
         extras = ["cloud", "databricks", "snowflake", "bigquery", "redshift"]
 
-        with patch("benchbox.utils.dependencies.is_development_install", return_value=True):
+        with (
+            patch("benchbox.utils.dependencies.is_development_install", return_value=True),
+            patch("benchbox.utils.dependencies.is_uv_tool_environment", return_value=False),
+        ):
             for extra in extras:
                 cmd = get_install_command(extra)
                 assert f"--extra {extra}" in cmd

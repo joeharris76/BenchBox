@@ -14,6 +14,11 @@ import pytest
 # Import all benchmark classes for testing
 import benchbox
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
 
 class TestConnectionInterfaceConsistency:
     """Test that all benchmarks use consistent connection interfaces."""
@@ -204,7 +209,6 @@ class TestConnectionInterfaceConsistency:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestConnectionInterfaceRegression:
     """Regression tests to prevent connection interface inconsistencies."""
 

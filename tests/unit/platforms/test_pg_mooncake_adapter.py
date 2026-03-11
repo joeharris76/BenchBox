@@ -16,7 +16,10 @@ import benchbox.platforms.postgresql as postgresql_module
 from benchbox.platforms.pg_mooncake import PgMooncakeAdapter
 from benchbox.platforms.postgresql import POSTGRES_DIALECT
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()

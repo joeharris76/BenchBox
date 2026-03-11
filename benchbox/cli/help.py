@@ -85,6 +85,8 @@ COMMAND_EXAMPLES: dict[str, dict[str, list[str]]] = {
             "  --platform-option warehouse=BENCHBOX_XL --output s3://my-bucket/results/",
             "benchbox run --platform snowflake --benchmark tpch --tuning tuned \\",
             "  --output s3://bucket/benchbox/  # Uses clustering, result caching",
+            "benchbox run --platform snowflake --benchmark tpch --table-mode external \\",
+            "  --platform-option staging_root=s3://bucket/benchbox/  # External tables over staged Parquet",
         ],
         "Databricks": [
             "benchbox run --platform databricks --benchmark tpch \\",
@@ -100,6 +102,8 @@ COMMAND_EXAMPLES: dict[str, dict[str, list[str]]] = {
             "  --platform-option project_id=my-project --output gs://my-bucket/results/",
             "benchbox run --platform bigquery --benchmark tpch --tuning tuned \\",
             "  --output gs://bucket/benchbox/  # Uses partitioning, clustering",
+            "benchbox run --platform bigquery --benchmark tpch --table-mode external \\",
+            "  --platform-option staging_root=gs://bucket/benchbox/  # External table over GCS Parquet",
         ],
         "Redshift": [
             "benchbox run --platform redshift --benchmark tpch --output s3://bucket/benchbox/",
@@ -154,6 +158,8 @@ COMMAND_EXAMPLES: dict[str, dict[str, list[str]]] = {
             "  --platform-option workgroup=benchbox-workgroup",
             "benchbox run --platform athena --benchmark tpch \\",
             "  --platform-option database=benchbox_tpch  # Use existing database",
+            "benchbox run --platform athena --benchmark tpch --table-mode external \\",
+            "  --platform-option staging_root=s3://my-bucket/benchbox/  # Skip CTAS materialization",
             "# Athena Spark: select Spark engine version",
             "benchbox run --platform athena --benchmark tpch \\",
             "  --platform-option workgroup=my-spark-workgroup \\",
@@ -236,9 +242,9 @@ COMMAND_EXAMPLES: dict[str, dict[str, list[str]]] = {
             "  --compression zstd:9  # Compressed output",
         ],
         "Export and Analysis": [
-            "benchbox run --platform duckdb --benchmark tpch --format json,csv,html",
-            "benchbox run --platform duckdb --benchmark tpch \\",
-            "  --output ./analysis/ --format json,csv  # Custom output location",
+            "benchbox export --last --format csv --format html  # Export most recent run",
+            "benchbox export result.json --format csv \\",
+            "  --output-dir ./analysis/  # Custom output location",
             "# Results can be loaded: python -c \"import json; data = json.load(open('result.json'))\"",
         ],
         # === Standard Configuration ===

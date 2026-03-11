@@ -11,7 +11,10 @@ from benchbox.core.tpch.official_benchmark import (
     TPCHOfficialBenchmarkResult,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class FakeConnection:

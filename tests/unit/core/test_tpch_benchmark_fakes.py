@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

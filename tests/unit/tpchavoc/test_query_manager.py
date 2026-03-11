@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.tpchavoc.queries import TPCHavocQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture(scope="module")

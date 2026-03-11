@@ -9,13 +9,17 @@ import pytest
 from benchbox.core.results.builder import (
     BenchmarkInfoInput,
     ResultBuilder,
+    RunConfigInput,
     build_benchmark_results,
     normalize_benchmark_id,
 )
 from benchbox.core.results.platform_info import PlatformInfoInput
 from benchbox.core.results.query_normalizer import QueryResultInput
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestNormalizeBenchmarkId:
@@ -467,3 +471,224 @@ class TestBuildBenchmarkResults:
 
         assert result.platform == "Polars"
         assert result.execution_metadata["execution_mode"] == "dataframe"
+
+
+class TestRunConfigInputTableMode:
+    """Verify table_mode is correctly serialized in RunConfigInput."""
+
+    def test_external_mode_included_in_dict(self):
+        rc = RunConfigInput(table_mode="external", phases=["power"])
+        d = rc.to_dict()
+        assert d["table_mode"] == "external"
+
+    def test_native_mode_omitted_from_dict(self):
+        rc = RunConfigInput(table_mode="native", phases=["power"])
+        d = rc.to_dict()
+        assert "table_mode" not in d
+
+    def test_none_mode_omitted_from_dict(self):
+        rc = RunConfigInput(table_mode=None, phases=["power"])
+        d = rc.to_dict()
+        assert "table_mode" not in d
+
+    def test_round_trip_through_builder(self):
+        """table_mode should survive set_run_config -> build -> config."""
+        builder = ResultBuilder(
+            benchmark=BenchmarkInfoInput(name="tpch", scale_factor=0.01),
+            platform=PlatformInfoInput(name="DuckDB", execution_mode="sql"),
+        )
+        builder.set_run_config(RunConfigInput(table_mode="external", phases=["power"]))
+        builder.mark_started()
+        builder.mark_completed()
+        result = builder.build()
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("table_mode") == "external"
+
+
+class TestRunConfigInputExternalFormat:
+    """Verify external_format is correctly serialized in RunConfigInput."""
+
+    def test_external_format_included_in_dict(self):
+        rc = RunConfigInput(table_mode="external", external_format="parquet", phases=["power"])
+        d = rc.to_dict()
+        assert d["external_format"] == "parquet"
+
+    def test_external_format_tbl_included(self):
+        rc = RunConfigInput(table_mode="external", external_format="tbl", phases=["power"])
+        d = rc.to_dict()
+        assert d["external_format"] == "tbl"
+
+    def test_none_format_omitted_from_dict(self):
+        rc = RunConfigInput(table_mode="external", external_format=None, phases=["power"])
+        d = rc.to_dict()
+        assert "external_format" not in d
+
+    def test_empty_format_omitted_from_dict(self):
+        rc = RunConfigInput(table_mode="external", external_format="", phases=["power"])
+        d = rc.to_dict()
+        assert "external_format" not in d
+
+    def test_round_trip_through_builder(self):
+        """external_format should survive set_run_config -> build -> execution_metadata."""
+        builder = ResultBuilder(
+            benchmark=BenchmarkInfoInput(name="tpch", scale_factor=0.01),
+            platform=PlatformInfoInput(name="DuckDB", execution_mode="sql"),
+        )
+        builder.set_run_config(RunConfigInput(table_mode="external", external_format="parquet", phases=["power"]))
+        builder.mark_started()
+        builder.mark_completed()
+        result = builder.build()
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("table_mode") == "external"
+        assert config.get("external_format") == "parquet"
+
+    def test_round_trip_tbl_format(self):
+        """TBL format should survive the full round-trip through builder."""
+        builder = ResultBuilder(
+            benchmark=BenchmarkInfoInput(name="tpch", scale_factor=1.0),
+            platform=PlatformInfoInput(name="DuckDB", execution_mode="sql"),
+        )
+        builder.set_run_config(RunConfigInput(table_mode="external", external_format="tbl", phases=["power"]))
+        builder.mark_started()
+        builder.mark_completed()
+        result = builder.build()
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("external_format") == "tbl"
+
+
+class TestRunConfigInputTableFormat:
+    """Verify table format settings are serialized in RunConfigInput."""
+
+    def test_table_format_fields_included_in_dict(self):
+        rc = RunConfigInput(
+            table_format="parquet",
+            table_format_compression="zstd",
+            table_format_partition_cols=["region"],
+            phases=["power"],
+        )
+        d = rc.to_dict()
+        assert d["table_format"] == "parquet"
+        assert d["table_format_compression"] == "zstd"
+        assert d["table_format_partition_cols"] == ["region"]
+
+    def test_table_format_fields_omitted_without_table_format(self):
+        rc = RunConfigInput(
+            table_format=None,
+            table_format_compression="zstd",
+            table_format_partition_cols=["region"],
+            phases=["power"],
+        )
+        d = rc.to_dict()
+        assert "table_format" not in d
+        assert "table_format_compression" not in d
+        assert "table_format_partition_cols" not in d
+
+    def test_table_format_round_trip_through_builder(self):
+        builder = ResultBuilder(
+            benchmark=BenchmarkInfoInput(name="tpch", scale_factor=0.01),
+            platform=PlatformInfoInput(name="DuckDB", execution_mode="sql"),
+        )
+        builder.set_run_config(
+            RunConfigInput(
+                table_format="iceberg",
+                table_format_compression="zstd",
+                table_format_partition_cols=["region"],
+                phases=["power"],
+            )
+        )
+        builder.mark_started()
+        builder.mark_completed()
+        result = builder.build()
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("table_format") == "iceberg"
+        assert config.get("table_format_compression") == "zstd"
+        assert config.get("table_format_partition_cols") == ["region"]
+
+
+class TestResultFactoryExternalFormat:
+    """Verify external_format propagates through build_enhanced_benchmark_result."""
+
+    def _make_benchmark(self, name="TPC-H Benchmark", scale=0.01):
+        from unittest.mock import Mock
+
+        bm = Mock()
+        bm.benchmark_name = name
+        bm.scale_factor = scale
+        return bm
+
+    def test_external_format_reaches_result_config(self):
+        """external_format in run_config should survive the result factory pipeline."""
+        from benchbox.core.results.result_factory import build_enhanced_benchmark_result
+
+        result = build_enhanced_benchmark_result(
+            benchmark=self._make_benchmark(),
+            platform="duckdb",
+            query_results=[],
+            execution_metadata={
+                "run_config": {
+                    "table_mode": "external",
+                    "external_format": "parquet",
+                    "phases": ["power"],
+                },
+            },
+        )
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("table_mode") == "external"
+        assert config.get("external_format") == "parquet"
+
+    def test_tbl_format_reaches_result_config(self):
+        """TBL format should propagate through result factory."""
+        from benchbox.core.results.result_factory import build_enhanced_benchmark_result
+
+        result = build_enhanced_benchmark_result(
+            benchmark=self._make_benchmark(),
+            platform="duckdb",
+            query_results=[],
+            execution_metadata={
+                "run_config": {
+                    "table_mode": "external",
+                    "external_format": "tbl",
+                },
+            },
+        )
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("external_format") == "tbl"
+
+    def test_missing_external_format_omitted(self):
+        """When external_format is absent, it should not appear in config."""
+        from benchbox.core.results.result_factory import build_enhanced_benchmark_result
+
+        result = build_enhanced_benchmark_result(
+            benchmark=self._make_benchmark(),
+            platform="duckdb",
+            query_results=[],
+            execution_metadata={
+                "run_config": {
+                    "table_mode": "external",
+                },
+            },
+        )
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("table_mode") == "external"
+        assert "external_format" not in config
+
+    def test_table_format_reaches_result_config(self):
+        """table_format in run_config should survive the result factory pipeline."""
+        from benchbox.core.results.result_factory import build_enhanced_benchmark_result
+
+        result = build_enhanced_benchmark_result(
+            benchmark=self._make_benchmark(),
+            platform="duckdb",
+            query_results=[],
+            execution_metadata={
+                "run_config": {
+                    "table_format": "parquet",
+                    "table_format_compression": "zstd",
+                    "table_format_partition_cols": ["region"],
+                },
+            },
+        )
+        config = result.execution_metadata.get("run_config", {})
+        assert config.get("table_format") == "parquet"
+        assert config.get("table_format_compression") == "zstd"
+        assert config.get("table_format_partition_cols") == ["region"]

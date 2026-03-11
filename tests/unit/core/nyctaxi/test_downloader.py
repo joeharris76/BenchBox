@@ -16,7 +16,10 @@ from benchbox.core.nyctaxi.downloader import (
     NYCTaxiDataDownloader,
 )
 
-pytestmark = pytest.mark.medium  # Data download/generation tests take 4-5s
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 class TestDownloaderConfiguration:

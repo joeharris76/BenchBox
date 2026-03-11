@@ -10,7 +10,10 @@ import pytest
 
 from benchbox.monitoring import PerformanceHistory, PerformanceMonitor
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_performance_monitor_getters_and_setters() -> None:

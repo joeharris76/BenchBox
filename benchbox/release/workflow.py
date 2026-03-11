@@ -491,7 +491,7 @@ def check_release_size(
 
         # Check forbidden patterns (skip files in allowed data paths)
         if check_forbidden_patterns:
-            rel_path_str = str(rel_path)
+            rel_path_str = rel_path.as_posix()
             in_allowed_path = any(rel_path_str.startswith(allowed) for allowed in ALLOWED_DATA_PATHS)
             if not in_allowed_path:
                 for pattern in FORBIDDEN_PATTERNS:
@@ -542,7 +542,7 @@ def _should_exclude_file(rel_path: Path, root_item: str) -> bool:
         return True
 
     # Check forbidden patterns (data files that shouldn't be synced)
-    rel_path_str = str(rel_path)
+    rel_path_str = rel_path.as_posix()
     in_allowed_path = any(rel_path_str.startswith(allowed) for allowed in ALLOWED_DATA_PATHS)
     if not in_allowed_path:
         for pattern in FORBIDDEN_PATTERNS:

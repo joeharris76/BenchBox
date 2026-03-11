@@ -15,6 +15,12 @@ from unittest.mock import patch
 import duckdb
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
+
+
 pytest.importorskip("pandas")
 
 from benchbox.core.tpcdi.benchmark import TPCDIBenchmark

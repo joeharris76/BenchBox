@@ -14,7 +14,10 @@ from benchbox.core.tpcdi.etl.results import ETLPhaseResult, ETLResult
 from benchbox.core.tpcdi.metrics import BenchmarkMetrics, BenchmarkReport
 from benchbox.core.tpcdi.validation import DataQualityResult, ValidationResult
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _make_benchmark(tmp_path: Path) -> TPCDIBenchmark:

@@ -10,7 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestTimescaleDBCloudMode:

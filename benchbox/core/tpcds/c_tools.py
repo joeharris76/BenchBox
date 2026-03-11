@@ -12,6 +12,7 @@ Licensed under the MIT License. See LICENSE file in the project root for details
 
 import re
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -231,6 +232,10 @@ class DSQGenBinary:
         """Generate query using dsqgen binary with minimal wrapper."""
         cmd = [str(self.dsqgen_path)]
 
+        # dsqgen uses '/' as option prefix on Windows, '-' on Unix
+        # (see r_params.c OPTION_START definition)
+        _opt = "/" if sys.platform == "win32" else "-"
+
         # Template and dialect
         # Multi-part queries (14, 23, 24, 39) have two SQL statements in a single template
         # For these, we use the base template and extract the appropriate part later
@@ -264,18 +269,18 @@ class DSQGenBinary:
             # For main templates, remove the query_templates/ prefix since we're already in that directory
             template_arg = template_rel.replace("query_templates/", "")
 
-        cmd.extend(["-TEMPLATE", template_arg])
-        cmd.extend(["-DIALECT", dialect])
+        cmd.extend([f"{_opt}TEMPLATE", template_arg])
+        cmd.extend([f"{_opt}DIALECT", dialect])
 
         # Scale and generation parameters
-        cmd.extend(["-SCALE", str(scale_factor)])
+        cmd.extend([f"{_opt}SCALE", str(scale_factor)])
 
         if seed is not None:
-            cmd.extend(["-RNGSEED", str(seed)])
+            cmd.extend([f"{_opt}RNGSEED", str(seed)])
 
         # Output to stdout
-        cmd.extend(["-FILTER", "Y"])
-        cmd.extend(["-VERBOSE", "N"])
+        cmd.extend([f"{_opt}FILTER", "Y"])
+        cmd.extend([f"{_opt}VERBOSE", "N"])
 
         try:
             # Set up environment for dsqgen - it needs tpcds.dst and templates to be available
@@ -286,19 +291,24 @@ class DSQGenBinary:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
 
-                # Symlink templates into temp dir with short names to avoid
+                # Copy templates into temp dir with short names to avoid
                 # exceeding dsqgen's internal 80-char path buffer for -DIRECTORY.
                 # Use single-char name for the templates dir (passed as -DIRECTORY).
+                # We use copytree instead of symlinks because Windows requires
+                # elevated permissions for symlinks, and dsqgen.exe may not
+                # follow Windows symlinks properly.
                 tpl_dir = temp_path / "q"
-                tpl_dir.symlink_to(self.templates_dir)
-                # Symlink query_variants as sibling so ../query_variants/ resolves
+                shutil.copytree(self.templates_dir, tpl_dir)
+                # Copy query_variants as sibling so ../query_variants/ resolves
                 var_src = self.templates_dir.parent / "query_variants"
                 if var_src.exists():
-                    (temp_path / "query_variants").symlink_to(var_src)
+                    shutil.copytree(var_src, temp_path / "query_variants")
 
-                # Set -INPUT and -DIRECTORY using short symlinked paths
-                cmd.extend(["-INPUT", str(tpl_dir / "templates.lst")])
-                cmd.extend(["-DIRECTORY", str(tpl_dir)])
+                # Use relative paths so the parameter values stay under
+                # dsqgen's internal 80-char PARAM_MAX_LEN buffer (r_params.c).
+                # Absolute Windows temp paths easily exceed 80 chars.
+                cmd.extend([f"{_opt}INPUT", "q/templates.lst"])
+                cmd.extend([f"{_opt}DIRECTORY", "q"])
 
                 # Set up environment for dsqgen
                 env = os.environ.copy()

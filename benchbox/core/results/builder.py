@@ -140,6 +140,11 @@ class RunConfigInput:
     tuning_mode: str | None = None
     tuning_config: dict[str, Any] | None = None
     platform_options: dict[str, Any] | None = None
+    table_mode: str | None = None
+    external_format: str | None = None
+    table_format: str | None = None
+    table_format_compression: str | None = None
+    table_format_partition_cols: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {}
@@ -159,6 +164,16 @@ class RunConfigInput:
             data["tuning_config"] = self.tuning_config
         if self.platform_options:
             data["platform_options"] = self.platform_options
+        if self.table_mode and self.table_mode != "native":
+            data["table_mode"] = self.table_mode
+        if self.external_format:
+            data["external_format"] = self.external_format
+        if self.table_format:
+            data["table_format"] = self.table_format
+            if self.table_format_compression:
+                data["table_format_compression"] = self.table_format_compression
+            if self.table_format_partition_cols:
+                data["table_format_partition_cols"] = self.table_format_partition_cols
         return data
 
 

@@ -28,7 +28,11 @@ except ImportError:
     DUCKLAKE_AVAILABLE = False
 
 
-pytestmark = pytest.mark.skipif(not DUCKLAKE_AVAILABLE, reason="DuckLake extension not available")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(not DUCKLAKE_AVAILABLE, reason="DuckLake extension not available"),
+]
 
 
 class TestDuckLakeConverterBasics:

@@ -9,7 +9,11 @@ from click.testing import CliRunner
 
 from benchbox.utils.printing import set_quiet
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 visualize_module = importlib.import_module("benchbox.cli.commands.visualize")
 

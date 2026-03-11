@@ -5,7 +5,10 @@ import pytest
 from benchbox.core.query_plans.parsers.sqlite import SQLiteQueryPlanParser
 from benchbox.core.results.query_plan_models import LogicalOperatorType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_parse_explain_output_with_header_and_tree_lines():

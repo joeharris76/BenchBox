@@ -10,7 +10,10 @@ import pytest
 from benchbox.core.tpcdi.generator.manifest import ManifestMixin
 from benchbox.core.tpcdi.generator.monitoring import ResourceMonitoringMixin
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _ManifestHarness(ManifestMixin):

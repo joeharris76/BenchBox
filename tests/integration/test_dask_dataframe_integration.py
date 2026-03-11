@@ -23,6 +23,12 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
+
 # Skip all tests if Dask is not available
 try:
     import dask.dataframe as dd  # noqa: F401

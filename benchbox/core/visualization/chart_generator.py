@@ -38,19 +38,18 @@ def generate_comparison_charts(
     Returns:
         Mapping of chart type to exported file path.
     """
-    from benchbox.core.visualization.ascii.base import ASCIIChartOptions
+    from benchbox.core.visualization.ascii_api import ChartOptions, render_ascii_chart_from_results
+    from benchbox.core.visualization.utils import extract_chart_subtitle
 
     if not results:
         return {}
 
-    # Import the rendering helper shared with the MCP tool
-    from benchbox.mcp.tools.visualization import _render_single_ascii_chart
-
-    opts = ASCIIChartOptions(use_color=False)
+    opts = ChartOptions(use_color=False)
+    subtitle = extract_chart_subtitle(results)
     exported: dict[str, Path] = {}
 
     for chart_type in _COMPARISON_CHART_TYPES:
-        content = _render_single_ascii_chart(results, chart_type, opts)
+        content = render_ascii_chart_from_results(results, chart_type, options=opts, subtitle=subtitle)
         if content:
             path = export_ascii(content, output_dir, chart_type)
             exported[chart_type] = path

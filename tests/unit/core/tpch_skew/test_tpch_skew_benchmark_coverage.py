@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.tpch_skew.benchmark import TPCHSkewBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Adapter:

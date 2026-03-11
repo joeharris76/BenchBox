@@ -13,7 +13,10 @@ from benchbox.core.tpcds.dataframe_queries.channel_helper import (
     union_sales_channels_pandas,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Expr:

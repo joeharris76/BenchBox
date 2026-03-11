@@ -16,6 +16,12 @@ from benchbox.core.data_organization.config import (
 )
 from benchbox.core.data_organization.sorting import SortedParquetWriter
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # ---------------------------------------------------------------------------
 # SortOrder
 # ---------------------------------------------------------------------------

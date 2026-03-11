@@ -13,9 +13,10 @@ import pytest
 from benchbox.base import BaseBenchmark
 from benchbox.core.read_primitives.benchmark import ReadPrimitivesBenchmark
 
+pytestmark = pytest.mark.medium
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBaseBenchmark:
     """Test the base benchmark functionality."""
 

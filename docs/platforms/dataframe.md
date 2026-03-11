@@ -460,6 +460,21 @@ DataFrame tuning is organized into configuration categories:
 | `pre_buffer` | bool | true | Pandas, Dask | Pre-buffer data during file reads |
 | `row_group_size` | int | None | Polars, Pandas, cuDF | Row group size for Parquet writing |
 
+#### Write Settings
+
+| Setting | Type | Default | Applicable Platforms | Description |
+|---------|------|---------|---------------------|-------------|
+| `sort_by` | list[object\|str] | `[]` | All DataFrame platforms | Sort columns before write for better compression and scan locality |
+| `partition_by` | list[object\|str] | `[]` | Dask, PySpark | Hive-style partitioned output directories |
+| `row_group_size` | int | None | Polars, Pandas, cuDF | Parquet row group sizing for write path |
+| `target_file_size_mb` | int | None | Platform-dependent | Preferred output file size target |
+| `repartition_count` | int | None | Dask, PySpark | Number of output files/partitions |
+| `compression` | str | `"zstd"` | All DataFrame platforms | Parquet compression codec (`none`, `snappy`, `gzip`, `zstd`, `lz4`, `brotli`) |
+| `compression_level` | int | None | Codec-dependent | Compression level for codecs that support levels |
+| `dictionary_columns` | list[str] | `[]` | All DataFrame platforms | Force dictionary encoding on selected columns |
+| `skip_dictionary_columns` | list[str] | `[]` | All DataFrame platforms | Disable dictionary encoding for selected columns |
+| `data_page_version` | `"1.0"`\|`"2.0"` | `null` (PyArrow default `1.0`) | All Parquet write paths | Parquet data page serialization version |
+
 #### GPU Settings (cuDF)
 
 | Setting | Type | Default | Applicable Platforms | Description |

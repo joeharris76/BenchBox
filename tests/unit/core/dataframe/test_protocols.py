@@ -25,7 +25,10 @@ from benchbox.core.dataframe.protocols import (
     SortOrder,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestJoinType:

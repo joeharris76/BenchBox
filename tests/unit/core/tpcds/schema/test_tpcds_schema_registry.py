@@ -12,7 +12,10 @@ from benchbox.core.tpcds.schema.registry import (
     get_tunings,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_get_table_returns_expected_table_when_key_present(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,8 +9,6 @@ import pytest
 
 from benchbox.base import BaseBenchmark
 
-pytestmark = pytest.mark.fast
-
 
 class MockImplementation:
     """Mock benchmark implementation class."""

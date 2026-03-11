@@ -12,7 +12,10 @@ import pytest
 
 from benchbox.utils.compression_mixin import CompressionMixin
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class MockDataGenerator(CompressionMixin):

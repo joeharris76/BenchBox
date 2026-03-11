@@ -1,5 +1,3 @@
-from tests.conftest import make_benchmark_results
-
 """Unit tests for CLI types and data structures.
 
 Copyright 2026 Joe Harris / BenchBox Project
@@ -13,10 +11,15 @@ import pytest
 
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.schemas import BenchmarkConfig, QueryResult
+from tests.conftest import make_benchmark_results
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestQueryResult:
     """Test QueryResult data structure."""
 
@@ -79,7 +82,6 @@ class TestQueryResult:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkResults:
     """Test BenchmarkResults helper construction and extension fields."""
 
@@ -182,7 +184,6 @@ def test_cli_types_module_removed() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestBenchmarkConfig:
     """Test BenchmarkConfig data structure."""
 
@@ -235,7 +236,6 @@ class TestBenchmarkConfig:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestDataStructureInteractions:
     """Test interactions between different data structures."""
 

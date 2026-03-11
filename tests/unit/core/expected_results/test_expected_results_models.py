@@ -14,7 +14,10 @@ from benchbox.core.expected_results.models import (
     ValidationResult,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestExpectedQueryResult:

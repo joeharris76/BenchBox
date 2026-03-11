@@ -14,7 +14,10 @@ from benchbox.core.aiml_functions.functions import (
     PlatformSupport,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAIMLFunctionCategory:

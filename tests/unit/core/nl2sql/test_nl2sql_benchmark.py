@@ -17,7 +17,10 @@ from benchbox.core.nl2sql.benchmark import (
 from benchbox.core.nl2sql.evaluator import SQLMatchType
 from benchbox.core.nl2sql.queries import NL2SQLQueryCategory, QueryDifficulty
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestNL2SQLQueryResult:

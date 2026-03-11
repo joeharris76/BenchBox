@@ -8,6 +8,11 @@ import pytest
 
 from benchbox.platforms.base import PlatformAdapter, ValidationPhase
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 class MockBenchmark:
     """Mock benchmark for testing."""

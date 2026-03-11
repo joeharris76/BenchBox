@@ -16,7 +16,10 @@ from benchbox.core.read_primitives.catalog.loader import (
 )
 from benchbox.core.read_primitives.queries import ReadPrimitivesQueryManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_load_primitives_catalog_success() -> None:

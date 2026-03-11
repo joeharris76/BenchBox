@@ -24,7 +24,10 @@ from benchbox.core.results.query_plan_models import (
 from benchbox.core.results.schema import build_plans_payload, build_result_payload
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueryPlanInQueryExecution:

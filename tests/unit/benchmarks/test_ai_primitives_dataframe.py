@@ -23,6 +23,11 @@ from benchbox.core.ai_primitives.dataframe_operations import (
     validate_ai_primitives_dataframe_platform,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestAIModelCapabilities:
     """Test ML model capability detection."""
@@ -355,7 +360,6 @@ class TestBenchmarkIntegration:
         assert combined == sorted(all_queries), "Skip + supported should cover all queries"
 
 
-@pytest.mark.fast
 class TestAIOperationType:
     """Test AI operation type enum."""
 

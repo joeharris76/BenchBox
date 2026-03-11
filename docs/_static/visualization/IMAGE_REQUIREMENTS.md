@@ -70,48 +70,22 @@ Gallery images showing complete template output.
 
 ---
 
-## Image Generation Script
+## Current Automation
 
-Create a script at `scripts/generate_doc_images.py`:
+BenchBox's screenshot capture automation lives in [`scripts/capture_chart_images.py`](../../../scripts/capture_chart_images.py).
 
-```python
-#!/usr/bin/env python3
-"""Generate documentation images for visualization docs.
+- `make docs-images` renders the supported chart screenshots and writes them to `_blog/building-benchbox/images`
+- The same command also syncs shared copies into `docs/blog/images`
+- `make docs-validate` verifies the two shared image trees stay byte-identical
 
-Renders ASCII charts to text files that can be screenshotted or
-converted to images using a terminal rendering tool.
-"""
+For copy-only resyncs after a manual asset update, run:
 
-from pathlib import Path
-
-from benchbox.core.visualization import ResultPlotter, export_ascii
-from benchbox.core.visualization.ascii.base import ASCIIChartOptions
-
-OUTPUT_DIR = Path("docs/_static/visualization")
-CHART_TYPES = [
-    "performance_bar",
-    "distribution_box",
-    "query_heatmap",
-    "query_histogram",
-    "cost_scatter",
-    "time_series",
-]
-
-
-def generate_chart_text_files():
-    """Generate ASCII chart text files for each chart type."""
-    plotter = ResultPlotter.from_sources()  # auto-detect latest results
-    opts = ASCIIChartOptions(use_color=True)
-
-    for chart_type in CHART_TYPES:
-        # Use the MCP rendering helper or ResultPlotter
-        pass
-
-
-if __name__ == "__main__":
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    generate_chart_text_files()
+```bash
+uv run -- python scripts/capture_chart_images.py --sync-only
 ```
+
+This automation currently covers the shared blog/documentation screenshot set. The `docs/_static/visualization/*.png`
+gallery assets listed above still use the manual capture workflow described in this file.
 
 ---
 

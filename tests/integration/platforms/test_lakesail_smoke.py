@@ -20,12 +20,14 @@ LAKESAIL_ENDPOINT = os.environ.get("LAKESAIL_ENDPOINT")
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.fast,
     pytest.mark.platform_smoke,
     pytest.mark.skipif(
         not LAKESAIL_ENDPOINT,
         reason="Skipping LakeSail live test: LAKESAIL_ENDPOINT not set",
     ),
 ]
+
 
 # Check PySpark availability
 try:

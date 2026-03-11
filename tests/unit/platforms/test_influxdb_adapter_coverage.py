@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.platforms.influxdb.adapter import InfluxDBAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

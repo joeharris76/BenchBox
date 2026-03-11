@@ -10,7 +10,10 @@ from click.testing import CliRunner
 from benchbox.cli.commands.run import run
 from benchbox.cli.config import ConfigManager
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestQueriesFlagBasic:

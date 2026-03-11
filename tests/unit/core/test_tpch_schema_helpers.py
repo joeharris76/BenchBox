@@ -2,7 +2,10 @@ import pytest
 
 from benchbox.core.tpch import schema as tpch_schema
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_column_get_sql_type_handles_sizes_and_defaults():

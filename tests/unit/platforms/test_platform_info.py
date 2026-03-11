@@ -10,7 +10,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-pytestmark = [pytest.mark.slow, pytest.mark.cloud_import]  # Platform info tests load cloud modules
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 class TestPlatformInfoBase:

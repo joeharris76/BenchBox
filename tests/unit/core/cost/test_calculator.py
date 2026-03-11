@@ -5,7 +5,10 @@ import pytest
 from benchbox.core.cost.calculator import CostCalculator
 from benchbox.core.cost.models import QueryCost
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestCostCalculator:

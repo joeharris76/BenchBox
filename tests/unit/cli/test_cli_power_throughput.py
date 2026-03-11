@@ -17,10 +17,12 @@ from benchbox.cli.system import SystemProfile
 from benchbox.core.schemas import DatabaseConfig
 from tests.conftest import make_benchmark_results
 
-pytestmark = pytest.mark.slow  # CLI tests spawn subprocesses (~10-15s)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+]
 
 
-@pytest.mark.medium
 @pytest.mark.xdist_group("cli_phase_validation")
 class TestCLIPowerThroughputExecution:
     """Test CLI Power and Throughput test execution."""
@@ -450,7 +452,6 @@ class TestTPCMetricsCalculation:
         assert getattr(result, "qph_at_size", None) == 333.3
 
 
-@pytest.mark.medium
 class TestNoTuningValidation:
     """Test that no-tuning mode truly disables constraints."""
 

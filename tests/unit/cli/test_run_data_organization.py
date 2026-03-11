@@ -10,6 +10,11 @@ from benchbox.cli.commands.run import (
 )
 from benchbox.core.tuning.interface import TableTuning, TuningColumn, UnifiedTuningConfiguration
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 def test_build_data_organization_from_tuning_with_sort_partition_cluster():
     cfg = UnifiedTuningConfiguration()

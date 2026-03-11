@@ -13,7 +13,10 @@ from benchbox.core.ai_primitives.catalog import (
     load_ai_catalog,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestAIQuery:

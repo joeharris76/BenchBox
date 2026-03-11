@@ -14,7 +14,10 @@ from benchbox.platforms.base.data_loading import (
     ParquetFileHandler,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestParquetFileHandler:

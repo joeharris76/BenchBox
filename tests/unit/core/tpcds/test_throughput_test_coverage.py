@@ -11,7 +11,10 @@ from benchbox.core.tpcds.throughput_test import (
     TPCDSThroughputTestConfig,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class DummyConn:

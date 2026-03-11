@@ -7,7 +7,10 @@ import pytest
 
 from benchbox.core.exceptions import ConfigurationError
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture

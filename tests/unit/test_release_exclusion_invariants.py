@@ -23,6 +23,12 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:
@@ -84,9 +90,6 @@ def _pattern_to_path(pattern: str) -> str:
 # ---------------------------------------------------------------------------
 # Layer A: HOLD_BACK_PATHS
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.fast
 class TestHoldBackPaths:
     """Validate HOLD_BACK_PATHS entries in workflow.py."""
 
@@ -105,9 +108,6 @@ class TestHoldBackPaths:
 # ---------------------------------------------------------------------------
 # Layer B: pyproject.toml [tool.setuptools.packages.find] exclude
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.fast
 class TestPyprojectExcludes:
     """Validate pyproject.toml package exclusion patterns."""
 
@@ -139,9 +139,6 @@ class TestPyprojectExcludes:
 # ---------------------------------------------------------------------------
 # Layer C: MANIFEST.in prune directives
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.fast
 class TestManifestPrunes:
     """Validate MANIFEST.in prune directives."""
 
@@ -158,9 +155,6 @@ class TestManifestPrunes:
 # ---------------------------------------------------------------------------
 # Cross-layer: A/B/C agreement on benchbox/ exclusions
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.fast
 class TestCrossLayerAgreement:
     """Ensure HOLD_BACK_PATHS, pyproject.toml, and MANIFEST.in agree."""
 
@@ -229,7 +223,6 @@ def _gitignore_has_private_sections() -> bool:
     return "# Exclude everything in _project/" in gitignore.read_text()
 
 
-@pytest.mark.fast
 @pytest.mark.skipif(
     not _gitignore_has_private_sections(),
     reason="Private gitignore sections only exist in the source repository",

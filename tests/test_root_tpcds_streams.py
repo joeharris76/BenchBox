@@ -19,6 +19,8 @@ import pytest
 
 from benchbox import TPCDS
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.integration
 def test_tpcds_streams():

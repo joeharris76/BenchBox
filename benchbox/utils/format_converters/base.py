@@ -10,12 +10,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import pyarrow as pa
 import pyarrow.csv as csv
 
-from benchbox.utils.file_format import TRAILING_DUMMY_COLUMN
+from benchbox.utils.compression import CompressionManager
+from benchbox.utils.file_format import detect_compression, get_column_names_with_trailing, has_trailing_delimiter
 
 
 @dataclass
@@ -30,6 +31,7 @@ class ConversionOptions:
         output_dir: Directory for converted files (if None, uses source dir)
         preserve_source: Whether to keep source files after conversion
         strict_schema: Raise SchemaError for unknown SQL types (default: False)
+        data_page_version: Parquet data page version ('1.0' or '2.0')
         metadata: Additional format-specific options
     """
 
@@ -41,6 +43,7 @@ class ConversionOptions:
     preserve_source: bool = True
     validate_row_count: bool = True
     strict_schema: bool = False
+    data_page_version: Literal["1.0", "2.0"] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -51,6 +54,9 @@ class ConversionOptions:
 
         if self.row_group_size <= 0:
             raise ValueError(f"row_group_size must be positive, got {self.row_group_size}")
+
+        if self.data_page_version is not None and self.data_page_version not in ("1.0", "2.0"):
+            raise ValueError(f"Invalid data_page_version: {self.data_page_version!r}. Must be '1.0' or '2.0'.")
 
         # Normalise boolean flags
         self.validate_row_count = bool(self.validate_row_count)
@@ -431,12 +437,10 @@ class BaseFormatConverter(FormatConverter):
         arrow_schema = self._build_arrow_schema(schema)
         column_names = [col["name"] for col in schema["columns"]]
 
-        # TBL files have trailing pipe delimiter, which creates an extra empty column
-        column_names_with_trailing = column_names + [TRAILING_DUMMY_COLUMN]
-
         tables = []
         total_files = len(source_files)
         progress_range = progress_end - progress_start
+        compression_manager = CompressionManager()
 
         try:
             for i, file_path in enumerate(source_files):
@@ -444,9 +448,15 @@ class BaseFormatConverter(FormatConverter):
                     progress = progress_start + (i / total_files) * progress_range
                     progress_callback(f"Reading {file_path.name}", progress)
 
+                # TPC-H/TPC-DS files may be generated with or without trailing
+                # field delimiters. Detect per-shard and only add a dummy column
+                # when the physical file has one extra empty field.
+                has_trailing = has_trailing_delimiter(file_path, "|", column_names)
+                column_names_for_file = get_column_names_with_trailing(column_names, has_trailing)
+
                 # Configure CSV read options
                 read_options = csv.ReadOptions(
-                    column_names=column_names_with_trailing,
+                    column_names=column_names_for_file,
                     autogenerate_column_names=False,
                 )
 
@@ -463,13 +473,25 @@ class BaseFormatConverter(FormatConverter):
                     include_columns=column_names,  # Exclude trailing delimiter
                 )
 
-                # Read TBL file with PyArrow
-                table = csv.read_csv(
-                    file_path,
-                    read_options=read_options,
-                    parse_options=parse_options,
-                    convert_options=convert_options,
-                )
+                # Read TBL file with PyArrow.
+                # Source shards may be compressed (e.g. .zst, .gz).
+                compression_type = detect_compression(file_path)
+                if compression_type:
+                    compressor = compression_manager.get_compressor(compression_type)
+                    with compressor.open_for_read(file_path, mode="rb") as stream:
+                        table = csv.read_csv(
+                            stream,
+                            read_options=read_options,
+                            parse_options=parse_options,
+                            convert_options=convert_options,
+                        )
+                else:
+                    table = csv.read_csv(
+                        file_path,
+                        read_options=read_options,
+                        parse_options=parse_options,
+                        convert_options=convert_options,
+                    )
 
                 tables.append(table)
 
@@ -509,11 +531,20 @@ class BaseFormatConverter(FormatConverter):
             Total row count
         """
         total_rows = 0
+        compression_manager = CompressionManager()
         for file_path in file_paths:
-            with open(file_path) as f:
-                for line in f:
-                    if line.strip():  # Skip empty lines
-                        total_rows += 1
+            compression_type = detect_compression(file_path)
+            if compression_type:
+                compressor = compression_manager.get_compressor(compression_type)
+                with compressor.open_for_read(file_path, mode="rt") as f:
+                    for line in f:
+                        if line.strip():  # Skip empty lines
+                            total_rows += 1
+            else:
+                with open(file_path, encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        if line.strip():  # Skip empty lines
+                            total_rows += 1
         return total_rows
 
     def validate_row_count(

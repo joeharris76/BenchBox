@@ -16,6 +16,11 @@ from benchbox.cli.database import (
     ExecutionStyleFilter,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestExecutionStyleFilter:
     """Tests for ExecutionStyleFilter dataclass."""

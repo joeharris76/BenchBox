@@ -20,7 +20,8 @@ from tests.e2e.utils import (
     validate_result_structure,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.fast]
+pytestmark = pytest.mark.fast
+
 
 # ============================================================================
 # Result Structure Validation Tests

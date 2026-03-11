@@ -13,7 +13,10 @@ from benchbox.core.results.query_plan_models import (
     validate_root_operator,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestValidatePlanTree:

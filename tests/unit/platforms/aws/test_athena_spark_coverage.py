@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.platforms.aws import AthenaSparkAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _adapter() -> AthenaSparkAdapter:

@@ -12,7 +12,10 @@ import pytest
 
 from benchbox.platforms.base import PlatformAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class ConcretePlatformAdapter(PlatformAdapter):

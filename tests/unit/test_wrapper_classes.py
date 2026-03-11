@@ -11,6 +11,12 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
+
 # Check for optional dependencies
 try:
     import pandas
@@ -21,7 +27,6 @@ except ImportError:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTPCHWrapper:
     """Test the TPC-H wrapper class functionality."""
 
@@ -115,7 +120,6 @@ class TestTPCHWrapper:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTPCDSWrapper:
     """Test the TPC-DS wrapper class functionality."""
 
@@ -209,7 +213,6 @@ class TestTPCDSWrapper:
 
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestOtherWrapperClasses:
     """Test other wrapper classes like AMPLab, H2ODB, etc."""
 

@@ -7,7 +7,10 @@ import pytest
 
 import benchbox.platforms.dataframe.pyspark_maintenance as pyspark_maintenance
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_factory_returns_none_when_pyspark_unavailable(monkeypatch):

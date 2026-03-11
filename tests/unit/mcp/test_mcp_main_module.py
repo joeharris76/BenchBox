@@ -9,7 +9,10 @@ import pytest
 
 import benchbox.mcp
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_module_main_invokes_run_server(monkeypatch):

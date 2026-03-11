@@ -25,7 +25,10 @@ from benchbox.platforms.fabric_warehouse import (
     FabricWarehouseAdapter,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()

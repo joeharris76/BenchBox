@@ -34,7 +34,7 @@ from ..utils.dependencies import (
 )
 from ..utils.file_format import detect_compression, get_delimiter_for_file
 from .base import DriverIsolationCapability, PlatformAdapter
-from .base.data_loading import FileFormatRegistry
+from .base.data_loading import DataSourceResolver, FileFormatRegistry
 
 try:
     import redshift_connector
@@ -58,6 +58,7 @@ class RedshiftAdapter(PlatformAdapter):
     """Amazon Redshift platform adapter with S3 integration."""
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -250,6 +251,7 @@ class RedshiftAdapter(PlatformAdapter):
             "iam_role",
             "s3_bucket",
             "s3_prefix",
+            "staging_root",
             "aws_access_key_id",
             "aws_secret_access_key",
             "aws_region",
@@ -1029,35 +1031,15 @@ class RedshiftAdapter(PlatformAdapter):
 
     def _resolve_data_files(self, benchmark, data_dir: Path) -> dict:
         """Resolve data files from benchmark tables or manifest fallback."""
-        if hasattr(benchmark, "tables") and benchmark.tables:
-            return benchmark.tables
-
-        data_files = None
-        try:
-            manifest_path = Path(data_dir) / "_datagen_manifest.json"
-            if manifest_path.exists():
-                with open(manifest_path) as f:
-                    manifest = json.load(f)
-                tables = manifest.get("tables") or {}
-                mapping = {}
-                for table, entries in tables.items():
-                    if entries:
-                        # Collect ALL chunk files, not just the first one
-                        chunk_paths = []
-                        for entry in entries:
-                            rel = entry.get("path")
-                            if rel:
-                                chunk_paths.append(Path(data_dir) / rel)
-                        if chunk_paths:
-                            mapping[table] = chunk_paths
-                if mapping:
-                    data_files = mapping
-                    self.logger.debug("Using data files from _datagen_manifest.json")
-        except Exception as e:
-            self.logger.debug(f"Manifest fallback failed: {e}")
-        if not data_files:
+        resolver = DataSourceResolver(
+            platform_name=self.platform_name,
+            table_mode=getattr(self, "table_mode", "native"),
+            platform_config=getattr(self, "__dict__", None),
+        )
+        data_source = resolver.resolve(benchmark, data_dir)
+        if not data_source or not data_source.tables:
             raise ValueError("No data files found. Ensure benchmark.generate_data() was called first.")
-        return data_files
+        return data_source.tables
 
     def _create_s3_client(self):
         """Create S3 client with explicit error handling."""
@@ -1258,6 +1240,178 @@ class RedshiftAdapter(PlatformAdapter):
             if file_path.exists() and file_path.stat().st_size > 0:
                 valid_files.append(file_path)
         return valid_files
+
+    def validate_external_table_requirements(self) -> None:
+        """Validate prerequisites for Redshift external table mode."""
+        if not self.s3_bucket:
+            raise ValueError(
+                "Redshift external mode requires S3 staging (set --platform-option s3_bucket=<bucket> "
+                "or provide --platform-option staging_root=s3://bucket/path)."
+            )
+        if not self.iam_role:
+            raise ValueError(
+                "Redshift external mode requires IAM role credentials for Spectrum "
+                "(set --platform-option iam_role=<arn>)."
+            )
+
+    @staticmethod
+    def _map_external_column_type(column_type: str) -> str:
+        """Map benchmark schema types to Redshift Spectrum-compatible types."""
+        normalized = str(column_type).strip().upper()
+        if not normalized:
+            return "VARCHAR(65535)"
+        if normalized.startswith(("DECIMAL", "NUMERIC", "VARCHAR", "CHAR", "TIMESTAMP")):
+            return normalized
+        if "BIGINT" in normalized:
+            return "BIGINT"
+        if "SMALLINT" in normalized:
+            return "SMALLINT"
+        if "INT" in normalized:
+            return "INTEGER"
+        if "DOUBLE" in normalized:
+            return "DOUBLE PRECISION"
+        if "REAL" in normalized or "FLOAT" in normalized:
+            return "REAL"
+        if "DATE" in normalized:
+            return "DATE"
+        if "BOOLEAN" in normalized or normalized == "BOOL":
+            return "BOOLEAN"
+        return "VARCHAR(65535)"
+
+    def _build_external_column_definitions(self, benchmark: Any, table_name: str) -> str:
+        """Build external table column definitions from benchmark schema."""
+        if not hasattr(benchmark, "get_schema"):
+            raise ValueError(
+                f"Benchmark schema metadata unavailable for '{table_name}'. "
+                "Redshift external mode requires benchmark.get_schema()."
+            )
+
+        schema = benchmark.get_schema() or {}
+        table_schema = schema.get(table_name) or schema.get(table_name.lower()) or schema.get(table_name.upper())
+        if not table_schema:
+            raise ValueError(f"No schema definition found for table '{table_name}'.")
+
+        columns = table_schema.get("columns", [])
+        if not columns:
+            raise ValueError(f"No columns found in schema definition for table '{table_name}'.")
+
+        column_defs = []
+        for column in columns:
+            column_name = str(column.get("name", "")).strip().lower()
+            if not column_name:
+                continue
+            mapped_type = self._map_external_column_type(str(column.get("type", "")))
+            column_defs.append(f"{column_name} {mapped_type}")
+
+        if not column_defs:
+            raise ValueError(f"No valid column definitions were generated for table '{table_name}'.")
+
+        return ", ".join(column_defs)
+
+    def _upload_external_parquet_files_to_s3(self, s3_client: Any, table_name: str, parquet_files: list[Path]) -> str:
+        """Upload table Parquet files and return Spectrum LOCATION prefix."""
+        table_name_lower = table_name.lower()
+        s3_prefix = f"{self.s3_prefix}/{self.database.lower()}_external/{table_name_lower}"
+        for file_path in parquet_files:
+            s3_key = f"{s3_prefix}/{file_path.name}"
+            s3_client.upload_file(str(file_path), self.s3_bucket, s3_key)
+        return f"s3://{self.s3_bucket}/{s3_prefix}/"
+
+    def _upload_external_directory_to_s3(self, s3_client: Any, table_name: str, directory: Path) -> str:
+        """Upload a directory tree for external Delta-style registration."""
+        table_name_lower = table_name.lower()
+        s3_prefix = f"{self.s3_prefix}/{self.database.lower()}_external/{table_name_lower}"
+        for file_path in directory.rglob("*"):
+            if not file_path.is_file():
+                continue
+            relative = file_path.relative_to(directory).as_posix()
+            s3_client.upload_file(str(file_path), self.s3_bucket, f"{s3_prefix}/{relative}")
+        return f"s3://{self.s3_bucket}/{s3_prefix}/"
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Upload external-table sources to S3 and register Redshift Spectrum tables."""
+        self.validate_external_table_requirements()
+        assert self.iam_role is not None
+
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+        # Derive a unique external schema name; warn if the base name already
+        # looks like a previous external-mode artifact to avoid cascading suffixes.
+        if self.schema.endswith("_external"):
+            self.logger.warning(
+                f"Schema '{self.schema}' already ends with '_external'. "
+                "The derived external schema will be '%s_external'.",
+                self.schema,
+            )
+        external_schema = f"{self.schema}_external"
+        escaped_iam_role = self.iam_role.replace("'", "''")
+        escaped_db = self.database.lower().replace("'", "''")
+        cursor = connection.cursor()
+
+        try:
+            data_files = self._resolve_data_files(benchmark, data_dir)
+            s3_client = self._create_s3_client()
+
+            cursor.execute(
+                f"""
+                CREATE EXTERNAL SCHEMA IF NOT EXISTS {external_schema}
+                FROM DATA CATALOG
+                DATABASE '{escaped_db}_external'
+                IAM_ROLE '{escaped_iam_role}'
+                CREATE EXTERNAL DATABASE IF NOT EXISTS
+                """
+            )
+
+            for table_name, file_paths in data_files.items():
+                table_name_lower = table_name.lower()
+                valid_files = self._filter_valid_files(file_paths)
+                delta_dirs = [path for path in valid_files if path.is_dir() and (path / "_delta_log").is_dir()]
+                parquet_files = [path for path in valid_files if path.suffix.lower() == ".parquet"]
+                if delta_dirs:
+                    location = self._upload_external_directory_to_s3(s3_client, table_name_lower, delta_dirs[0])
+                    source_format = "delta"
+                elif parquet_files:
+                    location = self._upload_external_parquet_files_to_s3(s3_client, table_name_lower, parquet_files)
+                    source_format = "parquet"
+                else:
+                    raise ValueError(
+                        f"Redshift external mode requires Parquet files or Delta directories for table "
+                        f"'{table_name_lower}'. No supported sources were found."
+                    )
+
+                column_defs = self._build_external_column_definitions(benchmark, table_name_lower)
+
+                cursor.execute(f"DROP TABLE IF EXISTS {external_schema}.{table_name_lower}")
+                if source_format == "delta":
+                    cursor.execute(
+                        f"""
+                        CREATE EXTERNAL TABLE {external_schema}.{table_name_lower}
+                        ({column_defs})
+                        STORED AS PARQUET
+                        LOCATION '{location}'
+                        TABLE PROPERTIES ('table_type'='DELTA')
+                        """
+                    )
+                else:
+                    cursor.execute(
+                        f"""
+                        CREATE EXTERNAL TABLE {external_schema}.{table_name_lower}
+                        ({column_defs})
+                        STORED AS PARQUET
+                        LOCATION '{location}'
+                        """
+                    )
+                cursor.execute(f"SELECT COUNT(*) FROM {external_schema}.{table_name_lower}")
+                result = cursor.fetchone()
+                table_stats[table_name_lower] = int(result[0]) if result else 0
+
+        finally:
+            cursor.close()
+
+        total_time = elapsed_seconds(start_time)
+        return table_stats, total_time, None
 
     def load_data(
         self, benchmark, connection: Any, data_dir: Path
@@ -2141,6 +2295,7 @@ def _build_redshift_config(
         # S3 and AWS configuration
         "s3_bucket": merged_options.get("s3_bucket"),
         "s3_prefix": merged_options.get("s3_prefix"),
+        "staging_root": merged_options.get("staging_root"),
         "iam_role": merged_options.get("iam_role"),
         "aws_access_key_id": merged_options.get("aws_access_key_id"),
         "aws_secret_access_key": merged_options.get("aws_secret_access_key"),

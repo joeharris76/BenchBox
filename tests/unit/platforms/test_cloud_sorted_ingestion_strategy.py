@@ -10,7 +10,11 @@ import pytest
 from benchbox.platforms.clickhouse_cloud import ClickHouseCloudAdapter
 from benchbox.platforms.snowflake import SnowflakeAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.slow,
+    pytest.mark.cloud_import,
+]
 
 
 def _make_sort_column(name: str, order: int) -> Mock:

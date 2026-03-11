@@ -76,6 +76,7 @@ class DatabricksAdapter(PlatformAdapter):
     """Databricks platform adapter with Delta Lake and Unity Catalog support."""
 
     driver_isolation_capability = DriverIsolationCapability.FEASIBLE_CLIENT_ONLY
+    supports_external_tables = True
 
     def __init__(self, **config):
         super().__init__(**config)
@@ -1323,6 +1324,76 @@ class DatabricksAdapter(PlatformAdapter):
             optimize_time = elapsed_seconds(optimize_start)
 
         return row_count, copy_time, optimize_time
+
+    def validate_external_table_requirements(self) -> None:
+        """Validate required staging configuration for external table mode."""
+        has_explicit_staging = isinstance(self.staging_root, str) and self._is_cloud_uri(self.staging_root)
+        has_uc_volume = bool(self.uc_catalog and self.uc_schema and self.uc_volume)
+        if not has_explicit_staging and not has_uc_volume:
+            raise ValueError(
+                "Databricks external mode requires cloud staging. Configure --platform-option staging_root=<cloud-uri> "
+                "(dbfs:/, s3://, gs://, or abfss://) or Unity Catalog volume options "
+                "(uc_catalog, uc_schema, uc_volume)."
+            )
+
+    @staticmethod
+    def _external_location_from_file_uri(file_uri: str) -> str:
+        """Resolve LOCATION path for CREATE TABLE ... USING PARQUET."""
+        normalized_uri = file_uri.strip()
+        lowered_uri = normalized_uri.lower()
+        if ".parquet" not in lowered_uri:
+            raise ValueError(
+                f"Databricks external mode requires Parquet sources, got '{file_uri}'. "
+                "Provide Parquet input files for --table-mode external."
+            )
+
+        if "*" in normalized_uri:
+            return normalized_uri.rsplit("/", 1)[0]
+        if normalized_uri.endswith("/"):
+            return normalized_uri.rstrip("/")
+        return normalized_uri.rsplit("/", 1)[0]
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Register Databricks external tables via USING PARQUET LOCATION."""
+        start_time = mono_time()
+        table_stats: dict[str, int] = {}
+        cursor = connection.cursor()
+
+        try:
+            data_files = self._resolve_databricks_data_files(benchmark, data_dir)
+            stage_root = self._resolve_stage_root(data_dir)
+            data_files = self._maybe_upload_to_uc_volume(data_files, stage_root, data_dir, connection)
+
+            cursor.execute(f"USE CATALOG {self.catalog}")
+            cursor.execute(f"USE SCHEMA {self.schema}")
+            cursor.execute(f"SHOW TABLES IN {self.catalog}.{self.schema}")
+            existing_tables = {row[1].lower() for row in cursor.fetchall()}
+
+            for table_name, file_path in data_files.items():
+                table_name_upper = table_name.upper()
+                table_name_lower = table_name.lower()
+                if table_name_lower not in existing_tables:
+                    raise RuntimeError(
+                        f"Table {table_name_upper} does not exist in {self.catalog}.{self.schema}. "
+                        "Ensure schema creation completed before external registration."
+                    )
+
+                file_uri, _filename, _delimiter = self._resolve_file_uri_and_delimiter(file_path, stage_root)
+                location = self._external_location_from_file_uri(file_uri)
+
+                cursor.execute(f"DROP TABLE IF EXISTS {table_name_upper}")
+                cursor.execute(f"CREATE TABLE {table_name_upper} USING PARQUET LOCATION '{location}'")
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name_upper}")
+                result = cursor.fetchone()
+                table_stats[table_name_upper] = int(result[0]) if result else 0
+
+        finally:
+            cursor.close()
+
+        total_time = elapsed_seconds(start_time)
+        return table_stats, total_time, None
 
     def configure_for_benchmark(self, connection: Any, benchmark_type: str) -> None:
         """Apply Databricks-specific configurations including cache control.

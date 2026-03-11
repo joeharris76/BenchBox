@@ -15,9 +15,13 @@ import pytest
 
 from benchbox.core.tpcds.benchmark import TPCDSBenchmark
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
+
 
 @pytest.mark.unit
-@pytest.mark.fast
 class TestTPCDSBenchmarkEnhanced:
     """Enhanced tests for TPC-DS benchmark."""
 
@@ -80,7 +84,6 @@ class TestTPCDSBenchmarkEnhanced:
 
         # Test individual query retrieval
         query_1 = tpcds_benchmark.get_query(1)
-        assert isinstance(query_1, str)
         assert len(query_1) > 0
         assert "select" in query_1.lower()
 
@@ -110,8 +113,8 @@ class TestTPCDSBenchmarkEnhanced:
         for dialect in dialects:
             try:
                 translated = tpcds_benchmark.translate_query(1, dialect)
-                assert isinstance(translated, str)
                 assert len(translated) > 0
+                assert "select" in translated.lower()
             except Exception:
                 # Translation might not be implemented for all dialects
                 pass
@@ -227,7 +230,7 @@ class TestTPCDSBenchmarkEnhanced:
         # Test that individual queries can be retrieved
         try:
             query = query_manager.get_query(1)
-            assert isinstance(query, str)
+            assert len(query) > 0
         except Exception:
             # May require initialization
             pass

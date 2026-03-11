@@ -20,6 +20,7 @@ from benchbox.cli.app import cli
 from tests.fixtures.result_dict_fixtures import make_v2_result_dict
 
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.fast,
     pytest.mark.skipif(
         sys.version_info < (3, 11),

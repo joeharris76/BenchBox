@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.utils.stale_artifact_pruning import TableArtifactPattern, prune_stale_table_artifacts
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_prune_stale_table_artifacts_escapes_glob_meta_in_table_name(tmp_path: Path) -> None:

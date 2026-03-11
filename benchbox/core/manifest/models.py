@@ -33,6 +33,7 @@ class ConvertedFileEntry:
     converted_at: str | None = None
     compression: str | None = None
     row_groups: int | None = None
+    is_directory: bool = False
     conversion_options: dict[str, Any] = field(default_factory=dict)
 
 

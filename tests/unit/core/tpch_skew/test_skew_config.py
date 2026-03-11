@@ -17,7 +17,10 @@ from benchbox.core.tpch_skew.skew_config import (
     get_preset_config,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSkewType:

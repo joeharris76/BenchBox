@@ -19,7 +19,10 @@ from benchbox.core.tpcdi.etl.validation import (
     validate_unique_values,
 )
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_core_validation_helpers_cover_missing_column_paths():

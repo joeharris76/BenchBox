@@ -13,6 +13,9 @@ from benchbox import TPCH
 from benchbox.core.tpch.benchmark import TPCHBenchmark
 from benchbox.core.tpch.queries import TPCHQueries
 
+pytestmark = pytest.mark.medium
+
+
 
 class TestTPCHParameterCompliance:
     """Test TPC-H parameter compliance with qgen."""
@@ -27,8 +30,8 @@ class TestTPCHParameterCompliance:
         for sf in valid_scale_factors:
             # Should generate without error
             sql = tpch.get_query(1, scale_factor=sf, seed=12345)
-            assert isinstance(sql, str)
             assert len(sql) > 50
+            assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_seed_parameter_compliance(self):
         """Test seed parameter compliance."""
@@ -40,8 +43,8 @@ class TestTPCHParameterCompliance:
         for seed in valid_seeds:
             # Should generate without error
             sql = tpch.get_query(1, seed=seed)
-            assert isinstance(sql, str)
             assert len(sql) > 50
+            assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_query_id_parameter_compliance(self):
         """Test query ID parameter compliance."""
@@ -50,8 +53,8 @@ class TestTPCHParameterCompliance:
         # Valid query IDs (1-22)
         for query_id in range(1, 23):
             sql = tpch.get_query(query_id, seed=54321)
-            assert isinstance(sql, str)
             assert len(sql) > 50
+            assert "select" in sql.lower() or "with" in sql.lower()
 
         # Invalid query IDs should raise ValueError
         invalid_ids = [0, 23, 24, 25, -1, 100]
@@ -66,15 +69,15 @@ class TestTPCHParameterCompliance:
 
         # Test valid types
         sql = tpch.get_query(1, seed=12345, scale_factor=0.01)
-        assert isinstance(sql, str)
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # Test type coercion
         sql = tpch.get_query(1, seed=12345, scale_factor=0.01)  # float
-        assert isinstance(sql, str)
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # Test integer query_id (correct type)
         sql = tpch.get_query(1, seed=12345)
-        assert isinstance(sql, str)
+        assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_parameter_inheritance_compliance(self):
         """Test parameter inheritance from benchmark instance."""
@@ -83,13 +86,13 @@ class TestTPCHParameterCompliance:
 
         # Query without specifying scale factor should use inherited value
         sql = benchmark.get_query(1, seed=99999)
-        assert isinstance(sql, str)
         assert len(sql) > 50
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # Query with explicit scale factor should override
         sql_override = benchmark.get_query(1, seed=99999, scale_factor=0.5)
-        assert isinstance(sql_override, str)
         assert len(sql_override) > 50
+        assert "select" in sql_override.lower() or "with" in sql_override.lower()
 
     def test_parameter_boundary_conditions(self):
         """Test parameter boundary conditions."""
@@ -97,19 +100,19 @@ class TestTPCHParameterCompliance:
 
         # Test minimum scale factor
         sql_min = tpch.get_query(1, scale_factor=0.01, seed=11111)
-        assert isinstance(sql_min, str)
+        assert "select" in sql_min.lower() or "with" in sql_min.lower()
 
         # Test maximum practical scale factor
         sql_max = tpch.get_query(1, scale_factor=100.0, seed=11111)
-        assert isinstance(sql_max, str)
+        assert "select" in sql_max.lower() or "with" in sql_max.lower()
 
         # Test minimum seed
         sql_seed_min = tpch.get_query(1, seed=1)
-        assert isinstance(sql_seed_min, str)
+        assert "select" in sql_seed_min.lower() or "with" in sql_seed_min.lower()
 
         # Test maximum seed
         sql_seed_max = tpch.get_query(1, seed=2**31 - 1)
-        assert isinstance(sql_seed_max, str)
+        assert "select" in sql_seed_max.lower() or "with" in sql_seed_max.lower()
 
     def test_parameter_combination_compliance(self):
         """Test various parameter combinations."""
@@ -125,8 +128,8 @@ class TestTPCHParameterCompliance:
 
         for params in combinations:
             sql = tpch.get_query(1, **params)
-            assert isinstance(sql, str)
             assert len(sql) > 50
+            assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_deprecated_parameter_handling(self):
         """Test deprecated parameter handling compliance."""
@@ -134,13 +137,13 @@ class TestTPCHParameterCompliance:
 
         # Test deprecated params=None (should work)
         sql = tpch.get_query(1, params=None, seed=33333)
-        assert isinstance(sql, str)
         assert len(sql) > 50
+        assert "select" in sql.lower() or "with" in sql.lower()
 
         # Test mixed deprecated and new parameters
         sql_mixed = tpch.get_query(1, params=None, seed=44444, dialect="duckdb")
-        assert isinstance(sql_mixed, str)
         assert len(sql_mixed) > 50
+        assert "select" in sql_mixed.lower() or "with" in sql_mixed.lower()
 
     def test_parameter_validation_across_interfaces(self):
         """Test parameter validation across different interfaces."""
@@ -157,9 +160,9 @@ class TestTPCHParameterCompliance:
         sql_benchmark = benchmark.get_query(1, seed=seed, scale_factor=scale_factor)
         sql_queries = queries.get_query(1, seed=seed, scale_factor=scale_factor)
 
-        assert isinstance(sql_tpch, str)
-        assert isinstance(sql_benchmark, str)
-        assert isinstance(sql_queries, str)
+        assert "select" in sql_tpch.lower() or "with" in sql_tpch.lower()
+        assert "select" in sql_benchmark.lower() or "with" in sql_benchmark.lower()
+        assert "select" in sql_queries.lower() or "with" in sql_queries.lower()
 
     def test_parameter_persistence_across_calls(self):
         """Test that parameters don't persist across calls."""
@@ -175,9 +178,9 @@ class TestTPCHParameterCompliance:
         sql3 = tpch.get_query(1, seed=22222, scale_factor=0.01)
 
         # All should be valid but potentially different
-        assert isinstance(sql1, str)
-        assert isinstance(sql2, str)
-        assert isinstance(sql3, str)
+        assert "select" in sql1.lower() or "with" in sql1.lower()
+        assert "select" in sql2.lower() or "with" in sql2.lower()
+        assert "select" in sql3.lower() or "with" in sql3.lower()
 
     def test_default_parameter_behavior(self):
         """Test default parameter behavior."""
@@ -185,8 +188,8 @@ class TestTPCHParameterCompliance:
 
         # No parameters should use qgen defaults
         sql_no_params = tpch.get_query(1)
-        assert isinstance(sql_no_params, str)
         assert len(sql_no_params) > 50
+        assert "select" in sql_no_params.lower() or "with" in sql_no_params.lower()
 
         # Same call should be consistent (qgen should use same defaults)
         sql_no_params2 = tpch.get_query(1)
@@ -214,8 +217,8 @@ class TestTPCHParameterCompliance:
 
         for sf in scale_factors:
             sql = tpch.get_query(1, scale_factor=sf, seed=88888)
-            assert isinstance(sql, str)
             assert len(sql) > 50
+            assert "select" in sql.lower() or "with" in sql.lower()
 
     def test_seed_range_compliance(self):
         """Test seed range compliance."""
@@ -249,7 +252,7 @@ class TestTPCHParameterCompliance:
 
         # Should still work with instance scale factor
         sql3 = tpch.get_query(1)
-        assert isinstance(sql3, str)
+        assert "select" in sql3.lower() or "with" in sql3.lower()
 
     def test_parameter_forwarding_compliance(self):
         """Test parameter forwarding through the stack."""
@@ -264,8 +267,8 @@ class TestTPCHParameterCompliance:
 
         # Test with different parameters
         sql3 = benchmark.get_query(1, seed=54321, scale_factor=0.01)
-        assert isinstance(sql3, str)
         assert len(sql3) > 50
+        assert "select" in sql3.lower() or "with" in sql3.lower()
 
     def test_tpch_specification_compliance(self):
         """Test compliance with TPC-H specification requirements."""
@@ -281,6 +284,5 @@ class TestTPCHParameterCompliance:
 
         # Each query should be valid
         for _query_id_str, sql in queries.items():
-            assert isinstance(sql, str)
             assert len(sql) > 50
             assert "select" in sql.lower() or "with" in sql.lower()

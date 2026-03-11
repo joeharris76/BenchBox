@@ -20,7 +20,10 @@ from benchbox.platforms.base.cloud_spark.session import (
     SessionState,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSessionProtocol:

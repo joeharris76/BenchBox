@@ -8,7 +8,10 @@ import pytest
 from benchbox.core.databases import manager as db_manager
 from benchbox.core.schemas import DatabaseConfig, SystemProfile
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_core_check_connection_delegates_to_adapter():

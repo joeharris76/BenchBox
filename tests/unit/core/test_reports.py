@@ -4,6 +4,11 @@ import pytest
 
 from benchbox.core.reports import generate_report
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 class TestGenerateReport:
     def test_basic_success_report(self):

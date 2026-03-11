@@ -34,7 +34,10 @@ from benchbox.core.metadata_primitives import (
     get_unsupported_message,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.mark.unit

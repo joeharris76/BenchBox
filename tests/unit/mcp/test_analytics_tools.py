@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 # Skip all tests if Python < 3.10
-pytestmark = pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+")
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(sys.version_info < (3, 10), reason="MCP server requires Python 3.10+"),
+]
 
 
 def _make_analytics_mcp(results_dir: Path):

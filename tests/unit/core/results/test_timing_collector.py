@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from benchbox.core.results.timing import TimingCollector
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_time_query_records_wall_clock_timestamp() -> None:

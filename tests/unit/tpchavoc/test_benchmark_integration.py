@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.tpchavoc.benchmark import TPCHavocBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 def test_benchmark_exposes_variant_helpers(tmp_path):

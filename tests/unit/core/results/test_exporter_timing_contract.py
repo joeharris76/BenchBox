@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.results.exporter import ResultExporter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_render_query_row_uses_execution_time_seconds_when_ms_missing(tmp_path) -> None:

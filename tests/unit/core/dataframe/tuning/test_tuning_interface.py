@@ -19,7 +19,10 @@ from benchbox.core.dataframe.tuning import (
 )
 from benchbox.core.dataframe.tuning.types import DataFrameTuningType
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestParallelismConfiguration:

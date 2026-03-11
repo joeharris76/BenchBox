@@ -163,7 +163,7 @@ DuckDB Delta support is read-only. BenchBox generates Delta tables using the del
 duckdb -c "INSTALL delta; LOAD delta;"
 
 # Run with Delta Lake format
-benchbox run --platform duckdb --benchmark tpch --scale 1 --format delta
+benchbox run --platform duckdb --benchmark tpch --scale 1 --table-format delta
 ```
 
 ## Open-Source vs Databricks Delta
@@ -205,15 +205,18 @@ Results are comparable across implementations when using the same Delta protocol
 4. **Use VACUUM before benchmarks**: Remove old versions for clean baseline
 
 ```bash
-# Enable OPTIMIZE after load (default on Databricks)
-benchbox run --platform databricks --benchmark tpch --format delta --optimize
+# Enable Z-ORDER clustering after load (default on Databricks)
+benchbox run --platform databricks --benchmark tpch --table-format delta \
+  --databricks-clustering-strategy z_order
 
-# Skip OPTIMIZE (measure raw load performance)
-benchbox run --platform databricks --benchmark tpch --format delta --no-optimize
+# Skip clustering (measure raw load performance)
+benchbox run --platform databricks --benchmark tpch --table-format delta \
+  --databricks-clustering-strategy none
 
-# Enable Z-ORDER on specific columns
-benchbox run --platform databricks --benchmark tpch --format delta \
-  --zorder="l_shipdate,l_orderkey"
+# Use Liquid Clustering on specific columns
+benchbox run --platform databricks --benchmark tpch --table-format delta \
+  --databricks-clustering-strategy liquid_clustering \
+  --liquid-clustering-columns "l_shipdate,l_orderkey"
 ```
 
 ## See Also

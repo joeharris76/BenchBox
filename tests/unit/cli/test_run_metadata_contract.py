@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.results.driver_metadata import apply_driver_metadata
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_apply_driver_metadata_prefers_adapter_values() -> None:

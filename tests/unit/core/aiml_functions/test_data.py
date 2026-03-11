@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.core.aiml_functions.data import AIMLDataGenerator, LongText, SampleText
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSampleText:

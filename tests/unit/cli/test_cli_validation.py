@@ -15,7 +15,10 @@ from benchbox.core.validation import (
     ValidationSummary,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestValidationDisplay:

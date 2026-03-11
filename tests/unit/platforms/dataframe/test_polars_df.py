@@ -17,7 +17,11 @@ import pytest
 
 from benchbox.core.dataframe.query import DataFrameQuery, QueryCategory
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Check if Polars is available
 try:

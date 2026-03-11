@@ -19,7 +19,10 @@ from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.results.schema import build_result_payload
 from tests.fixtures.result_dict_fixtures import make_v2_result_dict, write_v2_result_file
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestFindLatestResult:

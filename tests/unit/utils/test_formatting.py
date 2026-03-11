@@ -13,7 +13,10 @@ from benchbox.utils.formatting import (
     format_number,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestFormatDuration:

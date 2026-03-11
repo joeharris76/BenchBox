@@ -12,6 +12,11 @@ import pytest
 
 from benchbox.utils.runtime_env import discover_isolated_runtime
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 def _run_isolated_process(version: str) -> dict:
     runtime = discover_isolated_runtime(package_name="duckdb", requested_version=version)

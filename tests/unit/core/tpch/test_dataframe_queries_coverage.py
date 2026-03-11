@@ -10,7 +10,10 @@ import pytest
 from benchbox.core.dataframe.query import DataFrameQuery  # noqa: F401
 from benchbox.core.tpch.dataframe_queries import get_query, list_query_ids, set_parameter_overrides
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @dataclass

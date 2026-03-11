@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.platforms import check_platform_connectivity
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_check_platform_connectivity_returns_adapter_result():

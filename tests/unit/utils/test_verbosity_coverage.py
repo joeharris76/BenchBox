@@ -8,7 +8,10 @@ import pytest
 
 from benchbox.utils.verbosity import VerbosityMixin, VerbositySettings, compute_verbosity, create_debug_logger
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _DummyVerbosity(VerbosityMixin):

@@ -9,7 +9,10 @@ import pytest
 
 from benchbox.core.tsbs_devops.benchmark import TSBSDevOpsBenchmark
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _FakeConnection:

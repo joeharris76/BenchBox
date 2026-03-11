@@ -25,7 +25,10 @@ from benchbox.core.tpcds.schema.tables import (
 )
 from benchbox.core.tpcds_obt.etl.transformer import TPCDSOBTTransformer
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.medium,
+]
 
 
 def literal_for_type(dtype: DataType) -> str:

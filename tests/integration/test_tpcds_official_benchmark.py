@@ -28,6 +28,11 @@ from benchbox.core.tpcds.official_benchmark import (
     TPCDSOfficialBenchmarkResult,
 )
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.fast,
+]
+
 
 class TestTPCDSOfficialBenchmark:
     """Test suite for TPC-DS Official Benchmark implementation."""

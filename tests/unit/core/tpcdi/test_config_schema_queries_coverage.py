@@ -13,7 +13,10 @@ from benchbox.core.tpcdi.config import (
 from benchbox.core.tpcdi.queries import TPCDIQueryManager
 from benchbox.core.tpcdi.schema import TPCDISchemaManager, get_all_create_table_sql, get_create_table_sql
 
-pytestmark = [pytest.mark.fast, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class _Conn:

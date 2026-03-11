@@ -2,7 +2,10 @@ import pytest
 
 from benchbox.core.tpcds_obt import schema
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_table_name_and_defaults() -> None:

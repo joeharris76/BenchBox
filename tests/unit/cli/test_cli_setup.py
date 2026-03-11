@@ -15,7 +15,10 @@ from click.testing import CliRunner
 from benchbox.cli.main import cli
 from benchbox.security.credentials import CredentialStatus
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestSetupCommand:

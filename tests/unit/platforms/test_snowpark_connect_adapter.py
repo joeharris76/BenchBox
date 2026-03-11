@@ -15,6 +15,11 @@ import pytest
 
 from benchbox.core.exceptions import ConfigurationError
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
+
 
 # Mock Snowpark before importing adapter
 @pytest.fixture(autouse=True)

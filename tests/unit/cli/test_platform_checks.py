@@ -15,7 +15,10 @@ from benchbox.cli.platform_checks import (
 )
 from benchbox.security.credentials import CredentialStatus
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestCheckAndSetupPlatformCredentials:

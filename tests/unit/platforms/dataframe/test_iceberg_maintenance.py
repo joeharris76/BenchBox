@@ -33,13 +33,16 @@ IS_WINDOWS = sys.platform == "win32"
 
 
 # Skip all tests if Iceberg not available
-pytestmark = pytest.mark.skipif(
-    not ICEBERG_AVAILABLE or not PYARROW_AVAILABLE,
-    reason="PyIceberg or PyArrow not installed",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+    pytest.mark.skipif(
+        not ICEBERG_AVAILABLE or not PYARROW_AVAILABLE,
+        reason="PyIceberg or PyArrow not installed",
+    ),
+]
 
 
-@pytest.mark.fast
 class TestIcebergMaintenanceAvailability:
     """Tests for Iceberg maintenance availability."""
 
@@ -89,7 +92,6 @@ class TestIcebergMaintenanceAvailability:
         assert len(missing) == 0
 
 
-@pytest.mark.fast
 @pytest.mark.skipif(IS_WINDOWS, reason="PyIceberg path handling incompatible with Windows")
 class TestIcebergInsert:
     """Tests for Iceberg insert operations.
@@ -141,7 +143,6 @@ class TestIcebergInsert:
         assert result.rows_affected == 0
 
 
-@pytest.mark.fast
 @pytest.mark.skipif(IS_WINDOWS, reason="PyIceberg path handling incompatible with Windows")
 class TestIcebergDelete:
     """Tests for Iceberg delete operations."""
@@ -162,7 +163,6 @@ class TestIcebergDelete:
         assert result.rows_affected == 0
 
 
-@pytest.mark.fast
 @pytest.mark.skipif(IS_WINDOWS, reason="PyIceberg path handling incompatible with Windows")
 class TestIcebergMaintenanceResult:
     """Tests for Iceberg maintenance result timing."""
@@ -189,7 +189,6 @@ class TestIcebergMaintenanceResult:
         assert result.duration >= 0
 
 
-@pytest.mark.fast
 @pytest.mark.skipif(IS_WINDOWS, reason="PyIceberg path handling incompatible with Windows")
 class TestIcebergDataFrameConversion:
     """Tests for DataFrame type conversion."""

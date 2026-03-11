@@ -14,7 +14,10 @@ import pytest
 import benchbox.platforms.azure_synapse as synapse_module
 from benchbox.platforms.azure_synapse import SYNAPSE_DIALECT, AzureSynapseAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 @pytest.fixture()
@@ -504,3 +507,128 @@ class TestAzureSynapseDataLoading:
         stats, _, _ = adapter.load_data(Benchmark(), mock_conn, tmp_path)
 
         assert stats.get("empty_table", 0) == 0
+
+    def test_external_table_mode_requires_storage_config(self, synapse_stubs):
+        """External mode should require storage account/container configuration."""
+        adapter = AzureSynapseAdapter(
+            server="test.sql.azuresynapse.net",
+            username="admin",
+            password="secret",
+        )
+        assert adapter.supports_external_tables is True
+
+        with pytest.raises(ValueError, match="requires blob storage configuration"):
+            adapter.validate_external_table_requirements()
+
+    def test_create_external_tables_generates_polybase_sql(self, synapse_stubs, tmp_path):
+        """External mode should create data source/file format/external table SQL."""
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (15,)
+
+        parquet_file = tmp_path / "orders.parquet"
+        parquet_file.write_bytes(b"PAR1")
+
+        class Benchmark:
+            tables = {"orders": [parquet_file]}
+
+            @staticmethod
+            def get_schema():
+                return {
+                    "orders": {
+                        "columns": [
+                            {"name": "o_orderkey", "type": "BIGINT"},
+                            {"name": "o_totalprice", "type": "DECIMAL(15,2)"},
+                        ]
+                    }
+                }
+
+        adapter = AzureSynapseAdapter(
+            server="test.sql.azuresynapse.net",
+            database="testdb",
+            schema="dbo",
+            username="admin",
+            password="secret",
+            storage_account="benchboxacct",
+            container="benchbox",
+            storage_sas_token="sv=2025-01-01&sig=fake",
+        )
+
+        with patch.object(
+            adapter, "_upload_external_parquet_to_blob", return_value="/benchbox-data/testdb_external/orders/"
+        ):
+            stats, _, _ = adapter.create_external_tables(Benchmark(), mock_conn, tmp_path)
+
+        assert stats["orders"] == 15
+        execute_sql = " ".join(str(call.args[0]) for call in mock_cursor.execute.call_args_list)
+        assert "CREATE EXTERNAL DATA SOURCE [BENCHBOX_EXTERNAL_SOURCE]" in execute_sql
+        assert "CREATE EXTERNAL FILE FORMAT [BENCHBOX_PARQUET_FORMAT]" in execute_sql
+        assert "CREATE EXTERNAL TABLE [dbo].[orders]" in execute_sql
+        assert "LOCATION = '/benchbox-data/testdb_external/orders/'" in execute_sql
+
+    def test_load_data_native_path_not_routed_to_external(self, synapse_stubs, tmp_path):
+        """Native load_data should keep blob/COPY flow and not call external registration."""
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        csv_file = tmp_path / "orders.csv"
+        csv_file.write_text("1,a\n")
+
+        class Benchmark:
+            tables = {"orders": [csv_file]}
+
+        adapter = AzureSynapseAdapter(
+            server="test.sql.azuresynapse.net",
+            schema="dbo",
+            username="admin",
+            password="secret",
+            storage_account="benchboxacct",
+            container="benchbox",
+        )
+
+        with (
+            patch.object(adapter, "_load_data_via_blob", return_value={"orders": 1}) as mock_blob_load,
+            patch.object(
+                adapter,
+                "create_external_tables",
+                side_effect=AssertionError("native load_data should not call create_external_tables"),
+            ),
+        ):
+            stats, _, _ = adapter.load_data(Benchmark(), mock_conn, tmp_path)
+
+        assert stats["orders"] == 1
+        mock_blob_load.assert_called_once()
+
+
+class TestSynapseMasterKeyPassword:
+    """Verify master key password is not hardcoded."""
+
+    def test_setup_external_data_source_uses_random_password(self, synapse_stubs):
+        """Master key password should be randomly generated per call."""
+        adapter = AzureSynapseAdapter(
+            server="test.sql.azuresynapse.net",
+            database="testdb",
+            username="testuser",
+            password="testpass",
+            storage_account="teststorage",
+            container="testcontainer",
+        )
+        cursor1 = Mock()
+        cursor2 = Mock()
+
+        adapter._setup_external_data_source(cursor1)
+        adapter._setup_external_data_source(cursor2)
+
+        # Extract the SQL from both calls
+        sql1 = cursor1.execute.call_args[0][0]
+        sql2 = cursor2.execute.call_args[0][0]
+
+        # Both should contain CREATE MASTER KEY but with different passwords
+        assert "CREATE MASTER KEY" in sql1
+        assert "CREATE MASTER KEY" in sql2
+
+        # The hardcoded password must NOT appear
+        assert "BenchBox#Temp123!" not in sql1
+        assert "BenchBox#Temp123!" not in sql2

@@ -39,7 +39,10 @@ from benchbox.core.tpch.parameter_extractor import (
     get_tpch_extracted_parameters,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.medium,
+]
 
 
 # =============================================================================

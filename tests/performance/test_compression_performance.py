@@ -14,6 +14,11 @@ import pytest
 from benchbox.core.ssb.generator import SSBDataGenerator
 from benchbox.utils.compression import CompressionManager
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
 
 class TestCompressionPerformance:
     """Performance tests for compression functionality."""

@@ -15,6 +15,11 @@ from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.runner import LifecyclePhases, ValidationOptions, run_benchmark_lifecycle
 from benchbox.core.schemas import BenchmarkConfig, SystemProfile
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
 
 class DummyBenchmark:
     """Lightweight benchmark used for performance measurements."""

@@ -9,6 +9,12 @@ import pytest
 
 from tests.integration._cli_e2e_utils import run_cli_command
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
+
 # Check for optional dependencies
 try:
     import clickhouse_driver
@@ -19,7 +25,6 @@ except ImportError:
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_cli_help_command_runs_successfully():
     result = run_cli_command(["--help"])
 
@@ -29,7 +34,6 @@ def test_cli_help_command_runs_successfully():
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_cli_version_command_reports_versions():
     result = run_cli_command(["--version"])
 
@@ -95,7 +99,6 @@ def _prepare_clickhouse_stub(stub_root: Path) -> Path:
 
 
 @pytest.mark.integration
-@pytest.mark.medium
 @pytest.mark.platform_smoke
 @pytest.mark.parametrize("database", ["duckdb", "sqlite", "clickhouse"])
 def test_cli_dry_run_generates_expected_artifacts(tmp_path: Path, database: str):
@@ -147,7 +150,6 @@ def test_cli_dry_run_generates_expected_artifacts(tmp_path: Path, database: str)
 
 
 @pytest.mark.integration
-@pytest.mark.medium
 def test_cli_dry_run_data_only_mode(tmp_path: Path):
     output_dir = tmp_path / "dry_run_data_only"
     output_dir.mkdir()
@@ -179,7 +181,6 @@ def test_cli_dry_run_data_only_mode(tmp_path: Path):
 
 
 @pytest.mark.integration
-@pytest.mark.fast
 def test_cli_dry_run_requires_database_when_not_data_only(tmp_path: Path):
     output_dir = tmp_path / "dry_run_missing_database"
     output_dir.mkdir()

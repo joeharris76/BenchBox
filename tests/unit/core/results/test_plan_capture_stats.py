@@ -6,7 +6,10 @@ import pytest
 
 from benchbox.core.results.schema import compute_plan_capture_stats
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_compute_plan_capture_stats_uses_measurement_when_present() -> None:

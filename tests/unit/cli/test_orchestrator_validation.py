@@ -10,7 +10,10 @@ from benchbox.cli.orchestrator import BenchmarkOrchestrator
 from benchbox.core.results.models import BenchmarkResults
 from benchbox.core.schemas import BenchmarkConfig, DatabaseConfig, SystemProfile
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def _mk_system_profile():

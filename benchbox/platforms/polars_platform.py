@@ -92,6 +92,7 @@ class PolarsAdapter(PlatformAdapter):
     """
 
     driver_isolation_capability = DriverIsolationCapability.NOT_APPLICABLE
+    supports_external_tables = True
 
     @property
     def platform_name(self) -> str:
@@ -411,6 +412,12 @@ class PolarsAdapter(PlatformAdapter):
         )
 
         return table_stats, total_duration, per_table_timings
+
+    def create_external_tables(
+        self, benchmark: Any, connection: Any, data_dir: Path
+    ) -> tuple[dict[str, int], float, dict[str, Any] | None]:
+        """Alias external-table mode to Polars' existing lazy scan registration path."""
+        return self.load_data(benchmark, connection, data_dir)
 
     def _detect_file_format(self, file_paths: list[Path]) -> tuple[str, str]:
         """Detect file format and delimiter from file paths.

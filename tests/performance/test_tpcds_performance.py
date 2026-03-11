@@ -38,6 +38,11 @@ from benchbox.core.tpcds.queries import TPCDSQueryManager
 from benchbox.core.tpcds.streams import create_standard_streams
 from benchbox.monitoring import PerformanceMonitor
 
+pytestmark = [
+    pytest.mark.performance,
+    pytest.mark.stress,
+]
+
 
 @pytest.mark.performance
 @pytest.mark.tpcds

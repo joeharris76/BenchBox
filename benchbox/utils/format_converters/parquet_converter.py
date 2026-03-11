@@ -186,14 +186,15 @@ class ParquetConverter(BaseFormatConverter):
             if progress_callback:
                 progress_callback("Writing Parquet file", 0.9)
 
-            pq.write_table(
-                combined_table,
-                output_path,
-                compression=compression,
-                use_dictionary=True,
-                write_statistics=True,
-                row_group_size=opts.row_group_size,
-            )
+            write_kwargs: dict[str, Any] = {
+                "compression": compression,
+                "use_dictionary": True,
+                "write_statistics": True,
+                "row_group_size": opts.row_group_size,
+            }
+            if opts.data_page_version is not None:
+                write_kwargs["data_page_version"] = opts.data_page_version
+            pq.write_table(combined_table, output_path, **write_kwargs)
 
         except Exception as e:
             # Clean up partial file if write failed
@@ -303,6 +304,7 @@ class ParquetConverter(BaseFormatConverter):
                 file_options=ds.ParquetFileFormat().make_write_options(
                     compression=compression,
                     write_statistics=True,
+                    **({"data_page_version": opts.data_page_version} if opts.data_page_version else {}),
                 ),
             )
 

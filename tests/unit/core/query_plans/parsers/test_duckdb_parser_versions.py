@@ -29,7 +29,10 @@ from tests.fixtures.duckdb_plans_by_version import (
     VERSION_FIXTURES,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestDuckDBVersionCompatibility:

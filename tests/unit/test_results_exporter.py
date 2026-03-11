@@ -17,7 +17,10 @@ from benchbox.core.results.models import (
     TableCreationStats,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_exporter_serializes_execution_phases(tmp_path):

@@ -18,7 +18,10 @@ from benchbox.utils.printing import get_console, quiet_console, set_quiet
 _run_mod = sys.modules["benchbox.cli.commands.run"]
 _main_mod = sys.modules["benchbox.cli.main"]
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_quiet_mode_suppresses_decorative_output_generate_phase():

@@ -10,7 +10,10 @@ import pytest
 from benchbox.core.clickbench.benchmark import ClickBenchBenchmark
 from benchbox.platforms.duckdb import DuckDBAdapter
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestClickBenchCSVLoading:

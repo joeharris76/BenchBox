@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 from rich.console import Console
+from rich.markup import escape
 
 from benchbox.core.exceptions import ConfigurationError as CoreConfigurationError
 from benchbox.utils.dependencies import get_install_command
@@ -348,7 +349,8 @@ class ErrorHandler:
         self.console.print("\n[yellow]Cloud Storage Help:[/yellow]")
         self.console.print("• Verify cloud credentials are configured")
         self.console.print("• Check bucket/container permissions")
-        self.console.print(f"• Ensure cloudpathlib is installed: {get_install_command('cloudstorage')}")
+        install_cmd = escape(get_install_command("cloudstorage"))
+        self.console.print(f"• Ensure cloudpathlib is installed: {install_cmd}")
 
         # Show provider-specific help
         if error.details and "provider" in error.details:

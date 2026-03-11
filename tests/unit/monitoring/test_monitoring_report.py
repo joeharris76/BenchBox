@@ -20,7 +20,10 @@ from benchbox.monitoring.report import (
     generate_ascii_chart,
 )
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 class TestFormatBytes:

@@ -19,19 +19,19 @@ built-in defaults for `tpch` and `tpcds`.
 Run TPC-H with a sorted Parquet output:
 
 ```bash
-benchbox run --platform duckdb --benchmark tpch --scale 0.01 --data-format parquet-sorted --non-interactive
+benchbox run --platform duckdb --benchmark tpch --scale 0.01 --presort parquet-sorted --non-interactive
 ```
 
 Run TPC-H with Delta output:
 
 ```bash
-benchbox run --platform duckdb --benchmark tpch --scale 0.01 --data-format delta-sorted --non-interactive
+benchbox run --platform duckdb --benchmark tpch --scale 0.01 --presort delta-sorted --non-interactive
 ```
 
 Run TPC-H with Iceberg output:
 
 ```bash
-benchbox run --platform duckdb --benchmark tpch --scale 0.01 --data-format iceberg-sorted --non-interactive
+benchbox run --platform duckdb --benchmark tpch --scale 0.01 --presort iceberg-sorted --non-interactive
 ```
 
 ## How Organization Is Applied

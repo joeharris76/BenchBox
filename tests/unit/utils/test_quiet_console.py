@@ -2,7 +2,10 @@ import pytest
 
 from benchbox.utils.printing import get_console, get_quiet_console, quiet_console, set_quiet
 
-pytestmark = pytest.mark.fast
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.fast,
+]
 
 
 def test_quiet_console_respects_quiet_flag() -> None:
